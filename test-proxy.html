@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calendar Proxy Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 { color: #7413dc; }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f9f9f9;
+            border-left: 4px solid #7413dc;
+        }
+        button {
+            background: #7413dc;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #5c0fb3;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success { border-color: #23a950; background: #f0fdf4; }
+        .error { border-color: #dc3545; background: #fef2f2; }
+        .info { color: #666; font-size: 14px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📅 Calendar Proxy Server Test</h1>
+        
+        <div class="test-section">
+            <h2>Test 1: Proxy Endpoint</h2>
+            <p>Test if the proxy server is running and can process requests.</p>
+            <button onclick="testProxyEndpoint()">Test Proxy Connection</button>
+            <div id="proxy-result" class="result" style="display:none;"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>Test 2: Fetch Calendar Data</h2>
+            <p>Fetch an ICS calendar file through the proxy (requires external network access).</p>
+            <button onclick="testCalendarFetch()">Fetch Calendar</button>
+            <div id="calendar-result" class="result" style="display:none;"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>Test 3: Parse Events</h2>
+            <p>Test the client-side parser with sample ICS data.</p>
+            <button onclick="testParser()">Test Parser</button>
+            <div id="parser-result" class="result" style="display:none;"></div>
+        </div>
+
+        <div class="info">
+            <p><strong>Note:</strong> Tests 1 and 2 require the server to be running (<code>npm start</code>).</p>
+            <p><strong>Server Status:</strong> <span id="server-status">Checking...</span></p>
+        </div>
+    </div>
+
+    <script>
+        // Check server status on load
+        async function checkServerStatus() {
+            const statusEl = document.getElementById('server-status');
+            try {
+                const res = await fetch('/');
+                if (res.ok) {
+                    statusEl.textContent = '✅ Running on port 3000';
+                    statusEl.style.color = '#23a950';
+                } else {
+                    statusEl.textContent = '❌ Server error';
+                    statusEl.style.color = '#dc3545';
+                }
+            } catch (err) {
+                statusEl.textContent = '❌ Not running (run: npm start)';
+                statusEl.style.color = '#dc3545';
+            }
+        }
+
+        async function testProxyEndpoint() {
+            const resultEl = document.getElementById('proxy-result');
+            resultEl.style.display = 'block';
+            resultEl.className = 'result';
+            resultEl.textContent = 'Testing proxy endpoint...';
+
+            try {
+                const testUrl = 'https://www.onlinescoutmanager.co.uk/ext/cal/?f=527221.test';
+                const proxyUrl = `/api/calendar-proxy?url=${encodeURIComponent(testUrl)}`;
+                
+                resultEl.textContent = `Requesting: ${proxyUrl}\n\n`;
+                
+                const res = await fetch(proxyUrl);
+                resultEl.textContent += `Status: ${res.status} ${res.statusText}\n`;
+                resultEl.textContent += `Content-Type: ${res.headers.get('content-type')}\n\n`;
+                
+                const text = await res.text();
+                resultEl.textContent += `Response (first 500 chars):\n${text.substring(0, 500)}`;
+                
+                if (res.ok) {
+                    resultEl.classList.add('success');
+                } else {
+                    resultEl.classList.add('error');
+                }
+            } catch (err) {
+                resultEl.textContent = `❌ Error: ${err.message}`;
+                resultEl.classList.add('error');
+            }
+        }
+
+        async function testCalendarFetch() {
+            const resultEl = document.getElementById('calendar-result');
+            resultEl.style.display = 'block';
+            resultEl.className = 'result';
+            resultEl.textContent = 'Fetching calendar data...';
+
+            try {
+                const icsUrl = 'https://www.onlinescoutmanager.co.uk/ext/cal/?f=527221.M2ZmNjRiNzM3ZTk5NmE5ZGRmNWI2OWFiZjMyYTZiZTNkOWU3ZWE4NjU3MzgzZWQyODlmZWZhMTMwZTFlMGZhOWNiNDgwNjA5YTEzMTY2YmY3Nzc2MTM0ODA5ZGUwMDQyNDkyZGEwZTFmMjE0ZTZkNmExNTAxMjRjMDg5NDEwOTE%3D.j1gDjhGRGa';
+                const proxyUrl = `/api/calendar-proxy?url=${encodeURIComponent(icsUrl)}`;
+                
+                const res = await fetch(proxyUrl);
+                const text = await res.text();
+                
+                if (text.includes('BEGIN:VCALENDAR')) {
+                    resultEl.textContent = '✅ Successfully fetched ICS file!\n\n';
+                    resultEl.textContent += `Calendar data (first 1000 chars):\n${text.substring(0, 1000)}...`;
+                    resultEl.classList.add('success');
+                } else {
+                    resultEl.textContent = '❌ Response is not a valid ICS file:\n\n' + text;
+                    resultEl.classList.add('error');
+                }
+            } catch (err) {
+                resultEl.textContent = `❌ Error: ${err.message}`;
+                resultEl.classList.add('error');
+            }
+        }
+
+        function testParser() {
+            const resultEl = document.getElementById('parser-result');
+            resultEl.style.display = 'block';
+            resultEl.className = 'result';
+
+            const sampleICS = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:Test
+BEGIN:VEVENT
+DTSTART:20250110T190000
+DTEND:20250110T210000
+SUMMARY:Scouts Meeting
+LOCATION:Scout Hut
+DESCRIPTION:Weekly meeting
+END:VEVENT
+BEGIN:VEVENT
+DTSTART:20250117T190000
+DTEND:20250117T210000
+SUMMARY:Camping Trip
+LOCATION:Woods
+DESCRIPTION:Weekend camping
+END:VEVENT
+END:VCALENDAR`;
+
+            try {
+                // Simple parser (same logic as calendar-render.js)
+                const events = [];
+                const vevents = sampleICS.split(/BEGIN:VEVENT/g).slice(1);
+                vevents.forEach(block => {
+                    const end = block.split(/END:VEVENT/)[0];
+                    const lines = end.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+                    const event = {};
+                    lines.forEach(line => {
+                        if (line.startsWith('DTSTART')) event.dtstart = line.split(':').slice(1).join(':');
+                        if (line.startsWith('SUMMARY')) event.summary = line.split(':').slice(1).join(':');
+                        if (line.startsWith('LOCATION')) event.location = line.split(':').slice(1).join(':');
+                    });
+                    events.push(event);
+                });
+
+                resultEl.textContent = '✅ Parser test successful!\n\n';
+                resultEl.textContent += `Found ${events.length} events:\n\n`;
+                events.forEach((ev, i) => {
+                    resultEl.textContent += `${i+1}. ${ev.summary}\n`;
+                    resultEl.textContent += `   Date: ${ev.dtstart}\n`;
+                    resultEl.textContent += `   Location: ${ev.location}\n\n`;
+                });
+                resultEl.classList.add('success');
+            } catch (err) {
+                resultEl.textContent = `❌ Parser error: ${err.message}`;
+                resultEl.classList.add('error');
+            }
+        }
+
+        // Check server status when page loads
+        checkServerStatus();
+    </script>
+</body>
+</html>
