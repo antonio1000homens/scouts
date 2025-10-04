@@ -58,7 +58,9 @@
 
   async function fetchICS(url) {
     try {
-      const res = await fetch(url, {mode: 'cors'});
+      // Use the proxy endpoint to avoid CORS issues
+      const proxyUrl = `/api/calendar-proxy?url=${encodeURIComponent(url)}`;
+      const res = await fetch(proxyUrl);
       if (!res.ok) throw new Error('Network response was not ok');
       const text = await res.text();
       // If the server returned a file download wrapper (like HTML), detect automatically by simple heuristics

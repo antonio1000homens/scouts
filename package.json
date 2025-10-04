@@ -1,0 +1,17 @@
+{
+  "name": "scouts-calendar-proxy",
+  "version": "1.0.0",
+  "description": "Server-side proxy for fetching ICS calendar files from OnlineScoutManager",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["scouts", "calendar", "proxy"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  }
+}

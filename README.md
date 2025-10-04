@@ -15,6 +15,7 @@ This website has been completely redesigned to match the official Scouts UK bran
 - ✅ Modern card-based layouts
 - ✅ Yellow primary CTA buttons
 - ✅ Enhanced responsive design
+- ✅ **Calendar proxy server** - Fetches ICS files from OnlineScoutManager without CORS issues
 
 ## 📁 Files & Structure
 
@@ -22,6 +23,8 @@ This website has been completely redesigned to match the official Scouts UK bran
 - `index.html` - Main website
 - `styles.css` - Complete styling
 - `component-preview.html` - Preview all UI components
+- `server.js` - Calendar proxy server
+- `package.json` - Node.js dependencies
 
 ### Images Directory (`/images/`)
 - `beavers-logo.svg` - Beavers section logo (teal)
@@ -60,7 +63,9 @@ This website has been completely redesigned to match the official Scouts UK bran
 
 ## How to Use
 
-Simply open `index.html` in a web browser, or serve it using any web server:
+### Option 1: Static Site (without calendar events)
+
+Simply open `index.html` in a web browser:
 
 ```bash
 # Using Python
@@ -68,6 +73,27 @@ python3 -m http.server 8000
 
 # Then open http://localhost:8000 in your browser
 ```
+
+### Option 2: With Calendar Proxy Server (recommended)
+
+To enable live calendar event fetching from OnlineScoutManager, run the Node.js proxy server:
+
+```bash
+# Install dependencies (first time only)
+npm install
+
+# Start the server
+npm start
+
+# Then open http://localhost:3000 in your browser
+```
+
+The proxy server:
+- Fetches ICS calendar files from OnlineScoutManager
+- Serves them with proper CORS headers
+- Caches responses for 5 minutes
+- Handles redirects and downloads automatically
+- Serves all static files (HTML, CSS, images)
 
 ## 🎨 View Components
 
@@ -92,4 +118,6 @@ To customize for your specific scout group:
 
 - HTML5
 - CSS3
-- No JavaScript dependencies - pure HTML/CSS for maximum compatibility and performance
+- JavaScript (for calendar rendering)
+- Node.js + Express (for calendar proxy server)
+- CORS-enabled proxy to fetch ICS files
