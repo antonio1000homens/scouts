@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Cubs Logo - Green Circle with Wolf -->
+  <circle cx="100" cy="100" r="95" fill="#23a950"/>
+  <text x="100" y="115" font-family="Arial, sans-serif" font-size="38" font-weight="bold" fill="white" text-anchor="middle">CUBS</text>
+  <circle cx="100" cy="60" r="25" fill="white" opacity="0.3"/>
+</svg>

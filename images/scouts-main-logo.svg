@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100">
+  <!-- Main Scouts Logo with Purple Fleur-de-lis -->
+  <defs>
+    <style>
+      .logo-text { font-family: 'Arial', sans-serif; font-weight: bold; fill: #7413dc; }
+    </style>
+  </defs>
+  
+  <!-- Fleur-de-lis -->
+  <g transform="translate(30, 20)">
+    <path d="M25,10 L20,30 L25,25 L30,30 Z M15,35 L20,50 L25,45 L30,50 L35,35 L25,40 Z M10,40 L5,55 L15,50 Z M40,40 L45,55 L35,50 Z" fill="#7413dc"/>
+  </g>
+  
+  <!-- Text -->
+  <text x="80" y="60" class="logo-text" font-size="48">Scouts</text>
+</svg>
