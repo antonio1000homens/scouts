@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Beavers Logo - Teal Circle with Beaver -->
+  <circle cx="100" cy="100" r="95" fill="#00a794"/>
+  <text x="100" y="115" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="white" text-anchor="middle">BEAVERS</text>
+  <circle cx="100" cy="60" r="25" fill="white" opacity="0.3"/>
+</svg>
