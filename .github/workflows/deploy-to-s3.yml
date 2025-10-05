@@ -4,64 +4,70 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:
+  name: Deploy Website to S3
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
+  on:
+    push:
+      branches:
+        - master
+    workflow_dispatch:
 
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+  jobs:
+    deploy:
+      runs-on: ubuntu-latest
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: eu-west-2
+      steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Configure S3 bucket for static website hosting
-      run: |
-        aws s3 website s3://2ndtolworth/ \
-          --index-document index.html \
-          --error-document index.html
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-2
 
-    - name: Set S3 bucket policy for public read access
-      run: |
-        cat > bucket-policy.json << 'EOF'
-        {
-          "Version": "2012-10-17",
-          "Statement": [
-            {
-              "Sid": "PublicReadGetObject",
-              "Effect": "Allow",
-              "Principal": "*",
-              "Action": "s3:GetObject",
-              "Resource": "arn:aws:s3:::2ndtolworth/*"
-            }
-          ]
-        }
-        EOF
-        aws s3api put-bucket-policy --bucket 2ndtolworth --policy file://bucket-policy.json
+      - name: Configure S3 bucket for static website hosting
+        run: |
+          aws s3 website s3://2ndtolworth/ \
+            --index-document index.html \
+            --error-document index.html
 
-    - name: Deploy HTML, CSS, and JS files to S3
-      run: |
-        # Sync web files only
-        aws s3 sync . s3://2ndtolworth/ \
-          --exclude "*" \
-          --include "*.html" \
-          --include "*.css" \
-          --include "*.js" \
-          --include "fonts/*" \
-          --include "images/*" \
-          --include "scouts-img/*" \
-          --include "2tolworthcub_booklet_html/*" \
-          --delete \
-          --cache-control "public, max-age=3600" \
-          --metadata-directive REPLACE
+      - name: Set S3 bucket policy for public read access
+        run: |
+          cat > bucket-policy.json << 'EOF'
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "PublicReadGetObject",
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "s3:GetObject",
+                "Resource": "arn:aws:s3:::2ndtolworth/*"
+              }
+            ]
+          }
+          EOF
+          aws s3api put-bucket-policy --bucket 2ndtolworth --policy file://bucket-policy.json
 
-    - name: Deployment complete
-      run: |
-        echo "Website deployed successfully!"
-        echo "Website URL: http://2ndtolworth.s3-website.eu-west-2.amazonaws.com"
+      - name: Deploy HTML, CSS, and JS files to S3
+        run: |
+          # Sync web files only
+          aws s3 sync . s3://2ndtolworth/ \
+            --exclude "*" \
+            --include "*.html" \
+            --include "*.css" \
+            --include "*.js" \
+            --include "fonts/*" \
+            --include "images/*" \
+            --include "scouts-img/*" \
+            --include "2tolworthcub_booklet_html/*" \
+            --delete \
+            --cache-control "public, max-age=3600" \
+            --metadata-directive REPLACE
+
+      - name: Deployment complete
+        run: |
+          echo "Website deployed successfully!"
+          echo "Website URL: http://2ndtolworth.s3-website.eu-west-2.amazonaws.com"

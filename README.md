@@ -60,6 +60,15 @@ This website has been completely redesigned to match the official Scouts UK bran
 
 ## How to Use
 
+### Live Site (S3)
+
+The website is automatically deployed to Amazon S3 and is accessible at:
+- **S3 URL**: http://2ntolworth.s3-website.eu-west-2.amazonaws.com
+
+The site is automatically updated whenever changes are pushed to the `master` branch.
+
+### Local Development
+
 Simply open `index.html` in a web browser, or serve it using any web server:
 
 ```bash
