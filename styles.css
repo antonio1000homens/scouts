@@ -169,36 +169,35 @@ nav a:hover::after {
 .hero-sections .section-grid {
     margin-top: clamp(2rem, 5vw, 3rem);
     gap: clamp(2rem, 4vw, 3rem);
-    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-    max-width: 1180px;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    max-width: 1240px;
     margin-left: auto;
     margin-right: auto;
 }
 
 .hero-sections .section-card {
-    background-color: rgba(255, 255, 255, 0.94);
-    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.18);
-    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.22);
+    border: none;
+    color: #ffffff;
 }
 
-.hero-sections .section-card:hover {
-    box-shadow: 0 22px 44px rgba(0, 0, 0, 0.22);
+.hero-sections .section-card .section-header {
+    color: inherit;
+    background: transparent;
+    text-align: center;
+}
+
+.hero-sections .section-card .section-header img {
+    filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.25));
 }
 
 .hero-sections .section-card .section-description,
 .hero-sections .section-card .section-details p,
 .hero-sections .section-card .section-details,
 .hero-sections .section-card .age {
-    color: #1d1d1d;
-}
-
-.hero-sections .section-card .section-header {
-    color: #171717;
-    background: none;
-}
-
-.hero-sections .section-card .section-header img {
-    filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.25));
+    color: rgba(255, 255, 255, 0.92);
 }
 
 .hero-sections .section-card .section-description {
@@ -206,15 +205,59 @@ nav a:hover::after {
 }
 
 .hero-sections .section-link {
-    background: rgba(116, 19, 220, 0.1);
-    color: #5c10b3;
-    border-radius: 0 0 12px 12px;
-    border-top: 1px solid rgba(116, 19, 220, 0.25);
+    display: block;
+    border-radius: 0 0 18px 18px;
+    text-align: center;
+    font-weight: 700;
+    padding: 1rem 2rem;
+    text-decoration: none;
+    transition: transform 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
 }
 
 .hero-sections .section-link:hover {
-    background: rgba(116, 19, 220, 0.18);
-    color: #3e0b82;
+    transform: translateY(-2px);
+}
+
+.hero-sections .section-card.beavers {
+    background: linear-gradient(135deg, #00a794 0%, #00c6b0 100%);
+}
+
+.hero-sections .section-card.beavers .section-link {
+    background: rgba(0, 0, 0, 0.12);
+    color: #e7fffa;
+}
+
+.hero-sections .section-card.beavers .section-link:hover {
+    background: rgba(0, 0, 0, 0.2);
+    box-shadow: 0 12px 24px rgba(0, 167, 148, 0.35);
+}
+
+.hero-sections .section-card.cubs {
+    background: linear-gradient(135deg, #23a950 0%, #49c96f 100%);
+}
+
+.hero-sections .section-card.cubs .section-link {
+    background: rgba(0, 0, 0, 0.12);
+    color: #ecffef;
+}
+
+.hero-sections .section-card.cubs .section-link:hover {
+    background: rgba(0, 0, 0, 0.2);
+    box-shadow: 0 12px 24px rgba(35, 169, 80, 0.35);
+}
+
+.hero-sections .section-card.scouts {
+    background: linear-gradient(135deg, #004851 0%, #0a6b7a 100%);
+}
+
+.hero-sections .section-card.scouts .section-link {
+    background: rgba(0, 0, 0, 0.12);
+    color: #eaffff;
+}
+
+.hero-sections .section-card.scouts .section-link:hover {
+    background: rgba(0, 0, 0, 0.22);
+    box-shadow: 0 12px 24px rgba(0, 72, 81, 0.35);
 }
 
 .hero-content h2 {
@@ -246,31 +289,6 @@ nav a:hover::after {
     color: #ffffff;
     text-shadow: 0 6px 24px rgba(0,0,0,0.35);
 }
-
-.hero-sections {
-    margin-top: clamp(2.5rem, 6vw, 4.5rem);
-    background: rgba(255, 255, 255, 0.12);
-    border-radius: 22px;
-    padding: clamp(1.75rem, 5vw, 3rem);
-    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.25);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.25);
-}
-
-.hero-sections .section-grid {
-    margin-top: 0;
-    gap: clamp(1.5rem, 4vw, 2.5rem);
-}
-
-.hero-sections .section-card {
-    background-color: rgba(255, 255, 255, 0.92);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
-}
-
-.hero-sections .section-card:hover {
-    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.2);
-}
-
 .cta-button {
     display: inline-block;
     padding: 1rem 2.5rem;
