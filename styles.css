@@ -87,15 +87,10 @@ nav a:hover::after {
 }
 
 /* Hero Section */
-.hero {
-    background: linear-gradient(135deg, #7413dc 0%, #5c10b3 100%);
-    color: white;
-    padding: 5rem 2rem;
-    text-align: center;
+.hero-banner {
     position: relative;
 }
 
-/* Image Header Section */
 .image-header {
     position: relative;
     width: 100%;
@@ -135,28 +130,31 @@ nav a:hover::after {
     display: block;
 }
 
-.header-overlay {
+.hero-overlay {
     position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 50%, transparent 100%);
-    color: white;
-    padding: 3rem 2rem 2rem;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     text-align: center;
+    padding: clamp(2.5rem, 6vw, 5rem) 2rem;
+    color: #ffffff;
+    background: linear-gradient(180deg, rgba(0,0,0,0.58) 0%, rgba(0,0,0,0.25) 55%, rgba(0,0,0,0) 100%);
 }
 
-.header-overlay h2 {
-    font-size: 2.5rem;
-    font-weight: 700;
-    margin-bottom: 0.5rem;
-    text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+.hero-overlay::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at center, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.05) 60%, transparent 100%);
+    z-index: 0;
 }
 
-.header-overlay p {
-    font-size: 1.25rem;
-    margin: 0;
-    text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+.hero-overlay .hero-content {
+    position: relative;
+    z-index: 1;
+    max-width: 720px;
+    width: 100%;
 }
 
 .hero-content h2 {
@@ -181,6 +179,12 @@ nav a:hover::after {
     gap: 1rem;
     justify-content: center;
     flex-wrap: wrap;
+}
+
+.hero-content h2,
+.hero-content p {
+    color: #ffffff;
+    text-shadow: 0 6px 24px rgba(0,0,0,0.35);
 }
 
 .cta-button {
@@ -970,12 +974,8 @@ footer {
         height: 300px;
     }
 
-    .header-overlay h2 {
-        font-size: 1.75rem;
-    }
-
-    .header-overlay p {
-        font-size: 1rem;
+    .hero-overlay {
+        padding: 3rem 1.5rem;
     }
 
     .age-range-overview {
@@ -1029,10 +1029,6 @@ footer {
         font-size: 1.3rem;
     }
 
-    .hero {
-        padding: 4rem 1rem;
-    }
-
     .hero-content h2 {
         font-size: 1.75rem;
     }
@@ -1042,16 +1038,8 @@ footer {
         height: 250px;
     }
 
-    .header-overlay {
-        padding: 2rem 1rem 1.5rem;
-    }
-
-    .header-overlay h2 {
-        font-size: 1.5rem;
-    }
-
-    .header-overlay p {
-        font-size: 0.95rem;
+    .hero-overlay {
+        padding: 2.25rem 1.25rem;
     }
 
     .sections h2,
