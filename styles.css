@@ -152,33 +152,69 @@ nav a:hover::after {
 .hero-overlay .hero-content {
     position: relative;
     z-index: 1;
-    max-width: min(1100px, 100%);
+    max-width: min(1240px, 95vw);
     width: 100%;
     margin: 0 auto;
 }
 
 .hero-sections {
     margin-top: clamp(2.5rem, 6vw, 4.5rem);
-    background: rgba(255, 255, 255, 0.12);
-    border-radius: 22px;
-    padding: clamp(1.75rem, 5vw, 3rem);
-    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.25);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: none;
+    border: none;
+    padding: 0;
+    box-shadow: none;
+    backdrop-filter: none;
 }
 
 .hero-sections .section-grid {
-    margin-top: 0;
-    gap: clamp(1.5rem, 4vw, 2.5rem);
+    margin-top: clamp(2rem, 5vw, 3rem);
+    gap: clamp(2rem, 4vw, 3rem);
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    max-width: 1180px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .hero-sections .section-card {
-    background-color: rgba(255, 255, 255, 0.92);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+    background-color: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.35);
 }
 
 .hero-sections .section-card:hover {
-    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 22px 44px rgba(0, 0, 0, 0.22);
+}
+
+.hero-sections .section-card .section-description,
+.hero-sections .section-card .section-details p,
+.hero-sections .section-card .section-details,
+.hero-sections .section-card .age {
+    color: #1d1d1d;
+}
+
+.hero-sections .section-card .section-header {
+    color: #171717;
+    background: none;
+}
+
+.hero-sections .section-card .section-header img {
+    filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.25));
+}
+
+.hero-sections .section-card .section-description {
+    font-weight: 500;
+}
+
+.hero-sections .section-link {
+    background: rgba(116, 19, 220, 0.1);
+    color: #5c10b3;
+    border-radius: 0 0 12px 12px;
+    border-top: 1px solid rgba(116, 19, 220, 0.25);
+}
+
+.hero-sections .section-link:hover {
+    background: rgba(116, 19, 220, 0.18);
+    color: #3e0b82;
 }
 
 .hero-content h2 {
@@ -209,6 +245,30 @@ nav a:hover::after {
 .hero-content p {
     color: #ffffff;
     text-shadow: 0 6px 24px rgba(0,0,0,0.35);
+}
+
+.hero-sections {
+    margin-top: clamp(2.5rem, 6vw, 4.5rem);
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 22px;
+    padding: clamp(1.75rem, 5vw, 3rem);
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.hero-sections .section-grid {
+    margin-top: 0;
+    gap: clamp(1.5rem, 4vw, 2.5rem);
+}
+
+.hero-sections .section-card {
+    background-color: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+}
+
+.hero-sections .section-card:hover {
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.2);
 }
 
 .cta-button {
@@ -1140,6 +1200,19 @@ footer {
     margin-top: 0.35rem;
 }
 
+.event-card .date {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-top: 0.75rem;
+    color: #444444;
+}
+
+.event-card .location {
+    font-size: 0.9rem;
+    color: #666666;
+    margin-top: 0.35rem;
+}
+
 .past-events {
     background: #f0f2f5;
     padding: 2.5rem;
@@ -1160,6 +1233,11 @@ footer {
 
 .future-events .event-card h4 {
     color: #ffffff;
+}
+
+.future-events .event-card .date,
+.future-events .event-card .location {
+    color: rgba(255,255,255,0.85);
 }
 
 .future-events .event-card:nth-child(3n+1) {
@@ -1215,35 +1293,22 @@ footer {
 }
 
 .next-event #next-event {
-    max-width: 960px;
+    max-width: 1100px;
+    width: 100%;
     margin: 0 auto;
 }
 
-.next-event .event-card {
+.next-event .flip-card {
     position: relative;
-    background: linear-gradient(135deg, #ffd500 0%, #ff8a3d 45%, #ff4f81 100%);
-    color: #1f1147;
-    text-align: center;
+    width: 100%;
+    perspective: 1600px;
     border-radius: 18px;
-    padding: 2.5rem 3rem;
-    box-shadow: 0 18px 45px rgba(117, 19, 220, 0.25);
-    overflow: hidden;
+    cursor: pointer;
     animation: pulseGlow 6s infinite ease-in-out;
 }
 
-.next-event .event-card h3 {
-    font-size: 2.25rem;
-}
-
-.next-event .event-card .ai-text {
-    color: #2f1d58;
-    font-size: 1.15rem;
-    font-weight: 600;
-    margin-top: 0.75rem;
-}
-
-.next-event .event-card::before,
-.next-event .event-card::after {
+.next-event .flip-card::before,
+.next-event .flip-card::after {
     content: '';
     position: absolute;
     width: 160px;
@@ -1254,9 +1319,10 @@ footer {
     right: -60px;
     filter: blur(0px);
     animation: floatSparkle 12s infinite;
+    pointer-events: none;
 }
 
-.next-event .event-card::after {
+.next-event .flip-card::after {
     top: auto;
     bottom: -60px;
     right: auto;
@@ -1265,9 +1331,136 @@ footer {
     animation-delay: -6s;
 }
 
+.next-event .flip-card-inner {
+    position: relative;
+    width: 100%;
+    transform-style: preserve-3d;
+    transition: transform 0.9s cubic-bezier(0.19, 1, 0.22, 1);
+    border-radius: inherit;
+    min-height: 240px;
+}
+
+.next-event .flip-card:hover .flip-card-inner,
+.next-event .flip-card:focus-within .flip-card-inner {
+    transform: rotateY(180deg);
+}
+
+.next-event .flip-card-face {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2.5rem 3rem;
+    text-align: center;
+    border-radius: inherit;
+    backface-visibility: hidden;
+    box-shadow: 0 18px 45px rgba(117, 19, 220, 0.25);
+}
+
+.next-event .flip-card-front {
+    background: linear-gradient(135deg, #ffd500 0%, #ff8a3d 45%, #ff4f81 100%);
+    color: #1f1147;
+}
+
+.next-event .flip-card-back {
+    background: linear-gradient(135deg, #5c10b3 0%, #7413dc 100%);
+    color: #f8f2ff;
+    transform: rotateY(180deg);
+    box-shadow: 0 22px 55px rgba(92, 16, 179, 0.35);
+}
+
+.next-event .flip-card h3 {
+    font-size: 2.25rem;
+}
+
+.next-event .flip-card .ai-text {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-top: 0.75rem;
+}
+
+.next-event .flip-card-back .ai-text {
+    color: rgba(255,255,255,0.85);
+}
+
+.next-event .event-meta {
+    margin-top: 1.75rem;
+    font-size: 1.05rem;
+    line-height: 1.6;
+}
+
+.next-event .event-meta p {
+    margin: 0.35rem 0;
+}
+
+.next-event .event-meta .label {
+    display: inline-block;
+    font-weight: 700;
+    margin-right: 0.35rem;
+}
+
+.event-carousel {
+    --carousel-columns: 3;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    position: relative;
+}
+
+.event-carousel .carousel-viewport {
+    overflow: hidden;
+    flex: 1;
+}
+
+.event-carousel .carousel-track {
+    display: flex;
+    gap: 1.5rem;
+    transition: transform 0.55s ease;
+    will-change: transform;
+}
+
+.event-carousel .carousel-item {
+    flex: 0 0 calc((100% - (var(--carousel-columns) - 1) * 1.5rem) / var(--carousel-columns));
+}
+
+.event-carousel .carousel-control {
+    background: rgba(116, 19, 220, 0.1);
+    border: none;
+    color: #5c10b3;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 1.75rem;
+    cursor: pointer;
+    transition: background 0.3s ease, transform 0.3s ease;
+}
+
+.event-carousel .carousel-control:hover:not(:disabled) {
+    background: rgba(116, 19, 220, 0.2);
+    transform: translateY(-2px);
+}
+
+.event-carousel .carousel-control:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.event-carousel .carousel-control.is-hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
 @media (max-width: 992px) {
     .event-grid {
         grid-template-columns: repeat(2, 1fr);
+    }
+
+    .event-carousel {
+        --carousel-columns: 2;
     }
 }
 
@@ -1276,15 +1469,24 @@ footer {
         grid-template-columns: 1fr;
     }
 
-    .next-event .event-card h3 {
+    .next-event .flip-card h3 {
         font-size: 1.6rem;
     }
 
-    .next-event .event-card {
+    .next-event .flip-card-face {
         padding: 2rem 1.75rem;
     }
 
     .past-events {
         padding: 1.75rem;
+    }
+
+    .event-carousel {
+        --carousel-columns: 1;
+        gap: 0.75rem;
+    }
+
+    .event-carousel .carousel-track {
+        gap: 1rem;
     }
 }
