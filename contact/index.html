@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contact Us | 2nd Tolworth Scout Group</title>
+    <link rel="icon" href="../scouts-img/scouts-logo-white-png.png">
+    <link rel="stylesheet" href="../fonts/fonts.css">
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body class="contact-page">
+    <header>
+        <div class="container">
+            <div class="logo">
+                <img src="../scouts-img/scouts-logo-white-png.png" alt="Scouts Logo" class="main-logo">
+                <h1>2nd Tolworth Scout Group</h1>
+            </div>
+            <nav>
+                <ul>
+                    <li><a href="../index.html#home">Home</a></li>
+                    <li><a href="../about/index.html">About</a></li>
+                    <li><a href="../index.html#sections">Sections</a></li>
+                    <li><a href="../badges/index.html">Badges</a></li>
+                    <li><a href="../2tolworthcub_booklet_html/index.html">Booklet</a></li>
+                    <li><a href="index.html" class="active">Contact</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section class="contact contact-detail">
+            <div class="container">
+                <h2>Contact Us</h2>
+                <div class="contact-content">
+                    <div class="contact-info">
+                        <h3>Get in Touch</h3>
+                        <p>Interested in joining or want more information? We'd love to hear from you!</p>
+                        <p><strong>Email:</strong> info@scoutgroup.org</p>
+                        <p><strong>Phone:</strong> 01234 567890</p>
+                    </div>
+                    <div class="contact-form">
+                        <h3>Send us a message</h3>
+                        <form>
+                            <input type="text" placeholder="Your Name" required>
+                            <input type="email" placeholder="Your Email" required>
+                            <textarea placeholder="Your Message" rows="5" required></textarea>
+                            <button type="submit">Send Message</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; <span id="current-year"></span> 2nd Tolworth Scout Group. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script>
+        document.getElementById('current-year').textContent = new Date().getFullYear();
+    </script>
+</body>
+</html>
