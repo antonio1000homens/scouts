@@ -789,6 +789,209 @@ nav a:hover::after {
     font-weight: 600;
 }
 
+/* Next Event Section */
+.next-event {
+    padding: 4rem 2rem;
+    background: linear-gradient(135deg, #7413dc 0%, #5c10b3 100%);
+    color: white;
+    text-align: center;
+}
+
+.next-event-content {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.next-event-badge {
+    display: inline-block;
+    background-color: rgba(255, 255, 255, 0.2);
+    padding: 0.5rem 1.5rem;
+    border-radius: 50px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 1rem;
+}
+
+.next-event h2 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    opacity: 0.9;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+.next-event h3 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 2rem;
+    line-height: 1.2;
+}
+
+.next-event-details {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    flex-wrap: wrap;
+    margin-bottom: 2rem;
+    padding: 2rem;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+}
+
+.next-event-details .event-detail {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1.1rem;
+}
+
+.next-event-details .event-icon {
+    font-size: 1.5rem;
+}
+
+.next-event-description {
+    font-size: 1.2rem;
+    margin-bottom: 2rem;
+    line-height: 1.8;
+    opacity: 0.95;
+}
+
+.next-event .cta-button {
+    display: inline-block;
+    padding: 1rem 2.5rem;
+    background-color: white;
+    color: #7413dc;
+    text-decoration: none;
+    border-radius: 50px;
+    font-weight: 700;
+    font-size: 1.1rem;
+    transition: transform 0.3s, box-shadow 0.3s;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.next-event .cta-button:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* Events Section */
+.events {
+    padding: 5rem 2rem;
+    background-color: white;
+}
+
+.events h2 {
+    text-align: center;
+    font-size: 2.5rem;
+    margin-bottom: 3rem;
+    color: #000000;
+    font-weight: 700;
+}
+
+.events-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.event-card {
+    background-color: #f9f9fb;
+    padding: 2rem;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    transition: transform 0.3s, box-shadow 0.3s;
+    position: relative;
+    overflow: hidden;
+}
+
+.event-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 5px;
+    background: linear-gradient(135deg, #7413dc 0%, #5c10b3 100%);
+}
+
+.event-card.cubs::before {
+    background: linear-gradient(135deg, #23a950 0%, #1d8e42 100%);
+}
+
+.event-card.scouts::before {
+    background: linear-gradient(135deg, #003840 0%, #002830 100%);
+}
+
+.event-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+}
+
+.event-section-badge {
+    display: inline-block;
+    padding: 0.4rem 1rem;
+    border-radius: 50px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 1rem;
+    background-color: #7413dc;
+    color: white;
+}
+
+.event-card.cubs .event-section-badge {
+    background-color: #23a950;
+}
+
+.event-card.scouts .event-section-badge {
+    background-color: #003840;
+}
+
+.event-card h3 {
+    color: #000000;
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    line-height: 1.3;
+}
+
+.event-info {
+    margin-bottom: 1rem;
+}
+
+.event-detail {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    color: #444;
+    font-size: 0.95rem;
+}
+
+.event-icon {
+    font-size: 1.2rem;
+    min-width: 24px;
+}
+
+.event-card p {
+    color: #333;
+    line-height: 1.6;
+    margin-top: 1rem;
+}
+
+.no-events {
+    text-align: center;
+    color: #666;
+    font-size: 1.2rem;
+    padding: 3rem;
+}
+
 /* Contact Section */
 .contact {
     padding: 5rem 2rem;
@@ -1000,6 +1203,20 @@ footer {
         grid-template-columns: 1fr;
     }
 
+    .events-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .next-event h3 {
+        font-size: 2rem;
+    }
+
+    .next-event-details {
+        flex-direction: column;
+        gap: 1rem;
+        padding: 1.5rem;
+    }
+
     .contact-content {
         grid-template-columns: 1fr;
     }
@@ -1056,11 +1273,28 @@ footer {
 
     .sections h2,
     .news h2,
+    .events h2,
     .contact h2,
     .about h2,
     .activities h2,
     .badges h2 {
         font-size: 2rem;
+    }
+
+    .next-event h2 {
+        font-size: 1rem;
+    }
+
+    .next-event h3 {
+        font-size: 1.5rem;
+    }
+
+    .next-event-details .event-detail {
+        font-size: 0.95rem;
+    }
+
+    .next-event-description {
+        font-size: 1rem;
     }
 
     .section-grid {
