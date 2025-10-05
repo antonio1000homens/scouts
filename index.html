@@ -22,8 +22,8 @@
                     <li><a href="#sections">Sections</a></li>
                     <li><a href="#badges">Badges</a></li>
                     <li><a href="2tolworthcub_booklet_html/index.html">Booklet</a></li>
+                    <li><a href="#events">Events</a></li>
                     <li><a href="#news">News</a></li>
-                    <li><a href="#calendar">Calendar</a></li>
                     <li><a href="#contact">Contact</a></li>
                 </ul>
             </nav>
@@ -39,6 +39,10 @@
                 <a href="#contact" class="cta-button secondary">Find out more</a>
             </div>
         </div>
+    </section>
+
+    <section id="next-event" class="next-event">
+        <!-- Next event will be dynamically loaded here -->
     </section>
 
     <section class="image-header">
@@ -205,6 +209,15 @@
         </div>
     </section>
 
+    <section id="events" class="events">
+        <div class="container">
+            <h2>Upcoming Events</h2>
+            <div id="events-grid" class="events-grid">
+                <!-- Events will be dynamically loaded here -->
+            </div>
+        </div>
+    </section>
+
     <!-- Calendar section removed: external ICS feed didn't render due to CORS / embed restrictions. -->
 
     <section id="contact" class="contact">
@@ -259,4 +272,5 @@
     </footer>
 </body>
     <script src="scripts/calendar-render.js"></script>
+    <script src="scripts/events-loader.js"></script>
 </html>

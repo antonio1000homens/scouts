@@ -1,0 +1,34 @@
+[
+  {
+    "title": "Cubs Badge Workshop",
+    "date": "2025-10-15",
+    "time": "6:30 PM - 8:00 PM",
+    "location": "2nd Tolworth Scout HQ",
+    "description": "Work towards your activity badges with hands-on challenges and games.",
+    "section": "cubs"
+  },
+  {
+    "title": "Halloween Night Hike",
+    "date": "2025-10-30",
+    "time": "6:30 PM - 8:30 PM",
+    "location": "2nd Tolworth Scout HQ",
+    "description": "A spooky Halloween-themed night hike with torches and treats!",
+    "section": "cubs"
+  },
+  {
+    "title": "Cubs Winter Camp 2025",
+    "date": "2025-11-22",
+    "time": "10:00 AM - 4:00 PM",
+    "location": "2nd Tolworth Scout HQ",
+    "description": "Join us for a day of outdoor activities, campfire stories, and winter fun!",
+    "section": "cubs"
+  },
+  {
+    "title": "Parent & Cub Activity Evening",
+    "date": "2025-12-10",
+    "time": "6:30 PM - 8:00 PM",
+    "location": "2nd Tolworth Scout HQ",
+    "description": "An evening of fun activities for Cubs and their families.",
+    "section": "cubs"
+  }
+]

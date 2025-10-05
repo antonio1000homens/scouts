@@ -1,0 +1,26 @@
+[
+  {
+    "title": "Scouts Night Hike",
+    "date": "2025-10-18",
+    "time": "7:00 PM - 9:30 PM",
+    "location": "Richmond Park",
+    "description": "Experience a guided night hike through Richmond Park. Bring torches and warm clothing!",
+    "section": "scouts"
+  },
+  {
+    "title": "Scouts Cooking Competition",
+    "date": "2025-11-08",
+    "time": "7:00 PM - 9:00 PM",
+    "location": "2nd Tolworth Scout HQ",
+    "description": "Show off your outdoor cooking skills in our annual cooking competition.",
+    "section": "scouts"
+  },
+  {
+    "title": "Scouts Weekend Camp",
+    "date": "2025-11-28",
+    "time": "Friday 6:00 PM - Sunday 2:00 PM",
+    "location": "Bentley Copse Activity Centre",
+    "description": "A weekend of camping, adventure activities, and team challenges.",
+    "section": "scouts"
+  }
+]
