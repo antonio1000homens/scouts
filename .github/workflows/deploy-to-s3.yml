@@ -1,9 +1,10 @@
-name: Deploy to S3
+name: Deploy Website to S3
 
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -20,6 +21,47 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: eu-west-2
 
-    - name: Deploy to S3
+    - name: Configure S3 bucket for static website hosting
       run: |
-        aws s3 sync . s3://2ntolworth --delete
+        aws s3 website s3://2ndtolworth/ \
+          --index-document index.html \
+          --error-document index.html
+
+    - name: Set S3 bucket policy for public read access
+      run: |
+        cat > bucket-policy.json << 'EOF'
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "PublicReadGetObject",
+              "Effect": "Allow",
+              "Principal": "*",
+              "Action": "s3:GetObject",
+              "Resource": "arn:aws:s3:::2ndtolworth/*"
+            }
+          ]
+        }
+        EOF
+        aws s3api put-bucket-policy --bucket 2ndtolworth --policy file://bucket-policy.json
+
+    - name: Deploy HTML, CSS, and JS files to S3
+      run: |
+        # Sync web files only
+        aws s3 sync . s3://2ndtolworth/ \
+          --exclude "*" \
+          --include "*.html" \
+          --include "*.css" \
+          --include "*.js" \
+          --include "fonts/*" \
+          --include "images/*" \
+          --include "scouts-img/*" \
+          --include "2tolworthcub_booklet_html/*" \
+          --delete \
+          --cache-control "public, max-age=3600" \
+          --metadata-directive REPLACE
+
+    - name: Deployment complete
+      run: |
+        echo "Website deployed successfully!"
+        echo "Website URL: http://2ndtolworth.s3-website.eu-west-2.amazonaws.com"
