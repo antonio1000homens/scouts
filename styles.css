@@ -368,6 +368,60 @@ nav a:hover::after {
     margin-top: 2.5rem;
 }
 
+.about-extended {
+    margin-top: 4rem;
+}
+
+.badge-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 2rem;
+    margin-top: 2.5rem;
+}
+
+.badge-card {
+    background-color: rgba(255, 255, 255, 0.9);
+    border-radius: 18px;
+    padding: 1.75rem;
+    text-align: center;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.badges-subpage .badge-card {
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.badge-card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.18);
+}
+
+.badge-card img {
+    width: 140px;
+    height: 140px;
+    margin: 0 auto 1rem;
+    display: block;
+}
+
+.badge-card h3 {
+    font-size: 1.25rem;
+    margin-bottom: 0.75rem;
+}
+
+.badge-card p {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: rgba(0, 0, 0, 0.7);
+}
+
+.badges-subpage .badge-card p {
+    color: rgba(255, 255, 255, 0.84);
+}
+
 /* Button Styles */
 .btn {
     display: inline-block;
@@ -1506,5 +1560,9 @@ footer {
 
     .event-carousel .carousel-track {
         gap: 1rem;
+    }
+
+    .badge-gallery {
+        grid-template-columns: 1fr;
     }
 }
