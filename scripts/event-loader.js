@@ -20,11 +20,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const nextEventContainer = document.getElementById('next-event');
             if (nextEvent) {
                 nextEventContainer.innerHTML = `
-                    <div class="event-card prominent">
+                    <div class="event-card">
                         <h3>${nextEvent.title}</h3>
-                        <p class="subtitle">${nextEvent.AI || ''}</p>
-                        <p class="date">${new Date(nextEvent.start.iso).toLocaleString()}</p>
-                        <p class="location">${nextEvent.location || ''}</p>
+                        ${nextEvent.AI ? `<p class="ai-text">${nextEvent.AI}</p>` : ''}
                     </div>
                 `;
             } else {
@@ -36,7 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 futureEventsContainer.innerHTML = upcomingEvents.map(event => `
                     <div class="event-card">
                         <h4>${event.title}</h4>
-                        <p class="date">${new Date(event.start.iso).toLocaleString()}</p>
+                        ${event.AI ? `<p class="ai-text">${event.AI}</p>` : ''}
                     </div>
                 `).join('');
             } else {
@@ -48,7 +46,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 pastEventsContainer.innerHTML = recentEvents.map(event => `
                     <div class="event-card">
                         <h4>${event.title}</h4>
-                        <p class="date">${new Date(event.start.iso).toLocaleString()}</p>
                     </div>
                 `).join('');
             } else {
