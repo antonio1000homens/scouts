@@ -152,8 +152,33 @@ nav a:hover::after {
 .hero-overlay .hero-content {
     position: relative;
     z-index: 1;
-    max-width: 720px;
+    max-width: min(1100px, 100%);
     width: 100%;
+    margin: 0 auto;
+}
+
+.hero-sections {
+    margin-top: clamp(2.5rem, 6vw, 4.5rem);
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 22px;
+    padding: clamp(1.75rem, 5vw, 3rem);
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.hero-sections .section-grid {
+    margin-top: 0;
+    gap: clamp(1.5rem, 4vw, 2.5rem);
+}
+
+.hero-sections .section-card {
+    background-color: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+}
+
+.hero-sections .section-card:hover {
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.2);
 }
 
 .hero-content h2 {
