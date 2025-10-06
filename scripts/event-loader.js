@@ -277,7 +277,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 .sort((a, b) => b.__eventDate - a.__eventDate);
 
             const nextEvent = futureEvents.length ? futureEvents[0] : null;
-            const upcomingEvents = futureEvents.slice(0, 3);
+            const upcomingEvents = futureEvents.slice(1, 4);
 
             renderNextEventCard(nextEvent, document.getElementById('next-event'));
             renderFutureEvents(upcomingEvents, document.getElementById('future-events'));
