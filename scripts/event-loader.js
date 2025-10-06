@@ -25,7 +25,7 @@ function normaliseDateString(value) {
 
 function getEventDate(event) {
     if (!event) return null;
-    const candidate = event.start?.iso || event.start?.raw || event.start;
+    const candidate = event.dtstart || event.start?.iso || event.start?.raw || event.start;
     const normalised = normaliseDateString(candidate);
     if (!normalised) return null;
     const parsed = new Date(normalised);
@@ -46,7 +46,7 @@ function renderNextEventCard(event, container) {
         return;
     }
 
-    const dateLabel = formatDisplayDate(event.__eventDate || event.start?.iso || event.start?.raw);
+    const dateLabel = formatDisplayDate(event.__eventDate || event.dtstart || event.start?.iso || event.start?.raw);
     const locationLabel = event.location || '';
     const aiCopy = event.AI ? `<p class="ai-text">${event.AI}</p>` : '';
     const metaBlock = [
@@ -100,7 +100,7 @@ function renderPastEventsCarousel(events, container) {
     }
 
     const cards = events.map(event => {
-        const dateLabel = formatDisplayDate(event.__eventDate || event.start?.iso || event.start?.raw);
+        const dateLabel = formatDisplayDate(event.__eventDate || event.dtstart || event.start?.iso || event.start?.raw);
         const locationLabel = event.location ? `<p class="location">${event.location}</p>` : '';
         const aiCopy = event.AI ? `<p class="ai-text">${event.AI}</p>` : '';
         const image = event.image ? `<img src="${event.image}&w=400" alt="${event.title}" />` : '';
