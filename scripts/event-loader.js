@@ -39,6 +39,62 @@ function formatDisplayDate(dateOrString) {
     return dateFormatter.format(date);
 }
 
+function resolveImageUrl(event) {
+    if (!event) return null;
+    const { image, imageUrl } = event;
+    if (typeof image === 'string') return image;
+    if (typeof imageUrl === 'string') return imageUrl;
+    if (image && typeof image === 'object') {
+        if (typeof image.url === 'string') return image.url;
+        if (typeof image.src === 'string') return image.src;
+        if (typeof image.href === 'string') return image.href;
+    }
+    return null;
+}
+
+function withImageWidthParam(imageUrl, width = 400) {
+    if (!imageUrl || typeof imageUrl !== 'string') return null;
+    const trimmed = imageUrl.trim();
+    if (!trimmed) return null;
+    if (/[?&]w=\d+/i.test(trimmed)) {
+        return trimmed;
+    }
+    const separator = trimmed.includes('?') ? '&' : '?';
+    return `${trimmed}${separator}w=${width}`;
+}
+
+function createEventImageMarkup(event, width = 400) {
+    const rawUrl = resolveImageUrl(event);
+    if (!rawUrl) return '';
+    const sizedUrl = withImageWidthParam(rawUrl, width) || rawUrl;
+    const altText = event?.title || event?.summary || 'Scout event image';
+    return `<img src="${sizedUrl}" alt="${altText}" loading="lazy" />`;
+}
+
+function normaliseEventRecord(event) {
+    if (!event || typeof event !== 'object') return null;
+    const normalised = { ...event };
+
+    if (!normalised.title) {
+        normalised.title = normalised.summary || normalised.name || 'Scout event';
+    }
+
+    if (normalised.AI === undefined && normalised.ai !== undefined) {
+        normalised.AI = normalised.ai;
+    }
+
+    if (!normalised.location && normalised.place) {
+        normalised.location = normalised.place;
+    }
+
+    const imageUrl = resolveImageUrl(normalised);
+    if (imageUrl) {
+        normalised.imageUrl = imageUrl;
+    }
+
+    return normalised;
+}
+
 function renderNextEventCard(event, container) {
     if (!container) return;
     if (!event) {
@@ -53,7 +109,7 @@ function renderNextEventCard(event, container) {
         dateLabel ? `<p><span class="label">Date:</span> ${dateLabel}</p>` : '',
         locationLabel ? `<p><span class="label">Location:</span> ${locationLabel}</p>` : ''
     ].filter(Boolean).join('');
-    const image = event.image ? `<img src="${event.image}&w=400" alt="${event.title}" />` : '';
+    const image = createEventImageMarkup(event);
 
     container.innerHTML = `
         <div class="event-card flip-card" tabindex="0">
@@ -81,7 +137,7 @@ function renderFutureEvents(events, container) {
     }
 
     container.innerHTML = events.map(event => {
-        const image = event.image ? `<img src="${event.image}&w=400" alt="${event.title}" />` : '';
+        const image = createEventImageMarkup(event);
         return `
             <div class="event-card">
                 ${image}
@@ -103,7 +159,7 @@ function renderPastEventsCarousel(events, container) {
         const dateLabel = formatDisplayDate(event.__eventDate || event.dtstart || event.start?.iso || event.start?.raw);
         const locationLabel = event.location ? `<p class="location">${event.location}</p>` : '';
         const aiCopy = event.AI ? `<p class="ai-text">${event.AI}</p>` : '';
-        const image = event.image ? `<img src="${event.image}&w=400" alt="${event.title}" />` : '';
+        const image = createEventImageMarkup(event);
         return `
             <div class="event-card carousel-item">
                 ${image}
@@ -199,7 +255,9 @@ document.addEventListener('DOMContentLoaded', () => {
             return response.json();
         })
         .then(data => {
-            const events = data.events || [];
+            const events = (data.events || [])
+                .map(normaliseEventRecord)
+                .filter(Boolean);
             const now = new Date();
 
             const parsedEvents = events
