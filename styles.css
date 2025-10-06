@@ -92,6 +92,17 @@ nav a:hover::after {
     width: 100%;
 }
 
+#home {
+    margin-top: 0;
+    scroll-margin-top: clamp(4.5rem, 6vw, 5.5rem);
+}
+
+@media (max-width: 640px) {
+    #home {
+        scroll-margin-top: 4.25rem;
+    }
+}
+
 /* Hero Section */
 .hero-banner {
     position: relative;
@@ -174,25 +185,78 @@ nav a:hover::after {
 
 .hero-sections .section-grid {
     margin-top: clamp(2rem, 5vw, 3rem);
-    gap: clamp(2rem, 4vw, 3rem);
-    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: clamp(1.5rem, 4vw, 2.5rem);
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
     max-width: 1240px;
     margin-left: auto;
     margin-right: auto;
 }
 
 .hero-sections .section-card {
-    border-radius: 18px;
-    overflow: hidden;
-    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.22);
+    position: relative;
+    border-radius: 16px;
     border: none;
     color: #ffffff;
+    perspective: 1200px;
+    min-height: clamp(240px, 36vw, 320px);
+    cursor: pointer;
+    overflow: visible;
+}
+
+.hero-sections .section-card .card-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.22);
+    transform-style: preserve-3d;
+    transition: transform 0.6s ease;
+}
+
+.hero-sections .section-card:hover .card-inner,
+.hero-sections .section-card:focus-within .card-inner {
+    transform: rotateY(180deg);
+}
+
+.hero-sections .section-card:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.6);
+    outline-offset: 4px;
+}
+
+.hero-sections .card-face {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    backface-visibility: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: clamp(0.85rem, 2.4vw, 1.4rem);
+    text-align: center;
+}
+
+.hero-sections .card-back {
+    transform: rotateY(180deg);
+}
+
+.hero-sections .card-back-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: center;
+    text-align: center;
+    max-width: 88%;
+    margin: 0 auto;
 }
 
 .hero-sections .section-card .section-header {
     color: inherit;
     background: transparent;
     text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(0.3rem, 1.4vw, 0.5rem);
 }
 
 .hero-sections .section-card .section-header img {
@@ -208,23 +272,62 @@ nav a:hover::after {
 
 .hero-sections .section-card .section-description {
     font-weight: 500;
+    margin-bottom: 0.35rem;
+}
+
+.hero-sections .section-card .section-details {
+    font-size: 0.92rem;
+    line-height: 1.4;
 }
 
 .hero-sections .section-link {
-    display: block;
-    border-radius: 0 0 18px 18px;
-    text-align: center;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 999px;
     font-weight: 700;
-    padding: 1rem 2rem;
+    padding: 0.8rem 1.8rem;
     text-decoration: none;
     transition: transform 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
+    width: max-content;
 }
 
 .hero-sections .section-link:hover {
     transform: translateY(-2px);
 }
 
-.hero-sections .section-card.beavers {
+.hero-sections .section-logo-img {
+    width: clamp(160px, 28vw, 240px);
+    max-width: 92%;
+    height: auto;
+}
+
+.hero-sections .section-card .age {
+    font-size: clamp(1.15rem, 2.5vw, 1.4rem);
+    font-weight: 700;
+    margin-top: 0;
+}
+
+.hero-sections .card-back-content .section-description,
+.hero-sections .card-back-content .section-details {
+    padding: 0;
+}
+
+.hero-sections .card-back-content .section-description {
+    font-size: clamp(0.95rem, 2.4vw, 1.05rem);
+    line-height: 1.45;
+}
+
+.hero-sections .card-back-content .section-details {
+    margin-bottom: 0;
+    font-size: clamp(0.85rem, 2vw, 0.95rem);
+}
+
+.hero-sections .card-back-content .section-link {
+    margin-top: 0.35rem;
+}
+
+.hero-sections .section-card.beavers .card-face {
     background: linear-gradient(135deg, #00a794 0%, #00c6b0 100%);
 }
 
@@ -238,7 +341,7 @@ nav a:hover::after {
     box-shadow: 0 12px 24px rgba(0, 167, 148, 0.35);
 }
 
-.hero-sections .section-card.cubs {
+.hero-sections .section-card.cubs .card-face {
     background: linear-gradient(135deg, #23a950 0%, #49c96f 100%);
 }
 
@@ -252,7 +355,7 @@ nav a:hover::after {
     box-shadow: 0 12px 24px rgba(35, 169, 80, 0.35);
 }
 
-.hero-sections .section-card.scouts {
+.hero-sections .section-card.scouts .card-face {
     background: linear-gradient(135deg, #004851 0%, #0a6b7a 100%);
 }
 
@@ -266,6 +369,16 @@ nav a:hover::after {
     box-shadow: 0 12px 24px rgba(0, 72, 81, 0.35);
 }
 
+@media (prefers-reduced-motion: reduce) {
+    .hero-sections .section-card .card-inner {
+        transition: none;
+    }
+
+    .hero-sections .section-card:hover .card-inner,
+    .hero-sections .section-card:focus-within .card-inner {
+        transform: none;
+    }
+}
 .hero-content h2 {
     font-size: 2.8rem;
     font-weight: 700;
@@ -576,22 +689,15 @@ nav a:hover::after {
 }
 
 .section-header {
-    padding: 2.5rem 2rem 1.5rem;
+    padding: 1.5rem 1.25rem 1rem;
     text-align: center;
 }
 
 .section-logo-img {
-    width: 100px;
-    height: 100px;
-    margin: 0 auto 1rem;
+    width: clamp(110px, 22vw, 180px);
+    height: auto;
+    margin: 0 auto 0.75rem;
     display: block;
-}
-
-.section-logo {
-    font-size: 1.8rem;
-    font-weight: 900;
-    letter-spacing: 1px;
-    margin-bottom: 0.5rem;
 }
 
 .section-card .age {
@@ -602,40 +708,43 @@ nav a:hover::after {
 }
 
 .section-description {
-    padding: 0 2rem;
-    margin-bottom: 1.5rem;
-    font-size: 1.05rem;
-    line-height: 1.6;
+    padding: 0 1.5rem;
+    margin-bottom: 1.25rem;
+    font-size: 1rem;
+    line-height: 1.55;
     color: #333333;
 }
 
 .section-details {
-    padding: 0 2rem 1.5rem;
-    font-size: 0.95rem;
+    padding: 0 1.5rem 1.25rem;
+    font-size: 0.9rem;
 }
 
 .section-details p {
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.4rem;
     color: #555555;
 }
 
 /* Section Colors */
 .section-link {
-    display: block;
-    padding: 1rem 2rem;
-    text-align: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.75rem 1.75rem;
     text-decoration: none;
     font-weight: 700;
     font-size: 0.95rem;
-    transition: background-color 0.3s, transform 0.2s;
+    transition: background-color 0.3s, transform 0.2s, box-shadow 0.2s;
     color: white;
     position: relative;
+    border-radius: 999px;
 }
 
 .section-link .arrow {
     display: inline-block;
     transition: transform 0.3s;
-    margin-left: 0.5rem;
+    margin-left: 0.2rem;
 }
 
 .section-link:hover .arrow {
@@ -643,15 +752,11 @@ nav a:hover::after {
 }
 
 .section-link:hover {
-    transform: scale(1.02);
+    transform: translateY(-2px);
 }
 
 .beavers .section-header {
     background-color: #00a794;
-    color: white;
-}
-
-.beavers .section-logo {
     color: white;
 }
 
@@ -668,10 +773,6 @@ nav a:hover::after {
     color: white;
 }
 
-.cubs .section-logo {
-    color: white;
-}
-
 .cubs .section-link {
     background-color: #23a950;
 }
@@ -682,10 +783,6 @@ nav a:hover::after {
 
 .scouts .section-header {
     background-color: #004851;
-    color: white;
-}
-
-.scouts .section-logo {
     color: white;
 }
 
