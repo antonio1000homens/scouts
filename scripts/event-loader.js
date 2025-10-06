@@ -53,11 +53,13 @@ function renderNextEventCard(event, container) {
         dateLabel ? `<p><span class="label">Date:</span> ${dateLabel}</p>` : '',
         locationLabel ? `<p><span class="label">Location:</span> ${locationLabel}</p>` : ''
     ].filter(Boolean).join('');
+    const image = event.image ? `<img src="${event.image}&w=400" alt="${event.title}" />` : '';
 
     container.innerHTML = `
         <div class="event-card flip-card" tabindex="0">
             <div class="flip-card-inner">
                 <div class="flip-card-face flip-card-front">
+                    ${image}
                     <h3>${event.title}</h3>
                     ${aiCopy}
                 </div>
@@ -78,12 +80,16 @@ function renderFutureEvents(events, container) {
         return;
     }
 
-    container.innerHTML = events.map(event => `
-        <div class="event-card">
-            <h4>${event.title}</h4>
-            ${event.AI ? `<p class="ai-text">${event.AI}</p>` : ''}
-        </div>
-    `).join('');
+    container.innerHTML = events.map(event => {
+        const image = event.image ? `<img src="${event.image}&w=400" alt="${event.title}" />` : '';
+        return `
+            <div class="event-card">
+                ${image}
+                <h4>${event.title}</h4>
+                ${event.AI ? `<p class="ai-text">${event.AI}</p>` : ''}
+            </div>
+        `;
+    }).join('');
 }
 
 function renderPastEventsCarousel(events, container) {
@@ -97,8 +103,10 @@ function renderPastEventsCarousel(events, container) {
         const dateLabel = formatDisplayDate(event.__eventDate || event.start?.iso || event.start?.raw);
         const locationLabel = event.location ? `<p class="location">${event.location}</p>` : '';
         const aiCopy = event.AI ? `<p class="ai-text">${event.AI}</p>` : '';
+        const image = event.image ? `<img src="${event.image}&w=400" alt="${event.title}" />` : '';
         return `
             <div class="event-card carousel-item">
+                ${image}
                 <h4>${event.title}</h4>
                 ${dateLabel ? `<p class="date">${dateLabel}</p>` : ''}
                 ${locationLabel}
