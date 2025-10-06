@@ -1277,6 +1277,13 @@ footer {
     padding: 1.75rem;
     border-radius: 12px;
     box-shadow: 0 8px 18px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+}
+
+.event-card img {
+    width: 100%;
+    height: auto;
+    margin-bottom: 1rem;
 }
 
 .event-card h3,
