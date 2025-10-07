@@ -106,8 +106,12 @@ function normaliseSectionValue(value) {
 
 function resolveEventSection(event) {
     if (!event) return 'cubs';
-    return normaliseSectionValue(event.section ?? event.audience ?? event.group ?? null);
+    return normaliseSectionValue(event.icsType ?? event.section ?? event.audience ?? event.group ?? null);
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+    fetch('agenda.json')
+
 
 function createEventBadgeMarkup(event) {
     const sectionKey = resolveEventSection(event);
@@ -305,7 +309,7 @@ function renderPastEventsCarousel(events, container) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    fetch('events.json')
+    fetch('agenda.json')
         .then(response => {
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
