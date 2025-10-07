@@ -73,15 +73,15 @@ function createEventImageMarkup(event, width = 400) {
 
 const SECTION_BADGE_CONFIG = {
     beavers: {
-        src: 'images/beavers-logo-white-png.png',
+        src: 'website/images/beavers-logo-white-png.png',
         alt: 'Beavers event',
     },
     cubs: {
-        src: 'images/cubs-logo-white-png.png',
+        src: 'website/images/cubs-logo-white-png.png',
         alt: 'Cubs event',
     },
     all: {
-        src: 'images/scouts-logo-white-png.png',
+        src: 'website/images/scouts-logo-white-png.png',
         alt: 'All scouts event',
     },
 };
