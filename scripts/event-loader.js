@@ -71,6 +71,56 @@ function createEventImageMarkup(event, width = 400) {
     return `<img src="${sizedUrl}" alt="${altText}" loading="lazy" />`;
 }
 
+const SECTION_BADGE_CONFIG = {
+    beavers: {
+        src: 'scouts-img/beavers-logo-white-png.png',
+        alt: 'Beavers event',
+    },
+    cubs: {
+        src: 'scouts-img/cubs-logo-white-png.png',
+        alt: 'Cubs event',
+    },
+    all: {
+        src: 'scouts-img/scouts-logo-white-png.png',
+        alt: 'All scouts event',
+    },
+};
+
+function normaliseSectionValue(value) {
+    if (value === undefined || value === null) {
+        return 'cubs';
+    }
+    const normalized = String(value).trim().toLowerCase();
+    if (!normalized) return 'cubs';
+    if (normalized === 'all' || normalized === 'group' || normalized === 'scouts' || normalized === 'all scouts') {
+        return 'all';
+    }
+    if (normalized.startsWith('beaver')) {
+        return 'beavers';
+    }
+    if (normalized.startsWith('cub')) {
+        return 'cubs';
+    }
+    return 'cubs';
+}
+
+function resolveEventSection(event) {
+    if (!event) return 'cubs';
+    return normaliseSectionValue(event.section ?? event.audience ?? event.group ?? null);
+}
+
+function createEventBadgeMarkup(event) {
+    const sectionKey = resolveEventSection(event);
+    const config = SECTION_BADGE_CONFIG[sectionKey] ?? SECTION_BADGE_CONFIG.cubs;
+    return `<span class="event-section-badge event-section-badge--${sectionKey}"><img src="${config.src}" alt="${config.alt}" loading="lazy" /></span>`;
+}
+
+function createEventHeading(tagName, event) {
+    const badge = createEventBadgeMarkup(event);
+    const title = event?.title || event?.summary || 'Scout event';
+    return `<${tagName} class="event-card-title">${badge}<span class="event-card-title-text">${title}</span></${tagName}>`;
+}
+
 function normaliseEventRecord(event) {
     if (!event || typeof event !== 'object') return null;
     const normalised = { ...event };
@@ -92,6 +142,8 @@ function normaliseEventRecord(event) {
         normalised.imageUrl = imageUrl;
     }
 
+    normalised.section = resolveEventSection(normalised);
+
     return normalised;
 }
 
@@ -110,17 +162,19 @@ function renderNextEventCard(event, container) {
         locationLabel ? `<p><span class="label">Location:</span> ${locationLabel}</p>` : ''
     ].filter(Boolean).join('');
     const image = createEventImageMarkup(event);
+    const sectionKey = resolveEventSection(event);
+    const headingMarkup = createEventHeading('h3', event);
 
     container.innerHTML = `
-        <div class="event-card flip-card" tabindex="0">
+        <div class="event-card flip-card" tabindex="0" data-section="${sectionKey}">
             <div class="flip-card-inner">
                 <div class="flip-card-face flip-card-front">
                     ${image}
-                    <h3>${event.title}</h3>
+                    ${headingMarkup}
                     ${aiCopy}
                 </div>
                 <div class="flip-card-face flip-card-back">
-                    <h3>${event.title}</h3>
+                    ${headingMarkup}
                     ${aiCopy}
                     ${metaBlock ? `<div class="event-meta">${metaBlock}</div>` : ''}
                 </div>
@@ -138,10 +192,12 @@ function renderFutureEvents(events, container) {
 
     container.innerHTML = events.map(event => {
         const image = createEventImageMarkup(event);
+        const sectionKey = resolveEventSection(event);
+        const headingMarkup = createEventHeading('h4', event);
         return `
-            <div class="event-card">
+            <div class="event-card" data-section="${sectionKey}">
                 ${image}
-                <h4>${event.title}</h4>
+                ${headingMarkup}
                 ${event.AI ? `<p class="ai-text">${event.AI}</p>` : ''}
             </div>
         `;
@@ -160,10 +216,12 @@ function renderPastEventsCarousel(events, container) {
         const locationLabel = event.location ? `<p class="location">${event.location}</p>` : '';
         const aiCopy = event.AI ? `<p class="ai-text">${event.AI}</p>` : '';
         const image = createEventImageMarkup(event);
+        const sectionKey = resolveEventSection(event);
+        const headingMarkup = createEventHeading('h4', event);
         return `
-            <div class="event-card carousel-item">
+            <div class="event-card carousel-item" data-section="${sectionKey}">
                 ${image}
-                <h4>${event.title}</h4>
+                ${headingMarkup}
                 ${dateLabel ? `<p class="date">${dateLabel}</p>` : ''}
                 ${locationLabel}
                 ${aiCopy}
