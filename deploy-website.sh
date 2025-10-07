@@ -11,13 +11,8 @@ echo "Deploying website files to S3..."
 # Sync web files only
 aws s3 sync . s3://${BUCKET_NAME}/ \
   --exclude "*" \
-  --include "*.html" \
-  --include "*.css" \
-  --include "*.js" \
-  --include "fonts/*" \
-  --include "images/*" \
-  --include "scouts-img/*" \
-  --include "2tolworthcub_booklet_html/*" \
+  --include "index.html" \
+  --include "website/*" \
   --delete \
   --cache-control "public, max-age=3600" \
   --metadata-directive REPLACE
