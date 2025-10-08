@@ -109,9 +109,6 @@ function resolveEventSection(event) {
     return normaliseSectionValue(event.icsType ?? event.section ?? event.audience ?? event.group ?? null);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    fetch('agenda.json')
-
 
 function createEventBadgeMarkup(event) {
     const sectionKey = resolveEventSection(event);
