@@ -50,6 +50,18 @@ jobs:
         aws s3 sync . s3://2ndtolworth/ --exclude "*" --include "index.html"
         aws s3 sync website/ s3://2ndtolworth/website/ --delete
 
+    - name: Upload pixabay.conf to S3 root (if present)
+      run: |
+        if [ -f pixabay.conf ]; then
+          echo "Uploading pixabay.conf to s3://2ndtolworth/pixabay.conf"
+          aws s3 cp pixabay.conf s3://2ndtolworth/pixabay.conf --acl private
+        elif [ -f website/pixabay.conf ]; then
+          echo "Uploading website/pixabay.conf to s3://2ndtolworth/pixabay.conf"
+          aws s3 cp website/pixabay.conf s3://2ndtolworth/pixabay.conf --acl private
+        else
+          echo "No pixabay.conf found in repository root or website/, skipping"
+        fi
+
     - name: Deployment complete
       run: |
         echo "Website deployed successfully!"
