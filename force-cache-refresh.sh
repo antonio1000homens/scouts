@@ -13,6 +13,27 @@ aws s3 cp /home/windsor/github/scouts/index.html s3://2ndtolworth/index.html \
   --cache-control "no-cache, no-store, must-revalidate" \
   --metadata-directive REPLACE
 
+# Remove legacy top-level directories that are no longer used
+LEGACY_DIRS=(
+  "beavers"
+  "badges"
+  "contact"
+  "cubs"
+  "fonts"
+  "hiringtheden"
+  "images"
+  "history"
+  "location"
+  "scouts-page"
+  "volunteering"
+  "welcome"
+)
+
+for dir in "${LEGACY_DIRS[@]}"; do
+  echo "🧹 Cleaning legacy path s3://2ndtolworth/${dir}..."
+  aws s3 rm "s3://2ndtolworth/${dir}" --recursive --quiet >/dev/null 2>&1 || true
+done
+
 # Upload all HTML files in website directory with no-cache headers
 echo "📄 Uploading website HTML files with no-cache headers..."
 aws s3 sync /home/windsor/github/scouts/website/ s3://2ndtolworth/website/ \

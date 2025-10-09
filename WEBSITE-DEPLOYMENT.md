@@ -66,7 +66,7 @@ cd /home/windsor/github/scouts
 ./deploy-website.sh
 ```
 
-This script syncs only web files to S3 (HTML, CSS, JS, fonts, images).
+This script removes any legacy top-level folders (e.g. `/beavers`, `/badges`) before syncing the current `website/` content and root `index.html`.
 
 ## Website Structure
 
@@ -74,19 +74,26 @@ Files deployed to S3:
 ```
 /
 ├── index.html              # Main page
-├── component-preview.html  # Component preview
-├── styles.css             # Main stylesheet
-├── fonts/
-│   ├── fonts.css
-│   └── [font files]
-├── images/
-│   └── [image files]
-├── scouts-img/
-│   └── [scout images]
-├── scripts/
-│   └── calendar-render.js # Calendar rendering
-└── 2tolworthcub_booklet_html/
-    └── [9 HTML booklet pages]
+└── website/
+    ├── styles.css          # Main stylesheet
+    ├── fonts/
+    │   ├── fonts.css
+    │   └── [font files]
+    ├── images/
+    │   └── [image files]
+    ├── scripts/
+    │   └── calendar-render.js
+    ├── beavers/
+    ├── cubs/
+    ├── scouts-page/
+    ├── contact/
+    ├── volunteering/
+    ├── history/
+    ├── hiring-the-den/
+    ├── location/
+    ├── welcome/
+    └── 2tolworthcub_booklet_html/
+        └── [9 HTML booklet pages]
 ```
 
 ## Access the Website
