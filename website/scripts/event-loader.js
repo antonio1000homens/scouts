@@ -314,6 +314,14 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .then(data => {
             const events = (data.events || [])
+                .filter(event => {
+                    // Filter out hidden events
+                    if (event.status === 'hidden') {
+                        console.log('Filtering out hidden event:', event.uid ?? event.title);
+                        return false;
+                    }
+                    return true;
+                })
                 .map(normaliseEventRecord)
                 .filter(Boolean);
             const now = new Date();
