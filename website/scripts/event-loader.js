@@ -106,8 +106,9 @@ function normaliseSectionValue(value) {
 
 function resolveEventSection(event) {
     if (!event) return 'cubs';
-    return normaliseSectionValue(event.section ?? event.audience ?? event.group ?? null);
+    return normaliseSectionValue(event.icsType ?? event.section ?? event.audience ?? event.group ?? null);
 }
+
 
 function createEventBadgeMarkup(event) {
     const sectionKey = resolveEventSection(event);
@@ -305,7 +306,7 @@ function renderPastEventsCarousel(events, container) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    fetch('events.json')
+    fetch('agenda.json')
         .then(response => {
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
@@ -341,13 +342,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const pastEvents = parsedEvents
                 .filter(event => event.__eventDate <= now)
                 .sort((a, b) => b.__eventDate - a.__eventDate);
+                    const nextEvent = futureEvents.length ? futureEvents[0] : null;
+                    const upcomingEvents = futureEvents.slice(1, 4);
 
-            const nextEvent = futureEvents.length ? futureEvents[0] : null;
-            const upcomingEvents = futureEvents.slice(1, 4);
-
-            renderNextEventCard(nextEvent, document.getElementById('next-event'));
-            renderFutureEvents(upcomingEvents, document.getElementById('future-events'));
-            renderPastEventsCarousel(pastEvents, document.getElementById('past-events'));
+                    renderNextEventCard(nextEvent, document.getElementById('next-event'));
+                    renderFutureEvents(upcomingEvents, document.getElementById('future-events'));
+                    renderPastEventsCarousel(pastEvents, document.getElementById('past-events'));
         })
         .catch(error => {
             console.error('Error loading events:', error);

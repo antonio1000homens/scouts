@@ -9,6 +9,27 @@ echo "Deploying scouts website to S3..."
 echo "Uploading index.html..."
 aws s3 cp index.html s3://2ndtolworth/ --cache-control "max-age=0, no-cache, no-store, must-revalidate"
 
+# Remove legacy top-level directories that are now served from /website/
+LEGACY_DIRS=(
+  "beavers"
+  "badges"
+  "contact"
+  "cubs"
+  "fonts"
+  "hiringtheden"
+  "images"
+  "history"
+  "location"
+  "scouts-page"
+  "volunteering"
+  "welcome"
+)
+
+for dir in "${LEGACY_DIRS[@]}"; do
+  echo "Removing legacy path s3://2ndtolworth/${dir} (if present)..."
+  aws s3 rm "s3://2ndtolworth/${dir}" --recursive --quiet >/dev/null 2>&1 || true
+done
+
 # Sync website directory
 echo "Syncing website directory..."
 aws s3 sync website/ s3://2ndtolworth/website/ --delete --cache-control "max-age=0, no-cache, no-store, must-revalidate"
