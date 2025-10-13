@@ -95,7 +95,7 @@
         events.slice(0,6).forEach(ev => {
           const li = document.createElement('li');
           li.className = 'calendar-event';
-          li.innerHTML = `<div class="ce-head"><strong>${ev.summary}</strong> <span class="ce-date">${formatDate(ev.start)}</span></div>${ev.location?`<div class="ce-location">${ev.location}</div>`:''}${ev.description?`<div class="ce-desc">${ev.description}</div>`:''}`;
+          li.innerHTML = `<div class="ce-head"><strong>${ev.summary}</strong> <span class="ce-date">${formatDate(ev.start)}</span></div>${ev.location?`<div class="ce-location">${ev.location}</div>`: ''}${ev.description?`<div class="ce-desc">${ev.description}</div>`: ''}`;
           list.appendChild(li);
         });
         eventsContainer.innerHTML = '';

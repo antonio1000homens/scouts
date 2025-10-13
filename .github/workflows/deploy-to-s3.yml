@@ -47,8 +47,25 @@ jobs:
 
     - name: Deploy website to S3
       run: |
+        legacy_dirs=(beavers badges contact cubs fonts hiringtheden images history location scouts-page volunteering welcome)
+        for dir in "${legacy_dirs[@]}"; do
+          echo "Removing legacy path s3://2ndtolworth/${dir} (if any)"
+          aws s3 rm "s3://2ndtolworth/${dir}" --recursive --quiet >/dev/null 2>&1 || true
+        done
         aws s3 sync . s3://2ndtolworth/ --exclude "*" --include "index.html"
         aws s3 sync website/ s3://2ndtolworth/website/ --delete
+
+    - name: Upload pixabay.conf to S3 root (if present)
+      run: |
+        if [ -f pixabay.conf ]; then
+          echo "Uploading pixabay.conf to s3://2ndtolworth/pixabay.conf"
+          aws s3 cp pixabay.conf s3://2ndtolworth/pixabay.conf --acl private
+        elif [ -f website/pixabay.conf ]; then
+          echo "Uploading website/pixabay.conf to s3://2ndtolworth/pixabay.conf"
+          aws s3 cp website/pixabay.conf s3://2ndtolworth/pixabay.conf --acl private
+        else
+          echo "No pixabay.conf found in repository root or website/, skipping"
+        fi
 
     - name: Deployment complete
       run: |
