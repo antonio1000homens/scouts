@@ -317,7 +317,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const events = (data.events || [])
                 .filter(event => {
                     // Filter out hidden events
-                    if (event.status === 'hidden') {
+                    if (event.status === 'hidden' || event.hidden === true) {
                         console.log('Filtering out hidden event:', event.uid ?? event.title);
                         return false;
                     }
