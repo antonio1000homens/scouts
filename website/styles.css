@@ -33,8 +33,6 @@ header .container {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 0.75rem;
 }
 
 .logo {
@@ -54,15 +52,13 @@ header h1 {
     letter-spacing: -0.5px;
 }
 
-nav ul {
+.main-nav ul {
     list-style: none;
     display: flex;
     gap: 1.1rem;
-    flex-wrap: wrap;
-    justify-content: center;
 }
 
-nav a {
+.main-nav a {
     color: white;
     text-decoration: none;
     font-weight: 600;
@@ -73,11 +69,11 @@ nav a {
     padding: 0.25rem 0;
 }
 
-nav a:hover {
+.main-nav a:hover {
     opacity: 0.85;
 }
 
-nav a::after {
+.main-nav a::after {
     content: '';
     position: absolute;
     bottom: -5px;
@@ -88,9 +84,7 @@ nav a::after {
     transition: width 0.3s;
 }
 
-nav a:hover::after {
-    width: 100%;
-}
+
 
 #home {
     margin-top: 0;
@@ -1201,30 +1195,6 @@ footer {
 
 /* Responsive Design */
 @media (max-width: 768px) {
-    header .container {
-        flex-direction: column;
-        gap: 1rem;
-    }
-
-    .logo {
-        flex-direction: column;
-        text-align: center;
-    }
-
-    .main-logo {
-        height: 40px;
-    }
-
-    nav ul {
-        flex-direction: column;
-        gap: 0.5rem;
-        text-align: center;
-    }
-
-    nav a::after {
-        display: none;
-    }
-
     .hero-content h2 {
         font-size: 2rem;
     }
@@ -1297,6 +1267,9 @@ footer {
         max-width: 300px;
     }
 
+    .event-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 480px) {
@@ -1366,7 +1339,7 @@ footer {
 
 .event-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 1.5rem;
     text-align: left;
 }
