@@ -11,15 +11,15 @@ document.addEventListener("DOMContentLoaded", function() {
         fetch(footerFile)
             .then(response => {
                 if (!response.ok) {
-                    throw new Error('Failed to load footer');
+                    throw new Error(`Failed to load footer: ${response.status} ${response.statusText} from ${footerFile}`);
                 }
                 return response.text();
             })
             .then(data => {
                 footerPlaceholder.innerHTML = data;
                 
-                // Update current year in footer
-                const yearElement = document.getElementById('current-year') || document.getElementById('footer-year');
+                // Update current year in footer - looks for common year element IDs
+                const yearElement = footerPlaceholder.querySelector('#current-year, #footer-year, [data-year]');
                 if (yearElement) {
                     yearElement.textContent = new Date().getFullYear();
                 }
