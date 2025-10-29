@@ -993,6 +993,27 @@ header h1 {
     line-height: 1.6;
 }
 
+.activity-extra {
+    margin-top: 1rem;
+    text-align: left;
+}
+
+.activity-extra p {
+    margin-bottom: 1rem;
+}
+
+.activity-extra p:last-child {
+    margin-bottom: 0;
+}
+
+.activity-link.is-open .arrow {
+    transform: rotate(90deg);
+}
+
+.activity-link.is-open:hover .arrow {
+    transform: translateX(5px) rotate(90deg);
+}
+
 .activity-link {
     display: inline-block;
     color: #7413dc;
