@@ -25,19 +25,6 @@
             </div>
         </section>
 
-        <section class="about about-detail">
-            <div class="container">
-                <h2>Getting Started</h2>
-                <p>Across Beavers, Cubs, and Scouts we run weekly programmes that blend outdoor adventures, team challenges, creativity, and community service. We are proud to be inclusive—everyone is welcome.</p>
-                
-                <ul class="about-list">
-                    <li><strong>Come along for a taster evening:</strong> let your young person see what we do and meet the leadership team.</li>
-                    <li><strong>Complete the joining form:</strong> we'll guide you through the quick membership steps and make sure uniform, key dates, and subs are all clear.</li>
-                    <li><strong>Stay in the loop:</strong> look out for our parent emails, programme updates, and sign-up links for events and camps.</li>
-                </ul>
-            </div>
-        </section>
-
     <section id="events-section" class="events-section">
         <div class="container">
             <div class="event-group past-events">
@@ -83,6 +70,16 @@
                     <p>Learn about 2nd Tolworth Scout Group, our principles, and how we support young people in their development.</p>
                     <a href="website/about.html" class="activity-link">Learn more <span class="arrow">→</span></a>
                 </div>
+                <div class="activity-card">
+                    <div class="activity-icon">🌟</div>
+                    <h3>Getting Started</h3>
+                    <p><strong>Come along for a taster evening:</strong> let your young person see what we do and meet the leadership team.</p>
+                    <div class="activity-extra" id="getting-started-extra" hidden>
+                        <p><strong>Complete the joining form:</strong> we'll guide you through the quick membership steps and make sure uniform, key dates, and subs are all clear.</p>
+                        <p><strong>Stay in the loop:</strong> look out for our parent emails, programme updates, and sign-up links for events and camps.</p>
+                    </div>
+                    <a href="#getting-started-extra" class="activity-link activity-toggle" data-target="getting-started-extra" aria-controls="getting-started-extra" aria-expanded="false">Find out how <span class="arrow">→</span></a>
+                </div>
             </div>
         </div>
     </section>
@@ -94,5 +91,26 @@
     <script src="website/scripts/mobile-menu.js"></script>
     <script src="website/scripts/header-loader.js"></script>
     <script src="website/scripts/footer-loader.js"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('.activity-toggle').forEach(function (toggleLink) {
+            var targetId = toggleLink.dataset.target;
+            if (!targetId) {
+                return;
+            }
+            var target = document.getElementById(targetId);
+            if (!target) {
+                return;
+            }
+            toggleLink.addEventListener('click', function (event) {
+                event.preventDefault();
+                var isHidden = target.toggleAttribute('hidden');
+                var expanded = !isHidden;
+                toggleLink.setAttribute('aria-expanded', expanded.toString());
+                toggleLink.classList.toggle('is-open', expanded);
+            });
+        });
+    });
+    </script>
 </body>
 </html>
