@@ -9,18 +9,31 @@ document.addEventListener("DOMContentLoaded", function() {
             : '/website/shared/footer-simple.html';
         
         fetch(footerFile)
-            .then(response => response.text())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to load footer');
+                }
+                return response.text();
+            })
             .then(data => {
                 footerPlaceholder.innerHTML = data;
                 
-                // Update current year if simple footer is loaded
-                const yearElement = document.getElementById('current-year');
+                // Update current year in footer
+                const yearElement = document.getElementById('current-year') || document.getElementById('footer-year');
                 if (yearElement) {
                     yearElement.textContent = new Date().getFullYear();
                 }
             })
             .catch(error => {
                 console.error('Error loading footer:', error);
+                // Provide fallback footer content
+                footerPlaceholder.innerHTML = `
+                    <footer>
+                        <div class="container">
+                            <p>&copy; ${new Date().getFullYear()} 2nd Tolworth Scout Group. All rights reserved.</p>
+                        </div>
+                    </footer>
+                `;
             });
     }
 });
