@@ -68,6 +68,23 @@ function showError(message) {
     container.innerHTML = `<div class="error">${message}</div>`;
 }
 
+// Generate a unique identifier for an event (UID or HEX)
+function generateEventUID(event, index) {
+    // If event has a uid, use it
+    if (event.uid) return event.uid;
+    
+    // Generate a hex UID based on event data
+    const uniqueString = `${event.summary || ''}_${event.dtstart || ''}_${index}`;
+    let hash = 0;
+    for (let i = 0; i < uniqueString.length; i++) {
+        const char = uniqueString.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32bit integer
+    }
+    // Convert to hex and pad to 8 characters
+    return Math.abs(hash).toString(16).padStart(8, '0');
+}
+
 // Get image URL from event data
 function getImageUrl(event) {
     if (event.image) {
@@ -107,6 +124,7 @@ function renderEvents() {
         const aiPrompt = getAIPrompt(event);
         const section = getEventSection(event);
         const title = event.summary || event.title || 'Untitled Event';
+        const eventUID = generateEventUID(event, index);
         
         return `
             <div class="event-card">
@@ -116,10 +134,15 @@ function renderEvents() {
                         : `<div class="event-image" style="background: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #999;">No Image</div>`
                     }
                     <span class="event-badge ${section}">${section}</span>
+                    ${imageUrl ? `
+                        <button class="btn-hide" onclick="hideEvent('${eventUID}')" title="Hide this event">
+                            Hide
+                        </button>
+                    ` : ''}
                 </div>
                 <div class="event-details">
                     <h3 class="event-title">${title}</h3>
-                    <p class="event-index">Event Index: ${index}</p>
+                    <p class="event-index">Event Index: ${index} | UID: ${eventUID}</p>
                     
                     <div class="event-meta">
                         ${event.dtstart ? `<p><strong>Date:</strong> ${formatDate(event.dtstart)}</p>` : ''}
@@ -291,6 +314,45 @@ async function refreshLambda() {
         console.error('Error triggering Lambda:', error);
         statusElement.textContent = `Error: ${error.message}`;
         statusElement.className = 'refresh-status error';
+    }
+}
+
+// Hide event functionality
+async function hideEvent(eventUID) {
+    if (!confirm(`Are you sure you want to hide the event with UID: ${eventUID}?`)) {
+        return;
+    }
+
+    const lambdaUrl = 'https://ykjzunulxefwp2ere4aotapnwu0whhsk.lambda-url.eu-west-2.on.aws/';
+    const payload = {
+        realm: 'hide',
+        subject: eventUID
+    };
+
+    try {
+        const response = await fetch(lambdaUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+        alert(`Event ${eventUID} hidden successfully!`);
+        
+        // Reload events to reflect the change
+        setTimeout(() => {
+            loadEvents();
+        }, 1000);
+
+    } catch (error) {
+        console.error('Error hiding event:', error);
+        alert(`Error hiding event: ${error.message}`);
     }
 }
 
