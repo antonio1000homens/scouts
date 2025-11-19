@@ -159,6 +159,31 @@ body {
 .event-badge.cubs { color: #23a950; }
 .event-badge.scouts { color: #004851; }
 
+.btn-hide {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: var(--danger-color);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.85rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.1s;
+    z-index: 10;
+}
+
+.btn-hide:hover {
+    background-color: #c82333;
+    transform: translateY(-1px);
+}
+
+.btn-hide:active {
+    transform: translateY(0);
+}
+
 .event-details {
     padding: 1.5rem;
 }
