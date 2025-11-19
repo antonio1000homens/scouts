@@ -77,6 +77,40 @@ body {
     color: var(--text-dark);
 }
 
+.refresh-controls {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.refresh-input {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 1rem;
+}
+
+.refresh-status {
+    font-size: 0.9rem;
+    margin-top: 0.5rem;
+    min-height: 1.5rem;
+}
+
+.refresh-status.loading {
+    color: var(--text-light);
+}
+
+.refresh-status.success {
+    color: var(--success-color);
+    font-weight: bold;
+}
+
+.refresh-status.error {
+    color: var(--danger-color);
+    font-weight: bold;
+}
+
 .events-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
