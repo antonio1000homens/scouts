@@ -6,7 +6,9 @@
       "dtend": "2025-10-09T19:00:00",
       "location": "The Den",
       "description": "A fun-filled meeting for Beavers.",
-      "icsType": "beaver*"
+      "icsType": "beaver*",
+      "image": "https://images.unsplash.com/photo-1478131143081-80f7f84ca84d?w=400",
+      "AI": "Young beavers learning outdoor skills and teamwork in a fun, supportive environment"
     },
     {
       "summary": "Cubs Meeting",
@@ -14,7 +16,9 @@
       "dtend": "2025-10-08T20:00:00",
       "location": "The Den",
       "description": "An exciting meeting for Cubs.",
-      "icsType": "cubs*"
+      "icsType": "cubs*",
+      "image": "website/images/cubs-in-helmets-outdoors-jpg.jpg",
+      "AI": "Cubs exploring nature and developing new skills through adventure activities"
     },
     {
       "summary": "Scouts Meeting",
@@ -22,7 +26,9 @@
       "dtend": "2025-10-10T21:00:00",
       "location": "The Den",
       "description": "An adventurous meeting for Scouts.",
-      "icsType": "scouts*"
+      "icsType": "scouts*",
+      "image": "https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?w=400",
+      "AI": "Scouts working together on challenging outdoor activities and leadership skills"
     }
   ]
 }
