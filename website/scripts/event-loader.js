@@ -323,12 +323,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
                 .map(normaliseEventRecord)
                 .filter(Boolean);
+            console.log('[EventsLoader] agenda.json fetched', {
+                totalEvents: data.events?.length ?? 0,
+                visibleEvents: events.length,
+            });
             const now = new Date();
 
             const parsedEvents = events
                 .map(event => {
                     const eventDate = getEventDate(event);
-                    if (!eventDate) return null;
+                    if (!eventDate) {
+                        console.warn('[EventsLoader] Skipping event with invalid date', {
+                            uid: event.uid,
+                            summary: event.summary,
+                            dtstart: event.dtstart,
+                        });
+                        return null;
+                    }
                     return { ...event, __eventDate: eventDate };
                 })
                 .filter(Boolean);
@@ -336,10 +347,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const futureEvents = parsedEvents
                 .filter(event => event.__eventDate > now)
                 .sort((a, b) => a.__eventDate - b.__eventDate);
+            console.log('[EventsLoader] Future events count:', futureEvents.length);
 
             const pastEvents = parsedEvents
                 .filter(event => event.__eventDate <= now)
                 .sort((a, b) => b.__eventDate - a.__eventDate);
+                    console.log('[EventsLoader] Past events count:', pastEvents.length);
                     const nextEvent = futureEvents.length ? futureEvents[0] : null;
                     const upcomingEvents = futureEvents.slice(1, 4);
 
