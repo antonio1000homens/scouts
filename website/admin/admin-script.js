@@ -54,6 +54,10 @@ async function loadEvents() {
 
         const data = await response.json();
         eventsData = data.events || [];
+        console.log('[Admin] agenda.json fetched', {
+            totalEvents: data.events?.length ?? 0,
+            visibleEvents: eventsData.length,
+        });
         
         updateEventsCount(eventsData.length);
         renderEvents();
@@ -115,6 +119,7 @@ function renderEvents() {
     const container = document.getElementById('events-container');
     
     if (eventsData.length === 0) {
+        console.warn('[Admin] No events found after loading');
         container.innerHTML = '<p class="loading">No events found.</p>';
         return;
     }
@@ -125,6 +130,9 @@ function renderEvents() {
         const section = getEventSection(event);
         const title = event.summary || event.title || 'Untitled Event';
         const eventUID = generateEventUID(event, index);
+        if (!event.dtstart) {
+            console.warn('[Admin] Event missing dtstart', { index, uid: eventUID, title });
+        }
         
         return `
             <div class="event-card">
