@@ -291,7 +291,7 @@ async function refreshLambda() {
         const response = await fetch(lambdaUrl, {
             method: 'POST',
             headers: {
-                'Content-Type': 'text/plain;charset=UTF-8',
+                'Content-Type': 'text/plain',
             },
             body: JSON.stringify(payload)
         });
@@ -333,7 +333,7 @@ async function hideEvent(eventUID) {
         const response = await fetch(lambdaUrl, {
             method: 'POST',
             headers: {
-                'Content-Type': 'text/plain;charset=UTF-8',
+                'Content-Type': 'text/plain',
             },
             body: JSON.stringify(payload)
         });
