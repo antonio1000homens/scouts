@@ -10,15 +10,13 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
 function normaliseDateString(value) {
     if (!value) return null;
     if (typeof value !== 'string') return value;
-    const timestampMatch = value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/);
-    if (timestampMatch) {
-        const [, y, m, d, hh, mm, ss, suffix] = timestampMatch;
+    const compactMatch = value.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?)?(Z?)$/i);
+    if (compactMatch) {
+        const [, y, m, d, rawH, rawM, rawS, suffix] = compactMatch;
+        const hh = rawH ?? '00';
+        const mm = rawM ?? '00';
+        const ss = rawS ?? '00';
         return `${y}-${m}-${d}T${hh}:${mm}:${ss}${suffix || ''}`;
-    }
-    const dateMatch = value.match(/^(\d{4})(\d{2})(\d{2})$/);
-    if (dateMatch) {
-        const [, y, m, d] = dateMatch;
-        return `${y}-${m}-${d}T00:00:00`;
     }
     return value;
 }
