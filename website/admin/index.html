@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Images Admin - 2nd Tolworth Scout Group</title>
+    <link rel="stylesheet" href="../fonts/fonts.css">
+    <link rel="stylesheet" href="admin-styles.css">
+    
+    <!-- Uncomment the line below to enable AWS S3 upload functionality -->
+    <!-- <script src="https://sdk.amazonaws.com/js/aws-sdk-2.1234.0.min.js"></script> -->
+</head>
+<body>
+    <div class="admin-container">
+        <header class="admin-header">
+            <h1>Event Images Administration</h1>
+            <p class="subtitle">Manage images and AI prompts for events</p>
+        </header>
+
+        <div class="admin-info">
+            <div class="info-card">
+                <h3>S3 Upload Status</h3>
+                <p id="s3-status" class="status-text">Checking permissions...</p>
+            </div>
+            <div class="info-card">
+                <h3>Events Loaded</h3>
+                <p id="events-count" class="status-text">-</p>
+            </div>
+            <div class="info-card">
+                <h3>Lambda Refresh</h3>
+                <div class="refresh-controls">
+                    <input type="number" id="refresh-action" placeholder="Enter action number" class="refresh-input" min="0" step="1">
+                    <button class="btn btn-primary" onclick="refreshLambda()">Refresh</button>
+                </div>
+                <p id="refresh-status" class="refresh-status"></p>
+            </div>
+        </div>
+
+        <div id="events-container" class="events-grid">
+            <p class="loading">Loading events...</p>
+        </div>
+
+        <!-- Upload Modal -->
+        <div id="upload-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Replace Event Image</h2>
+                    <button class="modal-close" onclick="closeUploadModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>Event:</strong> <span id="modal-event-name"></span></p>
+                    <p><strong>Current Image:</strong></p>
+                    <img id="modal-current-image" src="" alt="Current image" style="max-width: 100%; margin: 1rem 0;">
+                    
+                    <div class="form-group">
+                        <label for="image-upload">Select new image:</label>
+                        <input type="file" id="image-upload" accept="image/*">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="image-url">Or enter image URL:</label>
+                        <input type="text" id="image-url" placeholder="https://example.com/image.jpg">
+                    </div>
+
+                    <p class="note">Note: This feature requires AWS credentials with S3 PutObject permissions.</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closeUploadModal()">Cancel</button>
+                    <button class="btn btn-primary" onclick="uploadImage()">Upload</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="admin-script.js"></script>
+</body>
+</html>
