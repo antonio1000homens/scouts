@@ -176,10 +176,25 @@ function renderEvents() {
     }).join('');
 }
 
+function normaliseEventDateString(value) {
+    if (!value || typeof value !== 'string') return value;
+    const match = value.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?)?(Z?)$/i);
+    if (!match) return value;
+    const [, y, m, d, rawH, rawM, rawS, suffix] = match;
+    const hh = rawH ?? '00';
+    const mm = rawM ?? '00';
+    const ss = rawS ?? '00';
+    return `${y}-${m}-${d}T${hh}:${mm}:${ss}${suffix || ''}`;
+}
+
 // Format date string
 function formatDate(dateString) {
     try {
-        const date = new Date(dateString);
+        const normalised = normaliseEventDateString(dateString);
+        const date = new Date(normalised || dateString);
+        if (Number.isNaN(date.getTime())) {
+            return dateString;
+        }
         return date.toLocaleString('en-GB', {
             weekday: 'short',
             year: 'numeric',
