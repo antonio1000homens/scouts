@@ -240,6 +240,60 @@ window.onclick = function(event) {
     }
 }
 
+// Lambda refresh functionality
+async function refreshLambda() {
+    const actionInput = document.getElementById('refresh-action');
+    const statusElement = document.getElementById('refresh-status');
+    const action = actionInput.value;
+
+    // Validate input
+    if (!action || action.trim() === '') {
+        statusElement.textContent = 'Please enter an action number';
+        statusElement.className = 'refresh-status error';
+        return;
+    }
+
+    // Show loading state
+    statusElement.textContent = 'Sending request...';
+    statusElement.className = 'refresh-status loading';
+
+    const lambdaUrl = 'https://ykjzunulxefwp2ere4aotapnwu0whhsk.lambda-url.eu-west-2.on.aws/';
+    const payload = {
+        realm: 'scouts',
+        subject: 'events',
+        action: parseInt(action, 10)
+    };
+
+    try {
+        const response = await fetch(lambdaUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+        statusElement.textContent = 'Lambda triggered successfully!';
+        statusElement.className = 'refresh-status success';
+
+        // Optionally reload events after a short delay
+        setTimeout(() => {
+            loadEvents();
+            statusElement.textContent = 'Events reloaded';
+        }, 2000);
+
+    } catch (error) {
+        console.error('Error triggering Lambda:', error);
+        statusElement.textContent = `Error: ${error.message}`;
+        statusElement.className = 'refresh-status error';
+    }
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     checkS3Permissions();

@@ -26,6 +26,14 @@
                 <h3>Events Loaded</h3>
                 <p id="events-count" class="status-text">-</p>
             </div>
+            <div class="info-card">
+                <h3>Lambda Refresh</h3>
+                <div class="refresh-controls">
+                    <input type="number" id="refresh-action" placeholder="Enter action number" class="refresh-input" min="0" step="1">
+                    <button class="btn btn-primary" onclick="refreshLambda()">Refresh</button>
+                </div>
+                <p id="refresh-status" class="refresh-status"></p>
+            </div>
         </div>
 
         <div id="events-container" class="events-grid">
