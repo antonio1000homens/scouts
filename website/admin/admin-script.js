@@ -4,6 +4,8 @@ let eventsData = [];
 let hasS3Permission = false;
 let currentEventIndex = null;
 const SCOUTS2SQS_URL = window.SCOUTS2SQS_URL || 'https://hnpooqvuwzt2rvpqtxfngfvhrq0nxngr.lambda-url.eu-west-2.on.aws/';
+const SCOUTS2SQS_API_KEY = window.SCOUTS2SQS_API_KEY || '';
+let apiKey = SCOUTS2SQS_API_KEY;
 
 // Check if AWS SDK is available and user has S3 permissions
 function checkS3Permissions() {
@@ -23,11 +25,30 @@ function updateEventsCount(count) {
     countElement.textContent = count + ' event' + (count !== 1 ? 's' : '');
 }
 
+function updateApiKeyStatus(message, type = 'info') {
+    const statusElement = document.getElementById('api-key-status');
+    if (!statusElement) return;
+    statusElement.textContent = message;
+    statusElement.className = 'status-text status-' + type;
+}
+
 function updateHideStatus(message, type = 'info') {
     const statusElement = document.getElementById('hide-status');
     if (!statusElement) return;
     statusElement.textContent = message;
     statusElement.className = 'status-text status-' + type;
+}
+
+function setApiKeyFromInput() {
+    const input = document.getElementById('api-key-input');
+    if (!input) return;
+    const trimmed = (input.value || '').trim();
+    apiKey = trimmed;
+    if (trimmed) {
+        updateApiKeyStatus('API key set for this session (not stored).', 'success');
+    } else {
+        updateApiKeyStatus('API key cleared. Requests will be rejected until a key is set.', 'warning');
+    }
 }
 
 // Load events from agenda.json
@@ -306,11 +327,16 @@ async function uploadImage() {
     showStatus('Sending image URL for download and persistence...', 'loading');
 
     try {
+        const headers = {
+            'Content-Type': 'application/json',
+        };
+        if (apiKey) {
+            headers['x-api-key'] = apiKey;
+        }
+
         const response = await fetch(SCOUTS2SQS_URL, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers,
             body: JSON.stringify(payload),
         });
 
@@ -337,6 +363,17 @@ window.onclick = function(event) {
         closeUploadModal();
     }
 }
+
+// Initialise API key status on load
+window.addEventListener('DOMContentLoaded', () => {
+    const input = document.getElementById('api-key-input');
+    if (input && apiKey) {
+        input.value = apiKey;
+        updateApiKeyStatus('API key preloaded from window.SCOUTS2SQS_API_KEY', 'info');
+    } else {
+        updateApiKeyStatus('Paste an API key to enable requests.', 'warning');
+    }
+});
 
 // Lambda refresh functionality
 async function refreshLambda() {
