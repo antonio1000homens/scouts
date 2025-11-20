@@ -152,6 +152,8 @@ function renderEvents() {
         const imageUrl = getImageUrl(event);
         const aiPrompt = getAIPrompt(event);
         const section = getEventSection(event);
+        const statusValue = typeof event.status === 'string' ? event.status.trim().toLowerCase() : null;
+        const isHidden = statusValue === 'hidden' || Boolean(event.hiddenAt);
         const title = event.summary || event.title || 'Untitled Event';
         const eventUID = generateEventUID(event, index);
         if (!event.dtstart) {
@@ -166,8 +168,9 @@ function renderEvents() {
                         : `<div class="event-image" style="background: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #999;">No Image</div>`
                     }
                     <span class="event-badge ${section}">${section}</span>
-                    <button class="btn-hide" onclick="hideEvent('${eventUID}')" title="Hide this event">
-                        Hide
+                    ${isHidden ? `<span class="event-badge hidden">Hidden</span>` : ''}
+                    <button class="btn-hide${isHidden ? ' disabled' : ''}" onclick="hideEvent('${eventUID}')" title="Hide this event" ${isHidden ? 'disabled' : ''}>
+                        ${isHidden ? 'Already Hidden' : 'Hide'}
                     </button>
                 </div>
                 <div class="event-details">
