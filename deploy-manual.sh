@@ -30,9 +30,20 @@ for dir in "${LEGACY_DIRS[@]}"; do
   aws s3 rm "s3://2ndtolworth/${dir}" --recursive --quiet >/dev/null 2>&1 || true
 done
 
-# Sync website directory
-echo "Syncing website directory..."
-aws s3 sync website/ s3://2ndtolworth/website/ --delete --cache-control "max-age=0, no-cache, no-store, must-revalidate"
+# Sync website directory excluding generated event images
+echo "Syncing website directory (excluding website/eventImages)..."
+aws s3 sync website/ s3://2ndtolworth/website/ \
+  --delete \
+  --exclude "eventImages/*" \
+  --exclude "eventImages/**" \
+  --cache-control "max-age=0, no-cache, no-store, must-revalidate"
+
+# Sync website event images without deleting lambda-uploaded assets
+if [ -d "website/eventImages" ]; then
+  echo "Syncing website/eventImages without delete..."
+  aws s3 sync website/eventImages/ s3://2ndtolworth/website/eventImages/ \
+    --cache-control "max-age=0, no-cache, no-store, must-revalidate"
+fi
 
 echo ""
 echo "✅ Deployment complete!"
