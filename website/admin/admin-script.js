@@ -3,32 +3,13 @@
 let eventsData = [];
 let hasS3Permission = false;
 let currentEventIndex = null;
+const SCOUTS2SQS_URL = window.SCOUTS2SQS_URL || 'https://hnpooqvuwzt2rvpqtxfngfvhrq0nxngr.lambda-url.eu-west-2.on.aws/';
 
 // Check if AWS SDK is available and user has S3 permissions
 function checkS3Permissions() {
-    // Check if AWS SDK is loaded
-    if (typeof AWS === 'undefined') {
-        updateS3Status('AWS SDK not loaded', 'warning');
-        hasS3Permission = false;
-        return;
-    }
-
-    // Try to check S3 access
-    // In a real implementation, this would make a test call to S3
-    // For now, we'll check if credentials are configured
-    try {
-        const credentials = AWS.config.credentials;
-        if (credentials && credentials.accessKeyId) {
-            updateS3Status('S3 upload enabled', 'success');
-            hasS3Permission = true;
-        } else {
-            updateS3Status('S3 credentials not configured', 'warning');
-            hasS3Permission = false;
-        }
-    } catch (error) {
-        updateS3Status('S3 upload disabled', 'warning');
-        hasS3Permission = false;
-    }
+    // Uploads are no longer needed; the image URL is sent to scouts2sqs for persistence
+    updateS3Status('Paste an image URL to persist via scouts2sqs (no S3 upload needed)', 'info');
+    hasS3Permission = true;
 }
 
 function updateS3Status(message, type) {
@@ -173,6 +154,7 @@ function renderEvents() {
                 <div class="event-details">
                     <h3 class="event-title">${title}</h3>
                     <p class="event-index">Event Index: ${index} | UID: ${eventUID}</p>
+                    ${event.hex ? `<p class="event-index">HEX: ${event.hex}</p>` : ''}
                     
                     <div class="event-meta">
                         ${event.dtstart ? `<p><strong>Date:</strong> ${formatDate(event.dtstart)}</p>` : ''}
@@ -194,11 +176,10 @@ function renderEvents() {
                     ` : '<p class="no-ai-prompt">No AI prompt</p>'}
 
                     <button 
-                        class="btn ${hasS3Permission ? 'btn-primary' : 'btn-disabled'}" 
-                        onclick="${hasS3Permission ? `openUploadModal(${index})` : 'alert(\'S3 upload not available. Please configure AWS credentials.\')'}"
-                        ${!hasS3Permission ? 'disabled' : ''}
+                        class="btn btn-primary"
+                        onclick="openUploadModal(${index})"
                     >
-                        ${hasS3Permission ? 'Replace Image' : 'Upload Disabled'}
+                        Set Image URL
                     </button>
                 </div>
             </div>
@@ -245,6 +226,7 @@ function openUploadModal(index) {
     const modal = document.getElementById('upload-modal');
     
     document.getElementById('modal-event-name').textContent = event.summary || event.title || 'Event ' + index;
+    document.getElementById('modal-event-hex').textContent = event.hex || 'Missing HEX';
     
     const currentImage = getImageUrl(event);
     const imgElement = document.getElementById('modal-current-image');
@@ -256,8 +238,10 @@ function openUploadModal(index) {
     }
     
     // Clear previous inputs
-    document.getElementById('image-upload').value = '';
-    document.getElementById('image-url').value = '';
+    const urlField = document.getElementById('image-url');
+    urlField.value = currentImage || '';
+    document.getElementById('modal-status').textContent = '';
+    document.getElementById('modal-status').className = 'status-text';
     
     modal.style.display = 'flex';
 }
@@ -276,28 +260,74 @@ async function uploadImage() {
         return;
     }
 
-    const fileInput = document.getElementById('image-upload');
     const urlInput = document.getElementById('image-url');
-    
-    if (!fileInput.files.length && !urlInput.value.trim()) {
-        alert('Please select a file or enter an image URL');
+    const statusEl = document.getElementById('modal-status');
+    const rawUrl = urlInput.value.trim();
+    const event = eventsData[currentEventIndex];
+    const hex = event.hex || null;
+
+    const showStatus = (text, type = 'info') => {
+        statusEl.textContent = text;
+        statusEl.className = `status-text status-${type}`;
+    };
+
+    if (!hex) {
+        showStatus('This event is missing a HEX identifier and cannot be persisted.', 'error');
         return;
     }
 
-    // This is a placeholder implementation
-    // In a real implementation, this would:
-    // 1. Upload the file to S3 using AWS SDK
-    // 2. Update the agenda.json with the new image URL
-    // 3. Refresh the events display
+    if (!rawUrl) {
+        showStatus('Please paste a public image URL (http/https).', 'error');
+        return;
+    }
 
-    alert('Image upload functionality requires AWS SDK integration.\n\n' +
-          'To implement:\n' +
-          '1. Add AWS SDK to the page\n' +
-          '2. Configure AWS credentials\n' +
-          '3. Implement S3 upload with proper bucket permissions\n' +
-          '4. Update agenda.json with new image URL');
+    let parsedUrl;
+    try {
+        parsedUrl = new URL(rawUrl);
+        if (!/^https?:$/i.test(parsedUrl.protocol)) {
+            throw new Error('Only http/https URLs are supported.');
+        }
+    } catch (error) {
+        showStatus(error.message || 'Invalid image URL.', 'error');
+        return;
+    }
 
-    closeUploadModal();
+    const subject = JSON.parse(JSON.stringify(event || {}));
+    subject.hex = hex;
+    subject.image = subject.image || {};
+    subject.image.url = parsedUrl.toString();
+
+    const payload = {
+        realm: 'persist',
+        action: 'persist',
+        subject,
+    };
+
+    showStatus('Sending image URL for download and persistence...', 'loading');
+
+    try {
+        const response = await fetch(SCOUTS2SQS_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Failed to queue persist request: ${response.status} ${errorText}`);
+        }
+
+        showStatus('Sent! The pipeline will download, persist, and confirm via Slack.', 'success');
+        setTimeout(() => {
+            closeUploadModal();
+            loadEvents();
+        }, 800);
+    } catch (error) {
+        console.error('Error sending persist request:', error);
+        showStatus(error.message || 'Failed to send persist request.', 'error');
+    }
 }
 
 // Close modal when clicking outside

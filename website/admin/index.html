@@ -53,24 +53,21 @@
                 </div>
                 <div class="modal-body">
                     <p><strong>Event:</strong> <span id="modal-event-name"></span></p>
+                    <p><strong>HEX:</strong> <span id="modal-event-hex"></span></p>
                     <p><strong>Current Image:</strong></p>
                     <img id="modal-current-image" src="" alt="Current image" style="max-width: 100%; margin: 1rem 0;">
                     
                     <div class="form-group">
-                        <label for="image-upload">Select new image:</label>
-                        <input type="file" id="image-upload" accept="image/*">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="image-url">Or enter image URL:</label>
+                        <label for="image-url">Paste a public image URL:</label>
                         <input type="text" id="image-url" placeholder="https://example.com/image.jpg">
                     </div>
 
-                    <p class="note">Note: This feature requires AWS credentials with S3 PutObject permissions.</p>
+                    <p class="note">The URL will be sent to scouts2sqs. The backend will download it into S3 and persist the event.</p>
+                    <p id="modal-status" class="status-text"></p>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" onclick="closeUploadModal()">Cancel</button>
-                    <button class="btn btn-primary" onclick="uploadImage()">Upload</button>
+                    <button class="btn btn-primary" onclick="uploadImage()">Send Image URL</button>
                 </div>
             </div>
         </div>
