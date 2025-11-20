@@ -54,7 +54,13 @@ jobs:
           aws s3 rm "s3://2ndtolworth/${dir}" --recursive --quiet >/dev/null 2>&1 || true
         done
         aws s3 sync . s3://2ndtolworth/ --exclude "*" --include "index.html"
-        aws s3 sync website/ s3://2ndtolworth/website/ --delete
+        aws s3 sync website/ s3://2ndtolworth/website/ \
+          --delete \
+          --exclude "eventImages/*" \
+          --exclude "eventImages/**"
+        if [ -d website/eventImages ]; then
+          aws s3 sync website/eventImages/ s3://2ndtolworth/website/eventImages/
+        fi
 
     - name: Upload pixabay.conf to S3 root (if present)
       run: |

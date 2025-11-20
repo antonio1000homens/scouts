@@ -48,7 +48,7 @@ The admin page supports multiple image URL formats:
 - Direct URL string: `"image": "https://..."`
 - Object with URL property: `"image": { "url": "https://..." }`
 - `imageUrl` field: `"imageUrl": "https://..."`
-- Relative paths: `"image": "website/images/photo.jpg"`
+- Relative paths: `"image": "website/eventImages/photo.jpg"`
 
 ### AI Prompts
 
