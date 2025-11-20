@@ -166,11 +166,9 @@ function renderEvents() {
                         : `<div class="event-image" style="background: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #999;">No Image</div>`
                     }
                     <span class="event-badge ${section}">${section}</span>
-                    ${imageUrl ? `
-                        <button class="btn-hide" onclick="hideEvent('${eventUID}')" title="Hide this event">
-                            Hide
-                        </button>
-                    ` : ''}
+                    <button class="btn-hide" onclick="hideEvent('${eventUID}')" title="Hide this event">
+                        Hide
+                    </button>
                 </div>
                 <div class="event-details">
                     <h3 class="event-title">${title}</h3>
