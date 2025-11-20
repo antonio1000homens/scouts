@@ -402,16 +402,16 @@ async function refreshLambda() {
     };
 
     try {
-        const headers = {
-            'Content-Type': 'application/json',
-        };
+        const endpoint = new URL(lambdaUrl);
         if (apiKey) {
-            headers['x-api-key'] = apiKey;
+            endpoint.searchParams.set('apiKey', apiKey);
         }
 
-        const response = await fetch(lambdaUrl, {
+        const response = await fetch(endpoint.toString(), {
             method: 'POST',
-            headers,
+            headers: {
+                'Content-Type': 'text/plain',
+            },
             body: JSON.stringify(payload),
         });
 
@@ -419,7 +419,6 @@ async function refreshLambda() {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        const result = await response.json();
         statusElement.textContent = 'Lambda triggered successfully!';
         statusElement.className = 'refresh-status success';
 
