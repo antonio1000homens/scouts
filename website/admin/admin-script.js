@@ -325,16 +325,16 @@ async function uploadImage() {
     showStatus('Sending image URL for download and persistence...', 'loading');
 
     try {
-        const headers = {
-            'Content-Type': 'application/json',
-        };
+        const endpoint = new URL(SCOUTS2SQS_URL);
         if (apiKey) {
-            headers['x-api-key'] = apiKey;
+            endpoint.searchParams.set('apiKey', apiKey);
         }
 
-        const response = await fetch(SCOUTS2SQS_URL, {
+        const response = await fetch(endpoint.toString(), {
             method: 'POST',
-            headers,
+            headers: {
+                'Content-Type': 'text/plain',
+            },
             body: JSON.stringify(payload),
         });
 
@@ -468,16 +468,16 @@ async function hideEvent(eventUID) {
     };
 
     try {
-        const headers = {
-            'Content-Type': 'application/json',
-        };
+        const endpoint = new URL(SCOUTS2SQS_URL);
         if (apiKey) {
-            headers['x-api-key'] = apiKey;
+            endpoint.searchParams.set('apiKey', apiKey);
         }
 
-        const response = await fetch(SCOUTS2SQS_URL, {
+        const response = await fetch(endpoint.toString(), {
             method: 'POST',
-            headers,
+            headers: {
+                'Content-Type': 'text/plain',
+            },
             body: JSON.stringify(payload),
         });
 
