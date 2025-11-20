@@ -42,6 +42,13 @@ function updateEventsCount(count) {
     countElement.textContent = count + ' event' + (count !== 1 ? 's' : '');
 }
 
+function updateHideStatus(message, type = 'info') {
+    const statusElement = document.getElementById('hide-status');
+    if (!statusElement) return;
+    statusElement.textContent = message;
+    statusElement.className = 'status-text status-' + type;
+}
+
 // Load events from agenda.json
 async function loadEvents() {
     try {
@@ -90,14 +97,29 @@ function generateEventUID(event, index) {
 }
 
 // Get image URL from event data
-function getImageUrl(event) {
-    if (event.image) {
-        if (typeof event.image === 'string') return event.image;
-        if (event.image.url) return event.image.url;
-        if (event.image.src) return event.image.src;
+function normaliseImagePath(url) {
+    if (!url || typeof url !== 'string') return url;
+    const trimmed = url.trim();
+    if (!trimmed) return trimmed;
+    if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
     }
-    if (event.imageUrl) return event.imageUrl;
-    return null;
+    if (trimmed.startsWith('/')) {
+        return trimmed;
+    }
+    return `/${trimmed.replace(/^(\.\/)+/, '')}`;
+}
+
+function getImageUrl(event) {
+    let candidate = null;
+    if (event.image) {
+        if (typeof event.image === 'string') candidate = event.image;
+        else if (event.image.url) candidate = event.image.url;
+        else if (event.image.src) candidate = event.image.src;
+    } else if (event.imageUrl) {
+        candidate = event.imageUrl;
+    }
+    return normaliseImagePath(candidate);
 }
 
 // Get AI prompt from event data
@@ -346,6 +368,8 @@ async function hideEvent(eventUID) {
         return;
     }
 
+    updateHideStatus(`Hiding event ${eventUID}...`, 'loading');
+
     const lambdaUrl = 'https://ykjzunulxefwp2ere4aotapnwu0whhsk.lambda-url.eu-west-2.on.aws/';
     const payload = {
         realm: 'hide',
@@ -366,16 +390,18 @@ async function hideEvent(eventUID) {
         }
 
         const result = await response.json();
-        alert(`Event ${eventUID} hidden successfully!`);
+        const message = result?.message || `Event ${eventUID} hidden successfully`;
+        updateHideStatus(message, 'success');
         
         // Reload events to reflect the change
         setTimeout(() => {
             loadEvents();
+            updateHideStatus('Events refreshed after hide action', 'success');
         }, 1000);
 
     } catch (error) {
         console.error('Error hiding event:', error);
-        alert(`Error hiding event: ${error.message}`);
+        updateHideStatus(`Error hiding event: ${error.message}`, 'error');
     }
 }
 
