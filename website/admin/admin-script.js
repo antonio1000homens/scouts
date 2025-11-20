@@ -393,19 +393,28 @@ async function refreshLambda() {
     statusElement.className = 'refresh-status loading';
 
     const lambdaUrl = 'https://ykjzunulxefwp2ere4aotapnwu0whhsk.lambda-url.eu-west-2.on.aws/';
+    const actionCount = parseInt(action, 10);
     const payload = {
-        realm: 'scouts',
-        subject: 'events',
-        action: parseInt(action, 10)
+        realm: 'scoutsRequest',
+        subject: {
+            type: 'events',
+            count: Number.isFinite(actionCount) ? actionCount : 0,
+        },
+        action: 'new',
     };
 
     try {
+        const headers = {
+            'Content-Type': 'application/json',
+        };
+        if (apiKey) {
+            headers['x-api-key'] = apiKey;
+        }
+
         const response = await fetch(lambdaUrl, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'text/plain',
-            },
-            body: JSON.stringify(payload)
+            headers,
+            body: JSON.stringify(payload),
         });
 
         if (!response.ok) {
@@ -437,27 +446,56 @@ async function hideEvent(eventUID) {
 
     updateHideStatus(`Hiding event ${eventUID}...`, 'loading');
 
-    const lambdaUrl = 'https://ykjzunulxefwp2ere4aotapnwu0whhsk.lambda-url.eu-west-2.on.aws/';
+    const match = eventsData.find((event, index) => generateEventUID(event, index) === eventUID);
+    if (!match) {
+        updateHideStatus(`Unable to find event with UID ${eventUID}`, 'error');
+        return;
+    }
+
+    const hexValue = match.hex;
+    if (!hexValue) {
+        updateHideStatus(`Event ${eventUID} is missing a HEX identifier`, 'error');
+        return;
+    }
+
+    const subject = JSON.parse(JSON.stringify(match));
+    subject.hex = hexValue;
+    subject.uid = match.uid || eventUID;
+    subject.status = 'hidden';
+
     const payload = {
-        realm: 'hide',
-        subject: eventUID
+        realm: 'persist',
+        action: 'hidden',
+        subject,
     };
 
     try {
-        const response = await fetch(lambdaUrl, {
+        const headers = {
+            'Content-Type': 'application/json',
+        };
+        if (apiKey) {
+            headers['x-api-key'] = apiKey;
+        }
+
+        const response = await fetch(SCOUTS2SQS_URL, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'text/plain',
-            },
-            body: JSON.stringify(payload)
+            headers,
+            body: JSON.stringify(payload),
         });
 
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        const result = await response.json();
-        const message = result?.message || `Event ${eventUID} hidden successfully`;
+        let message = `Event ${eventUID} hidden successfully`;
+        try {
+            const parsed = await response.json();
+            if (parsed?.message) {
+                message = parsed.message;
+            }
+        } catch {
+            // Response was not JSON; keep default message
+        }
         updateHideStatus(message, 'success');
         
         // Reload events to reflect the change
