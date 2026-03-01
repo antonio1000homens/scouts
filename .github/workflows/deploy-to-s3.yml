@@ -15,11 +15,10 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Configure AWS credentials
-      if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       uses: aws-actions/configure-aws-credentials@v5
       with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-access-key-id: ${{ secrets['AWS_ACCESS_KEY_ID'] }}
+        aws-secret-access-key: ${{ secrets['AWS_SECRET_ACCESS_KEY'] }}
         aws-region: eu-west-2
 
     - name: Configure S3 bucket for static website hosting
@@ -48,9 +47,9 @@ jobs:
 
     - name: Generate admin runtime config from secrets
       env:
-        SCOUTS2SQS_API_KEY: ${{ secrets.SCOUTS2SQS_API_KEY }}
-        SCOUTS_REFRESH_URL: ${{ secrets.SCOUTS_REFRESH_URL }}
-        SCOUTS2SQS_URL: ${{ secrets.SCOUTS2SQS_URL }}
+        SCOUTS2SQS_API_KEY: ${{ secrets['SCOUTS2SQS_API_KEY'] }}
+        SCOUTS_REFRESH_URL: ${{ secrets['SCOUTS_REFRESH_URL'] }}
+        SCOUTS2SQS_URL: ${{ secrets['SCOUTS2SQS_URL'] }}
       run: |
         {
           echo "// Generated during CI deploy from GitHub Secrets."
@@ -96,7 +95,7 @@ jobs:
 
     - name: Invalidate CloudFront cache
       env:
-        CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+        CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets['CLOUDFRONT_DISTRIBUTION_ID'] }}
       run: |
         if [ -n "${CLOUDFRONT_DISTRIBUTION_ID}" ]; then
           aws cloudfront create-invalidation \
