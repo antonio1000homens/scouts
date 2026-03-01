@@ -15,6 +15,17 @@
                 "arn:aws:s3:::2ndtolworth",
                 "arn:aws:s3:::2ndtolworth/*"
             ]
+        },
+        {
+            "Sid": "AllowGitHubActionsToInvalidateCloudFront",
+            "Effect": "Allow",
+            "Action": [
+                "cloudfront:CreateInvalidation",
+                "cloudfront:GetInvalidation",
+                "cloudfront:ListInvalidations",
+                "cloudfront:GetDistribution"
+            ],
+            "Resource": "arn:aws:cloudfront::243857182133:distribution/*"
         }
     ]
 }
