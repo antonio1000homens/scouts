@@ -53,13 +53,16 @@ jobs:
           echo "Removing legacy path s3://2ndtolworth/${dir} (if any)"
           aws s3 rm "s3://2ndtolworth/${dir}" --recursive --quiet >/dev/null 2>&1 || true
         done
-        aws s3 sync . s3://2ndtolworth/ --exclude "*" --include "index.html"
+        aws s3 sync . s3://2ndtolworth/ --exclude "*" --include "index.html" \
+          --cache-control "max-age=0, no-cache, no-store, must-revalidate"
         aws s3 sync website/ s3://2ndtolworth/website/ \
           --delete \
           --exclude "eventImages/*" \
-          --exclude "eventImages/**"
+          --exclude "eventImages/**" \
+          --cache-control "max-age=0, no-cache, no-store, must-revalidate"
         if [ -d website/eventImages ]; then
-          aws s3 sync website/eventImages/ s3://2ndtolworth/website/eventImages/
+          aws s3 sync website/eventImages/ s3://2ndtolworth/website/eventImages/ \
+            --cache-control "max-age=0, no-cache, no-store, must-revalidate"
         fi
 
     - name: Upload pixabay.conf to S3 root (if present)
@@ -73,6 +76,13 @@ jobs:
         else
           echo "No pixabay.conf found in repository root or website/, skipping"
         fi
+
+    - name: Invalidate CloudFront cache
+      if: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID != '' }}
+      run: |
+        aws cloudfront create-invalidation \
+          --distribution-id "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" \
+          --paths "/index.html" "/website/*"
 
     - name: Deployment complete
       run: |

@@ -48,6 +48,16 @@ fi
 echo ""
 echo "✅ Deployment complete!"
 echo "Website URL: http://2ndtolworth.s3-website.eu-west-2.amazonaws.com"
+
+if [ -n "${CLOUDFRONT_DISTRIBUTION_ID:-}" ]; then
+  echo "Creating CloudFront invalidation for ${CLOUDFRONT_DISTRIBUTION_ID}..."
+  aws cloudfront create-invalidation \
+    --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+    --paths "/index.html" "/website/*" >/dev/null
+  echo "CloudFront invalidation submitted."
+else
+  echo "Skipping CloudFront invalidation (set CLOUDFRONT_DISTRIBUTION_ID to enable)."
+fi
 echo ""
 echo "⚠️  Note: If you still see old content, try:"
 echo "   1. Hard refresh in browser (Ctrl+Shift+R or Cmd+Shift+R)"

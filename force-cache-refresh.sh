@@ -62,3 +62,13 @@ echo "      Chrome: Settings → Privacy → Clear browsing data → Cached imag
 echo "      Firefox: Settings → Privacy → Clear Data → Cached Web Content"
 echo "   3. Open in incognito/private window"
 echo "   4. Wait 1-2 minutes for S3 to propagate changes"
+
+if [ -n "${CLOUDFRONT_DISTRIBUTION_ID:-}" ]; then
+  echo "Creating CloudFront invalidation for ${CLOUDFRONT_DISTRIBUTION_ID}..."
+  aws cloudfront create-invalidation \
+    --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+    --paths "/index.html" "/website/*" >/dev/null
+  echo "CloudFront invalidation submitted."
+else
+  echo "Skipping CloudFront invalidation (set CLOUDFRONT_DISTRIBUTION_ID to enable)."
+fi
