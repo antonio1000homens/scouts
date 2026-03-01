@@ -4,8 +4,8 @@ let eventsData = [];
 let hasS3Permission = false;
 let currentEventIndex = null;
 const SCOUTS2SQS_URL = window.SCOUTS2SQS_URL || 'https://hnpooqvuwzt2rvpqtxfngfvhrq0nxngr.lambda-url.eu-west-2.on.aws/';
-const SCOUTS2SQS_API_KEY = window.SCOUTS2SQS_API_KEY || '';
-let apiKey = SCOUTS2SQS_API_KEY;
+const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || 'https://ykjzunulxefwp2ere4aotapnwu0whhsk.lambda-url.eu-west-2.on.aws/';
+const REQUEST_API_KEY = window.SCOUTS2SQS_API_KEY || '';
 
 // Check if AWS SDK is available and user has S3 permissions
 function checkS3Permissions() {
@@ -25,13 +25,6 @@ function updateEventsCount(count) {
     countElement.textContent = count + ' event' + (count !== 1 ? 's' : '');
 }
 
-function updateApiKeyStatus(message, type = 'info') {
-    const statusElement = document.getElementById('api-key-status');
-    if (!statusElement) return;
-    statusElement.textContent = message;
-    statusElement.className = 'status-text status-' + type;
-}
-
 function updateHideStatus(message, type = 'info') {
     const statusElement = document.getElementById('hide-status');
     if (!statusElement) return;
@@ -39,15 +32,9 @@ function updateHideStatus(message, type = 'info') {
     statusElement.className = 'status-text status-' + type;
 }
 
-function setApiKeyFromInput() {
-    const input = document.getElementById('api-key-input');
-    if (!input) return;
-    const trimmed = (input.value || '').trim();
-    apiKey = trimmed;
-    if (trimmed) {
-        updateApiKeyStatus('API key set for this session (not stored).', 'success');
-    } else {
-        updateApiKeyStatus('API key cleared. Requests will be rejected until a key is set.', 'warning');
+function addApiKeyQueryParam(endpoint) {
+    if (REQUEST_API_KEY) {
+        endpoint.searchParams.set('apiKey', REQUEST_API_KEY);
     }
 }
 
@@ -329,9 +316,7 @@ async function uploadImage() {
 
     try {
         const endpoint = new URL(SCOUTS2SQS_URL);
-        if (apiKey) {
-            endpoint.searchParams.set('apiKey', apiKey);
-        }
+        addApiKeyQueryParam(endpoint);
 
         const response = await fetch(endpoint.toString(), {
             method: 'POST',
@@ -365,17 +350,6 @@ window.onclick = function(event) {
     }
 }
 
-// Initialise API key status on load
-window.addEventListener('DOMContentLoaded', () => {
-    const input = document.getElementById('api-key-input');
-    if (input && apiKey) {
-        input.value = apiKey;
-        updateApiKeyStatus('API key preloaded from window.SCOUTS2SQS_API_KEY', 'info');
-    } else {
-        updateApiKeyStatus('Paste an API key to enable requests.', 'warning');
-    }
-});
-
 // Lambda refresh functionality
 async function refreshLambda() {
     const actionInput = document.getElementById('refresh-action');
@@ -393,22 +367,16 @@ async function refreshLambda() {
     statusElement.textContent = 'Sending request...';
     statusElement.className = 'refresh-status loading';
 
-    const lambdaUrl = 'https://ykjzunulxefwp2ere4aotapnwu0whhsk.lambda-url.eu-west-2.on.aws/';
     const actionCount = parseInt(action, 10);
     const payload = {
-        realm: 'scoutsRequest',
-        subject: {
-            type: 'events',
-            count: Number.isFinite(actionCount) ? actionCount : 0,
-        },
-        action: 'new',
+        realm: 'scouts',
+        subject: 'events',
+        action: Number.isFinite(actionCount) ? actionCount : 0,
     };
 
     try {
-        const endpoint = new URL(lambdaUrl);
-        if (apiKey) {
-            endpoint.searchParams.set('apiKey', apiKey);
-        }
+        const endpoint = new URL(SCOUTS_REFRESH_URL);
+        addApiKeyQueryParam(endpoint);
 
         const response = await fetch(endpoint.toString(), {
             method: 'POST',
@@ -433,7 +401,10 @@ async function refreshLambda() {
 
     } catch (error) {
         console.error('Error triggering Lambda:', error);
-        statusElement.textContent = `Error: ${error.message}`;
+        const errorMessage = error instanceof TypeError
+            ? 'Network/CORS error calling refresh Lambda. Verify Lambda Function URL CORS settings and response headers.'
+            : `Error: ${error.message}`;
+        statusElement.textContent = errorMessage;
         statusElement.className = 'refresh-status error';
     }
 }
@@ -471,9 +442,7 @@ async function hideEvent(eventUID) {
 
     try {
         const endpoint = new URL(SCOUTS2SQS_URL);
-        if (apiKey) {
-            endpoint.searchParams.set('apiKey', apiKey);
-        }
+        addApiKeyQueryParam(endpoint);
 
         const response = await fetch(endpoint.toString(), {
             method: 'POST',
