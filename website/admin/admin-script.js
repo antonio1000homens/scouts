@@ -3,9 +3,29 @@
 let eventsData = [];
 let hasS3Permission = false;
 let currentEventIndex = null;
-const SCOUTS2SQS_URL = window.SCOUTS2SQS_URL || 'https://hnpooqvuwzt2rvpqtxfngfvhrq0nxngr.lambda-url.eu-west-2.on.aws/';
-const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || 'https://ykjzunulxefwp2ere4aotapnwu0whhsk.lambda-url.eu-west-2.on.aws/';
+const SCOUTS2SQS_URL = window.SCOUTS2SQS_URL || 'https://makwmjq3oycgcrrorhn7tndsaa0ujnyh.lambda-url.eu-west-2.on.aws/';
+const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || 'https://h6ibdinq6dnu2zjekd4aqgkp2a0brmrh.lambda-url.eu-west-2.on.aws/';
 const REQUEST_API_KEY = window.SCOUTS2SQS_API_KEY || '';
+
+async function buildHttpError(response) {
+    let details = '';
+    try {
+        const payload = await response.json();
+        if (payload && typeof payload === 'object') {
+            details = payload.error || payload.message || JSON.stringify(payload);
+        }
+    } catch {
+        try {
+            const text = await response.text();
+            if (text) details = text;
+        } catch {
+            // Ignore body parsing issues
+        }
+    }
+
+    const detailSuffix = details ? `: ${details}` : '';
+    return new Error(`HTTP ${response.status}${detailSuffix}`);
+}
 
 // Check if AWS SDK is available and user has S3 permissions
 function checkS3Permissions() {
@@ -387,7 +407,7 @@ async function refreshLambda() {
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            throw await buildHttpError(response);
         }
 
         statusElement.textContent = 'Lambda triggered successfully!';
@@ -453,7 +473,7 @@ async function hideEvent(eventUID) {
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            throw await buildHttpError(response);
         }
 
         let message = `Event ${eventUID} hidden successfully`;
