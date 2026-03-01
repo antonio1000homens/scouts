@@ -46,6 +46,23 @@ jobs:
         EOF
         aws s3api put-bucket-policy --bucket 2ndtolworth --policy file://bucket-policy.json
 
+    - name: Generate admin runtime config from secrets
+      env:
+        SCOUTS2SQS_API_KEY: ${{ secrets.SCOUTS2SQS_API_KEY }}
+        SCOUTS_REFRESH_URL: ${{ secrets.SCOUTS_REFRESH_URL }}
+        SCOUTS2SQS_URL: ${{ secrets.SCOUTS2SQS_URL }}
+      run: |
+        {
+          echo "// Generated during CI deploy from GitHub Secrets."
+          echo "window.SCOUTS2SQS_API_KEY = '${SCOUTS2SQS_API_KEY:-}';"
+          if [ -n "${SCOUTS_REFRESH_URL:-}" ]; then
+            echo "window.SCOUTS_REFRESH_URL = '${SCOUTS_REFRESH_URL}';"
+          fi
+          if [ -n "${SCOUTS2SQS_URL:-}" ]; then
+            echo "window.SCOUTS2SQS_URL = '${SCOUTS2SQS_URL}';"
+          fi
+        } > website/admin/admin-config.js
+
     - name: Deploy website to S3
       run: |
         legacy_dirs=(beavers badges contact cubs fonts hiringtheden images history location scouts-page volunteering welcome)

@@ -19,6 +19,41 @@ For example:
 - Local development: `http://localhost:8000/website/admin/index.html`
 - Production: `http://2ndtolworth.s3-website.eu-west-2.amazonaws.com/website/admin/index.html`
 
+## Admin API Key Configuration
+
+The admin page reads the API key from a browser global:
+
+- `window.SCOUTS2SQS_API_KEY`
+
+`website/admin/index.html` loads `admin-config.js` before `admin-script.js`.
+
+Default behavior:
+
+- `website/admin/admin-config.js` is committed with a blank key (safe default).
+
+CI deployment behavior:
+
+- The GitHub Actions workflow generates `website/admin/admin-config.js` at deploy time from secrets.
+- Add these repository secrets:
+   - `SCOUTS2SQS_API_KEY` (required)
+   - `SCOUTS_REFRESH_URL` (optional override)
+   - `SCOUTS2SQS_URL` (optional override)
+
+Manual deployment behavior:
+
+- `deploy-manual.sh` can generate `website/admin/admin-config.js` from environment variables before syncing to S3.
+- Example:
+
+   ```bash
+   export SCOUTS2SQS_API_KEY='YOUR_REQUIRED_API_KEY'
+   ./deploy-manual.sh
+   ```
+
+Notes:
+
+- Any key sent to browser JavaScript is accessible to authenticated admin users in DevTools.
+- If you need stronger protection, move admin requests through a server-side proxy and keep secrets server-only.
+
 ## How It Works
 
 ### Data Source
