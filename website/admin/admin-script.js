@@ -9,6 +9,7 @@ let apiAuthReady = false;
 let lambdaRuntimeRunning = false;
 let uiCommandInFlight = false;
 let showHiddenEvents = false;
+let showCompleteEvents = false;
 let agendaPayload = null;
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
 const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
@@ -46,10 +47,11 @@ function updateS3Status(message, type) {
     statusElement.className = 'status-text status-' + type;
 }
 
-function updateEventsCount(uniqueCount, rawCount = uniqueCount, hiddenCount = 0) {
+function updateEventsCount(uniqueCount, rawCount = uniqueCount, hiddenCount = 0, completeCount = 0) {
     const countElement = document.getElementById('events-count');
     const hiddenSuffix = hiddenCount > 0 ? `, ${hiddenCount} hidden` : '';
-    countElement.textContent = `${uniqueCount} unique (${rawCount} raw${hiddenSuffix})`;
+    const completeSuffix = completeCount > 0 ? `, ${completeCount} complete` : '';
+    countElement.textContent = `${uniqueCount} unique (${rawCount} raw${hiddenSuffix}${completeSuffix})`;
 }
 
 function updateHideStatus(message, type = 'info') {
@@ -82,6 +84,36 @@ function updateHiddenEventsUi() {
 function toggleHiddenEvents() {
     showHiddenEvents = !showHiddenEvents;
     updateHiddenEventsUi();
+    renderEvents();
+}
+
+function isCompleteEvent(event) {
+    return hasText(getAIPrompt(event)) && hasText(getImagePrompt(event)) && hasText(getImageUrl(event));
+}
+
+function updateCompleteEventsUi() {
+    const toggleButton = document.getElementById('toggle-complete-events');
+    const summary = document.getElementById('complete-summary');
+    const completeCount = uniqueEventEntries.filter((entry) => isCompleteEvent(entry.event)).length;
+
+    if (toggleButton) {
+        toggleButton.textContent = showCompleteEvents ? 'Hide Complete' : 'Show Complete';
+    }
+
+    if (summary) {
+        if (completeCount === 0) {
+            summary.textContent = 'No complete events in agenda.';
+        } else if (showCompleteEvents) {
+            summary.textContent = `Showing ${completeCount} complete event group${completeCount !== 1 ? 's' : ''}.`;
+        } else {
+            summary.textContent = `${completeCount} complete event group${completeCount !== 1 ? 's' : ''} collapsed.`;
+        }
+    }
+}
+
+function toggleCompleteEvents() {
+    showCompleteEvents = !showCompleteEvents;
+    updateCompleteEventsUi();
     renderEvents();
 }
 
@@ -324,8 +356,10 @@ async function loadEvents() {
             uniqueEventEntries.length,
             eventsData.length,
             uniqueEventEntries.filter((entry) => entry.allHidden).length,
+            uniqueEventEntries.filter((entry) => isCompleteEvent(entry.event)).length,
         );
         updateHiddenEventsUi();
+        updateCompleteEventsUi();
         renderEvents();
         renderAgendaViewerContent();
         renderEventsJsonViewerContent();
@@ -541,12 +575,14 @@ function renderEvents() {
         return;
     }
 
-    visibleEventEntries = showHiddenEvents
-        ? [...uniqueEventEntries]
-        : uniqueEventEntries.filter((entry) => !entry.allHidden);
+    visibleEventEntries = uniqueEventEntries.filter((entry) => {
+        const hiddenAllowed = showHiddenEvents || !entry.allHidden;
+        const completeAllowed = showCompleteEvents || !isCompleteEvent(entry.event);
+        return hiddenAllowed && completeAllowed;
+    });
 
     if (visibleEventEntries.length === 0) {
-        container.innerHTML = '<p class="loading">All events are hidden. Use "Show Hidden" to view them.</p>';
+        container.innerHTML = '<p class="loading">No events match current filters. Use "Show Hidden" or "Show Complete".</p>';
         return;
     }
 
@@ -768,7 +804,7 @@ async function refreshLambda() {
     const actionCount = parseInt(action, 10);
     const payload = {
         realm: 'scouts',
-        subject: 'events',
+        subject: 'agenda',
         action: Number.isFinite(actionCount) ? actionCount : 0,
     };
 
@@ -779,7 +815,7 @@ async function refreshLambda() {
         await pollLambdaRuntimeStatus(true);
 
         const resultText = result?.status || result?.message || 'ok';
-        statusElement.textContent = `Lambda completed: ${resultText}`;
+        statusElement.textContent = `Agenda events refresh completed: ${resultText}`;
         statusElement.className = 'refresh-status success';
 
         // Optionally reload events after a short delay
