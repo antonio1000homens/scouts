@@ -10,6 +10,13 @@ let uiCommandInFlight = false;
 let showHiddenEvents = false;
 let showCompleteEvents = false;
 let agendaPayload = null;
+let pinnedRuntimeDetails = null;
+const MIN_RUNTIME_DETAILS_VISIBLE_MS = 5000;
+let runtimeDetailsLastShownAt = 0;
+let runtimeDetailsLastMessage = '';
+let runtimeDetailsLastType = 'info';
+let runtimeDetailsPending = null;
+let runtimeDetailsFlushTimer = null;
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
 const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
 const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
@@ -41,11 +48,63 @@ function updateEventsCount(uniqueCount, rawCount = uniqueCount, hiddenCount = 0,
     countElement.textContent = `${uniqueCount} unique (${rawCount} raw${hiddenSuffix}${completeSuffix})`;
 }
 
-function updateRuntimeDetails(message, type = 'info') {
+function applyRuntimeDetailsNow(message, type = 'info') {
     const detailsElement = document.getElementById('runtime-state-details');
     if (!detailsElement) return;
     detailsElement.textContent = message;
     detailsElement.className = `refresh-status ${type}`;
+    runtimeDetailsLastShownAt = Date.now();
+    runtimeDetailsLastMessage = message;
+    runtimeDetailsLastType = type;
+}
+
+function flushPendingRuntimeDetails() {
+    runtimeDetailsFlushTimer = null;
+    if (!runtimeDetailsPending) return;
+    const next = runtimeDetailsPending;
+    runtimeDetailsPending = null;
+    applyRuntimeDetailsNow(next.message, next.type);
+}
+
+function updateRuntimeDetails(message, type = 'info') {
+    const nextMessage = typeof message === 'string' ? message : String(message ?? '');
+    const nextType = typeof type === 'string' ? type : 'info';
+
+    if (nextMessage === runtimeDetailsLastMessage && nextType === runtimeDetailsLastType) {
+        return;
+    }
+
+    const now = Date.now();
+    const elapsed = now - runtimeDetailsLastShownAt;
+    if (runtimeDetailsLastShownAt === 0 || elapsed >= MIN_RUNTIME_DETAILS_VISIBLE_MS) {
+        applyRuntimeDetailsNow(nextMessage, nextType);
+        return;
+    }
+
+    runtimeDetailsPending = { message: nextMessage, type: nextType };
+    const waitMs = Math.max(0, MIN_RUNTIME_DETAILS_VISIBLE_MS - elapsed);
+    if (!runtimeDetailsFlushTimer) {
+        runtimeDetailsFlushTimer = setTimeout(flushPendingRuntimeDetails, waitMs);
+    }
+}
+
+function pinRuntimeDetails(message, type = 'info', ttlMs = 45000) {
+    const effectiveTtl = Number.isFinite(ttlMs) ? Math.max(1000, ttlMs) : 45000;
+    pinnedRuntimeDetails = {
+        message,
+        type,
+        expiresAt: Date.now() + effectiveTtl,
+    };
+    updateRuntimeDetails(message, type);
+}
+
+function getPinnedRuntimeDetails() {
+    if (!pinnedRuntimeDetails) return null;
+    if (Date.now() > pinnedRuntimeDetails.expiresAt) {
+        pinnedRuntimeDetails = null;
+        return null;
+    }
+    return pinnedRuntimeDetails;
 }
 
 function updateHiddenEventsUi() {
@@ -258,9 +317,14 @@ async function sendScoutsCommand(payload) {
     }
 
     try {
-        return await response.json();
+        const parsed = await response.json();
+        if (parsed && typeof parsed === 'object') {
+            parsed._httpStatus = response.status;
+            return parsed;
+        }
+        return { value: parsed, _httpStatus: response.status };
     } catch {
-        return null;
+        return { _httpStatus: response.status };
     }
 }
 
@@ -300,6 +364,7 @@ async function pollLambdaRuntimeStatus(silent = false) {
         refreshApiActionButtons();
 
         if (lambdaRuntimeRunning) {
+            pinnedRuntimeDetails = null;
             const startedAt = runtime?.startedAt ? new Date(runtime.startedAt).toLocaleString('en-GB') : 'unknown';
             const subject = runtime?.command?.subject || 'unknown';
             updateRuntimeStatus(`Running (${subject}) since ${startedAt}.`, 'loading');
@@ -311,6 +376,11 @@ async function pollLambdaRuntimeStatus(silent = false) {
             const outcome = runtime?.lastOutcome || 'idle';
             const suffix = completedAt ? ` Last ${outcome} at ${completedAt}.` : '';
             updateRuntimeStatus(`Idle.${suffix}`, 'success');
+            const pinned = getPinnedRuntimeDetails();
+            if (pinned) {
+                updateRuntimeDetails(pinned.message, pinned.type);
+                return;
+            }
             const lastCommand = runtime?.lastCommand || null;
             const lastResult = runtime?.lastResult || null;
             if (lastCommand || lastResult) {
@@ -990,21 +1060,25 @@ async function requeueEvent(eventIndex, fromModal = false) {
 
     const loadingMessage = `Requeueing "${eventLabel}" (missing: ${missing.join(', ')})...`;
     if (fromModal) updateModalStatus(loadingMessage, 'loading');
-    else updateRuntimeDetails(loadingMessage, 'loading');
+    else pinRuntimeDetails(loadingMessage, 'loading');
 
     uiCommandInFlight = true;
     refreshApiActionButtons();
     try {
         const result = await sendScoutsCommand(payload);
         const queueAcceptedSuffix = result?.queueAccepted === true ? ' Queue accepted.' : '';
-        const successMessage = `Requeue request submitted for "${eventLabel}".${queueAcceptedSuffix}`;
+        const statusCode = Number.isFinite(result?._httpStatus) ? result._httpStatus : 200;
+        const backendMessage = typeof result?.message === 'string' && result.message.trim()
+            ? ` ${result.message.trim()}`
+            : '';
+        const successMessage = `Requeue request submitted for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
         if (fromModal) updateModalStatus(successMessage, 'success');
-        else updateRuntimeDetails(successMessage, 'success');
+        else pinRuntimeDetails(successMessage, 'success');
     } catch (error) {
         console.error('Error requeueing event:', error);
         const failureMessage = `Failed to requeue event: ${error.message}`;
         if (fromModal) updateModalStatus(failureMessage, 'error');
-        else updateRuntimeDetails(failureMessage, 'error');
+        else pinRuntimeDetails(failureMessage, 'error');
     } finally {
         uiCommandInFlight = false;
         refreshApiActionButtons();
