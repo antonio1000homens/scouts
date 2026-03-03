@@ -359,6 +359,20 @@ function getImagePrompt(event) {
     return null;
 }
 
+function getMissingMetadataFields(event) {
+    const missing = [];
+    if (!hasText(getAIPrompt(event))) {
+        missing.push('AI Tagline');
+    }
+    if (!hasText(getImagePrompt(event))) {
+        missing.push('Image Prompt');
+    }
+    if (!hasText(getImageUrl(event))) {
+        missing.push('Image URL');
+    }
+    return missing;
+}
+
 // Determine event section/type
 function getEventSection(event) {
     const type = (event.icsType || event.section || '').toLowerCase();
@@ -428,6 +442,13 @@ function mergeEventMetadata(targetEvent, sourceEvent) {
         }
         targetEvent.image.url = getImageUrl(sourceEvent);
     }
+
+    if (!hasText(getImagePrompt(targetEvent)) && hasText(getImagePrompt(sourceEvent))) {
+        if (!targetEvent.image || typeof targetEvent.image !== 'object') {
+            targetEvent.image = {};
+        }
+        targetEvent.image.prompt = getImagePrompt(sourceEvent);
+    }
 }
 
 function buildUniqueEventEntries(events) {
@@ -496,6 +517,8 @@ function renderEvents() {
         const imageUrl = getImageUrl(event);
         const tagline = getAIPrompt(event);
         const imagePrompt = getImagePrompt(event);
+        const missingFields = getMissingMetadataFields(event);
+        const requeueEligible = missingFields.length > 0;
         const section = getEventSection(event);
         const isHidden = entry.allHidden;
         const title = event.summary || event.title || 'Untitled Event';
@@ -552,12 +575,22 @@ function renderEvents() {
                         </div>
                     ` : '<p class="no-ai-prompt">No tagline</p>'}
 
-                    <button 
-                        class="btn btn-primary"
-                        onclick="openUploadModal(${index})"
-                    >
-                        Edit URL, Prompt & Tagline
-                    </button>
+                    ${requeueEligible
+                        ? `<p class="requeue-hint">Missing: ${missingFields.join(', ')}</p>`
+                        : `<p class="requeue-hint requeue-ready">Metadata complete. No requeue needed.</p>`
+                    }
+                    <div class="event-actions">
+                        <button 
+                            class="btn btn-primary"
+                            onclick="openUploadModal(${index})"
+                        >
+                            Edit URL, Prompt & Tagline
+                        </button>
+                        ${requeueEligible
+                            ? `<button class="btn btn-secondary requires-api" onclick="requeueEvent(${index})">Requeue Missing Fields</button>`
+                            : ''
+                        }
+                    </div>
                 </div>
             </div>
         `;
@@ -631,9 +664,24 @@ function openUploadModal(index) {
     const urlField = document.getElementById('image-url');
     const imagePromptField = document.getElementById('image-prompt-input');
     const taglineField = document.getElementById('tagline-input');
+    const requeueButton = document.getElementById('modal-requeue-button');
+    const requeueHint = document.getElementById('modal-requeue-hint');
     urlField.value = currentImage || '';
     imagePromptField.value = getImagePrompt(event) || '';
     taglineField.value = getAIPrompt(event) || '';
+    const missing = getMissingMetadataFields(event);
+    if (requeueButton) {
+        requeueButton.style.display = missing.length > 0 ? 'inline-block' : 'none';
+    }
+    if (requeueHint) {
+        if (missing.length > 0) {
+            requeueHint.textContent = `Eligible for requeue: missing ${missing.join(', ')}.`;
+            requeueHint.className = 'refresh-status error';
+        } else {
+            requeueHint.textContent = 'Metadata complete. Requeue is not required.';
+            requeueHint.className = 'refresh-status success';
+        }
+    }
     document.getElementById('modal-status').textContent = '';
     document.getElementById('modal-status').className = 'status-text';
     
@@ -911,6 +959,81 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
         console.error(`Error refreshing ${label}:`, error);
         updateGlobalRefreshStatus(`Failed to refresh ${label}: ${error.message}`, 'error');
     }
+}
+
+async function requeueEvent(eventIndex, fromModal = false) {
+    if (!apiAuthReady) {
+        updateApiAuthStatus(
+            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
+            'error',
+        );
+        if (fromModal) updateModalStatus('Admin API auth not ready.', 'error');
+        return;
+    }
+
+    const entry = visibleEventEntries[eventIndex];
+    if (!entry || !entry.event) {
+        if (fromModal) updateModalStatus('Unable to find selected event entry.', 'error');
+        else updateHideStatus('Unable to find selected event entry.', 'error');
+        return;
+    }
+
+    const event = entry.event;
+    const missing = getMissingMetadataFields(event);
+    if (missing.length === 0) {
+        const message = 'Event metadata is complete. Requeue not required.';
+        if (fromModal) updateModalStatus(message, 'info');
+        else updateHideStatus(message, 'info');
+        return;
+    }
+
+    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+    if (!hex) {
+        const message = 'Cannot requeue: event is missing HEX.';
+        if (fromModal) updateModalStatus(message, 'error');
+        else updateHideStatus(message, 'error');
+        return;
+    }
+
+    const subject = JSON.parse(JSON.stringify(event || {}));
+    subject.hex = hex;
+    if (!subject.image || typeof subject.image !== 'object') {
+        subject.image = {};
+    }
+    if (!hasText(subject.AI)) subject.AI = null;
+    if (!hasText(subject.image.prompt)) subject.image.prompt = null;
+    if (!hasText(subject.image.url)) subject.image.url = null;
+
+    const payload = {
+        realm: 'scouts',
+        subject: 'scoutsRequest',
+        action: 'requeue',
+        event: subject,
+    };
+
+    const loadingMessage = `Requeueing ${hex} (missing: ${missing.join(', ')})...`;
+    if (fromModal) updateModalStatus(loadingMessage, 'loading');
+    else updateHideStatus(loadingMessage, 'loading');
+
+    try {
+        const result = await sendScoutsCommand(payload);
+        const successMessage = result?.message || `Requeue request submitted for ${hex}.`;
+        if (fromModal) updateModalStatus(successMessage, 'success');
+        else updateHideStatus(successMessage, 'success');
+    } catch (error) {
+        console.error('Error requeueing event:', error);
+        const failureMessage = `Failed to requeue event: ${error.message}`;
+        if (fromModal) updateModalStatus(failureMessage, 'error');
+        else updateHideStatus(failureMessage, 'error');
+    }
+}
+
+function requeueCurrentEvent() {
+    if (currentEventIndex === null) {
+        updateModalStatus('Open an event first before requeueing.', 'error');
+        return;
+    }
+    requeueEvent(currentEventIndex, true);
 }
 
 // Hide event functionality
