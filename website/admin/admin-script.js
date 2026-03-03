@@ -6,10 +6,11 @@ let visibleEventEntries = [];
 let hasS3Permission = false;
 let currentEventIndex = null;
 let apiAuthReady = false;
+let lambdaRuntimeRunning = false;
+let uiCommandInFlight = false;
 let showHiddenEvents = false;
 let agendaPayload = null;
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
-const SCOUTS2SQS_URL = window.SCOUTS2SQS_URL || window.SCOUTS_QUEUE_URL || `${ADMIN_API_BASE}/scouts2sqs`;
 const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
 const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
 
@@ -35,8 +36,7 @@ async function buildHttpError(response) {
 
 // Check if AWS SDK is available and user has S3 permissions
 function checkS3Permissions() {
-    // Uploads are no longer needed; metadata is queued via scouts2sqs through Cloudflare.
-    updateS3Status('Paste an image URL to queue metadata updates (no S3 upload needed)', 'info');
+    updateS3Status('Admin actions call scouts lambda only (no direct scouts2sqs calls)', 'info');
     hasS3Permission = true;
 }
 
@@ -167,6 +167,13 @@ function updateApiAuthStatus(message, type = 'info') {
     statusElement.className = 'status-text status-' + type;
 }
 
+function updateRuntimeStatus(message, type = 'info') {
+    const statusElement = document.getElementById('runtime-state-status');
+    if (!statusElement) return;
+    statusElement.textContent = message;
+    statusElement.className = 'status-text status-' + type;
+}
+
 function updateModalStatus(message, type = 'info') {
     const statusElement = document.getElementById('modal-status');
     if (!statusElement) return;
@@ -202,30 +209,59 @@ async function sendScoutsCommand(payload) {
     }
 }
 
-async function sendQueuePayload(payload) {
-    const response = await fetch(SCOUTS2SQS_URL, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'text/plain',
-        },
-        credentials: 'same-origin',
-        body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-        throw await buildHttpError(response);
-    }
-
-    return response;
-}
-
 function setApiActionState(enabled) {
     apiAuthReady = Boolean(enabled);
+    refreshApiActionButtons();
+}
+
+function refreshApiActionButtons() {
+    const enabled = apiAuthReady && !lambdaRuntimeRunning && !uiCommandInFlight;
     const actionButtons = document.querySelectorAll('.requires-api');
     actionButtons.forEach((button) => {
-        button.disabled = !apiAuthReady;
-        button.classList.toggle('btn-disabled', !apiAuthReady);
+        button.disabled = !enabled;
+        button.classList.toggle('btn-disabled', !enabled);
     });
+}
+
+async function pollLambdaRuntimeStatus(silent = false) {
+    if (!apiAuthReady) {
+        lambdaRuntimeRunning = false;
+        refreshApiActionButtons();
+        if (!silent) {
+            updateRuntimeStatus('Runtime status unavailable (API auth not ready).', 'error');
+        }
+        return;
+    }
+
+    try {
+        const result = await sendScoutsCommand({
+            realm: 'scouts',
+            subject: 'status',
+            action: 'runtime',
+        });
+        const runtime = result?.runtime || {};
+        lambdaRuntimeRunning = runtime?.status === 'running';
+        refreshApiActionButtons();
+
+        if (lambdaRuntimeRunning) {
+            const startedAt = runtime?.startedAt ? new Date(runtime.startedAt).toLocaleString('en-GB') : 'unknown';
+            const subject = runtime?.command?.subject || 'unknown';
+            updateRuntimeStatus(`Running (${subject}) since ${startedAt}.`, 'loading');
+        } else {
+            const completedAt = runtime?.lastCompletedAt
+                ? new Date(runtime.lastCompletedAt).toLocaleString('en-GB')
+                : null;
+            const outcome = runtime?.lastOutcome || 'idle';
+            const suffix = completedAt ? ` Last ${outcome} at ${completedAt}.` : '';
+            updateRuntimeStatus(`Idle.${suffix}`, 'success');
+        }
+    } catch (error) {
+        lambdaRuntimeRunning = false;
+        refreshApiActionButtons();
+        if (!silent) {
+            updateRuntimeStatus(`Runtime status check failed: ${error.message}`, 'error');
+        }
+    }
 }
 
 async function checkApiAuthStatus() {
@@ -253,6 +289,7 @@ async function checkApiAuthStatus() {
             : '';
         updateApiAuthStatus(`Ready - Cloudflare API proxy authenticated${keySuffix}`, 'success');
         setApiActionState(true);
+        await pollLambdaRuntimeStatus(true);
     } catch (error) {
         console.error('Error checking admin API auth status:', error);
         updateApiAuthStatus(
@@ -260,6 +297,7 @@ async function checkApiAuthStatus() {
             'error',
         );
         setApiActionState(false);
+        updateRuntimeStatus('Runtime status unavailable.', 'error');
     }
 }
 
@@ -536,9 +574,6 @@ function renderEvents() {
                     }
                     <span class="event-badge ${section}">${section}</span>
                     ${isHidden ? `<span class="event-badge hidden">Hidden</span>` : ''}
-                    <button class="btn-hide${isHidden ? ' disabled' : ''}" onclick="hideEvent(${index})" title="Hide this event" ${isHidden ? 'disabled' : ''}>
-                        ${isHidden ? 'Already Hidden' : 'Hide'}
-                    </button>
                 </div>
                 <div class="event-details">
                     <h3 class="event-title">${title}</h3>
@@ -549,11 +584,6 @@ function renderEvents() {
                         : ''
                     }
                     
-                    <div class="event-meta">
-                        ${event.dtstart ? `<p><strong>Date:</strong> ${formatDate(event.dtstart)}</p>` : ''}
-                        ${event.location ? `<p><strong>Location:</strong> ${event.location}</p>` : ''}
-                    </div>
-
                     ${imageUrl ? `
                         <div class="image-info">
                             <strong>Image URL:</strong>
@@ -584,7 +614,7 @@ function renderEvents() {
                             class="btn btn-primary"
                             onclick="openUploadModal(${index})"
                         >
-                            Edit URL, Prompt & Tagline
+                            View Details
                         </button>
                         ${requeueEligible
                             ? `<button class="btn btn-secondary requires-api" onclick="requeueEvent(${index})">Requeue Missing Fields</button>`
@@ -660,15 +690,14 @@ function openUploadModal(index) {
         imgElement.style.display = 'none';
     }
     
-    // Clear previous inputs
-    const urlField = document.getElementById('image-url');
-    const imagePromptField = document.getElementById('image-prompt-input');
-    const taglineField = document.getElementById('tagline-input');
+    const imageUrlText = document.getElementById('modal-image-url');
+    const imagePromptText = document.getElementById('modal-image-prompt');
+    const taglineText = document.getElementById('modal-tagline');
     const requeueButton = document.getElementById('modal-requeue-button');
     const requeueHint = document.getElementById('modal-requeue-hint');
-    urlField.value = currentImage || '';
-    imagePromptField.value = getImagePrompt(event) || '';
-    taglineField.value = getAIPrompt(event) || '';
+    if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
+    if (imagePromptText) imagePromptText.textContent = getImagePrompt(event) || 'Not set';
+    if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
     const missing = getMissingMetadataFields(event);
     if (requeueButton) {
         requeueButton.style.display = missing.length > 0 ? 'inline-block' : 'none';
@@ -695,170 +724,6 @@ function closeUploadModal() {
     currentEventIndex = null;
 }
 
-async function queueWorkflowAction(realm) {
-    if (!apiAuthReady) {
-        updateApiAuthStatus(
-            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
-            'error',
-        );
-        return;
-    }
-
-    if (currentEventIndex === null) {
-        updateModalStatus('Open an event first before queueing workflow actions.', 'error');
-        return;
-    }
-
-    const entry = visibleEventEntries[currentEventIndex];
-    if (!entry || !entry.event) {
-        updateModalStatus('Unable to find selected event entry.', 'error');
-        return;
-    }
-
-    const event = entry.event;
-    const hex = event.hex || null;
-    if (!hex) {
-        updateModalStatus('This event is missing a HEX identifier.', 'error');
-        return;
-    }
-
-    const actionMap = {
-        AI: 'request',
-        imagePrompt: 'request',
-        pixabay: 'bypass',
-    };
-
-    if (!actionMap[realm]) {
-        updateModalStatus(`Unsupported workflow realm: ${realm}`, 'error');
-        return;
-    }
-
-    let payload;
-    if (realm === 'pixabay') {
-        const subject = JSON.parse(JSON.stringify(event || {}));
-        subject.hex = hex;
-        subject.image = subject.image && typeof subject.image === 'object' ? subject.image : {};
-        const modalPrompt = (document.getElementById('image-prompt-input')?.value || '').trim();
-        if (modalPrompt) {
-            subject.image.prompt = modalPrompt;
-        }
-        payload = { realm, action: actionMap[realm], subject };
-    } else {
-        payload = { realm, action: actionMap[realm], subject: hex };
-    }
-
-    const label = realm === 'AI'
-        ? 'AI review'
-        : realm === 'imagePrompt'
-            ? 'image prompt review'
-            : 'image URL review';
-
-    updateModalStatus(`Queueing ${label}...`, 'loading');
-
-    try {
-        await sendQueuePayload(payload);
-        updateModalStatus(`Queued ${label} successfully.`, 'success');
-    } catch (error) {
-        console.error(`Error queueing ${label}:`, error);
-        updateModalStatus(`Failed to queue ${label}: ${error.message}`, 'error');
-    }
-}
-
-// Upload image (placeholder - requires AWS SDK integration)
-async function uploadImage() {
-    if (!apiAuthReady) {
-        updateApiAuthStatus(
-            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
-            'error',
-        );
-        return;
-    }
-
-    if (currentEventIndex === null) {
-        alert('No event selected');
-        return;
-    }
-
-    const urlInput = document.getElementById('image-url');
-    const imagePromptInput = document.getElementById('image-prompt-input');
-    const taglineInput = document.getElementById('tagline-input');
-    const rawUrl = urlInput.value.trim();
-    const rawImagePrompt = imagePromptInput.value.trim();
-    const rawTagline = taglineInput.value.trim();
-    const entry = visibleEventEntries[currentEventIndex];
-    if (!entry || !entry.event) {
-        updateModalStatus('Unable to find selected event entry.', 'error');
-        return;
-    }
-    const event = entry.event;
-    const hex = event.hex || null;
-
-    if (!hex) {
-        updateModalStatus('This event is missing a HEX identifier and cannot be persisted.', 'error');
-        return;
-    }
-
-    if (!rawUrl && !rawImagePrompt && !rawTagline) {
-        updateModalStatus('Provide at least one metadata change to persist.', 'error');
-        return;
-    }
-
-    let parsedUrl = null;
-    if (rawUrl) {
-        try {
-            parsedUrl = new URL(rawUrl);
-            if (!/^https?:$/i.test(parsedUrl.protocol)) {
-                throw new Error('Only http/https URLs are supported.');
-            }
-        } catch (error) {
-            updateModalStatus(error.message || 'Invalid image URL.', 'error');
-            return;
-        }
-    }
-
-    const subject = JSON.parse(JSON.stringify(event || {}));
-    subject.hex = hex;
-    const existingImage = subject.image;
-    if (!existingImage || typeof existingImage !== 'object') {
-        subject.image = {};
-        if (typeof existingImage === 'string' && existingImage.trim()) {
-            subject.image.url = existingImage.trim();
-        }
-    }
-
-    if (parsedUrl) {
-        subject.image.url = parsedUrl.toString();
-    }
-
-    if (rawImagePrompt) {
-        subject.image.prompt = rawImagePrompt;
-    }
-
-    if (rawTagline) {
-        subject.AI = rawTagline;
-    }
-
-    updateModalStatus('Saving metadata...', 'loading');
-
-    try {
-        const persistPayload = {
-            realm: 'persist',
-            action: 'persist',
-            subject,
-        };
-        await sendQueuePayload(persistPayload);
-
-        updateModalStatus('Metadata persisted successfully.', 'success');
-        setTimeout(() => {
-            closeUploadModal();
-            loadEvents();
-        }, 800);
-    } catch (error) {
-        console.error('Error sending persist request:', error);
-        updateModalStatus(error.message || 'Failed to send persist request.', 'error');
-    }
-}
-
 // Close modal when clicking outside
 window.onclick = function(event) {
     const modal = document.getElementById('upload-modal');
@@ -883,6 +748,11 @@ async function refreshLambda() {
     const actionInput = document.getElementById('refresh-action');
     const statusElement = document.getElementById('refresh-status');
     const action = actionInput.value;
+    if (lambdaRuntimeRunning || uiCommandInFlight) {
+        statusElement.textContent = 'Lambda currently running. Wait for completion.';
+        statusElement.className = 'refresh-status error';
+        return;
+    }
 
     // Validate input
     if (!action || action.trim() === '') {
@@ -902,10 +772,14 @@ async function refreshLambda() {
         action: Number.isFinite(actionCount) ? actionCount : 0,
     };
 
+    uiCommandInFlight = true;
+    refreshApiActionButtons();
     try {
-        await sendScoutsCommand(payload);
+        const result = await sendScoutsCommand(payload);
+        await pollLambdaRuntimeStatus(true);
 
-        statusElement.textContent = 'Lambda triggered successfully!';
+        const resultText = result?.status || result?.message || 'ok';
+        statusElement.textContent = `Lambda completed: ${resultText}`;
         statusElement.className = 'refresh-status success';
 
         // Optionally reload events after a short delay
@@ -921,6 +795,9 @@ async function refreshLambda() {
             : `Error: ${error.message}`;
         statusElement.textContent = errorMessage;
         statusElement.className = 'refresh-status error';
+    } finally {
+        uiCommandInFlight = false;
+        refreshApiActionButtons();
     }
 }
 
@@ -933,24 +810,29 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
         updateGlobalRefreshStatus('Admin API auth not ready', 'error');
         return;
     }
+    if (lambdaRuntimeRunning || uiCommandInFlight) {
+        updateGlobalRefreshStatus('Lambda currently running. Wait for completion.', 'error');
+        return;
+    }
 
     const payload = {
         realm: 'scouts',
-        subject: 'calendar',
+        subject: calendarToken && calendarToken !== 'all' ? String(calendarToken).trim().toLowerCase() : 'calendars',
         action: 'refresh',
     };
 
-    if (calendarToken && calendarToken !== 'all') {
-        payload.calendar = calendarToken;
-    }
-
     updateGlobalRefreshStatus(`Refreshing ${label}...`, 'loading');
 
+    uiCommandInFlight = true;
+    refreshApiActionButtons();
     try {
         const result = await sendScoutsCommand(payload);
+        await pollLambdaRuntimeStatus(true);
         const count = Number.isFinite(result?.eventsCount) ? result.eventsCount : null;
+        const generatedAt = result?.generatedAt ? new Date(result.generatedAt).toLocaleString('en-GB') : null;
         const countSuffix = count !== null ? ` (${count} events in agenda)` : '';
-        updateGlobalRefreshStatus(`Refresh complete for ${label}${countSuffix}`, 'success');
+        const timeSuffix = generatedAt ? ` at ${generatedAt}` : '';
+        updateGlobalRefreshStatus(`Refresh complete for ${label}${countSuffix}${timeSuffix}`, 'success');
 
         setTimeout(() => {
             loadEvents();
@@ -958,6 +840,9 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
     } catch (error) {
         console.error(`Error refreshing ${label}:`, error);
         updateGlobalRefreshStatus(`Failed to refresh ${label}: ${error.message}`, 'error');
+    } finally {
+        uiCommandInFlight = false;
+        refreshApiActionButtons();
     }
 }
 
@@ -968,6 +853,12 @@ async function requeueEvent(eventIndex, fromModal = false) {
             'error',
         );
         if (fromModal) updateModalStatus('Admin API auth not ready.', 'error');
+        return;
+    }
+    if (lambdaRuntimeRunning || uiCommandInFlight) {
+        const message = 'Lambda currently running. Wait for completion before queueing.';
+        if (fromModal) updateModalStatus(message, 'error');
+        else updateHideStatus(message, 'error');
         return;
     }
 
@@ -1015,6 +906,8 @@ async function requeueEvent(eventIndex, fromModal = false) {
     if (fromModal) updateModalStatus(loadingMessage, 'loading');
     else updateHideStatus(loadingMessage, 'loading');
 
+    uiCommandInFlight = true;
+    refreshApiActionButtons();
     try {
         const result = await sendScoutsCommand(payload);
         const successMessage = result?.message || `Requeue request submitted for ${hex}.`;
@@ -1025,6 +918,9 @@ async function requeueEvent(eventIndex, fromModal = false) {
         const failureMessage = `Failed to requeue event: ${error.message}`;
         if (fromModal) updateModalStatus(failureMessage, 'error');
         else updateHideStatus(failureMessage, 'error');
+    } finally {
+        uiCommandInFlight = false;
+        refreshApiActionButtons();
     }
 }
 
@@ -1036,84 +932,6 @@ function requeueCurrentEvent() {
     requeueEvent(currentEventIndex, true);
 }
 
-// Hide event functionality
-async function hideEvent(eventIndex) {
-    if (!apiAuthReady) {
-        updateApiAuthStatus(
-            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
-            'error',
-        );
-        return;
-    }
-
-    const entry = visibleEventEntries[eventIndex];
-    if (!entry || !entry.event) {
-        updateHideStatus('Unable to find selected event entry.', 'error');
-        return;
-    }
-
-    const match = entry.event;
-    const eventUID = getEntryIdentifier(entry);
-
-    if (!confirm(`Are you sure you want to hide the event with UID: ${eventUID}?`)) {
-        return;
-    }
-
-    updateHideStatus(`Hiding event ${eventUID}...`, 'loading');
-
-    const hexValue = match.hex;
-    if (!hexValue) {
-        updateHideStatus(`Event ${eventUID} is missing a HEX identifier`, 'error');
-        return;
-    }
-
-    const subject = JSON.parse(JSON.stringify(match));
-    subject.hex = hexValue;
-    subject.uid = match.uid || eventUID;
-    subject.status = 'hidden';
-
-    const payload = {
-        realm: 'persist',
-        action: 'hidden',
-        subject,
-    };
-
-    try {
-        const response = await fetch(SCOUTS2SQS_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'text/plain',
-            },
-            credentials: 'same-origin',
-            body: JSON.stringify(payload),
-        });
-
-        if (!response.ok) {
-            throw await buildHttpError(response);
-        }
-
-        let message = `Event ${eventUID} hidden successfully`;
-        try {
-            const parsed = await response.json();
-            if (parsed?.message) {
-                message = parsed.message;
-            }
-        } catch {
-            // Response was not JSON; keep default message
-        }
-        updateHideStatus(message, 'success');
-        
-        // Reload events to reflect the change
-        setTimeout(() => {
-            loadEvents();
-            updateHideStatus('Events refreshed after hide action', 'success');
-        }, 1000);
-
-    } catch (error) {
-        console.error('Error hiding event:', error);
-        updateHideStatus(`Error hiding event: ${error.message}`, 'error');
-    }
-}
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
@@ -1121,4 +939,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setApiActionState(false);
     checkApiAuthStatus();
     loadEvents();
+    setInterval(() => {
+        pollLambdaRuntimeStatus(true);
+    }, 5000);
 });

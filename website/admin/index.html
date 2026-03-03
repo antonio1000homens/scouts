@@ -78,6 +78,10 @@
                 <p id="api-auth-status" class="status-text">Checking Cloudflare admin API...</p>
             </div>
             <div class="info-card">
+                <h3>Lambda Run State</h3>
+                <p id="runtime-state-status" class="status-text">Checking runtime state...</p>
+            </div>
+            <div class="info-card">
                 <h3>Hide Status</h3>
                 <p id="hide-status" class="status-text">No hide requests yet.</p>
             </div>
@@ -120,36 +124,20 @@
                     <p><strong>HEX:</strong> <span id="modal-event-hex"></span></p>
                     <p><strong>Current Image:</strong></p>
                     <img id="modal-current-image" src="" alt="Current image" style="max-width: 100%; margin: 1rem 0;">
-                    
                     <div class="form-group">
-                        <label for="image-url">Paste a public image URL:</label>
-                        <input type="text" id="image-url" placeholder="https://example.com/image.jpg">
-                    </div>
-                    <div class="form-group">
-                        <label for="image-prompt-input">Image Prompt (used for image/tagline generation context):</label>
-                        <textarea id="image-prompt-input" rows="3" placeholder="Enter image prompt"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label for="tagline-input">Tagline (manual override):</label>
-                        <textarea id="tagline-input" rows="3" placeholder="Enter tagline text"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label>Workflow Actions (queue via scouts2sqs):</label>
-                        <div class="workflow-actions">
-                            <button class="btn btn-secondary requires-api" onclick="queueWorkflowAction('AI')">Request AI Review</button>
-                            <button class="btn btn-secondary requires-api" onclick="queueWorkflowAction('imagePrompt')">Request Prompt Review</button>
-                            <button class="btn btn-secondary requires-api" onclick="queueWorkflowAction('pixabay')">Request Image URL Review</button>
-                            <button id="modal-requeue-button" class="btn btn-secondary requires-api" style="display:none;" onclick="requeueCurrentEvent()">Requeue Missing Fields</button>
-                        </div>
+                        <label>Current Metadata</label>
+                        <p><strong>Image URL:</strong> <span id="modal-image-url"></span></p>
+                        <p><strong>Image Prompt:</strong> <span id="modal-image-prompt"></span></p>
+                        <p><strong>Tagline:</strong> <span id="modal-tagline"></span></p>
+                        <button id="modal-requeue-button" class="btn btn-secondary requires-api" style="display:none;" onclick="requeueCurrentEvent()">Requeue Missing Fields</button>
                         <p id="modal-requeue-hint" class="refresh-status"></p>
                     </div>
 
-                    <p class="note">Save Metadata persists manual values (URL/Prompt/Tagline). Workflow Actions queue separate review operations through scouts2sqs.</p>
+                    <p class="note">Admin UI calls the scouts lambda only. Direct scouts2sqs invocation has been removed.</p>
                     <p id="modal-status" class="status-text"></p>
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-secondary" onclick="closeUploadModal()">Cancel</button>
-                    <button id="upload-button" class="btn btn-primary requires-api" onclick="uploadImage()">Save Metadata</button>
+                    <button class="btn btn-secondary" onclick="closeUploadModal()">Close</button>
                 </div>
             </div>
         </div>
