@@ -43,6 +43,12 @@
                         <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('beavers-programme', 'Beavers Programme')">Beavers Programme</button>
                     </div>
                     <p id="global-refresh-status" class="refresh-status">No global refresh triggered yet.</p>
+                    <h3>Refresh Agenda Events</h3>
+                    <div class="refresh-controls">
+                        <input type="number" id="refresh-action" placeholder="Events to enrich (e.g. 5)" class="refresh-input" min="0" step="1">
+                        <button id="refresh-button" class="btn btn-primary requires-api" onclick="refreshLambda()">Refresh Agenda events</button>
+                    </div>
+                    <p id="refresh-status" class="refresh-status"></p>
                 </div>
                 <div class="global-card">
                     <h3>Consult Agenda And Events JSON</h3>
@@ -66,14 +72,6 @@
                 <p id="events-count" class="status-text">-</p>
             </div>
             <div class="info-card">
-                <h3>Lambda Refresh</h3>
-                <div class="refresh-controls">
-                    <input type="number" id="refresh-action" placeholder="Enter action number" class="refresh-input" min="0" step="1">
-                    <button id="refresh-button" class="btn btn-primary requires-api" onclick="refreshLambda()">Refresh</button>
-                </div>
-                <p id="refresh-status" class="refresh-status"></p>
-            </div>
-            <div class="info-card">
                 <h3>API Auth Status</h3>
                 <p id="api-auth-status" class="status-text">Checking Cloudflare admin API...</p>
             </div>
@@ -89,6 +87,11 @@
                 <h3>Hidden Events</h3>
                 <button id="toggle-hidden-events" class="btn btn-secondary" onclick="toggleHiddenEvents()">Show Hidden</button>
                 <p id="hidden-summary" class="refresh-status">Hidden events are collapsed by default.</p>
+            </div>
+            <div class="info-card">
+                <h3>Complete Events</h3>
+                <button id="toggle-complete-events" class="btn btn-secondary" onclick="toggleCompleteEvents()">Show Complete</button>
+                <p id="complete-summary" class="refresh-status">Complete events are collapsed by default.</p>
             </div>
         </div>
 
