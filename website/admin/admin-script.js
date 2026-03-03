@@ -3,9 +3,11 @@
 let eventsData = [];
 let hasS3Permission = false;
 let currentEventIndex = null;
-const SCOUTS2SQS_URL = window.SCOUTS2SQS_URL || 'https://makwmjq3oycgcrrorhn7tndsaa0ujnyh.lambda-url.eu-west-2.on.aws/';
-const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || 'https://h6ibdinq6dnu2zjekd4aqgkp2a0brmrh.lambda-url.eu-west-2.on.aws/';
-const REQUEST_API_KEY = window.SCOUTS2SQS_API_KEY || '';
+let apiAuthReady = false;
+const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
+const SCOUTS2SQS_URL = window.SCOUTS2SQS_URL || `${ADMIN_API_BASE}/persist`;
+const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/refresh`;
+const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
 
 async function buildHttpError(response) {
     let details = '';
@@ -52,9 +54,51 @@ function updateHideStatus(message, type = 'info') {
     statusElement.className = 'status-text status-' + type;
 }
 
-function addApiKeyQueryParam(endpoint) {
-    if (REQUEST_API_KEY) {
-        endpoint.searchParams.set('apiKey', REQUEST_API_KEY);
+function updateApiAuthStatus(message, type = 'info') {
+    const statusElement = document.getElementById('api-auth-status');
+    if (!statusElement) return;
+    statusElement.textContent = message;
+    statusElement.className = 'status-text status-' + type;
+}
+
+function setApiActionState(enabled) {
+    apiAuthReady = Boolean(enabled);
+    const actionButtons = document.querySelectorAll('.requires-api');
+    actionButtons.forEach((button) => {
+        button.disabled = !apiAuthReady;
+        button.classList.toggle('btn-disabled', !apiAuthReady);
+    });
+}
+
+async function checkApiAuthStatus() {
+    updateApiAuthStatus('Checking Cloudflare admin API...', 'loading');
+    setApiActionState(false);
+
+    try {
+        const response = await fetch(AUTH_STATUS_URL, {
+            method: 'GET',
+            credentials: 'same-origin',
+            cache: 'no-store',
+        });
+
+        if (!response.ok) {
+            throw await buildHttpError(response);
+        }
+
+        const payload = await response.json();
+        if (!payload?.ok) {
+            throw new Error(payload?.message || 'Auth status check failed.');
+        }
+
+        updateApiAuthStatus('Ready - Cloudflare API proxy authenticated', 'success');
+        setApiActionState(true);
+    } catch (error) {
+        console.error('Error checking admin API auth status:', error);
+        updateApiAuthStatus(
+            'Admin API unavailable. Re-login via Cloudflare Access or verify Worker config/secrets.',
+            'error',
+        );
+        setApiActionState(false);
     }
 }
 
@@ -250,6 +294,14 @@ function formatDate(dateString) {
 
 // Open upload modal
 function openUploadModal(index) {
+    if (!apiAuthReady) {
+        updateApiAuthStatus(
+            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
+            'error',
+        );
+        return;
+    }
+
     currentEventIndex = index;
     const event = eventsData[index];
     const modal = document.getElementById('upload-modal');
@@ -284,6 +336,14 @@ function closeUploadModal() {
 
 // Upload image (placeholder - requires AWS SDK integration)
 async function uploadImage() {
+    if (!apiAuthReady) {
+        updateApiAuthStatus(
+            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
+            'error',
+        );
+        return;
+    }
+
     if (currentEventIndex === null) {
         alert('No event selected');
         return;
@@ -335,14 +395,12 @@ async function uploadImage() {
     showStatus('Sending image URL for download and persistence...', 'loading');
 
     try {
-        const endpoint = new URL(SCOUTS2SQS_URL);
-        addApiKeyQueryParam(endpoint);
-
-        const response = await fetch(endpoint.toString(), {
+        const response = await fetch(SCOUTS2SQS_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'text/plain',
             },
+            credentials: 'same-origin',
             body: JSON.stringify(payload),
         });
 
@@ -372,6 +430,17 @@ window.onclick = function(event) {
 
 // Lambda refresh functionality
 async function refreshLambda() {
+    if (!apiAuthReady) {
+        updateApiAuthStatus(
+            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
+            'error',
+        );
+        const statusElement = document.getElementById('refresh-status');
+        statusElement.textContent = 'Admin API auth not ready';
+        statusElement.className = 'refresh-status error';
+        return;
+    }
+
     const actionInput = document.getElementById('refresh-action');
     const statusElement = document.getElementById('refresh-status');
     const action = actionInput.value;
@@ -395,14 +464,12 @@ async function refreshLambda() {
     };
 
     try {
-        const endpoint = new URL(SCOUTS_REFRESH_URL);
-        addApiKeyQueryParam(endpoint);
-
-        const response = await fetch(endpoint.toString(), {
+        const response = await fetch(SCOUTS_REFRESH_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'text/plain',
             },
+            credentials: 'same-origin',
             body: JSON.stringify(payload),
         });
 
@@ -431,6 +498,14 @@ async function refreshLambda() {
 
 // Hide event functionality
 async function hideEvent(eventUID) {
+    if (!apiAuthReady) {
+        updateApiAuthStatus(
+            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
+            'error',
+        );
+        return;
+    }
+
     if (!confirm(`Are you sure you want to hide the event with UID: ${eventUID}?`)) {
         return;
     }
@@ -461,14 +536,12 @@ async function hideEvent(eventUID) {
     };
 
     try {
-        const endpoint = new URL(SCOUTS2SQS_URL);
-        addApiKeyQueryParam(endpoint);
-
-        const response = await fetch(endpoint.toString(), {
+        const response = await fetch(SCOUTS2SQS_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'text/plain',
             },
+            credentials: 'same-origin',
             body: JSON.stringify(payload),
         });
 
@@ -502,5 +575,7 @@ async function hideEvent(eventUID) {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     checkS3Permissions();
+    setApiActionState(false);
+    checkApiAuthStatus();
     loadEvents();
 });

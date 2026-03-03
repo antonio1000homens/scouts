@@ -31,9 +31,13 @@
                 <h3>Lambda Refresh</h3>
                 <div class="refresh-controls">
                     <input type="number" id="refresh-action" placeholder="Enter action number" class="refresh-input" min="0" step="1">
-                    <button class="btn btn-primary" onclick="refreshLambda()">Refresh</button>
+                    <button id="refresh-button" class="btn btn-primary requires-api" onclick="refreshLambda()">Refresh</button>
                 </div>
                 <p id="refresh-status" class="refresh-status"></p>
+            </div>
+            <div class="info-card">
+                <h3>API Auth Status</h3>
+                <p id="api-auth-status" class="status-text">Checking Cloudflare admin API...</p>
             </div>
             <div class="info-card">
                 <h3>Hide Status</h3>
@@ -68,7 +72,7 @@
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" onclick="closeUploadModal()">Cancel</button>
-                    <button class="btn btn-primary" onclick="uploadImage()">Send Image URL</button>
+                    <button id="upload-button" class="btn btn-primary requires-api" onclick="uploadImage()">Send Image URL</button>
                 </div>
             </div>
         </div>

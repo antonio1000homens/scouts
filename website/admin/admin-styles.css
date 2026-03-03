@@ -77,6 +77,26 @@ body {
     color: var(--text-dark);
 }
 
+.status-text.status-loading,
+.status-text.status-info {
+    color: var(--text-light);
+}
+
+.status-text.status-success {
+    color: var(--success-color);
+}
+
+.status-text.status-error {
+    color: var(--danger-color);
+}
+
+#api-auth-status {
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1.4;
+    min-height: 2.8rem;
+}
+
 .refresh-controls {
     display: flex;
     gap: 0.5rem;
@@ -302,6 +322,11 @@ body {
 }
 
 .btn-disabled:hover {
+    transform: none;
+}
+
+.btn:disabled {
+    cursor: not-allowed;
     transform: none;
 }
 
