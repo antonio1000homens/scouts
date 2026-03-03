@@ -27,7 +27,8 @@ function requireAccess(request, env) {
 }
 
 function requireConfig(env) {
-  if (!env.SCOUTS_LAMBDA_API_KEY) {
+  const apiKey = (env.SCOUTS_LAMBDA_API_KEY || "").trim();
+  if (!apiKey) {
     return json(
       {
         ok: false,
@@ -51,8 +52,9 @@ function requireConfig(env) {
 }
 
 async function proxyToLambda(request, lambdaBaseUrl, apiKey) {
+  const safeApiKey = (apiKey || "").trim();
   const upstreamUrl = new URL(lambdaBaseUrl);
-  upstreamUrl.searchParams.set("apiKey", apiKey);
+  upstreamUrl.searchParams.set("apiKey", safeApiKey);
 
   const headers = new Headers(request.headers);
   headers.delete("cookie");
@@ -61,6 +63,8 @@ async function proxyToLambda(request, lambdaBaseUrl, apiKey) {
   headers.delete("cf-access-authenticated-user-email");
   headers.delete("cf-connecting-ip");
   headers.delete("x-forwarded-for");
+  // Support Lambdas expecting either query-string apiKey or x-api-key header.
+  headers.set("x-api-key", safeApiKey);
 
   const init = {
     method: request.method,
@@ -116,4 +120,3 @@ export default {
     return json({ ok: false, code: "METHOD_OR_PATH_NOT_ALLOWED" }, 405);
   },
 };
-
