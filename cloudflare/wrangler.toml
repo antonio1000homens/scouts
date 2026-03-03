@@ -11,4 +11,3 @@ routes = [
 REQUIRE_CF_ACCESS = "true"
 SCOUTS2SQS_URL = "https://makwmjq3oycgcrrorhn7tndsaa0ujnyh.lambda-url.eu-west-2.on.aws/"
 SCOUTS_REFRESH_URL = "https://h6ibdinq6dnu2zjekd4aqgkp2a0brmrh.lambda-url.eu-west-2.on.aws/"
-

@@ -118,14 +118,28 @@ export default {
           ok: true,
           code: "READY",
           message: "Proxy and API key are configured.",
+          scoutsEndpoint: "/admin-api/scouts",
+          scouts2sqsEndpoint: "/admin-api/scouts2sqs",
           apiKeyLast4: keySuffix(env.SCOUTS_LAMBDA_API_KEY),
         },
         200,
       );
     }
 
+    if (url.pathname === "/admin-api/scouts2sqs" && request.method === "POST") {
+      return proxyToLambda(request, env.SCOUTS2SQS_URL, env.SCOUTS_LAMBDA_API_KEY);
+    }
+
+    if (url.pathname === "/admin-api/queue" && request.method === "POST") {
+      return proxyToLambda(request, env.SCOUTS2SQS_URL, env.SCOUTS_LAMBDA_API_KEY);
+    }
+
     if (url.pathname === "/admin-api/persist" && request.method === "POST") {
       return proxyToLambda(request, env.SCOUTS2SQS_URL, env.SCOUTS_LAMBDA_API_KEY);
+    }
+
+    if (url.pathname === "/admin-api/scouts" && request.method === "POST") {
+      return proxyToLambda(request, env.SCOUTS_REFRESH_URL, env.SCOUTS_LAMBDA_API_KEY);
     }
 
     if (url.pathname === "/admin-api/refresh" && request.method === "POST") {
