@@ -9,8 +9,8 @@ let apiAuthReady = false;
 let showHiddenEvents = false;
 let agendaPayload = null;
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
-const SCOUTS2SQS_URL = window.SCOUTS2SQS_URL || `${ADMIN_API_BASE}/persist`;
-const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/refresh`;
+const SCOUTS2SQS_URL = window.SCOUTS2SQS_URL || window.SCOUTS_QUEUE_URL || `${ADMIN_API_BASE}/scouts2sqs`;
+const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
 const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
 
 async function buildHttpError(response) {
@@ -35,8 +35,8 @@ async function buildHttpError(response) {
 
 // Check if AWS SDK is available and user has S3 permissions
 function checkS3Permissions() {
-    // Uploads are no longer needed; the image URL is sent to scouts2sqs for persistence
-    updateS3Status('Paste an image URL to persist via scouts2sqs (no S3 upload needed)', 'info');
+    // Uploads are no longer needed; metadata is queued via scouts2sqs through Cloudflare.
+    updateS3Status('Paste an image URL to queue metadata updates (no S3 upload needed)', 'info');
     hasS3Permission = true;
 }
 
@@ -112,11 +112,111 @@ function toggleAgendaViewer() {
     }
 }
 
+function renderEventsJsonViewerContent() {
+    const eventsJsonContentEl = document.getElementById('events-json-content');
+    if (!eventsJsonContentEl) return;
+
+    if (!uniqueEventEntries.length) {
+        eventsJsonContentEl.textContent = 'No event JSON entries loaded yet.';
+        return;
+    }
+
+    const lines = [];
+    lines.push(`Generated from agenda.json on ${new Date().toISOString()}`);
+    lines.push(`Unique Event Groups: ${uniqueEventEntries.length}`);
+    lines.push('');
+
+    uniqueEventEntries.forEach((entry, index) => {
+        const event = entry.event || {};
+        const title = event.summary || event.title || `Event ${index + 1}`;
+        const hex = hasText(event.hex) ? event.hex.trim() : '';
+        const eventPath = hex ? `events/${hex}.json` : 'events/<missing-hex>.json';
+        const sourceSummary = (entry.sourceDetails || [])
+            .map((source) => `Event Index: ${source.index} | UID: ${source.uid}`)
+            .join(' ; ');
+
+        lines.push(`${index + 1}. ${eventPath}`);
+        lines.push(`   Title: ${title}`);
+        lines.push(`   HEX: ${hex || 'MISSING'}`);
+        lines.push(`   Occurrences: ${entry.duplicateCount}`);
+        if (sourceSummary) {
+            lines.push(`   Sources: ${sourceSummary}`);
+        }
+        lines.push('');
+    });
+
+    eventsJsonContentEl.textContent = lines.join('\n');
+}
+
+function toggleEventsJsonViewer() {
+    const viewer = document.getElementById('events-json-viewer');
+    if (!viewer) return;
+
+    const shouldShow = viewer.style.display === 'none' || viewer.style.display === '';
+    viewer.style.display = shouldShow ? 'block' : 'none';
+
+    if (shouldShow) {
+        renderEventsJsonViewerContent();
+    }
+}
+
 function updateApiAuthStatus(message, type = 'info') {
     const statusElement = document.getElementById('api-auth-status');
     if (!statusElement) return;
     statusElement.textContent = message;
     statusElement.className = 'status-text status-' + type;
+}
+
+function updateModalStatus(message, type = 'info') {
+    const statusElement = document.getElementById('modal-status');
+    if (!statusElement) return;
+    statusElement.textContent = message;
+    statusElement.className = `status-text status-${type}`;
+}
+
+function updateGlobalRefreshStatus(message, type = 'info') {
+    const statusElement = document.getElementById('global-refresh-status');
+    if (!statusElement) return;
+    statusElement.textContent = message;
+    statusElement.className = `refresh-status ${type}`;
+}
+
+async function sendScoutsCommand(payload) {
+    const response = await fetch(SCOUTS_REFRESH_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'text/plain',
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        throw await buildHttpError(response);
+    }
+
+    try {
+        return await response.json();
+    } catch {
+        return null;
+    }
+}
+
+async function sendQueuePayload(payload) {
+    const response = await fetch(SCOUTS2SQS_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'text/plain',
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        throw await buildHttpError(response);
+    }
+
+    return response;
 }
 
 function setApiActionState(enabled) {
@@ -190,6 +290,7 @@ async function loadEvents() {
         updateHiddenEventsUi();
         renderEvents();
         renderAgendaViewerContent();
+        renderEventsJsonViewerContent();
     } catch (error) {
         console.error('Error loading events:', error);
         showError('Failed to load events data. Please ensure agenda.json exists and is accessible.');
@@ -247,6 +348,15 @@ function getImageUrl(event) {
 // Get AI prompt from event data
 function getAIPrompt(event) {
     return event.AI || event.ai || event.aiPrompt || null;
+}
+
+function getImagePrompt(event) {
+    if (!event || typeof event !== 'object') return null;
+    if (event.image && typeof event.image === 'object' && typeof event.image.prompt === 'string') {
+        const trimmed = event.image.prompt.trim();
+        if (trimmed) return trimmed;
+    }
+    return null;
 }
 
 // Determine event section/type
@@ -384,7 +494,8 @@ function renderEvents() {
     container.innerHTML = visibleEventEntries.map((entry, index) => {
         const event = entry.event;
         const imageUrl = getImageUrl(event);
-        const aiPrompt = getAIPrompt(event);
+        const tagline = getAIPrompt(event);
+        const imagePrompt = getImagePrompt(event);
         const section = getEventSection(event);
         const isHidden = entry.allHidden;
         const title = event.summary || event.title || 'Untitled Event';
@@ -427,18 +538,25 @@ function renderEvents() {
                         </div>
                     ` : '<p class="no-ai-prompt">No image configured</p>'}
 
-                    ${aiPrompt ? `
+                    ${imagePrompt ? `
                         <div class="ai-prompt">
-                            <div class="ai-prompt-label">AI Prompt</div>
-                            <div class="ai-prompt-text">${aiPrompt}</div>
+                            <div class="ai-prompt-label">Image Prompt</div>
+                            <div class="ai-prompt-text">${imagePrompt}</div>
                         </div>
-                    ` : '<p class="no-ai-prompt">No AI prompt</p>'}
+                    ` : '<p class="no-ai-prompt">No image prompt</p>'}
+
+                    ${tagline ? `
+                        <div class="ai-prompt">
+                            <div class="ai-prompt-label">Tagline</div>
+                            <div class="ai-prompt-text">${tagline}</div>
+                        </div>
+                    ` : '<p class="no-ai-prompt">No tagline</p>'}
 
                     <button 
                         class="btn btn-primary"
                         onclick="openUploadModal(${index})"
                     >
-                        Edit Image & AI
+                        Edit URL, Prompt & Tagline
                     </button>
                 </div>
             </div>
@@ -511,9 +629,11 @@ function openUploadModal(index) {
     
     // Clear previous inputs
     const urlField = document.getElementById('image-url');
-    const aiField = document.getElementById('ai-prompt-input');
+    const imagePromptField = document.getElementById('image-prompt-input');
+    const taglineField = document.getElementById('tagline-input');
     urlField.value = currentImage || '';
-    aiField.value = getAIPrompt(event) || '';
+    imagePromptField.value = getImagePrompt(event) || '';
+    taglineField.value = getAIPrompt(event) || '';
     document.getElementById('modal-status').textContent = '';
     document.getElementById('modal-status').className = 'status-text';
     
@@ -525,6 +645,75 @@ function closeUploadModal() {
     const modal = document.getElementById('upload-modal');
     modal.style.display = 'none';
     currentEventIndex = null;
+}
+
+async function queueWorkflowAction(realm) {
+    if (!apiAuthReady) {
+        updateApiAuthStatus(
+            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
+            'error',
+        );
+        return;
+    }
+
+    if (currentEventIndex === null) {
+        updateModalStatus('Open an event first before queueing workflow actions.', 'error');
+        return;
+    }
+
+    const entry = visibleEventEntries[currentEventIndex];
+    if (!entry || !entry.event) {
+        updateModalStatus('Unable to find selected event entry.', 'error');
+        return;
+    }
+
+    const event = entry.event;
+    const hex = event.hex || null;
+    if (!hex) {
+        updateModalStatus('This event is missing a HEX identifier.', 'error');
+        return;
+    }
+
+    const actionMap = {
+        AI: 'request',
+        imagePrompt: 'request',
+        pixabay: 'bypass',
+    };
+
+    if (!actionMap[realm]) {
+        updateModalStatus(`Unsupported workflow realm: ${realm}`, 'error');
+        return;
+    }
+
+    let payload;
+    if (realm === 'pixabay') {
+        const subject = JSON.parse(JSON.stringify(event || {}));
+        subject.hex = hex;
+        subject.image = subject.image && typeof subject.image === 'object' ? subject.image : {};
+        const modalPrompt = (document.getElementById('image-prompt-input')?.value || '').trim();
+        if (modalPrompt) {
+            subject.image.prompt = modalPrompt;
+        }
+        payload = { realm, action: actionMap[realm], subject };
+    } else {
+        payload = { realm, action: actionMap[realm], subject: hex };
+    }
+
+    const label = realm === 'AI'
+        ? 'AI review'
+        : realm === 'imagePrompt'
+            ? 'image prompt review'
+            : 'image URL review';
+
+    updateModalStatus(`Queueing ${label}...`, 'loading');
+
+    try {
+        await sendQueuePayload(payload);
+        updateModalStatus(`Queued ${label} successfully.`, 'success');
+    } catch (error) {
+        console.error(`Error queueing ${label}:`, error);
+        updateModalStatus(`Failed to queue ${label}: ${error.message}`, 'error');
+    }
 }
 
 // Upload image (placeholder - requires AWS SDK integration)
@@ -543,29 +732,26 @@ async function uploadImage() {
     }
 
     const urlInput = document.getElementById('image-url');
-    const aiInput = document.getElementById('ai-prompt-input');
-    const statusEl = document.getElementById('modal-status');
-    const showStatus = (text, type = 'info') => {
-        statusEl.textContent = text;
-        statusEl.className = `status-text status-${type}`;
-    };
+    const imagePromptInput = document.getElementById('image-prompt-input');
+    const taglineInput = document.getElementById('tagline-input');
     const rawUrl = urlInput.value.trim();
-    const rawAiPrompt = aiInput.value.trim();
+    const rawImagePrompt = imagePromptInput.value.trim();
+    const rawTagline = taglineInput.value.trim();
     const entry = visibleEventEntries[currentEventIndex];
     if (!entry || !entry.event) {
-        showStatus('Unable to find selected event entry.', 'error');
+        updateModalStatus('Unable to find selected event entry.', 'error');
         return;
     }
     const event = entry.event;
     const hex = event.hex || null;
 
     if (!hex) {
-        showStatus('This event is missing a HEX identifier and cannot be persisted.', 'error');
+        updateModalStatus('This event is missing a HEX identifier and cannot be persisted.', 'error');
         return;
     }
 
-    if (!rawUrl && !rawAiPrompt) {
-        showStatus('Please provide an image URL and/or an AI prompt value.', 'error');
+    if (!rawUrl && !rawImagePrompt && !rawTagline) {
+        updateModalStatus('Provide at least one metadata change to persist.', 'error');
         return;
     }
 
@@ -577,7 +763,7 @@ async function uploadImage() {
                 throw new Error('Only http/https URLs are supported.');
             }
         } catch (error) {
-            showStatus(error.message || 'Invalid image URL.', 'error');
+            updateModalStatus(error.message || 'Invalid image URL.', 'error');
             return;
         }
     }
@@ -596,41 +782,32 @@ async function uploadImage() {
         subject.image.url = parsedUrl.toString();
     }
 
-    if (rawAiPrompt) {
-        subject.AI = rawAiPrompt;
+    if (rawImagePrompt) {
+        subject.image.prompt = rawImagePrompt;
     }
 
-    const payload = {
-        realm: 'persist',
-        action: 'persist',
-        subject,
-    };
+    if (rawTagline) {
+        subject.AI = rawTagline;
+    }
 
-    showStatus('Sending metadata for persistence...', 'loading');
+    updateModalStatus('Saving metadata...', 'loading');
 
     try {
-        const response = await fetch(SCOUTS2SQS_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'text/plain',
-            },
-            credentials: 'same-origin',
-            body: JSON.stringify(payload),
-        });
+        const persistPayload = {
+            realm: 'persist',
+            action: 'persist',
+            subject,
+        };
+        await sendQueuePayload(persistPayload);
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Failed to queue persist request: ${response.status} ${errorText}`);
-        }
-
-        showStatus('Sent! The pipeline will download, persist, and confirm via Slack.', 'success');
+        updateModalStatus('Metadata persisted successfully.', 'success');
         setTimeout(() => {
             closeUploadModal();
             loadEvents();
         }, 800);
     } catch (error) {
         console.error('Error sending persist request:', error);
-        showStatus(error.message || 'Failed to send persist request.', 'error');
+        updateModalStatus(error.message || 'Failed to send persist request.', 'error');
     }
 }
 
@@ -678,18 +855,7 @@ async function refreshLambda() {
     };
 
     try {
-        const response = await fetch(SCOUTS_REFRESH_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'text/plain',
-            },
-            credentials: 'same-origin',
-            body: JSON.stringify(payload),
-        });
-
-        if (!response.ok) {
-            throw await buildHttpError(response);
-        }
+        await sendScoutsCommand(payload);
 
         statusElement.textContent = 'Lambda triggered successfully!';
         statusElement.className = 'refresh-status success';
@@ -707,6 +873,43 @@ async function refreshLambda() {
             : `Error: ${error.message}`;
         statusElement.textContent = errorMessage;
         statusElement.className = 'refresh-status error';
+    }
+}
+
+async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected Calendar') {
+    if (!apiAuthReady) {
+        updateApiAuthStatus(
+            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
+            'error',
+        );
+        updateGlobalRefreshStatus('Admin API auth not ready', 'error');
+        return;
+    }
+
+    const payload = {
+        realm: 'scouts',
+        subject: 'calendar',
+        action: 'refresh',
+    };
+
+    if (calendarToken && calendarToken !== 'all') {
+        payload.calendar = calendarToken;
+    }
+
+    updateGlobalRefreshStatus(`Refreshing ${label}...`, 'loading');
+
+    try {
+        const result = await sendScoutsCommand(payload);
+        const count = Number.isFinite(result?.eventsCount) ? result.eventsCount : null;
+        const countSuffix = count !== null ? ` (${count} events in agenda)` : '';
+        updateGlobalRefreshStatus(`Refresh complete for ${label}${countSuffix}`, 'success');
+
+        setTimeout(() => {
+            loadEvents();
+        }, 1200);
+    } catch (error) {
+        console.error(`Error refreshing ${label}:`, error);
+        updateGlobalRefreshStatus(`Failed to refresh ${label}: ${error.message}`, 'error');
     }
 }
 

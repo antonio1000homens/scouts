@@ -25,6 +25,37 @@
             <p class="subtitle">Manage images and AI prompts for events</p>
         </header>
 
+        <section class="global-controls">
+            <div class="global-controls-header">
+                <h2>Global Scouts Controls</h2>
+                <p>Run lambda-wide operations for calendars and inspect agenda/event JSON outputs.</p>
+            </div>
+            <div class="global-controls-grid">
+                <div class="global-card">
+                    <h3>Refresh Calendars Individually</h3>
+                    <div class="calendar-refresh-grid">
+                        <button class="btn btn-primary requires-api" onclick="refreshSelectedCalendar('all', 'All Calendars')">Refresh All Calendars</button>
+                        <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('cubs-events', 'Cubs Events')">Cubs Events</button>
+                        <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('cubs-programme', 'Cubs Programme')">Cubs Programme</button>
+                        <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('scouts-events', 'Scouts Events')">Scouts Events</button>
+                        <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('scouts-programme', 'Scouts Programme')">Scouts Programme</button>
+                        <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('beavers-events', 'Beavers Events')">Beavers Events</button>
+                        <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('beavers-programme', 'Beavers Programme')">Beavers Programme</button>
+                    </div>
+                    <p id="global-refresh-status" class="refresh-status">No global refresh triggered yet.</p>
+                </div>
+                <div class="global-card">
+                    <h3>Consult Agenda And Events JSON</h3>
+                    <div class="global-actions">
+                        <button class="btn btn-secondary" onclick="toggleAgendaViewer()">Consult Agenda</button>
+                        <button class="btn btn-secondary" onclick="toggleEventsJsonViewer()">List events/*.json</button>
+                        <button class="btn btn-primary" onclick="loadEvents()">Reload Agenda From Disk</button>
+                    </div>
+                    <p class="refresh-status">The events list is generated from loaded agenda items and HEX identifiers.</p>
+                </div>
+            </div>
+        </section>
+
         <div class="admin-info">
             <div class="info-card">
                 <h3>S3 Upload Status</h3>
@@ -65,6 +96,14 @@
             <pre id="agenda-json-content" class="agenda-json-content">Loading agenda...</pre>
         </section>
 
+        <section id="events-json-viewer" class="agenda-viewer" style="display: none;">
+            <div class="agenda-viewer-header">
+                <h2>events/*.json Listing</h2>
+                <button class="btn btn-secondary" onclick="toggleEventsJsonViewer()">Close</button>
+            </div>
+            <pre id="events-json-content" class="agenda-json-content">No event JSON entries loaded yet.</pre>
+        </section>
+
         <div id="events-container" class="events-grid">
             <p class="loading">Loading events...</p>
         </div>
@@ -87,11 +126,23 @@
                         <input type="text" id="image-url" placeholder="https://example.com/image.jpg">
                     </div>
                     <div class="form-group">
-                        <label for="ai-prompt-input">Edit AI prompt/tagline:</label>
-                        <textarea id="ai-prompt-input" rows="4" placeholder="Enter AI prompt/tagline text"></textarea>
+                        <label for="image-prompt-input">Image Prompt (used for image/tagline generation context):</label>
+                        <textarea id="image-prompt-input" rows="3" placeholder="Enter image prompt"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="tagline-input">Tagline (manual override):</label>
+                        <textarea id="tagline-input" rows="3" placeholder="Enter tagline text"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Workflow Actions (queue via scouts2sqs):</label>
+                        <div class="workflow-actions">
+                            <button class="btn btn-secondary requires-api" onclick="queueWorkflowAction('AI')">Request AI Review</button>
+                            <button class="btn btn-secondary requires-api" onclick="queueWorkflowAction('imagePrompt')">Request Prompt Review</button>
+                            <button class="btn btn-secondary requires-api" onclick="queueWorkflowAction('pixabay')">Request Image URL Review</button>
+                        </div>
                     </div>
 
-                    <p class="note">The image URL and AI prompt will be sent to scouts2sqs. The backend persists metadata and downloads external images into S3.</p>
+                    <p class="note">Save Metadata persists manual values (URL/Prompt/Tagline). Workflow Actions queue separate review operations through scouts2sqs.</p>
                     <p id="modal-status" class="status-text"></p>
                 </div>
                 <div class="modal-footer">

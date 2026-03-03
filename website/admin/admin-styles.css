@@ -84,6 +84,56 @@ body {
     font-size: 1.1rem;
 }
 
+.global-controls {
+    background: white;
+    padding: 1.25rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    margin-bottom: 1.5rem;
+}
+
+.global-controls-header h2 {
+    color: var(--primary-color);
+    margin-bottom: 0.25rem;
+}
+
+.global-controls-header p {
+    color: var(--text-light);
+    font-size: 0.92rem;
+}
+
+.global-controls-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 1rem;
+    margin-top: 0.85rem;
+}
+
+.global-card {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    background: #fff;
+}
+
+.global-card h3 {
+    font-size: 1rem;
+    color: var(--text-dark);
+    margin-bottom: 0.65rem;
+}
+
+.calendar-refresh-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 0.55rem;
+}
+
+.global-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+}
+
 .admin-info {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -507,6 +557,12 @@ body {
     resize: vertical;
 }
 
+.workflow-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
 .note {
     background: var(--background-light);
     padding: 0.75rem;
@@ -536,6 +592,10 @@ body {
     }
 
     .events-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .global-controls-grid {
         grid-template-columns: 1fr;
     }
 
