@@ -41,11 +41,11 @@ function updateEventsCount(uniqueCount, rawCount = uniqueCount, hiddenCount = 0,
     countElement.textContent = `${uniqueCount} unique (${rawCount} raw${hiddenSuffix}${completeSuffix})`;
 }
 
-function updateHideStatus(message, type = 'info') {
-    const statusElement = document.getElementById('hide-status');
-    if (!statusElement) return;
-    statusElement.textContent = message;
-    statusElement.className = 'status-text status-' + type;
+function updateRuntimeDetails(message, type = 'info') {
+    const detailsElement = document.getElementById('runtime-state-details');
+    if (!detailsElement) return;
+    detailsElement.textContent = message;
+    detailsElement.className = `refresh-status ${type}`;
 }
 
 function updateHiddenEventsUi() {
@@ -180,10 +180,20 @@ function toggleEventsJsonViewer() {
 }
 
 function updateApiAuthStatus(message, type = 'info') {
-    const statusElement = document.getElementById('api-auth-status');
+    const statusElement = document.getElementById('api-ready-indicator');
     if (!statusElement) return;
-    statusElement.textContent = message;
-    statusElement.className = 'status-text status-' + type;
+    let label = 'API Not Ready';
+    let className = 'api-ready-pill api-error';
+    if (type === 'success') {
+        label = 'API Ready';
+        className = 'api-ready-pill api-success';
+    } else if (type === 'loading' || type === 'info') {
+        label = 'API Checking';
+        className = 'api-ready-pill api-loading';
+    }
+    statusElement.textContent = label;
+    statusElement.className = className;
+    statusElement.title = message || label;
 }
 
 function updateRuntimeStatus(message, type = 'info') {
@@ -191,6 +201,32 @@ function updateRuntimeStatus(message, type = 'info') {
     if (!statusElement) return;
     statusElement.textContent = message;
     statusElement.className = 'status-text status-' + type;
+}
+
+function formatRuntimeCommand(command) {
+    if (!command || typeof command !== 'object') return 'No command context';
+    const realm = command.realm ?? 'unknown';
+    const subject = command.subject ?? 'unknown';
+    const action = command.action ?? 'unknown';
+    let suffix = '';
+    if (Array.isArray(command.calendarTokens) && command.calendarTokens.length > 0) {
+        suffix = ` | calendars=${command.calendarTokens.join(',')}`;
+    }
+    return `Command: realm=${realm} subject=${subject} action=${action}${suffix}`;
+}
+
+function formatRuntimeResult(result) {
+    if (result == null) return 'No result captured yet.';
+    if (typeof result === 'string') return `Result: ${result}`;
+    if (typeof result !== 'object') return `Result: ${String(result)}`;
+
+    const status = result.status ?? 'unknown';
+    const message = result.message ?? '';
+    const eventsCount = Number.isFinite(result.eventsCount) ? ` events=${result.eventsCount}` : '';
+    const modifiedCount = Number.isFinite(result.modifiedEventsCount) ? ` modified=${result.modifiedEventsCount}` : '';
+    const queueAccepted = result.queueAccepted === true ? ' queueAccepted=true' : '';
+    const summary = `Result: status=${status}${eventsCount}${modifiedCount}${queueAccepted}`;
+    return message ? `${summary} message="${message}"` : summary;
 }
 
 function updateModalStatus(message, type = 'info') {
@@ -248,6 +284,7 @@ async function pollLambdaRuntimeStatus(silent = false) {
         refreshApiActionButtons();
         if (!silent) {
             updateRuntimeStatus('Runtime status unavailable (API auth not ready).', 'error');
+            updateRuntimeDetails('Cloudflare auth is not ready.', 'error');
         }
         return;
     }
@@ -266,6 +303,7 @@ async function pollLambdaRuntimeStatus(silent = false) {
             const startedAt = runtime?.startedAt ? new Date(runtime.startedAt).toLocaleString('en-GB') : 'unknown';
             const subject = runtime?.command?.subject || 'unknown';
             updateRuntimeStatus(`Running (${subject}) since ${startedAt}.`, 'loading');
+            updateRuntimeDetails(formatRuntimeCommand(runtime?.command), 'loading');
         } else {
             const completedAt = runtime?.lastCompletedAt
                 ? new Date(runtime.lastCompletedAt).toLocaleString('en-GB')
@@ -273,12 +311,23 @@ async function pollLambdaRuntimeStatus(silent = false) {
             const outcome = runtime?.lastOutcome || 'idle';
             const suffix = completedAt ? ` Last ${outcome} at ${completedAt}.` : '';
             updateRuntimeStatus(`Idle.${suffix}`, 'success');
+            const lastCommand = runtime?.lastCommand || null;
+            const lastResult = runtime?.lastResult || null;
+            if (lastCommand || lastResult) {
+                const pieces = [];
+                if (lastCommand) pieces.push(formatRuntimeCommand(lastCommand));
+                if (lastResult) pieces.push(formatRuntimeResult(lastResult));
+                updateRuntimeDetails(pieces.join(' | '), outcome === 'error' ? 'error' : 'success');
+            } else {
+                updateRuntimeDetails('No lambda commands recorded yet.', 'info');
+            }
         }
     } catch (error) {
         lambdaRuntimeRunning = false;
         refreshApiActionButtons();
         if (!silent) {
             updateRuntimeStatus(`Runtime status check failed: ${error.message}`, 'error');
+            updateRuntimeDetails('Unable to fetch runtime details.', 'error');
         }
     }
 }
@@ -317,6 +366,7 @@ async function checkApiAuthStatus() {
         );
         setApiActionState(false);
         updateRuntimeStatus('Runtime status unavailable.', 'error');
+        updateRuntimeDetails('Runtime details unavailable.', 'error');
     }
 }
 
@@ -695,7 +745,7 @@ function openUploadModal(index) {
     currentEventIndex = index;
     const entry = visibleEventEntries[index];
     if (!entry || !entry.event) {
-        updateHideStatus('Unable to open editor for selected event.', 'error');
+        updateRuntimeDetails('Unable to open editor for selected event.', 'error');
         return;
     }
     const event = entry.event;
@@ -814,7 +864,7 @@ async function refreshLambda() {
                 .slice(0, 5)
                 .map((entry) => entry?.title || entry?.hex || entry?.uid || entry?.key || 'unknown')
                 .join(' | ');
-            updateHideStatus(`Modified events: ${preview}${modifiedEvents.length > 5 ? ' ...' : ''}`, 'info');
+            updateRuntimeDetails(`Modified events: ${preview}${modifiedEvents.length > 5 ? ' ...' : ''}`, 'success');
         }
 
         // Optionally reload events after a short delay
@@ -893,23 +943,24 @@ async function requeueEvent(eventIndex, fromModal = false) {
     if (lambdaRuntimeRunning || uiCommandInFlight) {
         const message = 'Lambda currently running. Wait for completion before queueing.';
         if (fromModal) updateModalStatus(message, 'error');
-        else updateHideStatus(message, 'error');
+        else updateRuntimeDetails(message, 'error');
         return;
     }
 
     const entry = visibleEventEntries[eventIndex];
     if (!entry || !entry.event) {
         if (fromModal) updateModalStatus('Unable to find selected event entry.', 'error');
-        else updateHideStatus('Unable to find selected event entry.', 'error');
+        else updateRuntimeDetails('Unable to find selected event entry.', 'error');
         return;
     }
 
     const event = entry.event;
+    const eventLabel = event.summary || event.title || `Event ${eventIndex + 1}`;
     const missing = getMissingMetadataFields(event);
     if (missing.length === 0) {
         const message = 'Event metadata is complete. Requeue not required.';
         if (fromModal) updateModalStatus(message, 'info');
-        else updateHideStatus(message, 'info');
+        else updateRuntimeDetails(message, 'info');
         return;
     }
 
@@ -917,7 +968,7 @@ async function requeueEvent(eventIndex, fromModal = false) {
     if (!hex) {
         const message = 'Cannot requeue: event is missing HEX.';
         if (fromModal) updateModalStatus(message, 'error');
-        else updateHideStatus(message, 'error');
+        else updateRuntimeDetails(message, 'error');
         return;
     }
 
@@ -937,22 +988,23 @@ async function requeueEvent(eventIndex, fromModal = false) {
         event: subject,
     };
 
-    const loadingMessage = `Requeueing ${hex} (missing: ${missing.join(', ')})...`;
+    const loadingMessage = `Requeueing "${eventLabel}" (missing: ${missing.join(', ')})...`;
     if (fromModal) updateModalStatus(loadingMessage, 'loading');
-    else updateHideStatus(loadingMessage, 'loading');
+    else updateRuntimeDetails(loadingMessage, 'loading');
 
     uiCommandInFlight = true;
     refreshApiActionButtons();
     try {
         const result = await sendScoutsCommand(payload);
-        const successMessage = result?.message || `Requeue request submitted for ${hex}.`;
+        const queueAcceptedSuffix = result?.queueAccepted === true ? ' Queue accepted.' : '';
+        const successMessage = `Requeue request submitted for "${eventLabel}".${queueAcceptedSuffix}`;
         if (fromModal) updateModalStatus(successMessage, 'success');
-        else updateHideStatus(successMessage, 'success');
+        else updateRuntimeDetails(successMessage, 'success');
     } catch (error) {
         console.error('Error requeueing event:', error);
         const failureMessage = `Failed to requeue event: ${error.message}`;
         if (fromModal) updateModalStatus(failureMessage, 'error');
-        else updateHideStatus(failureMessage, 'error');
+        else updateRuntimeDetails(failureMessage, 'error');
     } finally {
         uiCommandInFlight = false;
         refreshApiActionButtons();
