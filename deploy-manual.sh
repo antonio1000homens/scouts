@@ -33,20 +33,22 @@ done
 # Sync website directory excluding generated event images
 echo "Syncing website directory (excluding website/eventImages)..."
 
-# Generate admin runtime config from environment variables when provided
-if [ -n "${SCOUTS2SQS_API_KEY:-}" ] || [ -n "${SCOUTS_REFRESH_URL:-}" ] || [ -n "${SCOUTS2SQS_URL:-}" ]; then
-  echo "Generating website/admin/admin-config.js from environment variables..."
-  {
-    echo "// Generated during manual deploy from environment variables."
-    echo "window.SCOUTS2SQS_API_KEY = '${SCOUTS2SQS_API_KEY:-}';"
-    if [ -n "${SCOUTS_REFRESH_URL:-}" ]; then
-      echo "window.SCOUTS_REFRESH_URL = '${SCOUTS_REFRESH_URL}';"
-    fi
-    if [ -n "${SCOUTS2SQS_URL:-}" ]; then
-      echo "window.SCOUTS2SQS_URL = '${SCOUTS2SQS_URL}';"
-    fi
-  } > website/admin/admin-config.js
-fi
+# Generate admin runtime config for Cloudflare Worker proxy mode.
+echo "Generating website/admin/admin-config.js for Cloudflare proxy..."
+ADMIN_API_BASE_VALUE="${ADMIN_API_BASE:-/admin-api}"
+{
+  echo "// Generated during manual deploy for Cloudflare Worker proxy mode."
+  echo "window.ADMIN_API_BASE = '${ADMIN_API_BASE_VALUE}';"
+  if [ -n "${SCOUTS_AUTH_STATUS_URL:-}" ]; then
+    echo "window.SCOUTS_AUTH_STATUS_URL = '${SCOUTS_AUTH_STATUS_URL}';"
+  fi
+  if [ -n "${SCOUTS_REFRESH_URL:-}" ]; then
+    echo "window.SCOUTS_REFRESH_URL = '${SCOUTS_REFRESH_URL}';"
+  fi
+  if [ -n "${SCOUTS2SQS_URL:-}" ]; then
+    echo "window.SCOUTS2SQS_URL = '${SCOUTS2SQS_URL}';"
+  fi
+} > website/admin/admin-config.js
 
 aws s3 sync website/ s3://2ndtolworth/website/ \
   --delete \
