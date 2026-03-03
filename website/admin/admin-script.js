@@ -90,7 +90,10 @@ async function checkApiAuthStatus() {
             throw new Error(payload?.message || 'Auth status check failed.');
         }
 
-        updateApiAuthStatus('Ready - Cloudflare API proxy authenticated', 'success');
+        const keySuffix = typeof payload.apiKeyLast4 === 'string' && payload.apiKeyLast4
+            ? ` (key ending ${payload.apiKeyLast4})`
+            : '';
+        updateApiAuthStatus(`Ready - Cloudflare API proxy authenticated${keySuffix}`, 'success');
         setApiActionState(true);
     } catch (error) {
         console.error('Error checking admin API auth status:', error);
