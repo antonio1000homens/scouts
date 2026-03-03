@@ -19,40 +19,31 @@ For example:
 - Local development: `http://localhost:8000/website/admin/index.html`
 - Production: `http://2ndtolworth.s3-website.eu-west-2.amazonaws.com/website/admin/index.html`
 
-## Admin API Key Configuration
+## Admin API Proxy Configuration
 
-The admin page reads the API key from a browser global:
+The admin page now calls Cloudflare Worker endpoints (same origin):
 
-- `window.SCOUTS2SQS_API_KEY`
+- `GET /admin-api/auth-status`
+- `POST /admin-api/persist`
+- `POST /admin-api/refresh`
 
 `website/admin/index.html` loads `admin-config.js` before `admin-script.js`.
 
-Default behavior:
+Default browser config:
 
-- `website/admin/admin-config.js` is committed with a blank key (safe default).
+- `window.ADMIN_API_BASE = '/admin-api'`
 
-CI deployment behavior:
+Optional browser overrides:
 
-- The GitHub Actions workflow generates `website/admin/admin-config.js` at deploy time from secrets.
-- Add these repository secrets:
-   - `SCOUTS2SQS_API_KEY` (required)
-   - `SCOUTS_REFRESH_URL` (optional override)
-   - `SCOUTS2SQS_URL` (optional override)
+- `window.SCOUTS_AUTH_STATUS_URL`
+- `window.SCOUTS_REFRESH_URL`
+- `window.SCOUTS2SQS_URL`
 
-Manual deployment behavior:
+Security model:
 
-- `deploy-manual.sh` can generate `website/admin/admin-config.js` from environment variables before syncing to S3.
-- Example:
-
-   ```bash
-   export SCOUTS2SQS_API_KEY='YOUR_REQUIRED_API_KEY'
-   ./deploy-manual.sh
-   ```
-
-Notes:
-
-- Any key sent to browser JavaScript is accessible to authenticated admin users in DevTools.
-- If you need stronger protection, move admin requests through a server-side proxy and keep secrets server-only.
+- Lambda API key is stored only in Cloudflare Worker secret `SCOUTS_LAMBDA_API_KEY`.
+- Browser no longer carries the API key.
+- Admin UI shows an "API Auth Status" warning and disables action buttons when the proxy/session is not ready.
 
 ## How It Works
 

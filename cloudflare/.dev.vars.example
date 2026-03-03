@@ -1,0 +1,6 @@
+SCOUTS2SQS_URL="https://makwmjq3oycgcrrorhn7tndsaa0ujnyh.lambda-url.eu-west-2.on.aws/"
+SCOUTS_REFRESH_URL="https://h6ibdinq6dnu2zjekd4aqgkp2a0brmrh.lambda-url.eu-west-2.on.aws/"
+SCOUTS_LAMBDA_API_KEY="replace-with-real-key"
+# Set to false locally if you are not testing through Cloudflare Access.
+REQUIRE_CF_ACCESS="false"
+

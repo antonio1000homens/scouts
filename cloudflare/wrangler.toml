@@ -1,0 +1,14 @@
+name = "scouts-admin-proxy"
+main = "worker.js"
+compatibility_date = "2026-03-03"
+
+# Configure your real zone route before deploy.
+# Example:
+# routes = [
+#   { pattern = "scouts.example.com/admin-api/*", zone_name = "example.com" }
+# ]
+
+[vars]
+# Set to "true" to require a Cloudflare Access JWT on incoming requests.
+REQUIRE_CF_ACCESS = "true"
+
