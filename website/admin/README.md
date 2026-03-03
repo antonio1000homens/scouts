@@ -8,6 +8,7 @@ This admin page provides an interface to view and manage event images and AI pro
 - **Event Information**: Shows event name, index, date, location
 - **Image Display**: Shows current event images with their URLs
 - **AI Prompts**: Displays AI-generated descriptions for each event
+- **Metadata Editing**: Update image URL and AI prompt/tagline from the same modal
 - **Section Badges**: Color-coded badges for Beavers, Cubs, and Scouts events
 - **S3 Upload Ready**: Prepared for AWS S3 integration to replace images
 

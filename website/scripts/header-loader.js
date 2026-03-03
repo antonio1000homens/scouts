@@ -1,14 +1,6 @@
 function handleAdminNavigation(event) {
     event.preventDefault();
-    var password = window.prompt('Enter the admin password');
-    if (password === null) {
-        return;
-    }
-    if (password === 'coldbath') {
-        window.location.href = '/website/admin/index.html';
-    } else {
-        window.alert('Incorrect password');
-    }
+    window.open('/website/admin/index.html', '_blank', 'noopener,noreferrer');
 }
 
 function attachAdminLinks(root) {
@@ -18,6 +10,9 @@ function attachAdminLinks(root) {
             return;
         }
         link.dataset.adminReady = 'true';
+        link.setAttribute('href', '/website/admin/index.html');
+        link.setAttribute('target', '_blank');
+        link.setAttribute('rel', 'noopener noreferrer');
         link.addEventListener('click', handleAdminNavigation);
     });
 }
