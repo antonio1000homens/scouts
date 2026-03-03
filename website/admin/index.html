@@ -12,6 +12,13 @@
     <!-- <script src="https://sdk.amazonaws.com/js/aws-sdk-2.1234.0.min.js"></script> -->
 </head>
 <body>
+    <nav class="admin-top-nav">
+        <div class="admin-top-nav-inner">
+            <a href="/index.html" class="nav-link">Website Home</a>
+            <a href="/website/admin/index.html" class="nav-link active">Admin</a>
+            <button class="btn btn-secondary nav-btn" onclick="toggleAgendaViewer()">Show Actual Agenda</button>
+        </div>
+    </nav>
     <div class="admin-container">
         <header class="admin-header">
             <h1>Event Images Administration</h1>
@@ -43,7 +50,20 @@
                 <h3>Hide Status</h3>
                 <p id="hide-status" class="status-text">No hide requests yet.</p>
             </div>
+            <div class="info-card">
+                <h3>Hidden Events</h3>
+                <button id="toggle-hidden-events" class="btn btn-secondary" onclick="toggleHiddenEvents()">Show Hidden</button>
+                <p id="hidden-summary" class="refresh-status">Hidden events are collapsed by default.</p>
+            </div>
         </div>
+
+        <section id="agenda-viewer" class="agenda-viewer" style="display: none;">
+            <div class="agenda-viewer-header">
+                <h2>Actual Agenda JSON</h2>
+                <button class="btn btn-secondary" onclick="toggleAgendaViewer()">Close</button>
+            </div>
+            <pre id="agenda-json-content" class="agenda-json-content">Loading agenda...</pre>
+        </section>
 
         <div id="events-container" class="events-grid">
             <p class="loading">Loading events...</p>
@@ -53,7 +73,7 @@
         <div id="upload-modal" class="modal" style="display: none;">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h2>Replace Event Image</h2>
+                    <h2>Update Event Metadata</h2>
                     <button class="modal-close" onclick="closeUploadModal()">&times;</button>
                 </div>
                 <div class="modal-body">
@@ -66,13 +86,17 @@
                         <label for="image-url">Paste a public image URL:</label>
                         <input type="text" id="image-url" placeholder="https://example.com/image.jpg">
                     </div>
+                    <div class="form-group">
+                        <label for="ai-prompt-input">Edit AI prompt/tagline:</label>
+                        <textarea id="ai-prompt-input" rows="4" placeholder="Enter AI prompt/tagline text"></textarea>
+                    </div>
 
-                    <p class="note">The URL will be sent to scouts2sqs. The backend will download it into S3 and persist the event.</p>
+                    <p class="note">The image URL and AI prompt will be sent to scouts2sqs. The backend persists metadata and downloads external images into S3.</p>
                     <p id="modal-status" class="status-text"></p>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" onclick="closeUploadModal()">Cancel</button>
-                    <button id="upload-button" class="btn btn-primary requires-api" onclick="uploadImage()">Send Image URL</button>
+                    <button id="upload-button" class="btn btn-primary requires-api" onclick="uploadImage()">Save Metadata</button>
                 </div>
             </div>
         </div>

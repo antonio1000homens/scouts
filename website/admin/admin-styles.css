@@ -24,6 +24,41 @@ body {
     line-height: 1.6;
 }
 
+.admin-top-nav {
+    position: sticky;
+    top: 0;
+    z-index: 1100;
+    background: #1f2937;
+    border-bottom: 3px solid var(--secondary-color);
+}
+
+.admin-top-nav-inner {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0.75rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.nav-link {
+    color: #fff;
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 0.9rem;
+    padding: 0.35rem 0.55rem;
+    border-radius: 4px;
+}
+
+.nav-link:hover,
+.nav-link.active {
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.nav-btn {
+    margin-left: auto;
+}
+
 .admin-container {
     max-width: 1400px;
     margin: 0 auto;
@@ -139,6 +174,39 @@ body {
     gap: 1.5rem;
 }
 
+.agenda-viewer {
+    background: #111827;
+    color: #f9fafb;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+.agenda-viewer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.agenda-viewer-header h2 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.agenda-json-content {
+    background: #030712;
+    color: #d1d5db;
+    border: 1px solid #374151;
+    border-radius: 6px;
+    padding: 0.9rem;
+    max-height: 420px;
+    overflow: auto;
+    margin: 0;
+    font-size: 0.82rem;
+}
+
 .event-card {
     background: white;
     border-radius: 8px;
@@ -180,6 +248,7 @@ body {
 .event-badge.beavers { color: #00a794; }
 .event-badge.cubs { color: #23a950; }
 .event-badge.scouts { color: #004851; }
+.event-badge.hidden { color: #b54708; }
 
 .btn-hide {
     position: absolute;
@@ -428,6 +497,16 @@ body {
     font-size: 1rem;
 }
 
+.form-group textarea {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 1rem;
+    font-family: inherit;
+    resize: vertical;
+}
+
 .note {
     background: var(--background-light);
     padding: 0.75rem;
@@ -439,6 +518,15 @@ body {
 
 /* Responsive Design */
 @media (max-width: 768px) {
+    .admin-top-nav-inner {
+        padding: 0.75rem 1rem;
+        flex-wrap: wrap;
+    }
+
+    .nav-btn {
+        margin-left: 0;
+    }
+
     .admin-container {
         padding: 1rem;
     }

@@ -1,9 +1,13 @@
 // Admin Script for Event Images Management
 
 let eventsData = [];
+let uniqueEventEntries = [];
+let visibleEventEntries = [];
 let hasS3Permission = false;
 let currentEventIndex = null;
 let apiAuthReady = false;
+let showHiddenEvents = false;
+let agendaPayload = null;
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
 const SCOUTS2SQS_URL = window.SCOUTS2SQS_URL || `${ADMIN_API_BASE}/persist`;
 const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/refresh`;
@@ -42,9 +46,10 @@ function updateS3Status(message, type) {
     statusElement.className = 'status-text status-' + type;
 }
 
-function updateEventsCount(count) {
+function updateEventsCount(uniqueCount, rawCount = uniqueCount, hiddenCount = 0) {
     const countElement = document.getElementById('events-count');
-    countElement.textContent = count + ' event' + (count !== 1 ? 's' : '');
+    const hiddenSuffix = hiddenCount > 0 ? `, ${hiddenCount} hidden` : '';
+    countElement.textContent = `${uniqueCount} unique (${rawCount} raw${hiddenSuffix})`;
 }
 
 function updateHideStatus(message, type = 'info') {
@@ -52,6 +57,59 @@ function updateHideStatus(message, type = 'info') {
     if (!statusElement) return;
     statusElement.textContent = message;
     statusElement.className = 'status-text status-' + type;
+}
+
+function updateHiddenEventsUi() {
+    const toggleButton = document.getElementById('toggle-hidden-events');
+    const hiddenSummary = document.getElementById('hidden-summary');
+    const hiddenCount = uniqueEventEntries.filter((entry) => entry.allHidden).length;
+
+    if (toggleButton) {
+        toggleButton.textContent = showHiddenEvents ? 'Hide Hidden' : 'Show Hidden';
+    }
+
+    if (hiddenSummary) {
+        if (hiddenCount === 0) {
+            hiddenSummary.textContent = 'No hidden events in agenda.';
+        } else if (showHiddenEvents) {
+            hiddenSummary.textContent = `Showing ${hiddenCount} hidden event group${hiddenCount !== 1 ? 's' : ''}.`;
+        } else {
+            hiddenSummary.textContent = `${hiddenCount} hidden event group${hiddenCount !== 1 ? 's' : ''} collapsed.`;
+        }
+    }
+}
+
+function toggleHiddenEvents() {
+    showHiddenEvents = !showHiddenEvents;
+    updateHiddenEventsUi();
+    renderEvents();
+}
+
+function renderAgendaViewerContent() {
+    const agendaContentEl = document.getElementById('agenda-json-content');
+    if (!agendaContentEl) return;
+    if (!agendaPayload) {
+        agendaContentEl.textContent = 'Agenda not loaded yet.';
+        return;
+    }
+    agendaContentEl.textContent = JSON.stringify(agendaPayload, null, 2);
+}
+
+function toggleAgendaViewer() {
+    const viewer = document.getElementById('agenda-viewer');
+    const navButton = document.querySelector('.admin-top-nav .nav-btn');
+    if (!viewer) return;
+
+    const shouldShow = viewer.style.display === 'none' || viewer.style.display === '';
+    viewer.style.display = shouldShow ? 'block' : 'none';
+
+    if (navButton) {
+        navButton.textContent = shouldShow ? 'Hide Actual Agenda' : 'Show Actual Agenda';
+    }
+
+    if (shouldShow) {
+        renderAgendaViewerContent();
+    }
 }
 
 function updateApiAuthStatus(message, type = 'info') {
@@ -116,14 +174,22 @@ async function loadEvents() {
         }
 
         const data = await response.json();
+        agendaPayload = data;
         eventsData = data.events || [];
+        uniqueEventEntries = buildUniqueEventEntries(eventsData);
         console.log('[Admin] agenda.json fetched', {
             totalEvents: data.events?.length ?? 0,
-            visibleEvents: eventsData.length,
+            uniqueEvents: uniqueEventEntries.length,
         });
-        
-        updateEventsCount(eventsData.length);
+
+        updateEventsCount(
+            uniqueEventEntries.length,
+            eventsData.length,
+            uniqueEventEntries.filter((entry) => entry.allHidden).length,
+        );
+        updateHiddenEventsUi();
         renderEvents();
+        renderAgendaViewerContent();
     } catch (error) {
         console.error('Error loading events:', error);
         showError('Failed to load events data. Please ensure agenda.json exists and is accessible.');
@@ -192,24 +258,137 @@ function getEventSection(event) {
     return 'all';
 }
 
+function hasText(value) {
+    return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isHiddenEvent(event) {
+    const statusValue = typeof event?.status === 'string' ? event.status.trim().toLowerCase() : '';
+    return statusValue === 'hidden' || Boolean(event?.hiddenAt);
+}
+
+function getEventMergeKey(event, index) {
+    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+    if (hex) return `hex:${hex}`;
+
+    const uid = hasText(event?.uid) ? event.uid.trim() : '';
+    if (uid) return `uid:${uid}`;
+
+    return `generated:${generateEventUID(event, index)}`;
+}
+
+function cloneEventRecord(event) {
+    try {
+        return JSON.parse(JSON.stringify(event || {}));
+    } catch {
+        return { ...(event || {}) };
+    }
+}
+
+function mergeEventMetadata(targetEvent, sourceEvent) {
+    if (!targetEvent || !sourceEvent) return;
+
+    if (!hasText(targetEvent.hex) && hasText(sourceEvent.hex)) {
+        targetEvent.hex = sourceEvent.hex.trim();
+    }
+
+    if (!hasText(targetEvent.uid) && hasText(sourceEvent.uid)) {
+        targetEvent.uid = sourceEvent.uid.trim();
+    }
+
+    if (!hasText(targetEvent.summary) && hasText(sourceEvent.summary)) {
+        targetEvent.summary = sourceEvent.summary;
+    }
+
+    if (!hasText(targetEvent.title) && hasText(sourceEvent.title)) {
+        targetEvent.title = sourceEvent.title;
+    }
+
+    if (!hasText(targetEvent.location) && hasText(sourceEvent.location)) {
+        targetEvent.location = sourceEvent.location;
+    }
+
+    if (!hasText(getAIPrompt(targetEvent)) && hasText(getAIPrompt(sourceEvent))) {
+        targetEvent.AI = getAIPrompt(sourceEvent);
+    }
+
+    if (!hasText(getImageUrl(targetEvent)) && hasText(getImageUrl(sourceEvent))) {
+        if (!targetEvent.image || typeof targetEvent.image !== 'object') {
+            targetEvent.image = {};
+        }
+        targetEvent.image.url = getImageUrl(sourceEvent);
+    }
+}
+
+function buildUniqueEventEntries(events) {
+    const grouped = new Map();
+
+    (events || []).forEach((event, index) => {
+        const key = getEventMergeKey(event, index);
+        const hidden = isHiddenEvent(event);
+        const sourceUid = hasText(event?.uid) ? event.uid.trim() : generateEventUID(event, index);
+        const existing = grouped.get(key);
+
+        if (!existing) {
+            grouped.set(key, {
+                key,
+                event: cloneEventRecord(event),
+                firstIndex: index,
+                duplicateCount: 1,
+                hiddenCount: hidden ? 1 : 0,
+                sourceDetails: [{ index, uid: sourceUid }],
+            });
+            return;
+        }
+
+        existing.duplicateCount += 1;
+        if (hidden) {
+            existing.hiddenCount += 1;
+        }
+        existing.sourceDetails.push({ index, uid: sourceUid });
+        mergeEventMetadata(existing.event, event);
+    });
+
+    return Array.from(grouped.values()).map((entry) => ({
+        ...entry,
+        allHidden: entry.hiddenCount === entry.duplicateCount,
+    }));
+}
+
+function getEntryIdentifier(entry) {
+    const event = entry?.event || {};
+    if (hasText(event.uid)) return event.uid.trim();
+    if (hasText(event.hex)) return `hex:${event.hex.trim()}`;
+    return generateEventUID(event, entry?.firstIndex ?? 0);
+}
+
 // Render all events
 function renderEvents() {
     const container = document.getElementById('events-container');
     
-    if (eventsData.length === 0) {
+    if (uniqueEventEntries.length === 0) {
         console.warn('[Admin] No events found after loading');
         container.innerHTML = '<p class="loading">No events found.</p>';
         return;
     }
 
-    container.innerHTML = eventsData.map((event, index) => {
+    visibleEventEntries = showHiddenEvents
+        ? [...uniqueEventEntries]
+        : uniqueEventEntries.filter((entry) => !entry.allHidden);
+
+    if (visibleEventEntries.length === 0) {
+        container.innerHTML = '<p class="loading">All events are hidden. Use "Show Hidden" to view them.</p>';
+        return;
+    }
+
+    container.innerHTML = visibleEventEntries.map((entry, index) => {
+        const event = entry.event;
         const imageUrl = getImageUrl(event);
         const aiPrompt = getAIPrompt(event);
         const section = getEventSection(event);
-        const statusValue = typeof event.status === 'string' ? event.status.trim().toLowerCase() : null;
-        const isHidden = statusValue === 'hidden' || Boolean(event.hiddenAt);
+        const isHidden = entry.allHidden;
         const title = event.summary || event.title || 'Untitled Event';
-        const eventUID = generateEventUID(event, index);
+        const eventUID = getEntryIdentifier(entry);
         if (!event.dtstart) {
             console.warn('[Admin] Event missing dtstart', { index, uid: eventUID, title });
         }
@@ -223,14 +402,18 @@ function renderEvents() {
                     }
                     <span class="event-badge ${section}">${section}</span>
                     ${isHidden ? `<span class="event-badge hidden">Hidden</span>` : ''}
-                    <button class="btn-hide${isHidden ? ' disabled' : ''}" onclick="hideEvent('${eventUID}')" title="Hide this event" ${isHidden ? 'disabled' : ''}>
+                    <button class="btn-hide${isHidden ? ' disabled' : ''}" onclick="hideEvent(${index})" title="Hide this event" ${isHidden ? 'disabled' : ''}>
                         ${isHidden ? 'Already Hidden' : 'Hide'}
                     </button>
                 </div>
                 <div class="event-details">
                     <h3 class="event-title">${title}</h3>
-                    <p class="event-index">Event Index: ${index} | UID: ${eventUID}</p>
+                    <p class="event-index">UID: ${eventUID} | Occurrences: ${entry.duplicateCount}</p>
                     ${event.hex ? `<p class="event-index">HEX: ${event.hex}</p>` : ''}
+                    ${entry.sourceDetails?.length
+                        ? `<div class="image-info"><strong>Grouped Source Events:</strong>${entry.sourceDetails.map((detail) => `<div class="image-url">Event Index: ${detail.index} | UID: ${detail.uid}</div>`).join('')}</div>`
+                        : ''
+                    }
                     
                     <div class="event-meta">
                         ${event.dtstart ? `<p><strong>Date:</strong> ${formatDate(event.dtstart)}</p>` : ''}
@@ -255,7 +438,7 @@ function renderEvents() {
                         class="btn btn-primary"
                         onclick="openUploadModal(${index})"
                     >
-                        Set Image URL
+                        Edit Image & AI
                     </button>
                 </div>
             </div>
@@ -306,7 +489,12 @@ function openUploadModal(index) {
     }
 
     currentEventIndex = index;
-    const event = eventsData[index];
+    const entry = visibleEventEntries[index];
+    if (!entry || !entry.event) {
+        updateHideStatus('Unable to open editor for selected event.', 'error');
+        return;
+    }
+    const event = entry.event;
     const modal = document.getElementById('upload-modal');
     
     document.getElementById('modal-event-name').textContent = event.summary || event.title || 'Event ' + index;
@@ -323,7 +511,9 @@ function openUploadModal(index) {
     
     // Clear previous inputs
     const urlField = document.getElementById('image-url');
+    const aiField = document.getElementById('ai-prompt-input');
     urlField.value = currentImage || '';
+    aiField.value = getAIPrompt(event) || '';
     document.getElementById('modal-status').textContent = '';
     document.getElementById('modal-status').className = 'status-text';
     
@@ -353,41 +543,62 @@ async function uploadImage() {
     }
 
     const urlInput = document.getElementById('image-url');
+    const aiInput = document.getElementById('ai-prompt-input');
     const statusEl = document.getElementById('modal-status');
-    const rawUrl = urlInput.value.trim();
-    const event = eventsData[currentEventIndex];
-    const hex = event.hex || null;
-
     const showStatus = (text, type = 'info') => {
         statusEl.textContent = text;
         statusEl.className = `status-text status-${type}`;
     };
+    const rawUrl = urlInput.value.trim();
+    const rawAiPrompt = aiInput.value.trim();
+    const entry = visibleEventEntries[currentEventIndex];
+    if (!entry || !entry.event) {
+        showStatus('Unable to find selected event entry.', 'error');
+        return;
+    }
+    const event = entry.event;
+    const hex = event.hex || null;
 
     if (!hex) {
         showStatus('This event is missing a HEX identifier and cannot be persisted.', 'error');
         return;
     }
 
-    if (!rawUrl) {
-        showStatus('Please paste a public image URL (http/https).', 'error');
+    if (!rawUrl && !rawAiPrompt) {
+        showStatus('Please provide an image URL and/or an AI prompt value.', 'error');
         return;
     }
 
-    let parsedUrl;
-    try {
-        parsedUrl = new URL(rawUrl);
-        if (!/^https?:$/i.test(parsedUrl.protocol)) {
-            throw new Error('Only http/https URLs are supported.');
+    let parsedUrl = null;
+    if (rawUrl) {
+        try {
+            parsedUrl = new URL(rawUrl);
+            if (!/^https?:$/i.test(parsedUrl.protocol)) {
+                throw new Error('Only http/https URLs are supported.');
+            }
+        } catch (error) {
+            showStatus(error.message || 'Invalid image URL.', 'error');
+            return;
         }
-    } catch (error) {
-        showStatus(error.message || 'Invalid image URL.', 'error');
-        return;
     }
 
     const subject = JSON.parse(JSON.stringify(event || {}));
     subject.hex = hex;
-    subject.image = subject.image || {};
-    subject.image.url = parsedUrl.toString();
+    const existingImage = subject.image;
+    if (!existingImage || typeof existingImage !== 'object') {
+        subject.image = {};
+        if (typeof existingImage === 'string' && existingImage.trim()) {
+            subject.image.url = existingImage.trim();
+        }
+    }
+
+    if (parsedUrl) {
+        subject.image.url = parsedUrl.toString();
+    }
+
+    if (rawAiPrompt) {
+        subject.AI = rawAiPrompt;
+    }
 
     const payload = {
         realm: 'persist',
@@ -395,7 +606,7 @@ async function uploadImage() {
         subject,
     };
 
-    showStatus('Sending image URL for download and persistence...', 'loading');
+    showStatus('Sending metadata for persistence...', 'loading');
 
     try {
         const response = await fetch(SCOUTS2SQS_URL, {
@@ -500,7 +711,7 @@ async function refreshLambda() {
 }
 
 // Hide event functionality
-async function hideEvent(eventUID) {
+async function hideEvent(eventIndex) {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -509,17 +720,20 @@ async function hideEvent(eventUID) {
         return;
     }
 
+    const entry = visibleEventEntries[eventIndex];
+    if (!entry || !entry.event) {
+        updateHideStatus('Unable to find selected event entry.', 'error');
+        return;
+    }
+
+    const match = entry.event;
+    const eventUID = getEntryIdentifier(entry);
+
     if (!confirm(`Are you sure you want to hide the event with UID: ${eventUID}?`)) {
         return;
     }
 
     updateHideStatus(`Hiding event ${eventUID}...`, 'loading');
-
-    const match = eventsData.find((event, index) => generateEventUID(event, index) === eventUID);
-    if (!match) {
-        updateHideStatus(`Unable to find event with UID ${eventUID}`, 'error');
-        return;
-    }
 
     const hexValue = match.hex;
     if (!hexValue) {
