@@ -3,7 +3,6 @@
 let eventsData = [];
 let uniqueEventEntries = [];
 let visibleEventEntries = [];
-let hasS3Permission = false;
 let currentEventIndex = null;
 let apiAuthReady = false;
 let lambdaRuntimeRunning = false;
@@ -33,18 +32,6 @@ async function buildHttpError(response) {
 
     const detailSuffix = details ? `: ${details}` : '';
     return new Error(`HTTP ${response.status}${detailSuffix}`);
-}
-
-// Check if AWS SDK is available and user has S3 permissions
-function checkS3Permissions() {
-    updateS3Status('Admin actions call scouts lambda only (no direct scouts2sqs calls)', 'info');
-    hasS3Permission = true;
-}
-
-function updateS3Status(message, type) {
-    const statusElement = document.getElementById('s3-status');
-    statusElement.textContent = message;
-    statusElement.className = 'status-text status-' + type;
 }
 
 function updateEventsCount(uniqueCount, rawCount = uniqueCount, hiddenCount = 0, completeCount = 0) {
@@ -815,8 +802,20 @@ async function refreshLambda() {
         await pollLambdaRuntimeStatus(true);
 
         const resultText = result?.status || result?.message || 'ok';
-        statusElement.textContent = `Agenda events refresh completed: ${resultText}`;
+        const modifiedEvents = Array.isArray(result?.modifiedEvents) ? result.modifiedEvents : [];
+        const modifiedCount = Number.isFinite(result?.modifiedEventsCount)
+            ? result.modifiedEventsCount
+            : modifiedEvents.length;
+        const modifiedSuffix = modifiedCount > 0 ? ` (${modifiedCount} events modified)` : ' (no event metadata changes)';
+        statusElement.textContent = `Agenda events refresh completed: ${resultText}${modifiedSuffix}`;
         statusElement.className = 'refresh-status success';
+        if (modifiedEvents.length > 0) {
+            const preview = modifiedEvents
+                .slice(0, 5)
+                .map((entry) => entry?.title || entry?.hex || entry?.uid || entry?.key || 'unknown')
+                .join(' | ');
+            updateHideStatus(`Modified events: ${preview}${modifiedEvents.length > 5 ? ' ...' : ''}`, 'info');
+        }
 
         // Optionally reload events after a short delay
         setTimeout(() => {
@@ -971,7 +970,6 @@ function requeueCurrentEvent() {
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
-    checkS3Permissions();
     setApiActionState(false);
     checkApiAuthStatus();
     loadEvents();
