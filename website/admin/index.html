@@ -23,6 +23,9 @@
         <header class="admin-header">
             <h1>Event Images Administration</h1>
             <p class="subtitle">Manage images and AI prompts for events</p>
+            <div class="admin-top-status">
+                <span id="api-ready-indicator" class="api-ready-pill api-loading" title="Checking Cloudflare admin API...">API Checking</span>
+            </div>
         </header>
 
         <section class="global-controls">
@@ -32,7 +35,7 @@
             </div>
             <div class="global-controls-grid">
                 <div class="global-card">
-                    <h3>Refresh Calendars Individually</h3>
+                    <h3>Calendar</h3>
                     <div class="calendar-refresh-grid">
                         <button class="btn btn-primary requires-api" onclick="refreshSelectedCalendar('all', 'All Calendars')">Refresh All Calendars</button>
                         <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('cubs-events', 'Cubs Events')">Cubs Events</button>
@@ -43,15 +46,14 @@
                         <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('beavers-programme', 'Beavers Programme')">Beavers Programme</button>
                     </div>
                     <p id="global-refresh-status" class="refresh-status">No global refresh triggered yet.</p>
-                    <h3>Refresh Agenda Events</h3>
+                </div>
+                <div class="global-card">
+                    <h3>Events</h3>
                     <div class="refresh-controls">
                         <input type="number" id="refresh-action" placeholder="Events to enrich (e.g. 5)" class="refresh-input" min="0" step="1">
                         <button id="refresh-button" class="btn btn-primary requires-api" onclick="refreshLambda()">Refresh Agenda events</button>
                     </div>
                     <p id="refresh-status" class="refresh-status"></p>
-                </div>
-                <div class="global-card">
-                    <h3>Consult Agenda And Events JSON</h3>
                     <div class="global-actions">
                         <button class="btn btn-secondary" onclick="toggleAgendaViewer()">Consult Agenda</button>
                         <button class="btn btn-secondary" onclick="toggleEventsJsonViewer()">List events/*.json</button>
@@ -68,16 +70,9 @@
                 <p id="events-count" class="status-text">-</p>
             </div>
             <div class="info-card">
-                <h3>API Auth Status</h3>
-                <p id="api-auth-status" class="status-text">Checking Cloudflare admin API...</p>
-            </div>
-            <div class="info-card">
                 <h3>Lambda Run State</h3>
                 <p id="runtime-state-status" class="status-text">Checking runtime state...</p>
-            </div>
-            <div class="info-card">
-                <h3>Hide Status</h3>
-                <p id="hide-status" class="status-text">No hide requests yet.</p>
+                <p id="runtime-state-details" class="refresh-status">No lambda commands yet.</p>
             </div>
             <div class="info-card">
                 <h3>Hidden Events</h3>
