@@ -51,6 +51,13 @@ function requireConfig(env) {
   return null;
 }
 
+function keySuffix(value) {
+  const key = (value || "").trim();
+  if (!key) return "";
+  if (key.length <= 4) return key;
+  return key.slice(-4);
+}
+
 async function proxyToLambda(request, lambdaBaseUrl, apiKey) {
   const safeApiKey = (apiKey || "").trim();
   const upstreamUrl = new URL(lambdaBaseUrl);
@@ -106,7 +113,15 @@ export default {
     if (configErr) return configErr;
 
     if (url.pathname === "/admin-api/auth-status" && request.method === "GET") {
-      return json({ ok: true, code: "READY", message: "Proxy and API key are configured." }, 200);
+      return json(
+        {
+          ok: true,
+          code: "READY",
+          message: "Proxy and API key are configured.",
+          apiKeyLast4: keySuffix(env.SCOUTS_LAMBDA_API_KEY),
+        },
+        200,
+      );
     }
 
     if (url.pathname === "/admin-api/persist" && request.method === "POST") {
