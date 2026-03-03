@@ -563,6 +563,25 @@ body {
     gap: 0.5rem;
 }
 
+.event-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.requeue-hint {
+    margin-top: 0.75rem;
+    margin-bottom: 0;
+    font-size: 0.85rem;
+    color: #92400e;
+    font-weight: 600;
+}
+
+.requeue-hint.requeue-ready {
+    color: var(--success-color);
+}
+
 .note {
     background: var(--background-light);
     padding: 0.75rem;

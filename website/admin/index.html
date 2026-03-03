@@ -139,7 +139,9 @@
                             <button class="btn btn-secondary requires-api" onclick="queueWorkflowAction('AI')">Request AI Review</button>
                             <button class="btn btn-secondary requires-api" onclick="queueWorkflowAction('imagePrompt')">Request Prompt Review</button>
                             <button class="btn btn-secondary requires-api" onclick="queueWorkflowAction('pixabay')">Request Image URL Review</button>
+                            <button id="modal-requeue-button" class="btn btn-secondary requires-api" style="display:none;" onclick="requeueCurrentEvent()">Requeue Missing Fields</button>
                         </div>
+                        <p id="modal-requeue-hint" class="refresh-status"></p>
                     </div>
 
                     <p class="note">Save Metadata persists manual values (URL/Prompt/Tagline). Workflow Actions queue separate review operations through scouts2sqs.</p>
