@@ -19,6 +19,7 @@ const MIN_RUNTIME_DETAILS_VISIBLE_MS = 5000;
 const AGENDA_POLL_INTERVAL_MS = 15000;
 const QUEUE_DEPTH_POLL_INTERVAL_MS = 5000;
 const HEX_HYDRATION_POLL_INTERVAL_MS = 6000;
+const AUTO_LAMBDA_INVOKE_INTERVAL_MS = 20000;
 const MAX_TRACKED_REQUEUE_ENTRIES = 30;
 let runtimeDetailsLastShownAt = 0;
 let runtimeDetailsLastMessage = '';
@@ -26,6 +27,7 @@ let runtimeDetailsLastType = 'info';
 let runtimeDetailsPending = null;
 let runtimeDetailsFlushTimer = null;
 let hexHydrationInFlight = false;
+let autoLambdaInvokeInFlight = false;
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
 const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
 const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
@@ -517,6 +519,69 @@ function formatObservedIds(snapshot) {
     return parts.join(' | ');
 }
 
+function decodeHexToText(hexValue) {
+    const hex = hasText(hexValue) ? String(hexValue).trim().toLowerCase() : '';
+    if (!hex || hex.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(hex)) return null;
+    try {
+        const bytes = [];
+        for (let i = 0; i < hex.length; i += 2) {
+            bytes.push(parseInt(hex.slice(i, i + 2), 16));
+        }
+        const decoded = new TextDecoder().decode(new Uint8Array(bytes)).trim();
+        return decoded || null;
+    } catch {
+        return null;
+    }
+}
+
+function resolveEventTitleByHex(hexValue) {
+    const hex = hasText(hexValue) ? String(hexValue).trim().toLowerCase() : '';
+    if (!hex) return null;
+    const entry = uniqueEventEntries.find((candidate) => {
+        const candidateHex = hasText(candidate?.event?.hex) ? String(candidate.event.hex).trim().toLowerCase() : '';
+        return candidateHex === hex;
+    });
+    if (!entry?.event) return null;
+    const title = entry.event.summary || entry.event.title || null;
+    return hasText(title) ? title.trim() : null;
+}
+
+function formatObservedTitles(snapshot) {
+    if (!snapshot || !snapshot.observed || typeof snapshot.observed !== 'object') {
+        return 'n/a';
+    }
+
+    const titles = new Set();
+    const links = Array.isArray(snapshot.observed.links) ? snapshot.observed.links : [];
+    links.forEach((link) => {
+        const directTitle = link?.title ?? link?.subjectTitle ?? link?.name ?? null;
+        if (hasText(directTitle)) {
+            titles.add(String(directTitle).trim());
+            return;
+        }
+        const byHex = resolveEventTitleByHex(link?.hex);
+        if (hasText(byHex)) {
+            titles.add(byHex);
+        }
+    });
+
+    const hexIds = Array.isArray(snapshot.observed.hexIds) ? snapshot.observed.hexIds : [];
+    hexIds.forEach((hex) => {
+        const byHex = resolveEventTitleByHex(hex);
+        if (hasText(byHex)) {
+            titles.add(byHex);
+            return;
+        }
+        const decoded = decodeHexToText(hex);
+        if (hasText(decoded)) {
+            titles.add(decoded);
+        }
+    });
+
+    if (titles.size === 0) return 'n/a';
+    return Array.from(titles).slice(0, 6).join(' | ');
+}
+
 function normaliseTrackerToken(value) {
     return hasText(value) ? String(value).trim().toLowerCase() : '';
 }
@@ -697,10 +762,15 @@ async function pollQueueDepthSnapshots() {
     const processingEl = document.getElementById('queue-depth-processing');
     const observedToggleEl = document.getElementById('queue-depth-observed-toggle');
     const observedDetailsEl = document.getElementById('queue-depth-observed-details');
+    const titlesToggleEl = document.getElementById('queue-depth-titles-toggle');
+    const titlesDetailsEl = document.getElementById('queue-depth-titles-details');
     const updatedEl = document.getElementById('queue-depth-updated');
-    if (!statusEl || !queuedEl || !processingEl || !updatedEl) {
+    const checkedEl = document.getElementById('queue-depth-checked');
+    if (!statusEl || !queuedEl || !processingEl || !updatedEl || !checkedEl) {
         return;
     }
+
+    checkedEl.textContent = `Last checked: ${new Date().toLocaleString('en-GB')}`;
 
     const [queuedSnapshot, processingSnapshot] = await Promise.all([
         fetchQueueSnapshot(QUEUED_REQUESTS_RUNTIME_URL),
@@ -728,6 +798,20 @@ async function pollQueueDepthSnapshots() {
             observedToggleEl.open = false;
         }
         observedDetailsEl.textContent = hasObservedIds ? observedBits.join(' | ') : 'No observed IDs';
+    }
+
+    const titleBits = [];
+    const queuedTitles = formatObservedTitles(queuedSnapshot);
+    const processingTitles = formatObservedTitles(processingSnapshot);
+    if (queuedTitles !== 'n/a') titleBits.push(`queued(${queuedTitles})`);
+    if (processingTitles !== 'n/a') titleBits.push(`processing(${processingTitles})`);
+    if (titlesToggleEl && titlesDetailsEl) {
+        const hasObservedTitles = titleBits.length > 0;
+        titlesToggleEl.hidden = !hasObservedTitles;
+        if (!hasObservedTitles && titlesToggleEl.open) {
+            titlesToggleEl.open = false;
+        }
+        titlesDetailsEl.textContent = hasObservedTitles ? titleBits.join(' | ') : 'No observed titles';
     }
 
     const timestamps = [queuedSnapshot?.updatedAt, processingSnapshot?.updatedAt]
@@ -1209,6 +1293,10 @@ function renderEvents() {
                         >
                             View Details
                         </button>
+                        ${!isHidden
+                            ? `<button class="btn btn-secondary requires-api" onclick="hideEvent(${index})">Hide Event</button>`
+                            : ''
+                        }
                         ${requeueEligible
                             ? `<button class="btn btn-secondary requires-api" onclick="requeueEvent(${index})">Requeue Missing Fields</button>`
                             : ''
@@ -1458,6 +1546,28 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
     }
 }
 
+async function invokeLambdaHeartbeat() {
+    if (!apiAuthReady) return;
+    if (autoLambdaInvokeInFlight) return;
+    if (uiCommandInFlight || lambdaRuntimeRunning) return;
+
+    autoLambdaInvokeInFlight = true;
+    try {
+        const payload = {
+            realm: 'scouts',
+            subject: 'agenda',
+            action: 0,
+        };
+        await sendScoutsCommand(payload);
+        await pollLambdaRuntimeStatus(true);
+        await pollQueueDepthSnapshots();
+    } catch (error) {
+        console.warn('[Admin] Auto lambda heartbeat failed:', error?.message || error);
+    } finally {
+        autoLambdaInvokeInFlight = false;
+    }
+}
+
 function isAcceptedAdminImageUrl(value) {
     if (!hasText(value)) return false;
     const trimmed = String(value).trim();
@@ -1556,6 +1666,14 @@ function applyLocalPersistedField(entry, field, value) {
         return;
     }
     event.image.url = value;
+}
+
+function applyLocalHiddenState(entry, hiddenAtIso) {
+    if (!entry || !entry.event) return;
+    const event = entry.event;
+    event.status = 'hidden';
+    event.hiddenAt = hasText(hiddenAtIso) ? hiddenAtIso : new Date().toISOString();
+    entry.allHidden = true;
 }
 
 async function persistCurrentField(field) {
@@ -1719,6 +1837,117 @@ async function requestGeneratedField(field) {
     }
 }
 
+async function hideEvent(eventIndex, fromModal = false) {
+    if (!apiAuthReady) {
+        updateApiAuthStatus(
+            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
+            'error',
+        );
+        if (fromModal) updateModalStatus('Admin API auth not ready.', 'error');
+        else updateRuntimeDetails('Admin API auth not ready.', 'error');
+        return;
+    }
+    if (lambdaRuntimeRunning || uiCommandInFlight) {
+        const message = 'Lambda currently running. Wait for completion before hiding.';
+        if (fromModal) updateModalStatus(message, 'error');
+        else updateRuntimeDetails(message, 'error');
+        return;
+    }
+
+    const entry = visibleEventEntries[eventIndex];
+    if (!entry || !entry.event) {
+        const message = 'Unable to find selected event entry.';
+        if (fromModal) updateModalStatus(message, 'error');
+        else updateRuntimeDetails(message, 'error');
+        return;
+    }
+
+    const event = entry.event;
+    if (isHiddenEvent(event)) {
+        const message = 'Event is already hidden.';
+        if (fromModal) updateModalStatus(message, 'info');
+        else updateRuntimeDetails(message, 'info');
+        return;
+    }
+
+    const eventLabel = event.summary || event.title || `Event ${eventIndex + 1}`;
+    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+    if (!hex) {
+        const message = 'Cannot hide event: missing HEX.';
+        if (fromModal) updateModalStatus(message, 'error');
+        else updateRuntimeDetails(message, 'error');
+        return;
+    }
+
+    const hiddenAtIso = new Date().toISOString();
+    const subject = JSON.parse(JSON.stringify(event || {}));
+    subject.hex = hex;
+    subject.status = 'hidden';
+    subject.hiddenAt = hiddenAtIso;
+    if (!subject.image || typeof subject.image !== 'object') {
+        subject.image = {};
+    }
+    if (!hasText(subject.tagline) && hasText(subject.AI)) {
+        subject.tagline = subject.AI;
+    }
+    if (Object.prototype.hasOwnProperty.call(subject, 'AI')) delete subject.AI;
+    if (Object.prototype.hasOwnProperty.call(subject, 'ai')) delete subject.ai;
+
+    const payload = {
+        realm: 'scouts',
+        subject: 'metadata',
+        action: 'hide',
+        hex,
+        event: subject,
+        hiddenAt: hiddenAtIso,
+    };
+
+    const loadingMessage = `Hiding "${eventLabel}"...`;
+    if (fromModal) updateModalStatus(loadingMessage, 'loading');
+    else pinRuntimeDetails(loadingMessage, 'loading');
+
+    uiCommandInFlight = true;
+    refreshApiActionButtons();
+    try {
+        const result = await sendScoutsCommand(payload);
+        await pollQueueDepthSnapshots();
+        applyLocalHiddenState(entry, hiddenAtIso);
+        updateEventsCount(
+            uniqueEventEntries.length,
+            eventsData.length,
+            uniqueEventEntries.filter((candidate) => candidate.allHidden).length,
+            uniqueEventEntries.filter((candidate) => isCompleteEvent(candidate.event)).length,
+        );
+        updateSidebarUi();
+        renderEvents();
+        if (fromModal) {
+            updateModalContent(currentEventIndex);
+        }
+        const backendMessage = typeof result?.message === 'string' && result.message.trim()
+            ? ` ${result.message.trim()}`
+            : '';
+        const successMessage = `Hide request queued for "${eventLabel}".${backendMessage}`;
+        if (fromModal) updateModalStatus(successMessage, 'success');
+        pinRuntimeDetails(successMessage, 'success');
+    } catch (error) {
+        console.error('Error hiding event:', error);
+        const failureMessage = `Failed to hide event: ${error.message}`;
+        if (fromModal) updateModalStatus(failureMessage, 'error');
+        else pinRuntimeDetails(failureMessage, 'error');
+    } finally {
+        uiCommandInFlight = false;
+        refreshApiActionButtons();
+    }
+}
+
+function hideCurrentEvent() {
+    if (currentEventIndex === null) {
+        updateModalStatus('Open an event first before hiding.', 'error');
+        return;
+    }
+    hideEvent(currentEventIndex, true);
+}
+
 async function requeueEvent(eventIndex, fromModal = false) {
     if (!apiAuthReady) {
         updateApiAuthStatus(
@@ -1837,4 +2066,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(() => {
         loadEvents({ silent: true });
     }, AGENDA_POLL_INTERVAL_MS);
+    setInterval(() => {
+        invokeLambdaHeartbeat();
+    }, AUTO_LAMBDA_INVOKE_INTERVAL_MS);
 });
