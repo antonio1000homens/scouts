@@ -96,11 +96,16 @@
                 <p id="queue-depth-status" class="status-text status-info">Checking queue snapshots...</p>
                 <p id="queue-depth-queued" class="refresh-status">scoutsRequests: unknown</p>
                 <p id="queue-depth-processing" class="refresh-status">scoutsProcessing: unknown</p>
+                <details id="queue-depth-titles-toggle" class="queue-observed-toggle" hidden>
+                    <summary>Observed Titles</summary>
+                    <p id="queue-depth-titles-details" class="refresh-status">No observed titles</p>
+                </details>
                 <details id="queue-depth-observed-toggle" class="queue-observed-toggle" hidden>
                     <summary>Observed IDs</summary>
                     <p id="queue-depth-observed-details" class="refresh-status">No observed IDs</p>
                 </details>
                 <p id="queue-depth-updated" class="refresh-status">Last update: n/a</p>
+                <p id="queue-depth-checked" class="refresh-status">Last checked: n/a</p>
             </div>
         </div>
 
@@ -192,6 +197,13 @@
                         <h3>Operation Types</h3>
                         <p class="refresh-status modal-input-help"><strong>Persist to HEX:</strong> immediately replaces the selected field in the HEX payload.</p>
                         <p class="refresh-status modal-input-help"><strong>Request AI/Pixabay:</strong> queues generation for that field and updates later through the existing SQS workflow.</p>
+                        <p class="refresh-status modal-input-help"><strong>Hide Event:</strong> marks the event hidden in HEX and agenda so it no longer appears in normal views.</p>
+                        <div class="field-actions">
+                            <button
+                                class="btn btn-secondary requires-api"
+                                onclick="hideCurrentEvent()"
+                            >Hide Event</button>
+                        </div>
                     </div>
 
                     <div class="field-editor">
