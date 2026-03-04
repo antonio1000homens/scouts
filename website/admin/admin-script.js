@@ -1544,7 +1544,8 @@ function applyLocalPersistedField(entry, field, value) {
     const event = entry.event;
     if (field === 'tagline') {
         event.tagline = value;
-        event.AI = value;
+        if (Object.prototype.hasOwnProperty.call(event, 'AI')) delete event.AI;
+        if (Object.prototype.hasOwnProperty.call(event, 'ai')) delete event.ai;
         return;
     }
     if (!event.image || typeof event.image !== 'object') {
@@ -1600,7 +1601,6 @@ async function persistCurrentField(field) {
     }
     if (field === 'tagline') {
         subject.tagline = nextValue;
-        subject.AI = nextValue;
     } else if (field === 'imagePrompt') {
         subject.image.prompt = nextValue;
     } else {
@@ -1610,9 +1610,8 @@ async function persistCurrentField(field) {
     if (!hasText(subject.tagline) && hasText(subject.AI)) {
         subject.tagline = subject.AI;
     }
-    if (!hasText(subject.AI) && hasText(subject.tagline)) {
-        subject.AI = subject.tagline;
-    }
+    if (Object.prototype.hasOwnProperty.call(subject, 'AI')) delete subject.AI;
+    if (Object.prototype.hasOwnProperty.call(subject, 'ai')) delete subject.ai;
 
     const payload = {
         realm: 'scouts',
@@ -1769,6 +1768,8 @@ async function requeueEvent(eventIndex, fromModal = false) {
     if (!hasText(subject.tagline) && hasText(subject.AI)) {
         subject.tagline = subject.AI;
     }
+    if (Object.prototype.hasOwnProperty.call(subject, 'AI')) delete subject.AI;
+    if (Object.prototype.hasOwnProperty.call(subject, 'ai')) delete subject.ai;
     if (!hasText(subject.tagline)) subject.tagline = null;
     if (!hasText(subject.image.prompt)) subject.image.prompt = null;
     if (!hasText(subject.image.url)) subject.image.url = null;
