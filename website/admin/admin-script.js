@@ -1235,22 +1235,15 @@ async function refreshLambda() {
         return;
     }
 
-    // Validate input
-    if (!action || action.trim() === '') {
-        statusElement.textContent = 'Please enter an action number';
-        statusElement.className = 'refresh-status error';
-        return;
-    }
-
     // Show loading state
     statusElement.textContent = 'Sending request...';
     statusElement.className = 'refresh-status loading';
 
-    const actionCount = parseInt(action, 10);
+    const actionCount = Number.isFinite(parseInt(action, 10)) ? parseInt(action, 10) : 0;
     const payload = {
         realm: 'scouts',
         subject: 'agenda',
-        action: Number.isFinite(actionCount) ? actionCount : 0,
+        action: actionCount,
     };
 
     uiCommandInFlight = true;
