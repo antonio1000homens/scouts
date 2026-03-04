@@ -450,12 +450,16 @@ async function loadEvents(options = {}) {
         }
 
         const data = await response.json();
-        agendaPayload = data;
-        eventsData = data.events || [];
+        const rawEvents = Array.isArray(data.events) ? data.events : [];
+        eventsData = rawEvents.map((event) => normaliseEventTaglineFields(cloneEventRecord(event)));
+        agendaPayload = {
+            ...data,
+            events: eventsData.map((event) => cloneEventRecord(event)),
+        };
         uniqueEventEntries = buildUniqueEventEntries(eventsData);
         lastAgendaScanAtIso = new Date().toISOString();
         console.log('[Admin] agenda.json fetched', {
-            totalEvents: data.events?.length ?? 0,
+            totalEvents: rawEvents.length,
             uniqueEvents: uniqueEventEntries.length,
         });
 
@@ -726,6 +730,15 @@ function getEventSection(event) {
 
 function hasText(value) {
     return typeof value === 'string' && value.trim().length > 0;
+}
+
+function normaliseEventTaglineFields(event) {
+    if (!event || typeof event !== 'object') return event;
+    const derivedTagline = getAIPrompt(event);
+    if (hasText(derivedTagline) && !hasText(event.tagline)) {
+        event.tagline = derivedTagline.trim();
+    }
+    return event;
 }
 
 function isHiddenEvent(event) {
