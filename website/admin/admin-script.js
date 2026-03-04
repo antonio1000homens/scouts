@@ -1286,9 +1286,11 @@ function openUploadModal(index) {
     const imageUrlText = document.getElementById('modal-image-url');
     const imagePromptText = document.getElementById('modal-image-prompt');
     const taglineText = document.getElementById('modal-tagline');
+    const imageUrlInput = document.getElementById('modal-image-url-input');
     const requeueButton = document.getElementById('modal-requeue-button');
     const requeueHint = document.getElementById('modal-requeue-hint');
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
+    if (imageUrlInput) imageUrlInput.value = currentImage || '';
     if (imagePromptText) imagePromptText.textContent = getImagePrompt(event) || 'Not set';
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
     const missing = getMissingMetadataFields(event);
@@ -1314,6 +1316,8 @@ function openUploadModal(index) {
 function closeUploadModal() {
     const modal = document.getElementById('upload-modal');
     modal.style.display = 'none';
+    const imageUrlInput = document.getElementById('modal-image-url-input');
+    if (imageUrlInput) imageUrlInput.value = '';
     currentEventIndex = null;
 }
 
@@ -1440,6 +1444,124 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
     } catch (error) {
         console.error(`Error refreshing ${label}:`, error);
         updateGlobalRefreshStatus(`Failed to refresh ${label}: ${error.message}`, 'error');
+    } finally {
+        uiCommandInFlight = false;
+        refreshApiActionButtons();
+    }
+}
+
+function isAcceptedAdminImageUrl(value) {
+    if (!hasText(value)) return false;
+    const trimmed = String(value).trim();
+    return /^https?:\/\//i.test(trimmed)
+        || trimmed.startsWith('/')
+        || trimmed.startsWith('website/');
+}
+
+async function persistCurrentImageUrl() {
+    if (!apiAuthReady) {
+        updateApiAuthStatus(
+            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
+            'error',
+        );
+        updateModalStatus('Admin API auth not ready.', 'error');
+        return;
+    }
+    if (lambdaRuntimeRunning || uiCommandInFlight) {
+        updateModalStatus('Lambda currently running. Wait for completion before persisting.', 'error');
+        return;
+    }
+    if (currentEventIndex === null) {
+        updateModalStatus('Open an event first before persisting an image URL.', 'error');
+        return;
+    }
+
+    const entry = visibleEventEntries[currentEventIndex];
+    if (!entry || !entry.event) {
+        updateModalStatus('Unable to find selected event entry.', 'error');
+        return;
+    }
+
+    const imageUrlInput = document.getElementById('modal-image-url-input');
+    const nextImageUrlRaw = hasText(imageUrlInput?.value) ? imageUrlInput.value.trim() : '';
+    if (!nextImageUrlRaw) {
+        updateModalStatus('Enter an image URL to persist.', 'error');
+        return;
+    }
+    if (!isAcceptedAdminImageUrl(nextImageUrlRaw)) {
+        updateModalStatus('Image URL must be http(s), /path, or website/...', 'error');
+        return;
+    }
+
+    const event = entry.event;
+    const eventLabel = event.summary || event.title || `Event ${currentEventIndex + 1}`;
+    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+    if (!hex) {
+        updateModalStatus('Cannot persist image URL: event is missing HEX.', 'error');
+        return;
+    }
+
+    const subject = JSON.parse(JSON.stringify(event || {}));
+    subject.hex = hex;
+    if (!subject.image || typeof subject.image !== 'object') {
+        subject.image = {};
+    }
+    subject.image.url = nextImageUrlRaw;
+
+    if (!hasText(subject.tagline) && hasText(subject.AI)) {
+        subject.tagline = subject.AI;
+    }
+    if (!hasText(subject.AI) && hasText(subject.tagline)) {
+        subject.AI = subject.tagline;
+    }
+
+    const payload = {
+        realm: 'scouts',
+        subject: 'imageUrl',
+        action: 'persist',
+        hex,
+        imageUrl: nextImageUrlRaw,
+        event: subject,
+    };
+
+    updateModalStatus(`Persisting image URL for "${eventLabel}"...`, 'loading');
+
+    uiCommandInFlight = true;
+    refreshApiActionButtons();
+    try {
+        const result = await sendScoutsCommand(payload);
+        const statusCode = Number.isFinite(result?._httpStatus) ? result._httpStatus : 200;
+        const backendMessage = typeof result?.message === 'string' && result.message.trim()
+            ? ` ${result.message.trim()}`
+            : '';
+        const queueAcceptedSuffix = result?.queueAccepted === true ? ' Queue accepted.' : '';
+        const successMessage = `Image URL persist queued for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
+        updateModalStatus(successMessage, 'success');
+        pinRuntimeDetails(successMessage, 'success');
+
+        if (!entry.event.image || typeof entry.event.image !== 'object') {
+            entry.event.image = {};
+        }
+        entry.event.image.url = nextImageUrlRaw;
+        const normalizedDisplayUrl = getImageUrl(entry.event);
+        const imageUrlText = document.getElementById('modal-image-url');
+        if (imageUrlText) imageUrlText.textContent = normalizedDisplayUrl || nextImageUrlRaw;
+        const imgElement = document.getElementById('modal-current-image');
+        if (imgElement && normalizedDisplayUrl) {
+            imgElement.src = normalizedDisplayUrl;
+            imgElement.style.display = 'block';
+        }
+
+        await pollQueueDepthSnapshots();
+        setTimeout(() => {
+            hydrateEntriesFromHexFiles();
+            loadEvents({ silent: true });
+        }, 1500);
+    } catch (error) {
+        console.error('Error persisting image URL:', error);
+        const failureMessage = `Failed to persist image URL: ${error.message}`;
+        updateModalStatus(failureMessage, 'error');
+        pinRuntimeDetails(failureMessage, 'error');
     } finally {
         uiCommandInFlight = false;
         refreshApiActionButtons();
