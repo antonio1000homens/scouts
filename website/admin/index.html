@@ -79,7 +79,10 @@
                 <p id="queue-depth-status" class="status-text status-info">Checking queue snapshots...</p>
                 <p id="queue-depth-queued" class="refresh-status">scoutsRequests: unknown</p>
                 <p id="queue-depth-processing" class="refresh-status">scoutsProcessing: unknown</p>
-                <p id="queue-depth-observed" class="refresh-status">Observed IDs: n/a</p>
+                <details id="queue-depth-observed-toggle" class="queue-observed-toggle" hidden>
+                    <summary>Observed IDs</summary>
+                    <p id="queue-depth-observed-details" class="refresh-status">No observed IDs</p>
+                </details>
                 <p id="queue-depth-updated" class="refresh-status">Last update: n/a</p>
             </div>
         </div>
