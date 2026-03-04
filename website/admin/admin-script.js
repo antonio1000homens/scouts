@@ -498,9 +498,10 @@ function getImageUrl(event) {
     return normaliseImagePath(candidate);
 }
 
-// Get AI prompt from event data
+// Get tagline from event data (prioritise `tagline`, fallback to legacy `AI`)
 function getAIPrompt(event) {
-    return event.AI || event.ai || event.aiPrompt || null;
+    if (!event || typeof event !== 'object') return null;
+    return event.tagline || event.AI || event.ai || event.aiPrompt || null;
 }
 
 function getImagePrompt(event) {
@@ -515,7 +516,7 @@ function getImagePrompt(event) {
 function getMissingMetadataFields(event) {
     const missing = [];
     if (!hasText(getAIPrompt(event))) {
-        missing.push('AI Tagline');
+        missing.push('Tagline');
     }
     if (!hasText(getImagePrompt(event))) {
         missing.push('Image Prompt');
@@ -586,7 +587,7 @@ function mergeEventMetadata(targetEvent, sourceEvent) {
     }
 
     if (!hasText(getAIPrompt(targetEvent)) && hasText(getAIPrompt(sourceEvent))) {
-        targetEvent.AI = getAIPrompt(sourceEvent);
+        targetEvent.tagline = getAIPrompt(sourceEvent);
     }
 
     if (!hasText(getImageUrl(targetEvent)) && hasText(getImageUrl(sourceEvent))) {
@@ -689,6 +690,11 @@ function renderEvents() {
         const isHidden = entry.allHidden;
         const title = event.summary || event.title || 'Untitled Event';
         const eventUID = getEntryIdentifier(entry);
+        const sourceDetailsMarkup = entry.sourceDetails?.length
+            ? entry.sourceDetails
+                .map((detail) => `<div class="event-identifiers-row"><span>Event Index:</span> <code>${detail.index}</code> <span>UID:</span> <code>${detail.uid}</code></div>`)
+                .join('')
+            : '<div class="event-identifiers-row">No source details</div>';
         if (!event.dtstart) {
             console.warn('[Admin] Event missing dtstart', { index, uid: eventUID, title });
         }
@@ -705,33 +711,36 @@ function renderEvents() {
                 </div>
                 <div class="event-details">
                     <h3 class="event-title">${title}</h3>
-                    <p class="event-index">UID: ${eventUID} | Occurrences: ${entry.duplicateCount}</p>
-                    ${event.hex ? `<p class="event-index">HEX: ${event.hex}</p>` : ''}
-                    ${entry.sourceDetails?.length
-                        ? `<div class="image-info">${entry.sourceDetails.map((detail) => `<div class="image-url">Event Index: ${detail.index} | UID: ${detail.uid}</div>`).join('')}</div>`
-                        : ''
-                    }
+                    <details class="event-identifiers">
+                        <summary>Identifiers</summary>
+                        <div class="event-identifiers-body">
+                            <div class="event-identifiers-row"><span>UID:</span> <code>${eventUID}</code></div>
+                            <div class="event-identifiers-row"><span>HEX:</span> <code>${event.hex || 'Missing HEX'}</code></div>
+                            <div class="event-identifiers-row"><span>Occurrences:</span> <code>${entry.duplicateCount}</code></div>
+                            ${sourceDetailsMarkup}
+                        </div>
+                    </details>
                     
                     ${imageUrl ? `
                         <div class="image-info">
                             <strong>Image URL:</strong>
                             <div class="image-url">${imageUrl}</div>
                         </div>
-                    ` : '<p class="no-ai-prompt">No image configured</p>'}
+                    ` : ''}
 
                     ${imagePrompt ? `
                         <div class="ai-prompt">
                             <div class="ai-prompt-label">Image Prompt</div>
                             <div class="ai-prompt-text">${imagePrompt}</div>
                         </div>
-                    ` : '<p class="no-ai-prompt">No image prompt</p>'}
+                    ` : ''}
 
                     ${tagline ? `
                         <div class="ai-prompt">
                             <div class="ai-prompt-label">Tagline</div>
                             <div class="ai-prompt-text">${tagline}</div>
                         </div>
-                    ` : '<p class="no-ai-prompt">No tagline</p>'}
+                    ` : ''}
 
                     ${requeueEligible
                         ? `<p class="requeue-hint">Missing: ${missingFields.join(', ')}</p>`
@@ -1032,7 +1041,10 @@ async function requeueEvent(eventIndex, fromModal = false) {
     if (!subject.image || typeof subject.image !== 'object') {
         subject.image = {};
     }
-    if (!hasText(subject.AI)) subject.AI = null;
+    if (!hasText(subject.tagline) && hasText(subject.AI)) {
+        subject.tagline = subject.AI;
+    }
+    if (!hasText(subject.tagline)) subject.tagline = null;
     if (!hasText(subject.image.prompt)) subject.image.prompt = null;
     if (!hasText(subject.image.url)) subject.image.url = null;
 
