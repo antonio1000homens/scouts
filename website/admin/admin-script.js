@@ -12,6 +12,8 @@ let agendaPayload = null;
 let agendaLoadInFlight = false;
 let lastAgendaScanAtIso = null;
 let requeueTrackerEntries = [];
+let latestQueuedSnapshot = null;
+let latestProcessingSnapshot = null;
 let pinnedRuntimeDetails = null;
 const MIN_RUNTIME_DETAILS_VISIBLE_MS = 5000;
 const AGENDA_POLL_INTERVAL_MS = 15000;
@@ -507,6 +509,58 @@ function formatObservedIds(snapshot) {
     return parts.join(' | ');
 }
 
+function normaliseTrackerToken(value) {
+    return hasText(value) ? String(value).trim().toLowerCase() : '';
+}
+
+function getSnapshotObservedTokens(snapshot) {
+    if (!snapshot || !snapshot.observed || typeof snapshot.observed !== 'object') {
+        return new Set();
+    }
+    const requestIds = Array.isArray(snapshot.observed.requestIds) ? snapshot.observed.requestIds : [];
+    const hexIds = Array.isArray(snapshot.observed.hexIds) ? snapshot.observed.hexIds : [];
+    const tokens = [...requestIds, ...hexIds]
+        .map((token) => normaliseTrackerToken(token))
+        .filter(Boolean);
+    return new Set(tokens);
+}
+
+function collectTrackerTokens(tracked) {
+    const tokens = [];
+    const requestIds = Array.isArray(tracked?.requestIds) ? tracked.requestIds : [];
+    tokens.push(...requestIds);
+    tokens.push(tracked?.hex);
+    tokens.push(tracked?.uid);
+    return Array.from(new Set(tokens.map((value) => normaliseTrackerToken(value)).filter(Boolean)));
+}
+
+function hasTrackedTokenInSnapshot(tracked, snapshot) {
+    const observedTokens = getSnapshotObservedTokens(snapshot);
+    if (observedTokens.size === 0) return false;
+    return collectTrackerTokens(tracked).some((token) => observedTokens.has(token));
+}
+
+function deriveQueueTrackerStatus(tracked) {
+    if (hasTrackedTokenInSnapshot(tracked, latestProcessingSnapshot)) return 'processing';
+    if (hasTrackedTokenInSnapshot(tracked, latestQueuedSnapshot)) return 'queued';
+    return 'submitted';
+}
+
+function extractRequestIdsFromResult(result) {
+    if (!result || typeof result !== 'object') return [];
+    const candidates = [
+        result.requestId,
+        result.requestID,
+        result.request_id,
+        result.queuedRequestId,
+        result.id,
+        result?.request?.id,
+    ];
+    if (Array.isArray(result.requestIds)) candidates.push(...result.requestIds);
+    if (Array.isArray(result.ids)) candidates.push(...result.ids);
+    return Array.from(new Set(candidates.map((value) => normaliseTrackerToken(value)).filter(Boolean)));
+}
+
 async function fetchQueueSnapshot(url) {
     try {
         const response = await fetch(`${url}?ts=${Date.now()}`, {
@@ -526,9 +580,10 @@ async function pollQueueDepthSnapshots() {
     const statusEl = document.getElementById('queue-depth-status');
     const queuedEl = document.getElementById('queue-depth-queued');
     const processingEl = document.getElementById('queue-depth-processing');
-    const observedEl = document.getElementById('queue-depth-observed');
+    const observedToggleEl = document.getElementById('queue-depth-observed-toggle');
+    const observedDetailsEl = document.getElementById('queue-depth-observed-details');
     const updatedEl = document.getElementById('queue-depth-updated');
-    if (!statusEl || !queuedEl || !processingEl || !observedEl || !updatedEl) {
+    if (!statusEl || !queuedEl || !processingEl || !updatedEl) {
         return;
     }
 
@@ -536,6 +591,8 @@ async function pollQueueDepthSnapshots() {
         fetchQueueSnapshot(QUEUED_REQUESTS_RUNTIME_URL),
         fetchQueueSnapshot(PROCESSING_REQUESTS_RUNTIME_URL),
     ]);
+    latestQueuedSnapshot = queuedSnapshot;
+    latestProcessingSnapshot = processingSnapshot;
 
     const hasAnySnapshot = Boolean(queuedSnapshot || processingSnapshot);
     statusEl.textContent = hasAnySnapshot ? 'Queue snapshots loaded' : 'Queue snapshots unavailable';
@@ -549,7 +606,14 @@ async function pollQueueDepthSnapshots() {
     const processingObserved = formatObservedIds(processingSnapshot);
     if (queuedObserved !== 'n/a') observedBits.push(`queued(${queuedObserved})`);
     if (processingObserved !== 'n/a') observedBits.push(`processing(${processingObserved})`);
-    observedEl.textContent = `Observed IDs: ${observedBits.length > 0 ? observedBits.join(' | ') : 'n/a'}`;
+    if (observedToggleEl && observedDetailsEl) {
+        const hasObservedIds = observedBits.length > 0;
+        observedToggleEl.hidden = !hasObservedIds;
+        if (!hasObservedIds && observedToggleEl.open) {
+            observedToggleEl.open = false;
+        }
+        observedDetailsEl.textContent = hasObservedIds ? observedBits.join(' | ') : 'No observed IDs';
+    }
 
     const timestamps = [queuedSnapshot?.updatedAt, processingSnapshot?.updatedAt]
         .filter((value) => typeof value === 'string' && value.trim().length > 0)
@@ -561,6 +625,9 @@ async function pollQueueDepthSnapshots() {
     } else {
         updatedEl.textContent = 'Last update: n/a';
     }
+
+    reconcileRequeueTrackerEntries();
+    renderRequeueTracker();
 }
 
 function showError(message) {
@@ -811,20 +878,22 @@ function findMatchingEntryForTracker(tracked) {
     return null;
 }
 
-function recordRequeueTrackerEntry(entry, requestedMissing) {
+function recordRequeueTrackerEntry(entry, requestedMissing, commandResult = null) {
     const event = entry?.event || {};
     const normalizedRequested = normaliseMissingFields(requestedMissing);
+    const requestIds = extractRequestIdsFromResult(commandResult);
     const tracked = {
         id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
         title: event.summary || event.title || 'Untitled Event',
         hex: hasText(event?.hex) ? event.hex.trim().toLowerCase() : '',
         uid: hasText(event?.uid) ? event.uid.trim() : '',
+        requestIds,
         entryKey: hasText(entry?.key) ? entry.key : '',
         requestedAt: new Date().toISOString(),
         lastCheckedAt: null,
         requestedMissing: normalizedRequested,
         latestMissing: normalizedRequested,
-        status: 'queued',
+        status: 'submitted',
     };
 
     requeueTrackerEntries = [tracked, ...requeueTrackerEntries].slice(0, MAX_TRACKED_REQUEUE_ENTRIES);
@@ -840,6 +909,12 @@ function reconcileRequeueTrackerEntries() {
     requeueTrackerEntries = requeueTrackerEntries.map((tracked) => {
         const match = findMatchingEntryForTracker(tracked);
         const next = { ...tracked, lastCheckedAt: checkedAtIso };
+        const queueStatus = deriveQueueTrackerStatus(next);
+
+        if (queueStatus === 'processing' || queueStatus === 'queued') {
+            next.status = queueStatus;
+            return next;
+        }
 
         if (!match || !match.event) {
             if (next.status !== 'resolved') {
@@ -857,12 +932,14 @@ function reconcileRequeueTrackerEntries() {
             return next;
         }
 
-        next.status = isSameMissingSet(currentMissing, next.requestedMissing) ? 'queued' : 'updated';
+        next.status = 'submitted';
         return next;
     });
 }
 
 function statusLabelForTracker(status) {
+    if (status === 'submitted') return 'Submitted';
+    if (status === 'processing') return 'Processing';
     if (status === 'resolved') return 'Resolved';
     if (status === 'updated') return 'Updated';
     if (status === 'not-found') return 'Not Found';
@@ -1325,7 +1402,7 @@ async function requeueEvent(eventIndex, fromModal = false) {
         const successMessage = `Requeue request submitted for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
         if (fromModal) updateModalStatus(successMessage, 'success');
         else pinRuntimeDetails(successMessage, 'success');
-        recordRequeueTrackerEntry(entry, missing);
+        recordRequeueTrackerEntry(entry, missing, result);
     } catch (error) {
         console.error('Error requeueing event:', error);
         const failureMessage = `Failed to requeue event: ${error.message}`;

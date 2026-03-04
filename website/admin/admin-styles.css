@@ -244,6 +244,27 @@ body {
     font-weight: bold;
 }
 
+.queue-observed-toggle {
+    margin-top: 0.5rem;
+    border: 1px solid #d9e2ec;
+    border-radius: 6px;
+    background: #f8fafc;
+}
+
+.queue-observed-toggle > summary {
+    cursor: pointer;
+    padding: 0.45rem 0.65rem;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-dark);
+}
+
+.queue-observed-toggle .refresh-status {
+    margin: 0;
+    border-top: 1px solid #e5e7eb;
+    padding: 0.55rem 0.65rem;
+}
+
 .events-layout {
     display: flex;
     gap: 1.25rem;
@@ -377,9 +398,19 @@ body {
     font-weight: 700;
 }
 
+.request-status-submitted {
+    background: #e5e7eb;
+    color: #374151;
+}
+
 .request-status-queued {
     background: #dbeafe;
     color: #1d4ed8;
+}
+
+.request-status-processing {
+    background: #ede9fe;
+    color: #6d28d9;
 }
 
 .request-status-updated {
