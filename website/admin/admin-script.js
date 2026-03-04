@@ -940,10 +940,6 @@ function reconcileRequeueTrackerEntries() {
             return next;
         }
 
-        if (next.status === 'processed') {
-            return next;
-        }
-
         next.status = 'submitted';
         return next;
     });
