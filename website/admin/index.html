@@ -114,6 +114,28 @@
             <div id="events-container" class="events-grid">
                 <p class="loading">Loading events...</p>
             </div>
+            <aside class="requests-sidebar">
+                <h3 class="sidebar-title">Requeue Tracker</h3>
+                <p id="requeue-tracker-summary" class="refresh-status">No requeue requests submitted yet.</p>
+                <p id="requeue-tracker-last-scan" class="refresh-status">Last scan: not started.</p>
+                <div class="requests-table-wrapper">
+                    <table class="requests-table">
+                        <thead>
+                            <tr>
+                                <th>Event</th>
+                                <th>Status</th>
+                                <th>Missing</th>
+                                <th>Requested</th>
+                            </tr>
+                        </thead>
+                        <tbody id="requeue-tracker-body">
+                            <tr>
+                                <td colspan="4">No requeue requests yet.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </aside>
         </div>
 
         <!-- Upload Modal -->
