@@ -20,6 +20,8 @@ const AGENDA_POLL_INTERVAL_MS = 15000;
 const QUEUE_DEPTH_POLL_INTERVAL_MS = 5000;
 const HEX_HYDRATION_POLL_INTERVAL_MS = 6000;
 const AUTO_LAMBDA_INVOKE_INTERVAL_MS = 20000;
+const HEX_NOT_FOUND_BACKOFF_MS = 30000;
+const AUTO_LAMBDA_PREF_KEY = 'scouts_admin_auto_lambda_enabled';
 const MAX_TRACKED_REQUEUE_ENTRIES = 30;
 let runtimeDetailsLastShownAt = 0;
 let runtimeDetailsLastMessage = '';
@@ -28,6 +30,9 @@ let runtimeDetailsPending = null;
 let runtimeDetailsFlushTimer = null;
 let hexHydrationInFlight = false;
 let autoLambdaInvokeInFlight = false;
+let autoLambdaInvokeEnabled = true;
+const missingHexRetryAtByHex = new Map();
+const warnedMissingDtstartIds = new Set();
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
 const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
 const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
@@ -297,6 +302,48 @@ function updateGlobalRefreshStatus(message, type = 'info') {
     if (!statusElement) return;
     statusElement.textContent = message;
     statusElement.className = `refresh-status ${type}`;
+}
+
+function readAutoLambdaInvocationPreference() {
+    try {
+        const stored = window.localStorage.getItem(AUTO_LAMBDA_PREF_KEY);
+        if (stored === null) return true;
+        return stored === '1' || stored.toLowerCase() === 'true';
+    } catch {
+        return true;
+    }
+}
+
+function persistAutoLambdaInvocationPreference(enabled) {
+    try {
+        window.localStorage.setItem(AUTO_LAMBDA_PREF_KEY, enabled ? '1' : '0');
+    } catch {
+        // Ignore storage errors (private mode/quota)
+    }
+}
+
+function updateAutoLambdaInvocationUi() {
+    const toggle = document.getElementById('auto-lambda-toggle');
+    const statusElement = document.getElementById('auto-lambda-status');
+    if (toggle) {
+        toggle.checked = autoLambdaInvokeEnabled;
+    }
+    if (statusElement) {
+        statusElement.textContent = `Auto invocation: ${autoLambdaInvokeEnabled ? 'enabled' : 'disabled'}`;
+        statusElement.className = `refresh-status ${autoLambdaInvokeEnabled ? 'success' : 'info'}`;
+    }
+}
+
+function setAutoLambdaInvocationEnabled(enabled, persist = true) {
+    autoLambdaInvokeEnabled = Boolean(enabled);
+    if (persist) {
+        persistAutoLambdaInvocationPreference(autoLambdaInvokeEnabled);
+    }
+    updateAutoLambdaInvocationUi();
+}
+
+function toggleAutoLambdaInvocation(enabled) {
+    setAutoLambdaInvocationEnabled(enabled, true);
 }
 
 async function sendScoutsCommand(payload) {
@@ -659,14 +706,23 @@ async function fetchQueueSnapshot(url) {
 async function fetchHexEventByHex(hexValue) {
     const hex = hasText(hexValue) ? String(hexValue).trim().toLowerCase() : '';
     if (!hex) return null;
+    const now = Date.now();
+    const nextRetryAt = missingHexRetryAtByHex.get(hex) || 0;
+    if (nextRetryAt > now) return null;
     try {
         const response = await fetch(`../../events/${hex}.json?ts=${Date.now()}`, {
             method: 'GET',
             credentials: 'same-origin',
             cache: 'no-store',
         });
-        if (!response.ok) return null;
+        if (!response.ok) {
+            if (response.status === 404 || response.status === 410) {
+                missingHexRetryAtByHex.set(hex, now + HEX_NOT_FOUND_BACKOFF_MS);
+            }
+            return null;
+        }
         const payload = await response.json();
+        missingHexRetryAtByHex.delete(hex);
         return payload && typeof payload === 'object' ? payload : null;
     } catch {
         return null;
@@ -1035,6 +1091,14 @@ function getEntryIdentifier(entry) {
     return generateEventUID(event, entry?.firstIndex ?? 0);
 }
 
+function getEventDisplayTitle(event, entry, index) {
+    if (hasText(event?.summary)) return event.summary.trim();
+    if (hasText(event?.title)) return event.title.trim();
+    const identifier = getEntryIdentifier(entry);
+    if (hasText(identifier)) return identifier;
+    return `Event ${index + 1}`;
+}
+
 function escapeHtml(value) {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -1234,7 +1298,7 @@ function renderEvents() {
         const requeueEligible = missingFields.length > 0;
         const section = getEventSection(event);
         const isHidden = entry.allHidden;
-        const title = event.summary || event.title || 'Untitled Event';
+        const title = getEventDisplayTitle(event, entry, index);
         const eventUID = getEntryIdentifier(entry);
         const sourceDetailsMarkup = entry.sourceDetails?.length
             ? entry.sourceDetails
@@ -1242,7 +1306,11 @@ function renderEvents() {
                 .join('')
             : '<div class="event-identifiers-row">No source details</div>';
         if (!event.dtstart) {
-            console.warn('[Admin] Event missing dtstart', { index, uid: eventUID, title });
+            const warnKey = `${eventUID}|${title}`;
+            if (!warnedMissingDtstartIds.has(warnKey)) {
+                warnedMissingDtstartIds.add(warnKey);
+                console.warn('[Admin] Event missing dtstart', { index, uid: eventUID, title });
+            }
         }
         
         return `
@@ -1548,6 +1616,7 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
 
 async function invokeLambdaHeartbeat() {
     if (!apiAuthReady) return;
+    if (!autoLambdaInvokeEnabled) return;
     if (autoLambdaInvokeInFlight) return;
     if (uiCommandInFlight || lambdaRuntimeRunning) return;
 
@@ -2049,6 +2118,7 @@ function requeueCurrentEvent() {
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
+    setAutoLambdaInvocationEnabled(readAutoLambdaInvocationPreference(), false);
     setApiActionState(false);
     checkApiAuthStatus();
     loadEvents();
