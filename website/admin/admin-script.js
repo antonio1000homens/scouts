@@ -1286,10 +1286,14 @@ function openUploadModal(index) {
     const imageUrlText = document.getElementById('modal-image-url');
     const imagePromptText = document.getElementById('modal-image-prompt');
     const taglineText = document.getElementById('modal-tagline');
+    const imagePromptInput = document.getElementById('modal-image-prompt-input');
+    const taglineInput = document.getElementById('modal-tagline-input');
     const imageUrlInput = document.getElementById('modal-image-url-input');
     const requeueButton = document.getElementById('modal-requeue-button');
     const requeueHint = document.getElementById('modal-requeue-hint');
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
+    if (imagePromptInput) imagePromptInput.value = getImagePrompt(event) || '';
+    if (taglineInput) taglineInput.value = getAIPrompt(event) || '';
     if (imageUrlInput) imageUrlInput.value = currentImage || '';
     if (imagePromptText) imagePromptText.textContent = getImagePrompt(event) || 'Not set';
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
@@ -1316,7 +1320,11 @@ function openUploadModal(index) {
 function closeUploadModal() {
     const modal = document.getElementById('upload-modal');
     modal.style.display = 'none';
+    const taglineInput = document.getElementById('modal-tagline-input');
+    const imagePromptInput = document.getElementById('modal-image-prompt-input');
     const imageUrlInput = document.getElementById('modal-image-url-input');
+    if (taglineInput) taglineInput.value = '';
+    if (imagePromptInput) imagePromptInput.value = '';
     if (imageUrlInput) imageUrlInput.value = '';
     currentEventIndex = null;
 }
@@ -1458,7 +1466,98 @@ function isAcceptedAdminImageUrl(value) {
         || trimmed.startsWith('website/');
 }
 
-async function persistCurrentImageUrl() {
+function getSelectedModalEntry() {
+    if (currentEventIndex === null) {
+        updateModalStatus('Open an event first.', 'error');
+        return null;
+    }
+
+    const entry = visibleEventEntries[currentEventIndex];
+    if (!entry || !entry.event) {
+        updateModalStatus('Unable to find selected event entry.', 'error');
+        return null;
+    }
+
+    return entry;
+}
+
+function getFieldOperationConfig(field) {
+    if (field === 'tagline') {
+        return {
+            subject: 'tagline',
+            payloadKey: 'tagline',
+            label: 'Tagline',
+            queueLabel: 'AI tagline',
+        };
+    }
+    if (field === 'imagePrompt') {
+        return {
+            subject: 'imagePrompt',
+            payloadKey: 'imagePrompt',
+            label: 'Image Prompt',
+            queueLabel: 'AI image prompt',
+        };
+    }
+    return {
+        subject: 'imageUrl',
+        payloadKey: 'imageUrl',
+        label: 'Image URL',
+        queueLabel: 'Pixabay image URL',
+    };
+}
+
+function getModalFieldValue(field) {
+    if (field === 'tagline') {
+        const input = document.getElementById('modal-tagline-input');
+        return hasText(input?.value) ? input.value.trim() : '';
+    }
+    if (field === 'imagePrompt') {
+        const input = document.getElementById('modal-image-prompt-input');
+        return hasText(input?.value) ? input.value.trim() : '';
+    }
+    const input = document.getElementById('modal-image-url-input');
+    return hasText(input?.value) ? input.value.trim() : '';
+}
+
+function refreshModalCurrentMetadata(event) {
+    const imageUrlText = document.getElementById('modal-image-url');
+    const imagePromptText = document.getElementById('modal-image-prompt');
+    const taglineText = document.getElementById('modal-tagline');
+    const currentImage = getImageUrl(event);
+    if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
+    if (imagePromptText) imagePromptText.textContent = getImagePrompt(event) || 'Not set';
+    if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
+
+    const imgElement = document.getElementById('modal-current-image');
+    if (imgElement) {
+        if (currentImage) {
+            imgElement.src = currentImage;
+            imgElement.style.display = 'block';
+        } else {
+            imgElement.style.display = 'none';
+        }
+    }
+}
+
+function applyLocalPersistedField(entry, field, value) {
+    if (!entry || !entry.event) return;
+    const event = entry.event;
+    if (field === 'tagline') {
+        event.tagline = value;
+        event.AI = value;
+        return;
+    }
+    if (!event.image || typeof event.image !== 'object') {
+        event.image = {};
+    }
+    if (field === 'imagePrompt') {
+        event.image.prompt = value;
+        return;
+    }
+    event.image.url = value;
+}
+
+async function persistCurrentField(field) {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -1471,24 +1570,17 @@ async function persistCurrentImageUrl() {
         updateModalStatus('Lambda currently running. Wait for completion before persisting.', 'error');
         return;
     }
-    if (currentEventIndex === null) {
-        updateModalStatus('Open an event first before persisting an image URL.', 'error');
-        return;
-    }
 
-    const entry = visibleEventEntries[currentEventIndex];
-    if (!entry || !entry.event) {
-        updateModalStatus('Unable to find selected event entry.', 'error');
-        return;
-    }
+    const entry = getSelectedModalEntry();
+    if (!entry) return;
 
-    const imageUrlInput = document.getElementById('modal-image-url-input');
-    const nextImageUrlRaw = hasText(imageUrlInput?.value) ? imageUrlInput.value.trim() : '';
-    if (!nextImageUrlRaw) {
-        updateModalStatus('Enter an image URL to persist.', 'error');
+    const config = getFieldOperationConfig(field);
+    const nextValue = getModalFieldValue(field);
+    if (!nextValue) {
+        updateModalStatus(`Enter a ${config.label.toLowerCase()} value to persist.`, 'error');
         return;
     }
-    if (!isAcceptedAdminImageUrl(nextImageUrlRaw)) {
+    if (field === 'imageUrl' && !isAcceptedAdminImageUrl(nextValue)) {
         updateModalStatus('Image URL must be http(s), /path, or website/...', 'error');
         return;
     }
@@ -1497,7 +1589,7 @@ async function persistCurrentImageUrl() {
     const eventLabel = event.summary || event.title || `Event ${currentEventIndex + 1}`;
     const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
     if (!hex) {
-        updateModalStatus('Cannot persist image URL: event is missing HEX.', 'error');
+        updateModalStatus(`Cannot persist ${config.label.toLowerCase()}: event is missing HEX.`, 'error');
         return;
     }
 
@@ -1506,7 +1598,14 @@ async function persistCurrentImageUrl() {
     if (!subject.image || typeof subject.image !== 'object') {
         subject.image = {};
     }
-    subject.image.url = nextImageUrlRaw;
+    if (field === 'tagline') {
+        subject.tagline = nextValue;
+        subject.AI = nextValue;
+    } else if (field === 'imagePrompt') {
+        subject.image.prompt = nextValue;
+    } else {
+        subject.image.url = nextValue;
+    }
 
     if (!hasText(subject.tagline) && hasText(subject.AI)) {
         subject.tagline = subject.AI;
@@ -1517,14 +1616,14 @@ async function persistCurrentImageUrl() {
 
     const payload = {
         realm: 'scouts',
-        subject: 'imageUrl',
+        subject: config.subject,
         action: 'persist',
         hex,
-        imageUrl: nextImageUrlRaw,
         event: subject,
     };
+    payload[config.payloadKey] = nextValue;
 
-    updateModalStatus(`Persisting image URL for "${eventLabel}"...`, 'loading');
+    updateModalStatus(`Persisting ${config.label.toLowerCase()} for "${eventLabel}"...`, 'loading');
 
     uiCommandInFlight = true;
     refreshApiActionButtons();
@@ -1535,22 +1634,12 @@ async function persistCurrentImageUrl() {
             ? ` ${result.message.trim()}`
             : '';
         const queueAcceptedSuffix = result?.queueAccepted === true ? ' Queue accepted.' : '';
-        const successMessage = `Image URL persist queued for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
+        const successMessage = `${config.label} persist queued for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
         updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
 
-        if (!entry.event.image || typeof entry.event.image !== 'object') {
-            entry.event.image = {};
-        }
-        entry.event.image.url = nextImageUrlRaw;
-        const normalizedDisplayUrl = getImageUrl(entry.event);
-        const imageUrlText = document.getElementById('modal-image-url');
-        if (imageUrlText) imageUrlText.textContent = normalizedDisplayUrl || nextImageUrlRaw;
-        const imgElement = document.getElementById('modal-current-image');
-        if (imgElement && normalizedDisplayUrl) {
-            imgElement.src = normalizedDisplayUrl;
-            imgElement.style.display = 'block';
-        }
+        applyLocalPersistedField(entry, field, nextValue);
+        refreshModalCurrentMetadata(entry.event);
 
         await pollQueueDepthSnapshots();
         setTimeout(() => {
@@ -1558,8 +1647,71 @@ async function persistCurrentImageUrl() {
             loadEvents({ silent: true });
         }, 1500);
     } catch (error) {
-        console.error('Error persisting image URL:', error);
-        const failureMessage = `Failed to persist image URL: ${error.message}`;
+        console.error(`Error persisting ${config.label}:`, error);
+        const failureMessage = `Failed to persist ${config.label.toLowerCase()}: ${error.message}`;
+        updateModalStatus(failureMessage, 'error');
+        pinRuntimeDetails(failureMessage, 'error');
+    } finally {
+        uiCommandInFlight = false;
+        refreshApiActionButtons();
+    }
+}
+
+async function requestGeneratedField(field) {
+    if (!apiAuthReady) {
+        updateApiAuthStatus(
+            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
+            'error',
+        );
+        updateModalStatus('Admin API auth not ready.', 'error');
+        return;
+    }
+    if (lambdaRuntimeRunning || uiCommandInFlight) {
+        updateModalStatus('Lambda currently running. Wait for completion before queueing generation.', 'error');
+        return;
+    }
+
+    const entry = getSelectedModalEntry();
+    if (!entry) return;
+
+    const config = getFieldOperationConfig(field);
+    const event = entry.event;
+    const eventLabel = event.summary || event.title || `Event ${currentEventIndex + 1}`;
+    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+    if (!hex) {
+        updateModalStatus(`Cannot queue ${config.queueLabel}: event is missing HEX.`, 'error');
+        return;
+    }
+
+    const payload = {
+        realm: 'scouts',
+        subject: config.subject,
+        action: 'generate',
+        hex,
+    };
+
+    updateModalStatus(`Queueing ${config.queueLabel} for "${eventLabel}"...`, 'loading');
+
+    uiCommandInFlight = true;
+    refreshApiActionButtons();
+    try {
+        const result = await sendScoutsCommand(payload);
+        const statusCode = Number.isFinite(result?._httpStatus) ? result._httpStatus : 200;
+        const backendMessage = typeof result?.message === 'string' && result.message.trim()
+            ? ` ${result.message.trim()}`
+            : '';
+        const queueAcceptedSuffix = result?.queueAccepted === true ? ' Queue accepted.' : '';
+        const successMessage = `${config.queueLabel} request queued for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
+        updateModalStatus(successMessage, 'success');
+        pinRuntimeDetails(successMessage, 'success');
+        await pollQueueDepthSnapshots();
+        setTimeout(() => {
+            hydrateEntriesFromHexFiles();
+            loadEvents({ silent: true });
+        }, 2000);
+    } catch (error) {
+        console.error(`Error queueing ${config.queueLabel}:`, error);
+        const failureMessage = `Failed to queue ${config.queueLabel}: ${error.message}`;
         updateModalStatus(failureMessage, 'error');
         pinRuntimeDetails(failureMessage, 'error');
     } finally {
