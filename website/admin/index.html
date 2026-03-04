@@ -74,16 +74,6 @@
                 <p id="runtime-state-status" class="status-text">Checking runtime state...</p>
                 <p id="runtime-state-details" class="refresh-status">No lambda commands yet.</p>
             </div>
-            <div class="info-card">
-                <h3>Hidden Events</h3>
-                <button id="toggle-hidden-events" class="btn btn-secondary" onclick="toggleHiddenEvents()">Show Hidden</button>
-                <p id="hidden-summary" class="refresh-status">Hidden events are collapsed by default.</p>
-            </div>
-            <div class="info-card">
-                <h3>Complete Events</h3>
-                <button id="toggle-complete-events" class="btn btn-secondary" onclick="toggleCompleteEvents()">Show Complete</button>
-                <p id="complete-summary" class="refresh-status">Complete events are collapsed by default.</p>
-            </div>
         </div>
 
         <section id="agenda-viewer" class="agenda-viewer" style="display: none;">
@@ -102,8 +92,28 @@
             <pre id="events-json-content" class="agenda-json-content">No event JSON entries loaded yet.</pre>
         </section>
 
-        <div id="events-container" class="events-grid">
-            <p class="loading">Loading events...</p>
+        <div class="events-layout">
+            <aside class="events-sidebar">
+                <h3 class="sidebar-title">Filter Events</h3>
+                <button id="filter-btn-all" class="sidebar-filter-btn active" onclick="setFilter('all')">
+                    All <span class="filter-count">0</span>
+                </button>
+                <button id="filter-btn-missing" class="sidebar-filter-btn" onclick="setFilter('missing')">
+                    Missing Metadata <span class="filter-count">0</span>
+                </button>
+                <button id="filter-btn-hidden" class="sidebar-filter-btn" onclick="setFilter('hidden')">
+                    Hidden <span class="filter-count">0</span>
+                </button>
+                <button id="filter-btn-complete" class="sidebar-filter-btn" onclick="setFilter('complete')">
+                    Complete <span class="filter-count">0</span>
+                </button>
+                <button id="filter-btn-approval" class="sidebar-filter-btn" onclick="setFilter('approval')">
+                    Need Approval <span class="filter-count">0</span>
+                </button>
+            </aside>
+            <div id="events-container" class="events-grid">
+                <p class="loading">Loading events...</p>
+            </div>
         </div>
 
         <!-- Upload Modal -->
