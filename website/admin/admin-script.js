@@ -9,8 +9,13 @@ let lambdaRuntimeRunning = false;
 let uiCommandInFlight = false;
 let activeFilter = 'all';
 let agendaPayload = null;
+let agendaLoadInFlight = false;
+let lastAgendaScanAtIso = null;
+let requeueTrackerEntries = [];
 let pinnedRuntimeDetails = null;
 const MIN_RUNTIME_DETAILS_VISIBLE_MS = 5000;
+const AGENDA_POLL_INTERVAL_MS = 15000;
+const MAX_TRACKED_REQUEUE_ENTRIES = 30;
 let runtimeDetailsLastShownAt = 0;
 let runtimeDetailsLastMessage = '';
 let runtimeDetailsLastType = 'info';
@@ -416,10 +421,16 @@ async function checkApiAuthStatus() {
 }
 
 // Load events from agenda.json
-async function loadEvents() {
+async function loadEvents(options = {}) {
+    const { silent = false } = options;
+    if (agendaLoadInFlight) {
+        return;
+    }
+
+    agendaLoadInFlight = true;
     try {
         // Try to load from parent directory (assuming admin is in website/admin/)
-        const response = await fetch('../../agenda.json');
+        const response = await fetch(`../../agenda.json?ts=${Date.now()}`, { cache: 'no-store' });
         
         if (!response.ok) {
             throw new Error('Failed to load events.json: ' + response.status);
@@ -429,6 +440,7 @@ async function loadEvents() {
         agendaPayload = data;
         eventsData = data.events || [];
         uniqueEventEntries = buildUniqueEventEntries(eventsData);
+        lastAgendaScanAtIso = new Date().toISOString();
         console.log('[Admin] agenda.json fetched', {
             totalEvents: data.events?.length ?? 0,
             uniqueEvents: uniqueEventEntries.length,
@@ -442,11 +454,17 @@ async function loadEvents() {
         );
         updateSidebarUi();
         renderEvents();
+        reconcileRequeueTrackerEntries();
+        renderRequeueTracker();
         renderAgendaViewerContent();
         renderEventsJsonViewerContent();
     } catch (error) {
         console.error('Error loading events:', error);
-        showError('Failed to load events data. Please ensure agenda.json exists and is accessible.');
+        if (!silent) {
+            showError('Failed to load events data. Please ensure agenda.json exists and is accessible.');
+        }
+    } finally {
+        agendaLoadInFlight = false;
     }
 }
 
@@ -647,6 +665,148 @@ function getEntryIdentifier(entry) {
     return generateEventUID(event, entry?.firstIndex ?? 0);
 }
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatTrackerTimestamp(isoString) {
+    if (!isoString) return 'n/a';
+    const parsed = new Date(isoString);
+    if (Number.isNaN(parsed.getTime())) return isoString;
+    return parsed.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function normaliseMissingFields(fields) {
+    if (!Array.isArray(fields)) return [];
+    return Array.from(new Set(fields.map((field) => String(field || '').trim()).filter(Boolean)));
+}
+
+function isSameMissingSet(a, b) {
+    const left = normaliseMissingFields(a).sort();
+    const right = normaliseMissingFields(b).sort();
+    if (left.length !== right.length) return false;
+    return left.every((value, index) => value === right[index]);
+}
+
+function findMatchingEntryForTracker(tracked) {
+    const trackedHex = hasText(tracked?.hex) ? tracked.hex.trim().toLowerCase() : '';
+    if (trackedHex) {
+        const byHex = uniqueEventEntries.find((entry) => {
+            const entryHex = hasText(entry?.event?.hex) ? entry.event.hex.trim().toLowerCase() : '';
+            return entryHex === trackedHex;
+        });
+        if (byHex) return byHex;
+    }
+
+    const trackedUid = hasText(tracked?.uid) ? tracked.uid.trim() : '';
+    if (trackedUid) {
+        const byUid = uniqueEventEntries.find((entry) => hasText(entry?.event?.uid) && entry.event.uid.trim() === trackedUid);
+        if (byUid) return byUid;
+    }
+
+    if (hasText(tracked?.entryKey)) {
+        return uniqueEventEntries.find((entry) => entry?.key === tracked.entryKey) || null;
+    }
+
+    return null;
+}
+
+function recordRequeueTrackerEntry(entry, requestedMissing) {
+    const event = entry?.event || {};
+    const normalizedRequested = normaliseMissingFields(requestedMissing);
+    const tracked = {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        title: event.summary || event.title || 'Untitled Event',
+        hex: hasText(event?.hex) ? event.hex.trim().toLowerCase() : '',
+        uid: hasText(event?.uid) ? event.uid.trim() : '',
+        entryKey: hasText(entry?.key) ? entry.key : '',
+        requestedAt: new Date().toISOString(),
+        lastCheckedAt: null,
+        requestedMissing: normalizedRequested,
+        latestMissing: normalizedRequested,
+        status: 'queued',
+    };
+
+    requeueTrackerEntries = [tracked, ...requeueTrackerEntries].slice(0, MAX_TRACKED_REQUEUE_ENTRIES);
+    renderRequeueTracker();
+}
+
+function reconcileRequeueTrackerEntries() {
+    if (!Array.isArray(requeueTrackerEntries) || requeueTrackerEntries.length === 0) {
+        return;
+    }
+
+    const checkedAtIso = new Date().toISOString();
+    requeueTrackerEntries = requeueTrackerEntries.map((tracked) => {
+        const match = findMatchingEntryForTracker(tracked);
+        const next = { ...tracked, lastCheckedAt: checkedAtIso };
+
+        if (!match || !match.event) {
+            if (next.status !== 'resolved') {
+                next.status = 'not-found';
+            }
+            return next;
+        }
+
+        next.title = match.event.summary || match.event.title || next.title;
+        const currentMissing = getMissingMetadataFields(match.event);
+        next.latestMissing = currentMissing;
+
+        if (currentMissing.length === 0) {
+            next.status = 'resolved';
+            return next;
+        }
+
+        next.status = isSameMissingSet(currentMissing, next.requestedMissing) ? 'queued' : 'updated';
+        return next;
+    });
+}
+
+function statusLabelForTracker(status) {
+    if (status === 'resolved') return 'Resolved';
+    if (status === 'updated') return 'Updated';
+    if (status === 'not-found') return 'Not Found';
+    return 'Queued';
+}
+
+function renderRequeueTracker() {
+    const tbody = document.getElementById('requeue-tracker-body');
+    const summary = document.getElementById('requeue-tracker-summary');
+    const lastScan = document.getElementById('requeue-tracker-last-scan');
+    if (!tbody || !summary || !lastScan) return;
+
+    const total = requeueTrackerEntries.length;
+    const resolved = requeueTrackerEntries.filter((entry) => entry.status === 'resolved').length;
+    const open = total - resolved;
+    summary.textContent = total === 0
+        ? 'No requeue requests submitted yet.'
+        : `${open} open, ${resolved} resolved (${total} tracked).`;
+    lastScan.textContent = lastAgendaScanAtIso
+        ? `Last scan: ${new Date(lastAgendaScanAtIso).toLocaleTimeString('en-GB')}`
+        : 'Last scan: not started.';
+
+    if (total === 0) {
+        tbody.innerHTML = '<tr><td colspan="4">No requeue requests yet.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = requeueTrackerEntries.map((entry) => {
+        const statusClass = `request-status-pill request-status-${entry.status}`;
+        const missingText = entry.latestMissing.length > 0 ? entry.latestMissing.join(', ') : 'None';
+        return `<tr>
+            <td>${escapeHtml(entry.title)}</td>
+            <td><span class="${statusClass}">${escapeHtml(statusLabelForTracker(entry.status))}</span></td>
+            <td>${escapeHtml(missingText)}</td>
+            <td>${escapeHtml(formatTrackerTimestamp(entry.requestedAt))}</td>
+        </tr>`;
+    }).join('');
+}
+
 // Render all events
 function renderEvents() {
     const container = document.getElementById('events-container');
@@ -716,17 +876,11 @@ function renderEvents() {
                         <div class="event-identifiers-body">
                             <div class="event-identifiers-row"><span>UID:</span> <code>${eventUID}</code></div>
                             <div class="event-identifiers-row"><span>HEX:</span> <code>${event.hex || 'Missing HEX'}</code></div>
+                            <div class="event-identifiers-row"><span>Image URL:</span> <code>${imageUrl || 'Not set'}</code></div>
                             <div class="event-identifiers-row"><span>Occurrences:</span> <code>${entry.duplicateCount}</code></div>
                             ${sourceDetailsMarkup}
                         </div>
                     </details>
-                    
-                    ${imageUrl ? `
-                        <div class="image-info">
-                            <strong>Image URL:</strong>
-                            <div class="image-url">${imageUrl}</div>
-                        </div>
-                    ` : ''}
 
                     ${imagePrompt ? `
                         <div class="ai-prompt">
@@ -1071,6 +1225,7 @@ async function requeueEvent(eventIndex, fromModal = false) {
         const successMessage = `Requeue request submitted for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
         if (fromModal) updateModalStatus(successMessage, 'success');
         else pinRuntimeDetails(successMessage, 'success');
+        recordRequeueTrackerEntry(entry, missing);
     } catch (error) {
         console.error('Error requeueing event:', error);
         const failureMessage = `Failed to requeue event: ${error.message}`;
@@ -1096,7 +1251,11 @@ document.addEventListener('DOMContentLoaded', () => {
     setApiActionState(false);
     checkApiAuthStatus();
     loadEvents();
+    renderRequeueTracker();
     setInterval(() => {
         pollLambdaRuntimeStatus(true);
     }, 5000);
+    setInterval(() => {
+        loadEvents({ silent: true });
+    }, AGENDA_POLL_INTERVAL_MS);
 });
