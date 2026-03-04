@@ -17,6 +17,7 @@ let latestProcessingSnapshot = null;
 let pinnedRuntimeDetails = null;
 const MIN_RUNTIME_DETAILS_VISIBLE_MS = 5000;
 const AGENDA_POLL_INTERVAL_MS = 15000;
+const QUEUE_DEPTH_POLL_INTERVAL_MS = 5000;
 const MAX_TRACKED_REQUEUE_ENTRIES = 30;
 let runtimeDetailsLastShownAt = 0;
 let runtimeDetailsLastMessage = '';
@@ -540,8 +541,15 @@ function hasTrackedTokenInSnapshot(tracked, snapshot) {
     return collectTrackerTokens(tracked).some((token) => observedTokens.has(token));
 }
 
+function getSnapshotStage(snapshot) {
+    if (!snapshot || typeof snapshot.stage !== 'string') return '';
+    return snapshot.stage.trim().toLowerCase();
+}
+
 function deriveQueueTrackerStatus(tracked) {
-    if (hasTrackedTokenInSnapshot(tracked, latestProcessingSnapshot)) return 'processing';
+    if (hasTrackedTokenInSnapshot(tracked, latestProcessingSnapshot)) {
+        return getSnapshotStage(latestProcessingSnapshot) === 'final' ? 'processed' : 'processing';
+    }
     if (hasTrackedTokenInSnapshot(tracked, latestQueuedSnapshot)) return 'queued';
     return 'submitted';
 }
@@ -911,7 +919,7 @@ function reconcileRequeueTrackerEntries() {
         const next = { ...tracked, lastCheckedAt: checkedAtIso };
         const queueStatus = deriveQueueTrackerStatus(next);
 
-        if (queueStatus === 'processing' || queueStatus === 'queued') {
+        if (queueStatus === 'processed' || queueStatus === 'processing' || queueStatus === 'queued') {
             next.status = queueStatus;
             return next;
         }
@@ -932,6 +940,10 @@ function reconcileRequeueTrackerEntries() {
             return next;
         }
 
+        if (next.status === 'processed') {
+            return next;
+        }
+
         next.status = 'submitted';
         return next;
     });
@@ -940,6 +952,7 @@ function reconcileRequeueTrackerEntries() {
 function statusLabelForTracker(status) {
     if (status === 'submitted') return 'Submitted';
     if (status === 'processing') return 'Processing';
+    if (status === 'processed') return 'Processed';
     if (status === 'resolved') return 'Resolved';
     if (status === 'updated') return 'Updated';
     if (status === 'not-found') return 'Not Found';
@@ -1437,7 +1450,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 5000);
     setInterval(() => {
         pollQueueDepthSnapshots();
-    }, 10000);
+    }, QUEUE_DEPTH_POLL_INTERVAL_MS);
     setInterval(() => {
         loadEvents({ silent: true });
     }, AGENDA_POLL_INTERVAL_MS);
