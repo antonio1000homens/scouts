@@ -24,6 +24,8 @@ let runtimeDetailsFlushTimer = null;
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
 const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
 const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
+const QUEUED_REQUESTS_RUNTIME_URL = '../../runtime/queuedrequests.json';
+const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/processingrequests.json';
 
 async function buildHttpError(response) {
     let details = '';
@@ -465,6 +467,91 @@ async function loadEvents(options = {}) {
         }
     } finally {
         agendaLoadInFlight = false;
+    }
+}
+
+function formatQueueSnapshotCount(snapshot) {
+    if (!snapshot || !snapshot.counts || typeof snapshot.counts !== 'object') {
+        return 'unknown';
+    }
+    const visible = Number.isFinite(snapshot.counts.visible) ? snapshot.counts.visible : '?';
+    const inFlight = Number.isFinite(snapshot.counts.inFlight) ? snapshot.counts.inFlight : '?';
+    const delayed = Number.isFinite(snapshot.counts.delayed) ? snapshot.counts.delayed : '?';
+    return `visible=${visible}, in-flight=${inFlight}, delayed=${delayed}`;
+}
+
+function formatObservedIds(snapshot) {
+    if (!snapshot || !snapshot.observed || typeof snapshot.observed !== 'object') {
+        return 'n/a';
+    }
+    const requestIds = Array.isArray(snapshot.observed.requestIds) ? snapshot.observed.requestIds : [];
+    const hexIds = Array.isArray(snapshot.observed.hexIds) ? snapshot.observed.hexIds : [];
+    const requestSample = requestIds.slice(0, 3);
+    const hexSample = hexIds.slice(0, 3);
+    if (requestSample.length === 0 && hexSample.length === 0) return 'n/a';
+    const parts = [];
+    if (requestSample.length > 0) {
+        parts.push(`requestIds=${requestSample.join(', ')}`);
+    }
+    if (hexSample.length > 0) {
+        parts.push(`hex=${hexSample.join(', ')}`);
+    }
+    return parts.join(' | ');
+}
+
+async function fetchQueueSnapshot(url) {
+    try {
+        const response = await fetch(`${url}?ts=${Date.now()}`, {
+            method: 'GET',
+            credentials: 'same-origin',
+            cache: 'no-store',
+        });
+        if (!response.ok) return null;
+        const payload = await response.json();
+        return payload && typeof payload === 'object' ? payload : null;
+    } catch {
+        return null;
+    }
+}
+
+async function pollQueueDepthSnapshots() {
+    const statusEl = document.getElementById('queue-depth-status');
+    const queuedEl = document.getElementById('queue-depth-queued');
+    const processingEl = document.getElementById('queue-depth-processing');
+    const observedEl = document.getElementById('queue-depth-observed');
+    const updatedEl = document.getElementById('queue-depth-updated');
+    if (!statusEl || !queuedEl || !processingEl || !observedEl || !updatedEl) {
+        return;
+    }
+
+    const [queuedSnapshot, processingSnapshot] = await Promise.all([
+        fetchQueueSnapshot(QUEUED_REQUESTS_RUNTIME_URL),
+        fetchQueueSnapshot(PROCESSING_REQUESTS_RUNTIME_URL),
+    ]);
+
+    const hasAnySnapshot = Boolean(queuedSnapshot || processingSnapshot);
+    statusEl.textContent = hasAnySnapshot ? 'Queue snapshots loaded' : 'Queue snapshots unavailable';
+    statusEl.className = `status-text ${hasAnySnapshot ? 'status-success' : 'status-error'}`;
+
+    queuedEl.textContent = `scoutsRequests: ${formatQueueSnapshotCount(queuedSnapshot)}`;
+    processingEl.textContent = `scoutsProcessing: ${formatQueueSnapshotCount(processingSnapshot)}`;
+
+    const observedBits = [];
+    const queuedObserved = formatObservedIds(queuedSnapshot);
+    const processingObserved = formatObservedIds(processingSnapshot);
+    if (queuedObserved !== 'n/a') observedBits.push(`queued(${queuedObserved})`);
+    if (processingObserved !== 'n/a') observedBits.push(`processing(${processingObserved})`);
+    observedEl.textContent = `Observed IDs: ${observedBits.length > 0 ? observedBits.join(' | ') : 'n/a'}`;
+
+    const timestamps = [queuedSnapshot?.updatedAt, processingSnapshot?.updatedAt]
+        .filter((value) => typeof value === 'string' && value.trim().length > 0)
+        .map((value) => new Date(value))
+        .filter((date) => !Number.isNaN(date.getTime()));
+    if (timestamps.length > 0) {
+        const mostRecent = timestamps.sort((a, b) => b.getTime() - a.getTime())[0];
+        updatedEl.textContent = `Last update: ${mostRecent.toLocaleString('en-GB')}`;
+    } else {
+        updatedEl.textContent = 'Last update: n/a';
     }
 }
 
@@ -1252,9 +1339,13 @@ document.addEventListener('DOMContentLoaded', () => {
     checkApiAuthStatus();
     loadEvents();
     renderRequeueTracker();
+    pollQueueDepthSnapshots();
     setInterval(() => {
         pollLambdaRuntimeStatus(true);
     }, 5000);
+    setInterval(() => {
+        pollQueueDepthSnapshots();
+    }, 10000);
     setInterval(() => {
         loadEvents({ silent: true });
     }, AGENDA_POLL_INTERVAL_MS);
