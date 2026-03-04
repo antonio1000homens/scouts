@@ -103,7 +103,10 @@
         <div class="events-layout">
             <aside class="events-sidebar">
                 <h3 class="sidebar-title">Filter Events</h3>
-                <button id="filter-btn-all" class="sidebar-filter-btn active" onclick="setFilter('all')">
+                <button id="filter-btn-new" class="sidebar-filter-btn active" onclick="setFilter('new')">
+                    New <span class="filter-count">0</span>
+                </button>
+                <button id="filter-btn-all" class="sidebar-filter-btn" onclick="setFilter('all')">
                     All <span class="filter-count">0</span>
                 </button>
                 <button id="filter-btn-missing" class="sidebar-filter-btn" onclick="setFilter('missing')">
