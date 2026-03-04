@@ -141,7 +141,7 @@ function getFilterCounts() {
             const missingCount = getMissingMetadataFields(entry.event).length;
             return missingCount > 0 && missingCount < 3;
         }).length,
-        hidden: uniqueEventEntries.filter((entry) => entry.allHidden).length,
+        hidden: uniqueEventEntries.filter((entry) => isEntryHidden(entry)).length,
         complete: uniqueEventEntries.filter((entry) => isCompleteEvent(entry.event)).length,
         approval: uniqueEventEntries.filter((entry) => getMissingMetadataFields(entry.event).length > 0 && hasText(entry.event?.hex)).length,
     };
@@ -517,7 +517,7 @@ async function loadEvents(options = {}) {
         updateEventsCount(
             uniqueEventEntries.length,
             eventsData.length,
-            uniqueEventEntries.filter((entry) => entry.allHidden).length,
+            uniqueEventEntries.filter((entry) => isEntryHidden(entry)).length,
             uniqueEventEntries.filter((entry) => isCompleteEvent(entry.event)).length,
         );
         updateSidebarUi();
@@ -799,7 +799,7 @@ async function hydrateEntriesFromHexFiles() {
             updateEventsCount(
                 uniqueEventEntries.length,
                 eventsData.length,
-                uniqueEventEntries.filter((entry) => entry.allHidden).length,
+                uniqueEventEntries.filter((entry) => isEntryHidden(entry)).length,
                 uniqueEventEntries.filter((entry) => isCompleteEvent(entry.event)).length,
             );
             updateSidebarUi();
@@ -987,6 +987,12 @@ function normaliseEventTaglineFields(event) {
 function isHiddenEvent(event) {
     const statusValue = typeof event?.status === 'string' ? event.status.trim().toLowerCase() : '';
     return statusValue === 'hidden' || Boolean(event?.hiddenAt);
+}
+
+function isEntryHidden(entry) {
+    if (!entry || typeof entry !== 'object') return false;
+    if (entry.allHidden === true) return true;
+    return isHiddenEvent(entry.event);
 }
 
 function getEventMergeKey(event, index) {
@@ -1273,7 +1279,7 @@ function renderEvents() {
                     return missingCount > 0 && missingCount < 3;
                 })();
             case 'hidden':
-                return entry.allHidden;
+                return isEntryHidden(entry);
             case 'complete':
                 return isCompleteEvent(event);
             case 'approval':
@@ -1297,7 +1303,7 @@ function renderEvents() {
         const missingFields = getMissingMetadataFields(event);
         const requeueEligible = missingFields.length > 0;
         const section = getEventSection(event);
-        const isHidden = entry.allHidden;
+        const isHidden = isEntryHidden(entry);
         const title = getEventDisplayTitle(event, entry, index);
         const eventUID = getEntryIdentifier(entry);
         const sourceDetailsMarkup = entry.sourceDetails?.length
@@ -1361,9 +1367,9 @@ function renderEvents() {
                         >
                             View Details
                         </button>
-                        ${!isHidden
-                            ? `<button class="btn btn-secondary requires-api" onclick="hideEvent(${index})">Hide Event</button>`
-                            : ''
+                        ${isHidden
+                            ? `<button class="btn btn-secondary requires-api" onclick="unhideEvent(${index})">Unhide Event</button>`
+                            : `<button class="btn btn-secondary requires-api" onclick="hideEvent(${index})">Hide Event</button>`
                         }
                         ${requeueEligible
                             ? `<button class="btn btn-secondary requires-api" onclick="requeueEvent(${index})">Requeue Missing Fields</button>`
@@ -1445,6 +1451,7 @@ function openUploadModal(index) {
     const imagePromptInput = document.getElementById('modal-image-prompt-input');
     const taglineInput = document.getElementById('modal-tagline-input');
     const imageUrlInput = document.getElementById('modal-image-url-input');
+    const hideToggleButton = document.getElementById('modal-hide-toggle-button');
     const requeueButton = document.getElementById('modal-requeue-button');
     const requeueHint = document.getElementById('modal-requeue-hint');
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
@@ -1453,6 +1460,10 @@ function openUploadModal(index) {
     if (imageUrlInput) imageUrlInput.value = currentImage || '';
     if (imagePromptText) imagePromptText.textContent = getImagePrompt(event) || 'Not set';
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
+    if (hideToggleButton) {
+        const hidden = isEntryHidden(entry);
+        hideToggleButton.textContent = hidden ? 'Unhide Event' : 'Hide Event';
+    }
     const missing = getMissingMetadataFields(event);
     if (requeueButton) {
         requeueButton.style.display = missing.length > 0 ? 'inline-block' : 'none';
@@ -1470,6 +1481,12 @@ function openUploadModal(index) {
     document.getElementById('modal-status').className = 'status-text';
     
     modal.style.display = 'flex';
+}
+
+function updateModalContent(index) {
+    const modal = document.getElementById('upload-modal');
+    if (!modal || modal.style.display !== 'flex') return;
+    openUploadModal(index);
 }
 
 // Close upload modal
@@ -1737,12 +1754,18 @@ function applyLocalPersistedField(entry, field, value) {
     event.image.url = value;
 }
 
-function applyLocalHiddenState(entry, hiddenAtIso) {
+function applyLocalHiddenState(entry, hiddenAtIso, hidden = true) {
     if (!entry || !entry.event) return;
     const event = entry.event;
-    event.status = 'hidden';
-    event.hiddenAt = hasText(hiddenAtIso) ? hiddenAtIso : new Date().toISOString();
-    entry.allHidden = true;
+    if (hidden) {
+        event.status = 'hidden';
+        event.hiddenAt = hasText(hiddenAtIso) ? hiddenAtIso : new Date().toISOString();
+        entry.allHidden = true;
+    } else {
+        event.status = null;
+        event.hiddenAt = null;
+        entry.allHidden = false;
+    }
 }
 
 async function persistCurrentField(field) {
@@ -1984,7 +2007,7 @@ async function hideEvent(eventIndex, fromModal = false) {
         updateEventsCount(
             uniqueEventEntries.length,
             eventsData.length,
-            uniqueEventEntries.filter((candidate) => candidate.allHidden).length,
+            uniqueEventEntries.filter((candidate) => isEntryHidden(candidate)).length,
             uniqueEventEntries.filter((candidate) => isCompleteEvent(candidate.event)).length,
         );
         updateSidebarUi();
@@ -1998,6 +2021,9 @@ async function hideEvent(eventIndex, fromModal = false) {
         const successMessage = `Hide request queued for "${eventLabel}".${backendMessage}`;
         if (fromModal) updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
+        setTimeout(() => {
+            loadEvents({ silent: true });
+        }, 1800);
     } catch (error) {
         console.error('Error hiding event:', error);
         const failureMessage = `Failed to hide event: ${error.message}`;
@@ -2009,12 +2035,125 @@ async function hideEvent(eventIndex, fromModal = false) {
     }
 }
 
-function hideCurrentEvent() {
-    if (currentEventIndex === null) {
-        updateModalStatus('Open an event first before hiding.', 'error');
+async function unhideEvent(eventIndex, fromModal = false) {
+    if (!apiAuthReady) {
+        updateApiAuthStatus(
+            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
+            'error',
+        );
+        if (fromModal) updateModalStatus('Admin API auth not ready.', 'error');
+        else updateRuntimeDetails('Admin API auth not ready.', 'error');
         return;
     }
-    hideEvent(currentEventIndex, true);
+    if (lambdaRuntimeRunning || uiCommandInFlight) {
+        const message = 'Lambda currently running. Wait for completion before unhiding.';
+        if (fromModal) updateModalStatus(message, 'error');
+        else updateRuntimeDetails(message, 'error');
+        return;
+    }
+
+    const entry = visibleEventEntries[eventIndex];
+    if (!entry || !entry.event) {
+        const message = 'Unable to find selected event entry.';
+        if (fromModal) updateModalStatus(message, 'error');
+        else updateRuntimeDetails(message, 'error');
+        return;
+    }
+
+    const event = entry.event;
+    if (!isHiddenEvent(event)) {
+        const message = 'Event is already visible.';
+        if (fromModal) updateModalStatus(message, 'info');
+        else updateRuntimeDetails(message, 'info');
+        return;
+    }
+
+    const eventLabel = event.summary || event.title || `Event ${eventIndex + 1}`;
+    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+    if (!hex) {
+        const message = 'Cannot unhide event: missing HEX.';
+        if (fromModal) updateModalStatus(message, 'error');
+        else updateRuntimeDetails(message, 'error');
+        return;
+    }
+
+    const subject = JSON.parse(JSON.stringify(event || {}));
+    subject.hex = hex;
+    subject.status = null;
+    subject.hiddenAt = null;
+    if (!subject.image || typeof subject.image !== 'object') {
+        subject.image = {};
+    }
+    if (!hasText(subject.tagline) && hasText(subject.AI)) {
+        subject.tagline = subject.AI;
+    }
+    if (Object.prototype.hasOwnProperty.call(subject, 'AI')) delete subject.AI;
+    if (Object.prototype.hasOwnProperty.call(subject, 'ai')) delete subject.ai;
+
+    const payload = {
+        realm: 'scouts',
+        subject: 'metadata',
+        action: 'unhide',
+        hex,
+        event: subject,
+    };
+
+    const loadingMessage = `Unhiding "${eventLabel}"...`;
+    if (fromModal) updateModalStatus(loadingMessage, 'loading');
+    else pinRuntimeDetails(loadingMessage, 'loading');
+
+    uiCommandInFlight = true;
+    refreshApiActionButtons();
+    try {
+        const result = await sendScoutsCommand(payload);
+        await pollQueueDepthSnapshots();
+        applyLocalHiddenState(entry, null, false);
+        updateEventsCount(
+            uniqueEventEntries.length,
+            eventsData.length,
+            uniqueEventEntries.filter((candidate) => isEntryHidden(candidate)).length,
+            uniqueEventEntries.filter((candidate) => isCompleteEvent(candidate.event)).length,
+        );
+        updateSidebarUi();
+        renderEvents();
+        if (fromModal) {
+            updateModalContent(currentEventIndex);
+        }
+        const backendMessage = typeof result?.message === 'string' && result.message.trim()
+            ? ` ${result.message.trim()}`
+            : '';
+        const successMessage = `Unhide request queued for "${eventLabel}".${backendMessage}`;
+        if (fromModal) updateModalStatus(successMessage, 'success');
+        pinRuntimeDetails(successMessage, 'success');
+        setTimeout(() => {
+            loadEvents({ silent: true });
+        }, 1800);
+    } catch (error) {
+        console.error('Error unhiding event:', error);
+        const failureMessage = `Failed to unhide event: ${error.message}`;
+        if (fromModal) updateModalStatus(failureMessage, 'error');
+        else pinRuntimeDetails(failureMessage, 'error');
+    } finally {
+        uiCommandInFlight = false;
+        refreshApiActionButtons();
+    }
+}
+
+function toggleCurrentEventHidden() {
+    if (currentEventIndex === null) {
+        updateModalStatus('Open an event first before toggling visibility.', 'error');
+        return;
+    }
+    const entry = visibleEventEntries[currentEventIndex];
+    if (!entry || !entry.event) {
+        updateModalStatus('Unable to find selected event entry.', 'error');
+        return;
+    }
+    if (isEntryHidden(entry)) {
+        unhideEvent(currentEventIndex, true);
+    } else {
+        hideEvent(currentEventIndex, true);
+    }
 }
 
 async function requeueEvent(eventIndex, fromModal = false) {
