@@ -186,7 +186,26 @@
                         <p><strong>Image URL:</strong> <span id="modal-image-url"></span></p>
                         <p><strong>Image Prompt:</strong> <span id="modal-image-prompt"></span></p>
                         <p><strong>Tagline:</strong> <span id="modal-tagline"></span></p>
-                        <button id="modal-requeue-button" class="btn btn-secondary requires-api" style="display:none;" onclick="requeueCurrentEvent()">Requeue Missing Fields</button>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="modal-image-url-input">Set Image URL</label>
+                        <input
+                            type="url"
+                            id="modal-image-url-input"
+                            placeholder="https://example.com/image.jpg"
+                            autocomplete="off"
+                            spellcheck="false"
+                        >
+                        <p class="refresh-status modal-input-help">Persists via scouts lambda. External URLs are downloaded into S3 and the HEX file image URL is updated.</p>
+                        <div class="workflow-actions">
+                            <button
+                                id="modal-save-image-url-button"
+                                class="btn btn-primary requires-api"
+                                onclick="persistCurrentImageUrl()"
+                            >Persist Image URL</button>
+                            <button id="modal-requeue-button" class="btn btn-secondary requires-api" style="display:none;" onclick="requeueCurrentEvent()">Requeue Missing Fields</button>
+                        </div>
                         <p id="modal-requeue-hint" class="refresh-status"></p>
                     </div>
 
