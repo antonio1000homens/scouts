@@ -18,12 +18,14 @@ let pinnedRuntimeDetails = null;
 const MIN_RUNTIME_DETAILS_VISIBLE_MS = 5000;
 const AGENDA_POLL_INTERVAL_MS = 15000;
 const QUEUE_DEPTH_POLL_INTERVAL_MS = 5000;
+const HEX_HYDRATION_POLL_INTERVAL_MS = 6000;
 const MAX_TRACKED_REQUEUE_ENTRIES = 30;
 let runtimeDetailsLastShownAt = 0;
 let runtimeDetailsLastMessage = '';
 let runtimeDetailsLastType = 'info';
 let runtimeDetailsPending = null;
 let runtimeDetailsFlushTimer = null;
+let hexHydrationInFlight = false;
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
 const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
 const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
@@ -475,6 +477,7 @@ async function loadEvents(options = {}) {
         renderRequeueTracker();
         renderAgendaViewerContent();
         renderEventsJsonViewerContent();
+        hydrateEntriesFromHexFiles();
     } catch (error) {
         console.error('Error loading events:', error);
         if (!silent) {
@@ -585,6 +588,106 @@ async function fetchQueueSnapshot(url) {
         return payload && typeof payload === 'object' ? payload : null;
     } catch {
         return null;
+    }
+}
+
+async function fetchHexEventByHex(hexValue) {
+    const hex = hasText(hexValue) ? String(hexValue).trim().toLowerCase() : '';
+    if (!hex) return null;
+    try {
+        const response = await fetch(`../../events/${hex}.json?ts=${Date.now()}`, {
+            method: 'GET',
+            credentials: 'same-origin',
+            cache: 'no-store',
+        });
+        if (!response.ok) return null;
+        const payload = await response.json();
+        return payload && typeof payload === 'object' ? payload : null;
+    } catch {
+        return null;
+    }
+}
+
+function applyHexEventMetadata(targetEvent, hexEvent) {
+    if (!targetEvent || !hexEvent) return false;
+    let changed = false;
+
+    const nextTagline = getAIPrompt(hexEvent);
+    if (hasText(nextTagline) && targetEvent.tagline !== nextTagline) {
+        targetEvent.tagline = nextTagline;
+        changed = true;
+    }
+
+    const nextPrompt = getImagePrompt(hexEvent);
+    const nextUrl = getImageUrl(hexEvent);
+    if (hasText(nextPrompt) || hasText(nextUrl)) {
+        if (!targetEvent.image || typeof targetEvent.image !== 'object') {
+            targetEvent.image = {};
+            changed = true;
+        }
+        if (hasText(nextPrompt) && targetEvent.image.prompt !== nextPrompt) {
+            targetEvent.image.prompt = nextPrompt;
+            changed = true;
+        }
+        if (hasText(nextUrl) && targetEvent.image.url !== nextUrl) {
+            targetEvent.image.url = nextUrl;
+            changed = true;
+        }
+    }
+
+    if (hasText(hexEvent.status) && targetEvent.status !== hexEvent.status) {
+        targetEvent.status = hexEvent.status;
+        changed = true;
+    }
+    if (hexEvent.hiddenAt && targetEvent.hiddenAt !== hexEvent.hiddenAt) {
+        targetEvent.hiddenAt = hexEvent.hiddenAt;
+        changed = true;
+    }
+
+    return changed;
+}
+
+async function hydrateEntriesFromHexFiles() {
+    if (hexHydrationInFlight || !Array.isArray(uniqueEventEntries) || uniqueEventEntries.length === 0) {
+        return;
+    }
+
+    const entriesWithHex = uniqueEventEntries
+        .map((entry, index) => ({ entry, index }))
+        .filter(({ entry }) => hasText(entry?.event?.hex));
+    if (entriesWithHex.length === 0) return;
+
+    hexHydrationInFlight = true;
+    try {
+        const updates = await Promise.all(entriesWithHex.map(async ({ entry, index }) => ({
+            index,
+            hexEvent: await fetchHexEventByHex(entry.event.hex),
+        })));
+
+        let changedAny = false;
+        for (const update of updates) {
+            if (!update.hexEvent) continue;
+            const targetEntry = uniqueEventEntries[update.index];
+            if (!targetEntry?.event) continue;
+            if (applyHexEventMetadata(targetEntry.event, update.hexEvent)) {
+                changedAny = true;
+            }
+        }
+
+        if (changedAny) {
+            updateEventsCount(
+                uniqueEventEntries.length,
+                eventsData.length,
+                uniqueEventEntries.filter((entry) => entry.allHidden).length,
+                uniqueEventEntries.filter((entry) => isCompleteEvent(entry.event)).length,
+            );
+            updateSidebarUi();
+            renderEvents();
+            reconcileRequeueTrackerEntries();
+            renderRequeueTracker();
+        }
+    } finally {
+        hexHydrationInFlight = false;
     }
 }
 
@@ -1453,6 +1556,9 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(() => {
         pollQueueDepthSnapshots();
     }, QUEUE_DEPTH_POLL_INTERVAL_MS);
+    setInterval(() => {
+        hydrateEntriesFromHexFiles();
+    }, HEX_HYDRATION_POLL_INTERVAL_MS);
     setInterval(() => {
         loadEvents({ silent: true });
     }, AGENDA_POLL_INTERVAL_MS);
