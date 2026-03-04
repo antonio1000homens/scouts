@@ -413,6 +413,11 @@ body {
     color: #6d28d9;
 }
 
+.request-status-processed {
+    background: #e0f2fe;
+    color: #0c4a6e;
+}
+
 .request-status-updated {
     background: #fef3c7;
     color: #92400e;
