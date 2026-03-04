@@ -102,3 +102,9 @@ To customize for your specific scout group:
 - HTML5
 - CSS3
 - No JavaScript dependencies - pure HTML/CSS for maximum compatibility and performance
+
+## Event Tagline Compatibility
+
+- Website event rendering and admin views now read both `tagline` and legacy `AI` fields.
+- If both fields exist on an event, `tagline` is used.
+- Legacy `AI` support is temporary for migration and backward compatibility.

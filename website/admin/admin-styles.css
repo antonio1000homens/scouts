@@ -451,6 +451,46 @@ body {
     color: var(--text-dark);
 }
 
+.event-identifiers {
+    margin: 0.5rem 0 1rem 0;
+    border: 1px solid #d9e2ec;
+    border-radius: 6px;
+    background: #f8fafc;
+}
+
+.event-identifiers > summary {
+    cursor: pointer;
+    padding: 0.5rem 0.7rem;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text-dark);
+}
+
+.event-identifiers-body {
+    border-top: 1px solid #e5e7eb;
+    padding: 0.55rem 0.7rem;
+    display: grid;
+    gap: 0.35rem;
+}
+
+.event-identifiers-row {
+    font-size: 0.82rem;
+    color: var(--text-light);
+}
+
+.event-identifiers-row span {
+    font-weight: 700;
+    color: var(--text-dark);
+}
+
+.event-identifiers-row code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.78rem;
+    background: #eef2f7;
+    border-radius: 4px;
+    padding: 0.08rem 0.3rem;
+}
+
 .ai-prompt {
     background: var(--background-light);
     padding: 1rem;

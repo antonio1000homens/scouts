@@ -120,6 +120,11 @@ function createEventHeading(tagName, event) {
     return `<${tagName} class="event-card-title">${badge}<span class="event-card-title-text">${title}</span></${tagName}>`;
 }
 
+function getTagline(event) {
+    if (!event || typeof event !== 'object') return null;
+    return event.tagline || event.AI || event.ai || event.aiPrompt || null;
+}
+
 function normaliseEventRecord(event) {
     if (!event || typeof event !== 'object') return null;
     const normalised = { ...event };
@@ -128,8 +133,8 @@ function normaliseEventRecord(event) {
         normalised.title = normalised.summary || normalised.name || 'Scout event';
     }
 
-    if (normalised.AI === undefined && normalised.ai !== undefined) {
-        normalised.AI = normalised.ai;
+    if (normalised.tagline === undefined) {
+        normalised.tagline = getTagline(normalised);
     }
 
     if (!normalised.location && normalised.place) {
@@ -155,7 +160,8 @@ function renderNextEventCard(event, container) {
 
     const dateLabel = formatDisplayDate(event.__eventDate || event.dtstart || event.start?.iso || event.start?.raw);
     const locationLabel = event.location || '';
-    const aiCopy = event.AI ? `<p class="ai-text">${event.AI}</p>` : '';
+    const tagline = getTagline(event);
+    const aiCopy = tagline ? `<p class="ai-text">${tagline}</p>` : '';
     const metaBlock = [
         dateLabel ? `<p><span class="label">Date:</span> ${dateLabel}</p>` : '',
         locationLabel ? `<p><span class="label">Location:</span> ${locationLabel}</p>` : ''
@@ -197,7 +203,7 @@ function renderFutureEvents(events, container) {
             <div class="event-card" data-section="${sectionKey}">
                 ${image}
                 ${headingMarkup}
-                ${event.AI ? `<p class="ai-text">${event.AI}</p>` : ''}
+                ${getTagline(event) ? `<p class="ai-text">${getTagline(event)}</p>` : ''}
             </div>
         `;
     }).join('');
@@ -213,7 +219,8 @@ function renderPastEventsCarousel(events, container) {
     const cards = events.map(event => {
         const dateLabel = formatDisplayDate(event.__eventDate || event.dtstart || event.start?.iso || event.start?.raw);
         const locationLabel = event.location ? `<p class="location">${event.location}</p>` : '';
-        const aiCopy = event.AI ? `<p class="ai-text">${event.AI}</p>` : '';
+        const tagline = getTagline(event);
+        const aiCopy = tagline ? `<p class="ai-text">${tagline}</p>` : '';
         const image = createEventImageMarkup(event);
         const sectionKey = resolveEventSection(event);
         const headingMarkup = createEventHeading('h4', event);
