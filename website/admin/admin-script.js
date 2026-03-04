@@ -7,7 +7,7 @@ let currentEventIndex = null;
 let apiAuthReady = false;
 let lambdaRuntimeRunning = false;
 let uiCommandInFlight = false;
-let activeFilter = 'all';
+let activeFilter = 'new';
 let agendaPayload = null;
 let agendaLoadInFlight = false;
 let lastAgendaScanAtIso = null;
@@ -117,10 +117,18 @@ function isCompleteEvent(event) {
     return hasText(getAIPrompt(event)) && hasText(getImagePrompt(event)) && hasText(getImageUrl(event));
 }
 
+function isNewEvent(event) {
+    return !hasText(getAIPrompt(event)) && !hasText(getImagePrompt(event)) && !hasText(getImageUrl(event));
+}
+
 function getFilterCounts() {
     return {
+        new: uniqueEventEntries.filter((entry) => isNewEvent(entry.event)).length,
         all: uniqueEventEntries.length,
-        missing: uniqueEventEntries.filter((entry) => getMissingMetadataFields(entry.event).length > 0).length,
+        missing: uniqueEventEntries.filter((entry) => {
+            const missingCount = getMissingMetadataFields(entry.event).length;
+            return missingCount > 0 && missingCount < 3;
+        }).length,
         hidden: uniqueEventEntries.filter((entry) => entry.allHidden).length,
         complete: uniqueEventEntries.filter((entry) => isCompleteEvent(entry.event)).length,
         approval: uniqueEventEntries.filter((entry) => getMissingMetadataFields(entry.event).length > 0 && hasText(entry.event?.hex)).length,
@@ -129,7 +137,7 @@ function getFilterCounts() {
 
 function updateSidebarUi() {
     const counts = getFilterCounts();
-    const filters = ['all', 'missing', 'hidden', 'complete', 'approval'];
+    const filters = ['new', 'all', 'missing', 'hidden', 'complete', 'approval'];
     filters.forEach((filter) => {
         const btn = document.getElementById(`filter-btn-${filter}`);
         if (!btn) return;
@@ -907,8 +915,13 @@ function renderEvents() {
     visibleEventEntries = uniqueEventEntries.filter((entry) => {
         const event = entry.event;
         switch (activeFilter) {
+            case 'new':
+                return isNewEvent(event);
             case 'missing':
-                return getMissingMetadataFields(event).length > 0;
+                return (() => {
+                    const missingCount = getMissingMetadataFields(event).length;
+                    return missingCount > 0 && missingCount < 3;
+                })();
             case 'hidden':
                 return entry.allHidden;
             case 'complete':
