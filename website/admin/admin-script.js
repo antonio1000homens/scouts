@@ -1245,6 +1245,7 @@ async function refreshLambda() {
     try {
         const result = await sendScoutsCommand(payload);
         await pollLambdaRuntimeStatus(true);
+        await pollQueueDepthSnapshots();
 
         const resultText = result?.status || result?.message || 'ok';
         const modifiedEvents = Array.isArray(result?.modifiedEvents) ? result.modifiedEvents : [];
@@ -1308,6 +1309,7 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
     try {
         const result = await sendScoutsCommand(payload);
         await pollLambdaRuntimeStatus(true);
+        await pollQueueDepthSnapshots();
         const count = Number.isFinite(result?.eventsCount) ? result.eventsCount : null;
         const generatedAt = result?.generatedAt ? new Date(result.generatedAt).toLocaleString('en-GB') : null;
         const countSuffix = count !== null ? ` (${count} events in agenda)` : '';

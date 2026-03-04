@@ -50,14 +50,31 @@
                 <div class="global-card">
                     <h3>Events</h3>
                     <div class="refresh-controls">
-                        <input type="number" id="refresh-action" placeholder="Events to enrich (e.g. 5)" class="refresh-input" min="0" step="1">
-                        <button id="refresh-button" class="btn btn-primary requires-api" onclick="refreshLambda()">Refresh Agenda events</button>
+                        <input
+                            type="number"
+                            id="refresh-action"
+                            placeholder="Events to enrich (e.g. 5)"
+                            class="refresh-input"
+                            min="0"
+                            step="1"
+                            title="Number of scoutsRequest queue notifications Lambda may publish this run. 0 = no new queue notifications; it still enriches and updates agenda/HEX data."
+                        >
+                        <button
+                            id="refresh-button"
+                            class="btn btn-primary requires-api"
+                            onclick="refreshLambda()"
+                            title="Runs agenda enrichment with the integer as max queue publish count. This does not do a full calendar feed refresh."
+                        >Refresh Agenda events</button>
                     </div>
                     <p id="refresh-status" class="refresh-status"></p>
                     <div class="global-actions">
                         <button class="btn btn-secondary" onclick="toggleAgendaViewer()">Consult Agenda</button>
                         <button class="btn btn-secondary" onclick="toggleEventsJsonViewer()">List events/*.json</button>
-                        <button class="btn btn-primary" onclick="loadEvents()">Reload Agenda From Disk</button>
+                        <button
+                            class="btn btn-primary"
+                            onclick="loadEvents()"
+                            title="Reloads ../../agenda.json into the admin UI and rerenders events/tracker. No Lambda call and no queue writes."
+                        >Reload Agenda From Disk</button>
                     </div>
                     <p class="refresh-status">The events list is generated from loaded agenda items and HEX identifiers.</p>
                 </div>
