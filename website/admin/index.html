@@ -67,6 +67,18 @@
                         >Refresh Agenda events</button>
                     </div>
                     <p id="refresh-status" class="refresh-status"></p>
+                    <div class="refresh-controls">
+                        <label class="refresh-status" for="auto-lambda-toggle">
+                            <input
+                                type="checkbox"
+                                id="auto-lambda-toggle"
+                                checked
+                                onchange="toggleAutoLambdaInvocation(this.checked)"
+                            >
+                            Auto invoke lambda every 20s
+                        </label>
+                    </div>
+                    <p id="auto-lambda-status" class="refresh-status">Auto invocation: enabled</p>
                     <div class="global-actions">
                         <button class="btn btn-secondary" onclick="toggleAgendaViewer()">Consult Agenda</button>
                         <button class="btn btn-secondary" onclick="toggleEventsJsonViewer()">List events/*.json</button>
