@@ -7,8 +7,7 @@ let currentEventIndex = null;
 let apiAuthReady = false;
 let lambdaRuntimeRunning = false;
 let uiCommandInFlight = false;
-let showHiddenEvents = false;
-let showCompleteEvents = false;
+let activeFilter = 'all';
 let agendaPayload = null;
 let pinnedRuntimeDetails = null;
 const MIN_RUNTIME_DETAILS_VISIBLE_MS = 5000;
@@ -107,59 +106,35 @@ function getPinnedRuntimeDetails() {
     return pinnedRuntimeDetails;
 }
 
-function updateHiddenEventsUi() {
-    const toggleButton = document.getElementById('toggle-hidden-events');
-    const hiddenSummary = document.getElementById('hidden-summary');
-    const hiddenCount = uniqueEventEntries.filter((entry) => entry.allHidden).length;
-
-    if (toggleButton) {
-        toggleButton.textContent = showHiddenEvents ? 'Hide Hidden' : 'Show Hidden';
-    }
-
-    if (hiddenSummary) {
-        if (hiddenCount === 0) {
-            hiddenSummary.textContent = 'No hidden events in agenda.';
-        } else if (showHiddenEvents) {
-            hiddenSummary.textContent = `Showing ${hiddenCount} hidden event group${hiddenCount !== 1 ? 's' : ''}.`;
-        } else {
-            hiddenSummary.textContent = `${hiddenCount} hidden event group${hiddenCount !== 1 ? 's' : ''} collapsed.`;
-        }
-    }
-}
-
-function toggleHiddenEvents() {
-    showHiddenEvents = !showHiddenEvents;
-    updateHiddenEventsUi();
-    renderEvents();
-}
-
 function isCompleteEvent(event) {
     return hasText(getAIPrompt(event)) && hasText(getImagePrompt(event)) && hasText(getImageUrl(event));
 }
 
-function updateCompleteEventsUi() {
-    const toggleButton = document.getElementById('toggle-complete-events');
-    const summary = document.getElementById('complete-summary');
-    const completeCount = uniqueEventEntries.filter((entry) => isCompleteEvent(entry.event)).length;
-
-    if (toggleButton) {
-        toggleButton.textContent = showCompleteEvents ? 'Hide Complete' : 'Show Complete';
-    }
-
-    if (summary) {
-        if (completeCount === 0) {
-            summary.textContent = 'No complete events in agenda.';
-        } else if (showCompleteEvents) {
-            summary.textContent = `Showing ${completeCount} complete event group${completeCount !== 1 ? 's' : ''}.`;
-        } else {
-            summary.textContent = `${completeCount} complete event group${completeCount !== 1 ? 's' : ''} collapsed.`;
-        }
-    }
+function getFilterCounts() {
+    return {
+        all: uniqueEventEntries.length,
+        missing: uniqueEventEntries.filter((entry) => getMissingMetadataFields(entry.event).length > 0).length,
+        hidden: uniqueEventEntries.filter((entry) => entry.allHidden).length,
+        complete: uniqueEventEntries.filter((entry) => isCompleteEvent(entry.event)).length,
+        approval: uniqueEventEntries.filter((entry) => getMissingMetadataFields(entry.event).length > 0 && hasText(entry.event?.hex)).length,
+    };
 }
 
-function toggleCompleteEvents() {
-    showCompleteEvents = !showCompleteEvents;
-    updateCompleteEventsUi();
+function updateSidebarUi() {
+    const counts = getFilterCounts();
+    const filters = ['all', 'missing', 'hidden', 'complete', 'approval'];
+    filters.forEach((filter) => {
+        const btn = document.getElementById(`filter-btn-${filter}`);
+        if (!btn) return;
+        const countEl = btn.querySelector('.filter-count');
+        if (countEl) countEl.textContent = counts[filter];
+        btn.classList.toggle('active', filter === activeFilter);
+    });
+}
+
+function setFilter(filter) {
+    activeFilter = filter;
+    updateSidebarUi();
     renderEvents();
 }
 
@@ -465,8 +440,7 @@ async function loadEvents() {
             uniqueEventEntries.filter((entry) => entry.allHidden).length,
             uniqueEventEntries.filter((entry) => isCompleteEvent(entry.event)).length,
         );
-        updateHiddenEventsUi();
-        updateCompleteEventsUi();
+        updateSidebarUi();
         renderEvents();
         renderAgendaViewerContent();
         renderEventsJsonViewerContent();
@@ -683,13 +657,24 @@ function renderEvents() {
     }
 
     visibleEventEntries = uniqueEventEntries.filter((entry) => {
-        const hiddenAllowed = showHiddenEvents || !entry.allHidden;
-        const completeAllowed = showCompleteEvents || !isCompleteEvent(entry.event);
-        return hiddenAllowed && completeAllowed;
+        const event = entry.event;
+        switch (activeFilter) {
+            case 'missing':
+                return getMissingMetadataFields(event).length > 0;
+            case 'hidden':
+                return entry.allHidden;
+            case 'complete':
+                return isCompleteEvent(event);
+            case 'approval':
+                return getMissingMetadataFields(event).length > 0 && hasText(event?.hex);
+            case 'all':
+            default:
+                return true;
+        }
     });
 
     if (visibleEventEntries.length === 0) {
-        container.innerHTML = '<p class="loading">No events match current filters. Use "Show Hidden" or "Show Complete".</p>';
+        container.innerHTML = '<p class="loading">No events match the selected filter.</p>';
         return;
     }
 
@@ -723,7 +708,7 @@ function renderEvents() {
                     <p class="event-index">UID: ${eventUID} | Occurrences: ${entry.duplicateCount}</p>
                     ${event.hex ? `<p class="event-index">HEX: ${event.hex}</p>` : ''}
                     ${entry.sourceDetails?.length
-                        ? `<div class="image-info"><strong>Grouped Source Events:</strong>${entry.sourceDetails.map((detail) => `<div class="image-url">Event Index: ${detail.index} | UID: ${detail.uid}</div>`).join('')}</div>`
+                        ? `<div class="image-info">${entry.sourceDetails.map((detail) => `<div class="image-url">Event Index: ${detail.index} | UID: ${detail.uid}</div>`).join('')}</div>`
                         : ''
                     }
                     
