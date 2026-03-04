@@ -188,8 +188,56 @@
                         <p><strong>Tagline:</strong> <span id="modal-tagline"></span></p>
                     </div>
 
-                    <div class="form-group">
-                        <label for="modal-image-url-input">Set Image URL</label>
+                    <div class="operation-group">
+                        <h3>Operation Types</h3>
+                        <p class="refresh-status modal-input-help"><strong>Persist to HEX:</strong> immediately replaces the selected field in the HEX payload.</p>
+                        <p class="refresh-status modal-input-help"><strong>Request AI/Pixabay:</strong> queues generation for that field and updates later through the existing SQS workflow.</p>
+                    </div>
+
+                    <div class="field-editor">
+                        <label for="modal-tagline-input">Tagline</label>
+                        <input
+                            type="text"
+                            id="modal-tagline-input"
+                            placeholder="Short event tagline"
+                            autocomplete="off"
+                            spellcheck="false"
+                        >
+                        <div class="field-actions">
+                            <button
+                                class="btn btn-primary requires-api"
+                                onclick="persistCurrentField('tagline')"
+                            >Persist Tagline</button>
+                            <button
+                                class="btn btn-secondary requires-api"
+                                onclick="requestGeneratedField('tagline')"
+                            >Request AI Tagline</button>
+                        </div>
+                    </div>
+
+                    <div class="field-editor">
+                        <label for="modal-image-prompt-input">Image Prompt</label>
+                        <input
+                            type="text"
+                            id="modal-image-prompt-input"
+                            placeholder="Prompt used for image generation/search"
+                            autocomplete="off"
+                            spellcheck="false"
+                        >
+                        <div class="field-actions">
+                            <button
+                                class="btn btn-primary requires-api"
+                                onclick="persistCurrentField('imagePrompt')"
+                            >Persist Image Prompt</button>
+                            <button
+                                class="btn btn-secondary requires-api"
+                                onclick="requestGeneratedField('imagePrompt')"
+                            >Request AI Image Prompt</button>
+                        </div>
+                    </div>
+
+                    <div class="field-editor">
+                        <label for="modal-image-url-input">Image URL</label>
                         <input
                             type="url"
                             id="modal-image-url-input"
@@ -197,13 +245,17 @@
                             autocomplete="off"
                             spellcheck="false"
                         >
-                        <p class="refresh-status modal-input-help">Persists via scouts lambda. External URLs are downloaded into S3 and the HEX file image URL is updated.</p>
-                        <div class="workflow-actions">
+                        <p class="refresh-status modal-input-help">External URLs are downloaded into S3 by `sqs2scouts` when persisted.</p>
+                        <div class="field-actions">
                             <button
                                 id="modal-save-image-url-button"
                                 class="btn btn-primary requires-api"
-                                onclick="persistCurrentImageUrl()"
+                                onclick="persistCurrentField('imageUrl')"
                             >Persist Image URL</button>
+                            <button
+                                class="btn btn-secondary requires-api"
+                                onclick="requestGeneratedField('imageUrl')"
+                            >Request Pixabay Image URL</button>
                             <button id="modal-requeue-button" class="btn btn-secondary requires-api" style="display:none;" onclick="requeueCurrentEvent()">Requeue Missing Fields</button>
                         </div>
                         <p id="modal-requeue-hint" class="refresh-status"></p>

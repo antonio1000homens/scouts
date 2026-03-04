@@ -804,6 +804,35 @@ body {
     font-size: 0.82rem;
 }
 
+.operation-group {
+    border: 1px solid #d9e2ec;
+    border-radius: 6px;
+    background: #f8fafc;
+    padding: 0.7rem;
+    margin: 0.85rem 0;
+}
+
+.operation-group h3 {
+    margin: 0 0 0.35rem 0;
+    font-size: 0.95rem;
+    color: var(--text-dark);
+}
+
+.operation-group .modal-input-help {
+    margin: 0.15rem 0;
+}
+
+.field-editor {
+    margin: 0.9rem 0;
+}
+
+.field-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
 .form-group textarea {
     width: 100%;
     padding: 0.5rem;
