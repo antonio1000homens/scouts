@@ -40,14 +40,27 @@ function formatDisplayDate(dateOrString) {
 function resolveImageUrl(event) {
     if (!event) return null;
     const { image, imageUrl } = event;
-    if (typeof image === 'string') return image;
-    if (typeof imageUrl === 'string') return imageUrl;
+    if (typeof image === 'string') return normaliseImagePath(image);
+    if (typeof imageUrl === 'string') return normaliseImagePath(imageUrl);
     if (image && typeof image === 'object') {
-        if (typeof image.url === 'string') return image.url;
-        if (typeof image.src === 'string') return image.src;
-        if (typeof image.href === 'string') return image.href;
+        if (typeof image.url === 'string') return normaliseImagePath(image.url);
+        if (typeof image.src === 'string') return normaliseImagePath(image.src);
+        if (typeof image.href === 'string') return normaliseImagePath(image.href);
     }
     return null;
+}
+
+function normaliseImagePath(url) {
+    if (!url || typeof url !== 'string') return url;
+    const trimmed = url.trim();
+    if (!trimmed) return trimmed;
+    if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
+    }
+    if (trimmed.startsWith('/')) {
+        return trimmed;
+    }
+    return `/${trimmed.replace(/^(\.\/)+/, '')}`;
 }
 
 function withImageWidthParam(imageUrl, width = 400) {
@@ -311,7 +324,10 @@ function renderPastEventsCarousel(events, container) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    fetch(`agenda.json?ts=${Date.now()}`)
+    fetch(`agenda.json?ts=${Date.now()}`, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+    })
         .then(response => {
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
