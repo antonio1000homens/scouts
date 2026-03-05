@@ -33,6 +33,7 @@ let autoLambdaInvokeInFlight = false;
 let autoLambdaInvokeEnabled = true;
 const missingHexRetryAtByHex = new Map();
 const warnedMissingDtstartIds = new Set();
+const localVisibilityOverrides = new Map();
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
 const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
 const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
@@ -508,6 +509,7 @@ async function loadEvents(options = {}) {
             events: eventsData.map((event) => cloneEventRecord(event)),
         };
         uniqueEventEntries = buildUniqueEventEntries(eventsData);
+        applyVisibilityOverrides(uniqueEventEntries);
         lastAgendaScanAtIso = new Date().toISOString();
         console.log('[Admin] agenda.json fetched', {
             totalEvents: rawEvents.length,
@@ -793,6 +795,9 @@ async function hydrateEntriesFromHexFiles() {
             if (applyHexEventMetadata(targetEntry.event, update.hexEvent)) {
                 changedAny = true;
             }
+        }
+        if (applyVisibilityOverrides(uniqueEventEntries, { allowConfirm: false })) {
+            changedAny = true;
         }
 
         if (changedAny) {
@@ -1757,15 +1762,69 @@ function applyLocalPersistedField(entry, field, value) {
 function applyLocalHiddenState(entry, hiddenAtIso, hidden = true) {
     if (!entry || !entry.event) return;
     const event = entry.event;
+    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
     if (hidden) {
         event.status = 'hidden';
         event.hiddenAt = hasText(hiddenAtIso) ? hiddenAtIso : new Date().toISOString();
         entry.allHidden = true;
+        if (hex) {
+            localVisibilityOverrides.set(hex, {
+                hidden: true,
+                hiddenAt: event.hiddenAt,
+            });
+        }
     } else {
         event.status = null;
         event.hiddenAt = null;
         entry.allHidden = false;
+        if (hex) {
+            localVisibilityOverrides.set(hex, {
+                hidden: false,
+                hiddenAt: null,
+            });
+        }
     }
+}
+
+function applyVisibilityOverrides(entries, options = {}) {
+    if (!Array.isArray(entries) || localVisibilityOverrides.size === 0) return false;
+    const allowConfirm = options.allowConfirm !== false;
+    let changed = false;
+
+    entries.forEach((entry) => {
+        const event = entry?.event;
+        const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+        if (!hex) return;
+
+        const override = localVisibilityOverrides.get(hex);
+        if (!override) return;
+
+        const backendStateMatches = isHiddenEvent(event) === Boolean(override.hidden);
+        if (allowConfirm && backendStateMatches) {
+            localVisibilityOverrides.delete(hex);
+            return;
+        }
+
+        if (override.hidden) {
+            const nextHiddenAt = hasText(override.hiddenAt) ? override.hiddenAt : (event.hiddenAt || new Date().toISOString());
+            if (event.status !== 'hidden' || event.hiddenAt !== nextHiddenAt || entry.allHidden !== true) {
+                event.status = 'hidden';
+                event.hiddenAt = nextHiddenAt;
+                entry.allHidden = true;
+                changed = true;
+            }
+            return;
+        }
+
+        if (event.status !== null || event.hiddenAt !== null || entry.allHidden !== false) {
+            event.status = null;
+            event.hiddenAt = null;
+            entry.allHidden = false;
+            changed = true;
+        }
+    });
+
+    return changed;
 }
 
 async function persistCurrentField(field) {
@@ -2022,7 +2081,7 @@ async function hideEvent(eventIndex, fromModal = false) {
         if (fromModal) updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
         setTimeout(() => {
-            loadEvents({ silent: true });
+            hydrateEntriesFromHexFiles();
         }, 1800);
     } catch (error) {
         console.error('Error hiding event:', error);
@@ -2126,7 +2185,7 @@ async function unhideEvent(eventIndex, fromModal = false) {
         if (fromModal) updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
         setTimeout(() => {
-            loadEvents({ silent: true });
+            hydrateEntriesFromHexFiles();
         }, 1800);
     } catch (error) {
         console.error('Error unhiding event:', error);
