@@ -182,14 +182,28 @@ function renderNextEventCard(event, container) {
     const image = createEventImageMarkup(event);
     const sectionKey = resolveEventSection(event);
     const headingMarkup = createEventHeading('h3', event);
+    const frontMarkup = image
+        ? `
+            <div class="next-event-hero next-event-hero--with-image">
+                <div class="next-event-hero-media">${image}</div>
+                <div class="next-event-hero-copy">
+                    ${headingMarkup}
+                    ${aiCopy}
+                </div>
+            </div>
+        `
+        : `
+            <div class="next-event-hero next-event-hero--text-only">
+                ${headingMarkup}
+                ${aiCopy}
+            </div>
+        `;
 
     container.innerHTML = `
         <div class="event-card flip-card" tabindex="0" data-section="${sectionKey}">
             <div class="flip-card-inner">
                 <div class="flip-card-face flip-card-front">
-                    ${image}
-                    ${headingMarkup}
-                    ${aiCopy}
+                    ${frontMarkup}
                 </div>
                 <div class="flip-card-face flip-card-back">
                     ${headingMarkup}

@@ -1647,11 +1647,43 @@ footer {
     font-size: 2.25rem;
 }
 
+.next-event .next-event-hero {
+    width: 100%;
+}
+
+.next-event .next-event-hero--with-image {
+    display: grid;
+    grid-template-columns: minmax(240px, 360px) minmax(0, 1fr);
+    gap: 2rem;
+    align-items: center;
+    text-align: left;
+}
+
+.next-event .next-event-hero-media {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.next-event .next-event-hero-copy {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+}
+
+.next-event .next-event-hero-copy .event-card-title {
+    justify-content: flex-start;
+}
+
+.next-event .next-event-hero-copy .ai-text {
+    margin-top: 1rem;
+}
+
 .next-event .flip-card img {
-    max-width: 260px;
+    max-width: 320px;
     width: 100%;
     height: auto;
-    margin-bottom: 1.25rem;
     border-radius: 14px;
     box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
 }
@@ -1748,6 +1780,20 @@ footer {
 @media (max-width: 600px) {
     .event-grid {
         grid-template-columns: 1fr;
+    }
+
+    .next-event .next-event-hero--with-image {
+        grid-template-columns: 1fr;
+        gap: 1.25rem;
+        text-align: center;
+    }
+
+    .next-event .next-event-hero-copy {
+        align-items: center;
+    }
+
+    .next-event .next-event-hero-copy .event-card-title {
+        justify-content: center;
     }
 
     .next-event .flip-card h3 {
