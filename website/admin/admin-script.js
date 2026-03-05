@@ -31,6 +31,8 @@ let runtimeDetailsFlushTimer = null;
 let hexHydrationInFlight = false;
 let autoLambdaInvokeInFlight = false;
 let autoLambdaInvokeEnabled = true;
+let latestCompletedRequests = [];
+let latestCompletedRequestsUpdatedAt = null;
 const missingHexRetryAtByHex = new Map();
 const warnedMissingDtstartIds = new Set();
 const localVisibilityOverrides = new Map();
@@ -303,6 +305,62 @@ function updateGlobalRefreshStatus(message, type = 'info') {
     if (!statusElement) return;
     statusElement.textContent = message;
     statusElement.className = `refresh-status ${type}`;
+}
+
+function formatCompletedRequestOperation(value) {
+    if (!hasText(value)) return 'unknown';
+    const normalized = String(value).trim();
+    if (normalized === 'imagePrompt') return 'Image Prompt';
+    if (normalized === 'imageUrl') return 'Image URL';
+    if (normalized === 'tagline') return 'Tagline';
+    if (normalized === 'hidden') return 'Hidden';
+    if (normalized === 'persist') return 'Persist';
+    return normalized;
+}
+
+function renderCompletedRequests() {
+    const summaryEl = document.getElementById('completed-requests-summary');
+    const updatedEl = document.getElementById('completed-requests-updated');
+    const listEl = document.getElementById('completed-requests-list');
+    if (!summaryEl || !updatedEl || !listEl) return;
+
+    const total = Array.isArray(latestCompletedRequests) ? latestCompletedRequests.length : 0;
+    summaryEl.textContent = total > 0 ? `${total} completed` : 'No new completions';
+    summaryEl.className = `status-text ${total > 0 ? 'status-success' : 'status-info'}`;
+
+    if (latestCompletedRequestsUpdatedAt) {
+        const parsed = new Date(latestCompletedRequestsUpdatedAt);
+        updatedEl.textContent = `Last refresh: ${Number.isNaN(parsed.getTime()) ? latestCompletedRequestsUpdatedAt : parsed.toLocaleString('en-GB')}`;
+    } else {
+        updatedEl.textContent = 'Last refresh: n/a';
+    }
+
+    if (total === 0) {
+        listEl.innerHTML = '<p class="refresh-status">No completed requests in the latest refresh.</p>';
+        return;
+    }
+
+    listEl.innerHTML = latestCompletedRequests.map((entry) => {
+        const title = hasText(entry?.title) ? entry.title.trim() : (hasText(entry?.hex) ? entry.hex.trim() : 'Unknown');
+        const operation = formatCompletedRequestOperation(entry?.operation);
+        const processedAt = hasText(entry?.processedAt)
+            ? formatTrackerTimestamp(entry.processedAt)
+            : 'n/a';
+        const hex = hasText(entry?.hex) ? entry.hex.trim() : 'n/a';
+        return `<div class="completed-request-item">
+            <div><strong>${escapeHtml(title)}</strong></div>
+            <div class="completed-request-meta">${escapeHtml(operation)} | ${escapeHtml(hex)} | ${escapeHtml(processedAt)}</div>
+        </div>`;
+    }).join('');
+}
+
+function updateCompletedRequestsFromResult(result) {
+    const completedRequests = Array.isArray(result?.completedRequests) ? result.completedRequests : null;
+    if (completedRequests && completedRequests.length > 0) {
+        latestCompletedRequests = completedRequests;
+        latestCompletedRequestsUpdatedAt = new Date().toISOString();
+    }
+    renderCompletedRequests();
 }
 
 function readAutoLambdaInvocationPreference() {
@@ -1554,6 +1612,7 @@ async function refreshLambda() {
         const result = await sendScoutsCommand(payload);
         await pollLambdaRuntimeStatus(true);
         await pollQueueDepthSnapshots();
+        updateCompletedRequestsFromResult(result);
 
         const resultText = result?.status || result?.message || 'ok';
         const modifiedEvents = Array.isArray(result?.modifiedEvents) ? result.modifiedEvents : [];
@@ -1618,6 +1677,7 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
         const result = await sendScoutsCommand(payload);
         await pollLambdaRuntimeStatus(true);
         await pollQueueDepthSnapshots();
+        updateCompletedRequestsFromResult(result);
         const count = Number.isFinite(result?.eventsCount) ? result.eventsCount : null;
         const generatedAt = result?.generatedAt ? new Date(result.generatedAt).toLocaleString('en-GB') : null;
         const countSuffix = count !== null ? ` (${count} events in agenda)` : '';
@@ -1649,9 +1709,10 @@ async function invokeLambdaHeartbeat() {
             subject: 'agenda',
             action: 0,
         };
-        await sendScoutsCommand(payload);
+        const result = await sendScoutsCommand(payload);
         await pollLambdaRuntimeStatus(true);
         await pollQueueDepthSnapshots();
+        updateCompletedRequestsFromResult(result);
     } catch (error) {
         console.warn('[Admin] Auto lambda heartbeat failed:', error?.message || error);
     } finally {
@@ -2321,6 +2382,7 @@ document.addEventListener('DOMContentLoaded', () => {
     checkApiAuthStatus();
     loadEvents();
     renderRequeueTracker();
+    renderCompletedRequests();
     pollQueueDepthSnapshots();
     setInterval(() => {
         pollLambdaRuntimeStatus(true);
