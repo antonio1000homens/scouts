@@ -311,7 +311,7 @@ function renderPastEventsCarousel(events, container) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    fetch('agenda.json')
+    fetch(`agenda.json?ts=${Date.now()}`)
         .then(response => {
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
