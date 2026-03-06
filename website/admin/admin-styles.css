@@ -530,6 +530,14 @@ body {
 .event-badge.cubs { color: #23a950; }
 .event-badge.scouts { color: #004851; }
 .event-badge.hidden { color: #b54708; }
+.event-badge.runtime-updating {
+    top: 46px;
+    color: #155eef;
+}
+.event-badge.runtime-refresh-needed {
+    top: 46px;
+    color: #b42318;
+}
 
 .btn-hide {
     position: absolute;

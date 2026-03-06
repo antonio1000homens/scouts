@@ -607,6 +607,36 @@ function getSnapshotRequests(snapshot) {
     return Array.isArray(snapshot?.requests) ? snapshot.requests : [];
 }
 
+function deriveEventRuntimeRefreshState(event) {
+    const hex = hasText(event?.hex) ? String(event.hex).trim().toLowerCase() : '';
+    if (!hex) return null;
+
+    const queuedRequests = getSnapshotRequests(latestQueuedSnapshot).filter((request) => {
+        const requestHex = hasText(request?.hexId) ? String(request.hexId).trim().toLowerCase() : '';
+        return requestHex === hex && hasText(request?.requestId);
+    });
+    if (queuedRequests.length === 0) {
+        return null;
+    }
+
+    const completedPairs = new Set(
+        getSnapshotRequests(latestCompletedSnapshot)
+            .map((request) => {
+                const requestHex = hasText(request?.hexId) ? String(request.hexId).trim().toLowerCase() : '';
+                const requestId = hasText(request?.requestId) ? String(request.requestId).trim() : '';
+                return requestHex && requestId ? `${requestHex}|${requestId}` : '';
+            })
+            .filter(Boolean),
+    );
+
+    const hasCompletedMatch = queuedRequests.some((request) => {
+        const requestId = hasText(request?.requestId) ? String(request.requestId).trim() : '';
+        return requestId && completedPairs.has(`${hex}|${requestId}`);
+    });
+
+    return hasCompletedMatch ? 'refresh-needed' : 'updating';
+}
+
 function formatObservedIds(snapshot) {
     const requests = getSnapshotRequests(snapshot);
     if (requests.length === 0) {
@@ -1450,6 +1480,7 @@ function renderEvents() {
         const requeueEligible = missingFields.length > 0;
         const section = getEventSection(event);
         const isHidden = isEntryHidden(entry);
+        const runtimeRefreshState = deriveEventRuntimeRefreshState(event);
         const title = getEventDisplayTitle(event, entry, index);
         const eventUID = getEntryIdentifier(entry);
         const sourceDetailsMarkup = entry.sourceDetails?.length
@@ -1474,6 +1505,8 @@ function renderEvents() {
                     }
                     <span class="event-badge ${section}">${section}</span>
                     ${isHidden ? `<span class="event-badge hidden">Hidden</span>` : ''}
+                    ${runtimeRefreshState === 'updating' ? `<span class="event-badge runtime-updating">Updating</span>` : ''}
+                    ${runtimeRefreshState === 'refresh-needed' ? `<span class="event-badge runtime-refresh-needed">Refresh Needed</span>` : ''}
                 </div>
                 <div class="event-details">
                     <h3 class="event-title">${title}</h3>
