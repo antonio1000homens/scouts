@@ -265,6 +265,28 @@ body {
     padding: 0.55rem 0.65rem;
 }
 
+.completed-requests-list {
+    margin-top: 0.5rem;
+    display: grid;
+    gap: 0.45rem;
+}
+
+.completed-request-item {
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    background: #f8fafc;
+    padding: 0.55rem 0.65rem;
+}
+
+.completed-request-item strong {
+    color: var(--text-dark);
+}
+
+.completed-request-meta {
+    font-size: 0.82rem;
+    color: var(--text-light);
+}
+
 .events-layout {
     display: flex;
     gap: 1.25rem;
