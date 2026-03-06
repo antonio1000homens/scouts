@@ -32,8 +32,11 @@ let runtimeDetailsFlushTimer = null;
 let hexHydrationInFlight = false;
 let autoLambdaInvokeInFlight = false;
 let autoLambdaInvokeEnabled = true;
+let latestCompletedRequests = [];
+let latestCompletedRequestsUpdatedAt = null;
 const missingHexRetryAtByHex = new Map();
 const warnedMissingDtstartIds = new Set();
+const localVisibilityOverrides = new Map();
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
 const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
 const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
@@ -306,6 +309,62 @@ function updateGlobalRefreshStatus(message, type = 'info') {
     statusElement.className = `refresh-status ${type}`;
 }
 
+function formatCompletedRequestOperation(value) {
+    if (!hasText(value)) return 'unknown';
+    const normalized = String(value).trim();
+    if (normalized === 'imagePrompt') return 'Image Prompt';
+    if (normalized === 'imageUrl') return 'Image URL';
+    if (normalized === 'tagline') return 'Tagline';
+    if (normalized === 'hidden') return 'Hidden';
+    if (normalized === 'persist') return 'Persist';
+    return normalized;
+}
+
+function renderCompletedRequests() {
+    const summaryEl = document.getElementById('completed-requests-summary');
+    const updatedEl = document.getElementById('completed-requests-updated');
+    const listEl = document.getElementById('completed-requests-list');
+    if (!summaryEl || !updatedEl || !listEl) return;
+
+    const total = Array.isArray(latestCompletedRequests) ? latestCompletedRequests.length : 0;
+    summaryEl.textContent = total > 0 ? `${total} completed` : 'No new completions';
+    summaryEl.className = `status-text ${total > 0 ? 'status-success' : 'status-info'}`;
+
+    if (latestCompletedRequestsUpdatedAt) {
+        const parsed = new Date(latestCompletedRequestsUpdatedAt);
+        updatedEl.textContent = `Last refresh: ${Number.isNaN(parsed.getTime()) ? latestCompletedRequestsUpdatedAt : parsed.toLocaleString('en-GB')}`;
+    } else {
+        updatedEl.textContent = 'Last refresh: n/a';
+    }
+
+    if (total === 0) {
+        listEl.innerHTML = '<p class="refresh-status">No completed requests in the latest refresh.</p>';
+        return;
+    }
+
+    listEl.innerHTML = latestCompletedRequests.map((entry) => {
+        const title = hasText(entry?.title) ? entry.title.trim() : (hasText(entry?.hex) ? entry.hex.trim() : 'Unknown');
+        const operation = formatCompletedRequestOperation(entry?.operation);
+        const processedAt = hasText(entry?.processedAt)
+            ? formatTrackerTimestamp(entry.processedAt)
+            : 'n/a';
+        const hex = hasText(entry?.hex) ? entry.hex.trim() : 'n/a';
+        return `<div class="completed-request-item">
+            <div><strong>${escapeHtml(title)}</strong></div>
+            <div class="completed-request-meta">${escapeHtml(operation)} | ${escapeHtml(hex)} | ${escapeHtml(processedAt)}</div>
+        </div>`;
+    }).join('');
+}
+
+function updateCompletedRequestsFromResult(result) {
+    const completedRequests = Array.isArray(result?.completedRequests) ? result.completedRequests : null;
+    if (completedRequests && completedRequests.length > 0) {
+        latestCompletedRequests = completedRequests;
+        latestCompletedRequestsUpdatedAt = new Date().toISOString();
+    }
+    renderCompletedRequests();
+}
+
 function readAutoLambdaInvocationPreference() {
     try {
         const stored = window.localStorage.getItem(AUTO_LAMBDA_PREF_KEY);
@@ -507,6 +566,7 @@ async function loadEvents(options = {}) {
         eventsData = rawEvents.map((event) => normaliseEventTaglineFields(cloneEventRecord(event)));
         agendaPayload = data;
         uniqueEventEntries = buildUniqueEventEntries(eventsData);
+        applyVisibilityOverrides(uniqueEventEntries);
         lastAgendaScanAtIso = new Date().toISOString();
         console.log('[Admin] agenda.json fetched', {
             totalEvents: rawEvents.length,
@@ -808,6 +868,9 @@ async function hydrateEntriesFromHexFiles() {
             if (applyHexEventMetadata(targetEntry.event, update.hexEvent)) {
                 changedAny = true;
             }
+        }
+        if (applyVisibilityOverrides(uniqueEventEntries, { allowConfirm: false })) {
+            changedAny = true;
         }
 
         if (changedAny) {
@@ -1625,6 +1688,7 @@ async function refreshLambda() {
         const result = await sendScoutsCommand(payload);
         await pollLambdaRuntimeStatus(true);
         await pollQueueDepthSnapshots();
+        updateCompletedRequestsFromResult(result);
 
         const resultText = result?.status || result?.message || 'ok';
         const modifiedEvents = Array.isArray(result?.modifiedEvents) ? result.modifiedEvents : [];
@@ -1689,6 +1753,7 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
         const result = await sendScoutsCommand(payload);
         await pollLambdaRuntimeStatus(true);
         await pollQueueDepthSnapshots();
+        updateCompletedRequestsFromResult(result);
         const count = Number.isFinite(result?.eventsCount) ? result.eventsCount : null;
         const generatedAt = result?.generatedAt ? new Date(result.generatedAt).toLocaleString('en-GB') : null;
         const countSuffix = count !== null ? ` (${count} events in agenda)` : '';
@@ -1720,9 +1785,10 @@ async function invokeLambdaHeartbeat() {
             subject: 'agenda',
             action: 0,
         };
-        await sendScoutsCommand(payload);
+        const result = await sendScoutsCommand(payload);
         await pollLambdaRuntimeStatus(true);
         await pollQueueDepthSnapshots();
+        updateCompletedRequestsFromResult(result);
     } catch (error) {
         console.warn('[Admin] Auto lambda heartbeat failed:', error?.message || error);
     } finally {
@@ -1833,15 +1899,69 @@ function applyLocalPersistedField(entry, field, value) {
 function applyLocalHiddenState(entry, hiddenAtIso, hidden = true) {
     if (!entry || !entry.event) return;
     const event = entry.event;
+    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
     if (hidden) {
         event.status = 'hidden';
         event.hiddenAt = hasText(hiddenAtIso) ? hiddenAtIso : new Date().toISOString();
         entry.allHidden = true;
+        if (hex) {
+            localVisibilityOverrides.set(hex, {
+                hidden: true,
+                hiddenAt: event.hiddenAt,
+            });
+        }
     } else {
         event.status = null;
         event.hiddenAt = null;
         entry.allHidden = false;
+        if (hex) {
+            localVisibilityOverrides.set(hex, {
+                hidden: false,
+                hiddenAt: null,
+            });
+        }
     }
+}
+
+function applyVisibilityOverrides(entries, options = {}) {
+    if (!Array.isArray(entries) || localVisibilityOverrides.size === 0) return false;
+    const allowConfirm = options.allowConfirm !== false;
+    let changed = false;
+
+    entries.forEach((entry) => {
+        const event = entry?.event;
+        const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+        if (!hex) return;
+
+        const override = localVisibilityOverrides.get(hex);
+        if (!override) return;
+
+        const backendStateMatches = isHiddenEvent(event) === Boolean(override.hidden);
+        if (allowConfirm && backendStateMatches) {
+            localVisibilityOverrides.delete(hex);
+            return;
+        }
+
+        if (override.hidden) {
+            const nextHiddenAt = hasText(override.hiddenAt) ? override.hiddenAt : (event.hiddenAt || new Date().toISOString());
+            if (event.status !== 'hidden' || event.hiddenAt !== nextHiddenAt || entry.allHidden !== true) {
+                event.status = 'hidden';
+                event.hiddenAt = nextHiddenAt;
+                entry.allHidden = true;
+                changed = true;
+            }
+            return;
+        }
+
+        if (event.status !== null || event.hiddenAt !== null || entry.allHidden !== false) {
+            event.status = null;
+            event.hiddenAt = null;
+            entry.allHidden = false;
+            changed = true;
+        }
+    });
+
+    return changed;
 }
 
 async function persistCurrentField(field) {
@@ -2098,7 +2218,7 @@ async function hideEvent(eventIndex, fromModal = false) {
         if (fromModal) updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
         setTimeout(() => {
-            loadEvents({ silent: true });
+            hydrateEntriesFromHexFiles();
         }, 1800);
     } catch (error) {
         console.error('Error hiding event:', error);
@@ -2202,7 +2322,7 @@ async function unhideEvent(eventIndex, fromModal = false) {
         if (fromModal) updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
         setTimeout(() => {
-            loadEvents({ silent: true });
+            hydrateEntriesFromHexFiles();
         }, 1800);
     } catch (error) {
         console.error('Error unhiding event:', error);
@@ -2338,6 +2458,7 @@ document.addEventListener('DOMContentLoaded', () => {
     checkApiAuthStatus();
     loadEvents();
     renderRequeueTracker();
+    renderCompletedRequests();
     pollQueueDepthSnapshots();
     setInterval(() => {
         pollLambdaRuntimeStatus(true);
