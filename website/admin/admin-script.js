@@ -827,8 +827,9 @@ function applyHexEventMetadata(targetEvent, hexEvent) {
         }
     }
 
-    if (hasText(hexEvent.status) && targetEvent.status !== hexEvent.status) {
-        targetEvent.status = hexEvent.status;
+    const nextHidden = isHiddenEvent(hexEvent);
+    if (targetEvent.isHidden !== nextHidden) {
+        targetEvent.isHidden = nextHidden;
         changed = true;
     }
     if (hexEvent.hiddenAt && targetEvent.hiddenAt !== hexEvent.hiddenAt) {
@@ -1124,6 +1125,12 @@ function normaliseEventTaglineFields(event) {
 function isHiddenEvent(event) {
     const structuredStatus = getStatusData(event);
     if (structuredStatus?.isHidden === true) return true;
+    if (typeof event?.isHidden === 'boolean') return event.isHidden;
+    if (typeof event?.isHidden === 'string') {
+        const normalized = event.isHidden.trim().toLowerCase();
+        if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+        if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+    }
     const statusValue = typeof event?.status === 'string' ? event.status.trim().toLowerCase() : '';
     return statusValue === 'hidden' || Boolean(event?.hiddenAt);
 }
@@ -1901,7 +1908,7 @@ function applyLocalHiddenState(entry, hiddenAtIso, hidden = true) {
     const event = entry.event;
     const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
     if (hidden) {
-        event.status = 'hidden';
+        event.isHidden = true;
         event.hiddenAt = hasText(hiddenAtIso) ? hiddenAtIso : new Date().toISOString();
         entry.allHidden = true;
         if (hex) {
@@ -1911,7 +1918,7 @@ function applyLocalHiddenState(entry, hiddenAtIso, hidden = true) {
             });
         }
     } else {
-        event.status = null;
+        event.isHidden = false;
         event.hiddenAt = null;
         entry.allHidden = false;
         if (hex) {
@@ -1944,8 +1951,8 @@ function applyVisibilityOverrides(entries, options = {}) {
 
         if (override.hidden) {
             const nextHiddenAt = hasText(override.hiddenAt) ? override.hiddenAt : (event.hiddenAt || new Date().toISOString());
-            if (event.status !== 'hidden' || event.hiddenAt !== nextHiddenAt || entry.allHidden !== true) {
-                event.status = 'hidden';
+            if (event.isHidden !== true || event.hiddenAt !== nextHiddenAt || entry.allHidden !== true) {
+                event.isHidden = true;
                 event.hiddenAt = nextHiddenAt;
                 entry.allHidden = true;
                 changed = true;
@@ -1953,8 +1960,8 @@ function applyVisibilityOverrides(entries, options = {}) {
             return;
         }
 
-        if (event.status !== null || event.hiddenAt !== null || entry.allHidden !== false) {
-            event.status = null;
+        if (event.isHidden !== false || event.hiddenAt !== null || entry.allHidden !== false) {
+            event.isHidden = false;
             event.hiddenAt = null;
             entry.allHidden = false;
             changed = true;
@@ -2170,7 +2177,7 @@ async function hideEvent(eventIndex, fromModal = false) {
     const hiddenAtIso = new Date().toISOString();
     const subject = JSON.parse(JSON.stringify(event || {}));
     subject.hex = hex;
-    subject.status = 'hidden';
+    subject.isHidden = true;
     subject.hiddenAt = hiddenAtIso;
     if (!subject.image || typeof subject.image !== 'object') {
         subject.image = {};
@@ -2275,7 +2282,7 @@ async function unhideEvent(eventIndex, fromModal = false) {
 
     const subject = JSON.parse(JSON.stringify(event || {}));
     subject.hex = hex;
-    subject.status = null;
+    subject.isHidden = false;
     subject.hiddenAt = null;
     if (!subject.image || typeof subject.image !== 'object') {
         subject.image = {};
