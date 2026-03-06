@@ -157,6 +157,19 @@ function getTagline(event) {
     return metadata?.tagline || event.tagline || event.AI || event.ai || event.aiPrompt || null;
 }
 
+function isHiddenEvent(event) {
+    if (!event || typeof event !== 'object') return false;
+    const status = getStatusData(event);
+    if (status?.isHidden === true) return true;
+    if (typeof event.isHidden === 'boolean') return event.isHidden;
+    if (typeof event.isHidden === 'string') {
+        const normalized = event.isHidden.trim().toLowerCase();
+        if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+        if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+    }
+    return event.status === 'hidden' || event.hidden === true;
+}
+
 function normaliseEventRecord(event) {
     if (!event || typeof event !== 'object') return null;
     const source = getSourceData(event);
@@ -388,6 +401,7 @@ document.addEventListener('DOMContentLoaded', () => {
         .then(data => {
             const events = (data.events || [])
                 .filter(event => {
+                    // Filter out hidden events
                     if (isHiddenEvent(event)) {
                         console.log('Filtering out hidden event:', event.uid ?? event.title);
                         return false;
