@@ -503,10 +503,7 @@ async function loadEvents(options = {}) {
         const data = await response.json();
         const rawEvents = Array.isArray(data.events) ? data.events : [];
         eventsData = rawEvents.map((event) => normaliseEventTaglineFields(cloneEventRecord(event)));
-        agendaPayload = {
-            ...data,
-            events: eventsData.map((event) => cloneEventRecord(event)),
-        };
+        agendaPayload = data;
         uniqueEventEntries = buildUniqueEventEntries(eventsData);
         lastAgendaScanAtIso = new Date().toISOString();
         console.log('[Admin] agenda.json fetched', {
@@ -723,7 +720,7 @@ async function fetchHexEventByHex(hexValue) {
         }
         const payload = await response.json();
         missingHexRetryAtByHex.delete(hex);
-        return payload && typeof payload === 'object' ? payload : null;
+        return payload && typeof payload === 'object' ? normaliseEventRecordForUi(payload) : null;
     } catch {
         return null;
     }
@@ -762,6 +759,10 @@ function applyHexEventMetadata(targetEvent, hexEvent) {
     }
     if (hexEvent.hiddenAt && targetEvent.hiddenAt !== hexEvent.hiddenAt) {
         targetEvent.hiddenAt = hexEvent.hiddenAt;
+        changed = true;
+    }
+    if (hexEvent.approved === true && targetEvent.approved !== true) {
+        targetEvent.approved = true;
         changed = true;
     }
 
@@ -921,12 +922,59 @@ function normaliseImagePath(url) {
     return `/${trimmed.replace(/^(\.\/)+/, '')}`;
 }
 
+function getSourceData(event) {
+    return event?.source && typeof event.source === 'object' ? event.source : null;
+}
+
+function getMetadataData(event) {
+    return event?.metadata && typeof event.metadata === 'object' ? event.metadata : null;
+}
+
+function getStatusData(event) {
+    return event?.status && typeof event.status === 'object' ? event.status : null;
+}
+
+function normaliseEventRecordForUi(event) {
+    if (!event || typeof event !== 'object') return event;
+    const source = getSourceData(event);
+    const metadata = getMetadataData(event);
+    const status = getStatusData(event);
+    const image = metadata?.image ?? event.image ?? null;
+    const lastModified = event?.lastModified && typeof event.lastModified === 'object'
+        ? {
+            ...(event.lastModified.raw ? { raw: event.lastModified.raw } : {}),
+            ...(event.lastModified.ISO ? { ISO: event.lastModified.ISO } : {}),
+        }
+        : event?.lastModified ?? null;
+
+    return {
+        ...event,
+        uid: source?.uid ?? event.uid ?? null,
+        title: source?.title ?? event.title ?? source?.summary ?? event.summary ?? null,
+        summary: source?.summary ?? event.summary ?? source?.title ?? event.title ?? null,
+        location: source?.location ?? event.location ?? null,
+        dtstart: source?.dtstart ?? event.dtstart ?? null,
+        section: source?.section ?? event.section ?? null,
+        icsType: source?.icsType ?? event.icsType ?? null,
+        image,
+        tagline: metadata?.tagline ?? event.tagline ?? null,
+        hexId: metadata?.hexId ?? event.hexId ?? event.hex ?? null,
+        hex: metadata?.hexId ?? event.hexId ?? event.hex ?? null,
+        approved: status?.isApproved === true || event.approved === true,
+        status: status?.isHidden === true ? 'hidden' : event.status ?? null,
+        hiddenAt: event.hiddenAt ?? null,
+        lastModified,
+    };
+}
+
 function getImageUrl(event) {
+    const metadata = getMetadataData(event);
     let candidate = null;
-    if (event.image) {
-        if (typeof event.image === 'string') candidate = event.image;
-        else if (event.image.url) candidate = event.image.url;
-        else if (event.image.src) candidate = event.image.src;
+    const image = metadata?.image ?? event?.image;
+    if (image) {
+        if (typeof image === 'string') candidate = image;
+        else if (image.url) candidate = image.url;
+        else if (image.src) candidate = image.src;
     } else if (event.imageUrl) {
         candidate = event.imageUrl;
     }
@@ -936,13 +984,15 @@ function getImageUrl(event) {
 // Get tagline from event data (prioritise `tagline`, fallback to legacy `AI`)
 function getAIPrompt(event) {
     if (!event || typeof event !== 'object') return null;
-    return event.tagline || event.AI || event.ai || event.aiPrompt || null;
+    const metadata = getMetadataData(event);
+    return metadata?.tagline || event.tagline || event.AI || event.ai || event.aiPrompt || null;
 }
 
 function getImagePrompt(event) {
     if (!event || typeof event !== 'object') return null;
-    if (event.image && typeof event.image === 'object' && typeof event.image.prompt === 'string') {
-        const trimmed = event.image.prompt.trim();
+    const image = getMetadataData(event)?.image ?? event.image;
+    if (image && typeof image === 'object' && typeof image.prompt === 'string') {
+        const trimmed = image.prompt.trim();
         if (trimmed) return trimmed;
     }
     return null;
@@ -964,7 +1014,8 @@ function getMissingMetadataFields(event) {
 
 // Determine event section/type
 function getEventSection(event) {
-    const type = (event.icsType || event.section || '').toLowerCase();
+    const source = getSourceData(event);
+    const type = (source?.icsType || source?.section || event.icsType || event.section || '').toLowerCase();
     if (type.includes('beaver')) return 'beavers';
     if (type.includes('cub')) return 'cubs';
     if (type.includes('scout')) return 'scouts';
@@ -977,14 +1028,17 @@ function hasText(value) {
 
 function normaliseEventTaglineFields(event) {
     if (!event || typeof event !== 'object') return event;
-    const derivedTagline = getAIPrompt(event);
+    const normalised = normaliseEventRecordForUi(event);
+    const derivedTagline = getAIPrompt(normalised);
     if (hasText(derivedTagline) && !hasText(event.tagline)) {
-        event.tagline = derivedTagline.trim();
+        normalised.tagline = derivedTagline.trim();
     }
-    return event;
+    return normalised;
 }
 
 function isHiddenEvent(event) {
+    const structuredStatus = getStatusData(event);
+    if (structuredStatus?.isHidden === true) return true;
     const statusValue = typeof event?.status === 'string' ? event.status.trim().toLowerCase() : '';
     return statusValue === 'hidden' || Boolean(event?.hiddenAt);
 }

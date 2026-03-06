@@ -21,9 +21,22 @@ function normaliseDateString(value) {
     return value;
 }
 
+function getSourceData(event) {
+    return event?.source && typeof event.source === 'object' ? event.source : null;
+}
+
+function getMetadataData(event) {
+    return event?.metadata && typeof event.metadata === 'object' ? event.metadata : null;
+}
+
+function getStatusData(event) {
+    return event?.status && typeof event.status === 'object' ? event.status : null;
+}
+
 function getEventDate(event) {
     if (!event) return null;
-    const candidate = event.dtstart || event.start?.iso || event.start?.raw || event.start;
+    const source = getSourceData(event);
+    const candidate = source?.dtstart || event.dtstart || event.start?.iso || event.start?.raw || event.start;
     const normalised = normaliseDateString(candidate);
     if (!normalised) return null;
     const parsed = new Date(normalised);
@@ -39,7 +52,9 @@ function formatDisplayDate(dateOrString) {
 
 function resolveImageUrl(event) {
     if (!event) return null;
-    const { image, imageUrl } = event;
+    const metadata = getMetadataData(event);
+    const image = metadata?.image ?? event.image;
+    const imageUrl = event.imageUrl;
     if (typeof image === 'string') return image;
     if (typeof imageUrl === 'string') return imageUrl;
     if (image && typeof image === 'object') {
@@ -104,7 +119,10 @@ function normaliseSectionValue(value) {
 
 function resolveEventSection(event) {
     if (!event) return 'cubs';
-    return normaliseSectionValue(event.icsType ?? event.section ?? event.audience ?? event.group ?? null);
+    const source = getSourceData(event);
+    return normaliseSectionValue(
+        source?.icsType ?? source?.section ?? event.icsType ?? event.section ?? event.audience ?? event.group ?? null,
+    );
 }
 
 
@@ -122,12 +140,31 @@ function createEventHeading(tagName, event) {
 
 function getTagline(event) {
     if (!event || typeof event !== 'object') return null;
-    return event.tagline || event.AI || event.ai || event.aiPrompt || null;
+    const metadata = getMetadataData(event);
+    return metadata?.tagline || event.tagline || event.AI || event.ai || event.aiPrompt || null;
 }
 
 function normaliseEventRecord(event) {
     if (!event || typeof event !== 'object') return null;
-    const normalised = { ...event };
+    const source = getSourceData(event);
+    const metadata = getMetadataData(event);
+    const status = getStatusData(event);
+    const normalised = {
+        ...event,
+        uid: source?.uid ?? event.uid,
+        title: source?.title ?? event.title ?? source?.summary ?? event.summary,
+        summary: source?.summary ?? event.summary ?? source?.title ?? event.title,
+        location: source?.location ?? event.location,
+        dtstart: source?.dtstart ?? event.dtstart,
+        section: source?.section ?? event.section,
+        icsType: source?.icsType ?? event.icsType,
+        tagline: metadata?.tagline ?? event.tagline,
+        image: metadata?.image ?? event.image,
+        hexId: metadata?.hexId ?? event.hexId ?? event.hex ?? null,
+        hex: metadata?.hexId ?? event.hexId ?? event.hex ?? null,
+        approved: status?.isApproved === true || event.approved === true,
+        status: status?.isHidden === true ? 'hidden' : event.status,
+    };
 
     if (!normalised.title) {
         normalised.title = normalised.summary || normalised.name || 'Scout event';
@@ -321,8 +358,7 @@ document.addEventListener('DOMContentLoaded', () => {
         .then(data => {
             const events = (data.events || [])
                 .filter(event => {
-                    // Filter out hidden events
-                    if (event.status === 'hidden' || event.hidden === true) {
+                    if (isHiddenEvent(event)) {
                         console.log('Filtering out hidden event:', event.uid ?? event.title);
                         return false;
                     }
@@ -375,3 +411,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 });
+
+function isHiddenEvent(event) {
+    const status = getStatusData(event);
+    if (status?.isHidden === true) return true;
+    return event?.status === 'hidden' || event?.hidden === true;
+}
