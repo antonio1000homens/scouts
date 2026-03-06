@@ -14,6 +14,7 @@ let lastAgendaScanAtIso = null;
 let requeueTrackerEntries = [];
 let latestQueuedSnapshot = null;
 let latestProcessingSnapshot = null;
+let latestCompletedSnapshot = null;
 let pinnedRuntimeDetails = null;
 const MIN_RUNTIME_DETAILS_VISIBLE_MS = 5000;
 const AGENDA_POLL_INTERVAL_MS = 15000;
@@ -36,8 +37,9 @@ const warnedMissingDtstartIds = new Set();
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
 const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
 const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
-const QUEUED_REQUESTS_RUNTIME_URL = '../../runtime/queuedrequests.json';
-const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/processingrequests.json';
+const QUEUED_REQUESTS_RUNTIME_URL = '../../runtime/scoutsqueued.json';
+const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/scoutsprocessing.json';
+const COMPLETED_REQUESTS_RUNTIME_URL = '../../runtime/scoutscompleted.json';
 
 async function buildHttpError(response) {
     let details = '';
@@ -535,32 +537,40 @@ async function loadEvents(options = {}) {
 }
 
 function formatQueueSnapshotCount(snapshot) {
-    if (!snapshot || !snapshot.counts || typeof snapshot.counts !== 'object') {
+    if (!snapshot || !Array.isArray(snapshot.requests)) {
         return 'unknown';
     }
-    const visible = Number.isFinite(snapshot.counts.visible) ? snapshot.counts.visible : '?';
-    const inFlight = Number.isFinite(snapshot.counts.inFlight) ? snapshot.counts.inFlight : '?';
-    const delayed = Number.isFinite(snapshot.counts.delayed) ? snapshot.counts.delayed : '?';
-    return `visible=${visible}, in-flight=${inFlight}, delayed=${delayed}`;
+    return `requests=${snapshot.requests.length}`;
+}
+
+function getSnapshotRequests(snapshot) {
+    return Array.isArray(snapshot?.requests) ? snapshot.requests : [];
 }
 
 function formatObservedIds(snapshot) {
-    if (!snapshot || !snapshot.observed || typeof snapshot.observed !== 'object') {
+    const requests = getSnapshotRequests(snapshot);
+    if (requests.length === 0) {
         return 'n/a';
     }
-    const requestIds = Array.isArray(snapshot.observed.requestIds) ? snapshot.observed.requestIds : [];
-    const hexIds = Array.isArray(snapshot.observed.hexIds) ? snapshot.observed.hexIds : [];
-    const requestSample = requestIds.slice(0, 3);
-    const hexSample = hexIds.slice(0, 3);
-    if (requestSample.length === 0 && hexSample.length === 0) return 'n/a';
+    const requestIds = [];
+    const messageIds = [];
+    const hexIds = [];
+    requests.forEach((request) => {
+        if (hasText(request?.requestId)) requestIds.push(request.requestId.trim());
+        if (hasText(request?.messageId)) messageIds.push(request.messageId.trim());
+        if (hasText(request?.hexId)) hexIds.push(request.hexId.trim());
+    });
     const parts = [];
-    if (requestSample.length > 0) {
-        parts.push(`requestIds=${requestSample.join(', ')}`);
+    if (requestIds.length > 0) {
+        parts.push(`requestIds=${Array.from(new Set(requestIds)).slice(0, 3).join(', ')}`);
     }
-    if (hexSample.length > 0) {
-        parts.push(`hex=${hexSample.join(', ')}`);
+    if (messageIds.length > 0) {
+        parts.push(`messageIds=${Array.from(new Set(messageIds)).slice(0, 3).join(', ')}`);
     }
-    return parts.join(' | ');
+    if (hexIds.length > 0) {
+        parts.push(`hex=${Array.from(new Set(hexIds)).slice(0, 3).join(', ')}`);
+    }
+    return parts.length > 0 ? parts.join(' | ') : 'n/a';
 }
 
 function decodeHexToText(hexValue) {
@@ -591,34 +601,38 @@ function resolveEventTitleByHex(hexValue) {
 }
 
 function formatObservedTitles(snapshot) {
-    if (!snapshot || !snapshot.observed || typeof snapshot.observed !== 'object') {
+    const requests = getSnapshotRequests(snapshot);
+    if (requests.length === 0) {
         return 'n/a';
     }
 
     const titles = new Set();
-    const links = Array.isArray(snapshot.observed.links) ? snapshot.observed.links : [];
-    links.forEach((link) => {
-        const directTitle = link?.title ?? link?.subjectTitle ?? link?.name ?? null;
+    requests.forEach((request) => {
+        const directTitle = request?.title ?? null;
         if (hasText(directTitle)) {
-            titles.add(String(directTitle).trim());
+            const statusSuffix = hasText(request?.status) ? ` [${String(request.status).trim()}]` : '';
+            titles.add(`${String(directTitle).trim()}${statusSuffix}`);
             return;
         }
-        const byHex = resolveEventTitleByHex(link?.hex);
+        const byHex = resolveEventTitleByHex(request?.hexId);
         if (hasText(byHex)) {
-            titles.add(byHex);
+            const statusSuffix = hasText(request?.status) ? ` [${String(request.status).trim()}]` : '';
+            titles.add(`${byHex}${statusSuffix}`);
         }
     });
 
-    const hexIds = Array.isArray(snapshot.observed.hexIds) ? snapshot.observed.hexIds : [];
-    hexIds.forEach((hex) => {
+    requests.forEach((request) => {
+        const hex = request?.hexId;
         const byHex = resolveEventTitleByHex(hex);
         if (hasText(byHex)) {
-            titles.add(byHex);
+            const statusSuffix = hasText(request?.status) ? ` [${String(request.status).trim()}]` : '';
+            titles.add(`${byHex}${statusSuffix}`);
             return;
         }
         const decoded = decodeHexToText(hex);
         if (hasText(decoded)) {
-            titles.add(decoded);
+            const statusSuffix = hasText(request?.status) ? ` [${String(request.status).trim()}]` : '';
+            titles.add(`${decoded}${statusSuffix}`);
         }
     });
 
@@ -631,12 +645,8 @@ function normaliseTrackerToken(value) {
 }
 
 function getSnapshotObservedTokens(snapshot) {
-    if (!snapshot || !snapshot.observed || typeof snapshot.observed !== 'object') {
-        return new Set();
-    }
-    const requestIds = Array.isArray(snapshot.observed.requestIds) ? snapshot.observed.requestIds : [];
-    const hexIds = Array.isArray(snapshot.observed.hexIds) ? snapshot.observed.hexIds : [];
-    const tokens = [...requestIds, ...hexIds]
+    const tokens = getSnapshotRequests(snapshot)
+        .flatMap((request) => [request?.requestId, request?.messageId, request?.hexId])
         .map((token) => normaliseTrackerToken(token))
         .filter(Boolean);
     return new Set(tokens);
@@ -657,14 +667,12 @@ function hasTrackedTokenInSnapshot(tracked, snapshot) {
     return collectTrackerTokens(tracked).some((token) => observedTokens.has(token));
 }
 
-function getSnapshotStage(snapshot) {
-    if (!snapshot || typeof snapshot.stage !== 'string') return '';
-    return snapshot.stage.trim().toLowerCase();
-}
-
 function deriveQueueTrackerStatus(tracked) {
+    if (hasTrackedTokenInSnapshot(tracked, latestCompletedSnapshot)) {
+        return 'processed';
+    }
     if (hasTrackedTokenInSnapshot(tracked, latestProcessingSnapshot)) {
-        return getSnapshotStage(latestProcessingSnapshot) === 'final' ? 'processed' : 'processing';
+        return 'processing';
     }
     if (hasTrackedTokenInSnapshot(tracked, latestQueuedSnapshot)) return 'queued';
     return 'submitted';
@@ -682,6 +690,12 @@ function extractRequestIdsFromResult(result) {
     ];
     if (Array.isArray(result.requestIds)) candidates.push(...result.requestIds);
     if (Array.isArray(result.ids)) candidates.push(...result.ids);
+    const queuedRequests = Array.isArray(result?.runtimeRequestFiles?.queued?.requests)
+        ? result.runtimeRequestFiles.queued.requests
+        : [];
+    queuedRequests.forEach((request) => {
+        candidates.push(request?.requestId, request?.messageId);
+    });
     return Array.from(new Set(candidates.map((value) => normaliseTrackerToken(value)).filter(Boolean)));
 }
 
@@ -817,37 +831,43 @@ async function pollQueueDepthSnapshots() {
     const statusEl = document.getElementById('queue-depth-status');
     const queuedEl = document.getElementById('queue-depth-queued');
     const processingEl = document.getElementById('queue-depth-processing');
+    const completedEl = document.getElementById('queue-depth-completed');
     const observedToggleEl = document.getElementById('queue-depth-observed-toggle');
     const observedDetailsEl = document.getElementById('queue-depth-observed-details');
     const titlesToggleEl = document.getElementById('queue-depth-titles-toggle');
     const titlesDetailsEl = document.getElementById('queue-depth-titles-details');
     const updatedEl = document.getElementById('queue-depth-updated');
     const checkedEl = document.getElementById('queue-depth-checked');
-    if (!statusEl || !queuedEl || !processingEl || !updatedEl || !checkedEl) {
+    if (!statusEl || !queuedEl || !processingEl || !completedEl || !updatedEl || !checkedEl) {
         return;
     }
 
     checkedEl.textContent = `Last checked: ${new Date().toLocaleString('en-GB')}`;
 
-    const [queuedSnapshot, processingSnapshot] = await Promise.all([
+    const [queuedSnapshot, processingSnapshot, completedSnapshot] = await Promise.all([
         fetchQueueSnapshot(QUEUED_REQUESTS_RUNTIME_URL),
         fetchQueueSnapshot(PROCESSING_REQUESTS_RUNTIME_URL),
+        fetchQueueSnapshot(COMPLETED_REQUESTS_RUNTIME_URL),
     ]);
     latestQueuedSnapshot = queuedSnapshot;
     latestProcessingSnapshot = processingSnapshot;
+    latestCompletedSnapshot = completedSnapshot;
 
-    const hasAnySnapshot = Boolean(queuedSnapshot || processingSnapshot);
-    statusEl.textContent = hasAnySnapshot ? 'Queue snapshots loaded' : 'Queue snapshots unavailable';
+    const hasAnySnapshot = Boolean(queuedSnapshot || processingSnapshot || completedSnapshot);
+    statusEl.textContent = hasAnySnapshot ? 'Runtime request files loaded' : 'Runtime request files unavailable';
     statusEl.className = `status-text ${hasAnySnapshot ? 'status-success' : 'status-error'}`;
 
-    queuedEl.textContent = `scoutsRequests: ${formatQueueSnapshotCount(queuedSnapshot)}`;
-    processingEl.textContent = `scoutsProcessing: ${formatQueueSnapshotCount(processingSnapshot)}`;
+    queuedEl.textContent = `scoutsqueued.json: ${formatQueueSnapshotCount(queuedSnapshot)}`;
+    processingEl.textContent = `scoutsprocessing.json: ${formatQueueSnapshotCount(processingSnapshot)}`;
+    completedEl.textContent = `scoutscompleted.json: ${formatQueueSnapshotCount(completedSnapshot)}`;
 
     const observedBits = [];
     const queuedObserved = formatObservedIds(queuedSnapshot);
     const processingObserved = formatObservedIds(processingSnapshot);
+    const completedObserved = formatObservedIds(completedSnapshot);
     if (queuedObserved !== 'n/a') observedBits.push(`queued(${queuedObserved})`);
     if (processingObserved !== 'n/a') observedBits.push(`processing(${processingObserved})`);
+    if (completedObserved !== 'n/a') observedBits.push(`completed(${completedObserved})`);
     if (observedToggleEl && observedDetailsEl) {
         const hasObservedIds = observedBits.length > 0;
         observedToggleEl.hidden = !hasObservedIds;
@@ -860,8 +880,10 @@ async function pollQueueDepthSnapshots() {
     const titleBits = [];
     const queuedTitles = formatObservedTitles(queuedSnapshot);
     const processingTitles = formatObservedTitles(processingSnapshot);
+    const completedTitles = formatObservedTitles(completedSnapshot);
     if (queuedTitles !== 'n/a') titleBits.push(`queued(${queuedTitles})`);
     if (processingTitles !== 'n/a') titleBits.push(`processing(${processingTitles})`);
+    if (completedTitles !== 'n/a') titleBits.push(`completed(${completedTitles})`);
     if (titlesToggleEl && titlesDetailsEl) {
         const hasObservedTitles = titleBits.length > 0;
         titlesToggleEl.hidden = !hasObservedTitles;
@@ -871,7 +893,7 @@ async function pollQueueDepthSnapshots() {
         titlesDetailsEl.textContent = hasObservedTitles ? titleBits.join(' | ') : 'No observed titles';
     }
 
-    const timestamps = [queuedSnapshot?.updatedAt, processingSnapshot?.updatedAt]
+    const timestamps = [queuedSnapshot?.updatedAt, processingSnapshot?.updatedAt, completedSnapshot?.updatedAt]
         .filter((value) => typeof value === 'string' && value.trim().length > 0)
         .map((value) => new Date(value))
         .filter((date) => !Number.isNaN(date.getTime()));
