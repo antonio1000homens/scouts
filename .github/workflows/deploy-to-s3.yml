@@ -86,16 +86,16 @@ jobs:
             --cache-control "max-age=0, no-cache, no-store, must-revalidate"
         fi
 
-    - name: Upload pixabay.conf to S3 root (if present)
+    - name: Upload AI.conf to S3 root (if present)
       run: |
-        if [ -f pixabay.conf ]; then
-          echo "Uploading pixabay.conf to s3://2ndtolworth/pixabay.conf"
-          aws s3 cp pixabay.conf s3://2ndtolworth/pixabay.conf --acl private
-        elif [ -f website/pixabay.conf ]; then
-          echo "Uploading website/pixabay.conf to s3://2ndtolworth/pixabay.conf"
-          aws s3 cp website/pixabay.conf s3://2ndtolworth/pixabay.conf --acl private
+        if [ -f AI.conf ]; then
+          echo "Uploading AI.conf to s3://2ndtolworth/AI.conf"
+          aws s3 cp AI.conf s3://2ndtolworth/AI.conf --acl private
+        elif [ -f website/AI.conf ]; then
+          echo "Uploading website/AI.conf to s3://2ndtolworth/AI.conf"
+          aws s3 cp website/AI.conf s3://2ndtolworth/AI.conf --acl private
         else
-          echo "No pixabay.conf found in repository root or website/, skipping"
+          echo "No AI.conf found in repository root or website/, skipping"
         fi
 
     - name: Invalidate CloudFront cache

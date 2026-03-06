@@ -1847,7 +1847,7 @@ function getFieldOperationConfig(field) {
         subject: 'imageUrl',
         payloadKey: 'imageUrl',
         label: 'Image URL',
-        queueLabel: 'Pixabay image URL',
+        queueLabel: 'AI image',
     };
 }
 
