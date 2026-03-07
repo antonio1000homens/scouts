@@ -1445,13 +1445,7 @@ function buildExpandedManualImagePrompt(template, event, config, shortPrompt) {
         .replace(/{{IMAGE_TAG_GUIDELINES}}/g, buildManualPromptGuidelinesText(config?.imagePromptGuidelines))
         .replace(/{{IMAGE_PROMPT}}/g, hasText(shortPrompt) ? String(shortPrompt).trim() : '')
         .replace(/{{SHORT_IMAGE_PROMPT}}/g, hasText(shortPrompt) ? String(shortPrompt).trim() : '');
-    if (!hasText(shortPrompt)) {
-        return replaced;
-    }
-    if (replaced.includes(String(shortPrompt).trim())) {
-        return replaced;
-    }
-    return `${replaced}\n\nUse this final image prompt exactly:\n${String(shortPrompt).trim()}`;
+    return replaced;
 }
 
 function updateImagePromptCopyStatus(message, type = 'info') {
