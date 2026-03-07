@@ -81,6 +81,7 @@
                     <p id="auto-lambda-status" class="refresh-status">Auto invocation: enabled</p>
                     <div class="global-actions">
                         <button class="btn btn-secondary" onclick="toggleAgendaViewer()">Consult Agenda</button>
+                        <button class="btn btn-secondary" onclick="toggleAiConfigViewer()">View AI.conf</button>
                         <button class="btn btn-secondary" onclick="toggleEventsJsonViewer()">List events/*.json</button>
                         <button
                             class="btn btn-primary"
@@ -139,6 +140,14 @@
                 <button class="btn btn-secondary" onclick="toggleEventsJsonViewer()">Close</button>
             </div>
             <pre id="events-json-content" class="agenda-json-content">No event JSON entries loaded yet.</pre>
+        </section>
+
+        <section id="ai-config-viewer" class="agenda-viewer" style="display: none;">
+            <div class="agenda-viewer-header">
+                <h2>Active AI.conf</h2>
+                <button class="btn btn-secondary" onclick="toggleAiConfigViewer()">Close</button>
+            </div>
+            <pre id="ai-config-content" class="agenda-json-content">Loading AI.conf...</pre>
         </section>
 
         <div class="events-layout">
