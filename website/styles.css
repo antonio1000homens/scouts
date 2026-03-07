@@ -1430,6 +1430,9 @@ footer {
 .events-section {
     padding: 5rem 2rem;
     background-color: #f5f5f5;
+}
+
+.events-section > .container {
     display: flex;
     flex-direction: column;
     gap: 4rem;
@@ -1440,7 +1443,7 @@ footer {
 }
 
 .event-group + .event-group {
-    margin-top: 2rem;
+    margin-top: 0;
 }
 
 .event-group h2 {
