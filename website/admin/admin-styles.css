@@ -1182,10 +1182,6 @@ body {
     font-weight: 600;
 }
 
-.requeue-hint.requeue-ready {
-    color: var(--success-color);
-}
-
 .note {
     background: var(--background-light);
     padding: 0.75rem;
