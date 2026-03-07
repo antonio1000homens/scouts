@@ -725,6 +725,52 @@ body {
     padding: 0.75rem;
 }
 
+.event-hex-preview {
+    margin-top: 0.9rem;
+    border-top: 1px solid #e5e7eb;
+    padding-top: 0.75rem;
+}
+
+.event-hex-preview-label {
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #475467;
+    margin-bottom: 0.4rem;
+}
+
+.event-hex-preview-body {
+    margin: 0;
+    padding: 0.75rem;
+    max-height: 220px;
+    overflow: auto;
+    border-radius: 6px;
+    background: #03111f;
+    color: #dbe7f3;
+    border: 1px solid #19324a;
+    font-size: 0.74rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.event-hex-preview-body[data-state="idle"] {
+    color: #98a2b3;
+}
+
+.event-hex-preview-body[data-state="loading"] {
+    color: #7dd3fc;
+}
+
+.event-hex-preview-body[data-state="empty"] {
+    color: #fbbf24;
+}
+
+.event-hex-preview-body[data-state="error"] {
+    color: #fda29b;
+}
+
 .event-title {
     font-size: 0.95rem;
     font-weight: bold;
