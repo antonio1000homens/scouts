@@ -49,6 +49,13 @@ const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/scoutsprocessing.json';
 const COMPLETED_REQUESTS_RUNTIME_URL = '../../runtime/scoutscompleted.json';
 const AI_CONFIG_URL = '../../AI.conf';
 const AI_CONFIG_CACHE_MS = 5 * 60 * 1000;
+const DEFAULT_IMAGE_PROMPT_TEMPLATE = 'cartoonish image of scouts in {{IMAGE_THEME}}, {{IMAGE_PROMPT_SPECIFICATIONS}}';
+const DEFAULT_IMAGE_PROMPT_SPECIFICATIONS = [
+    'landscape 4:3 composition suitable for website event cards',
+    'approximately 1600x1200',
+    'main subjects centered',
+    'safe margins for crop',
+];
 
 async function buildHttpError(response) {
     let details = '';
@@ -343,7 +350,7 @@ function formatCompletedRequestOperation(value) {
     if (!hasText(value)) return 'unknown';
     const normalized = String(value).trim();
     if (normalized === 'processing-complete') return 'Processing Complete';
-    if (normalized === 'imagePrompt') return 'Image Prompt';
+    if (normalized === 'imagePrompt') return 'Image Theme';
     if (normalized === 'imageUrl') return 'Image URL';
     if (normalized === 'tagline') return 'Tagline';
     if (normalized === 'hidden') return 'Hidden';
@@ -383,7 +390,7 @@ function formatRequestBadgeLabel(value, fallback = 'Unknown') {
     if (normalized === 'persist') return 'SAVE Persist';
     if (normalized === 'hidden') return 'OFF Hidden';
     if (normalized === 'imageurl') return 'IMG Image URL';
-    if (normalized === 'imageprompt') return 'ART Image Prompt';
+    if (normalized === 'imageprompt') return 'ART Image Theme';
     if (normalized === 'tagline') return 'TXT Tagline';
     if (normalized === 'updated') return 'UP Updated';
     return formatRequestStageLabel(value, fallback);
@@ -1150,15 +1157,15 @@ function applyHexEventMetadata(targetEvent, hexEvent) {
         changed = true;
     }
 
-    const nextPrompt = getImagePrompt(hexEvent);
+    const nextTheme = getImageTheme(hexEvent);
     const nextUrl = getImageUrl(hexEvent);
-    if (hasText(nextPrompt) || hasText(nextUrl)) {
+    if (hasText(nextTheme) || hasText(nextUrl)) {
         if (!targetEvent.image || typeof targetEvent.image !== 'object') {
             targetEvent.image = {};
             changed = true;
         }
-        if (hasText(nextPrompt) && targetEvent.image.prompt !== nextPrompt) {
-            targetEvent.image.prompt = nextPrompt;
+        if (hasText(nextTheme) && targetEvent.image.theme !== nextTheme) {
+            targetEvent.image.theme = nextTheme;
             changed = true;
         }
         if (hasText(nextUrl) && targetEvent.image.url !== nextUrl) {
@@ -1422,57 +1429,56 @@ function getAIPrompt(event) {
     return metadata?.tagline || event.tagline || event.AI || event.ai || event.aiPrompt || null;
 }
 
+function getImageTheme(event) {
+    if (!event || typeof event !== 'object') return null;
+    const image = getMetadataData(event)?.image ?? event.image;
+    if (image && typeof image === 'object' && typeof image.theme === 'string') {
+        const trimmed = image.theme.trim();
+        if (trimmed) return trimmed;
+    }
+    return null;
+}
+
+function buildImagePromptSpecificationsText(specifications) {
+    if (!Array.isArray(specifications) || specifications.length === 0) {
+        return DEFAULT_IMAGE_PROMPT_SPECIFICATIONS.join(', ');
+    }
+    const cleaned = specifications
+        .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+        .filter(Boolean);
+    return cleaned.length > 0 ? cleaned.join(', ') : DEFAULT_IMAGE_PROMPT_SPECIFICATIONS.join(', ');
+}
+
+function buildDerivedImagePromptFromTheme(theme, config = cachedAiConfig) {
+    if (!hasText(theme)) return null;
+    const normalizedTheme = String(theme).trim();
+    const lower = normalizedTheme.toLowerCase();
+    if (lower.startsWith('create a cartoonish image of ') || lower.startsWith('cartoonish image of scouts')) {
+        return normalizedTheme;
+    }
+    const template = hasText(config?.imagePromptTemplate)
+        ? String(config.imagePromptTemplate)
+        : DEFAULT_IMAGE_PROMPT_TEMPLATE;
+    const specifications = buildImagePromptSpecificationsText(config?.imagePromptSpecifications);
+    return template
+        .replace(/{{IMAGE_THEME}}/g, normalizedTheme)
+        .replace(/{{IMAGE_PROMPT_SPECIFICATIONS}}/g, specifications)
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 function getImagePrompt(event) {
     if (!event || typeof event !== 'object') return null;
+    const derivedFromTheme = buildDerivedImagePromptFromTheme(getImageTheme(event));
+    if (hasText(derivedFromTheme)) {
+        return derivedFromTheme;
+    }
     const image = getMetadataData(event)?.image ?? event.image;
     if (image && typeof image === 'object' && typeof image.prompt === 'string') {
         const trimmed = image.prompt.trim();
         if (trimmed) return trimmed;
     }
     return null;
-}
-
-function buildManualPromptEventDetails(event) {
-    if (!event || typeof event !== 'object') {
-        return 'No additional event context provided.';
-    }
-    const details = [];
-    const title = event.title ?? event.summary ?? event.name ?? null;
-    if (hasText(title)) details.push(`Title: ${String(title).trim()}`);
-    const rawLocation = hasText(event.location) ? String(event.location).trim() : '';
-    if (rawLocation) {
-        const normalizedLocation = /(^|\b)the den(\b|$)/i.test(rawLocation)
-            ? `${rawLocation} (indoors)`
-            : rawLocation;
-        details.push(`Location: ${normalizedLocation}`);
-    }
-    return details.join('\n') || 'No additional event context provided.';
-}
-
-function buildManualPromptGuidelinesText(guidelines) {
-    if (!Array.isArray(guidelines) || guidelines.length === 0) {
-        return '- Use common descriptive words only.';
-    }
-    return guidelines
-        .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
-        .filter(Boolean)
-        .map((entry) => `- ${entry}`)
-        .join('\n');
-}
-
-function buildManualImageGenerationPrompt(shortPrompt) {
-    if (!hasText(shortPrompt)) {
-        return null;
-    }
-    const candidate = String(shortPrompt).replace(/\s+/g, ' ').trim();
-    if (!candidate) {
-        return null;
-    }
-    const lower = candidate.toLowerCase();
-    if (lower.startsWith('create a cartoonish image of ') || lower.startsWith('cartoonish image of scouts')) {
-        return candidate;
-    }
-    return `cartoonish image of scouts in ${candidate}`;
 }
 
 function updateImagePromptCopyStatus(message, type = 'info') {
@@ -1487,8 +1493,8 @@ function getMissingMetadataFields(event) {
     if (!hasText(getAIPrompt(event))) {
         missing.push('Tagline');
     }
-    if (!hasText(getImagePrompt(event))) {
-        missing.push('Image Prompt');
+    if (!hasText(getImageTheme(event))) {
+        missing.push('Image Theme');
     }
     if (!hasText(getImageUrl(event))) {
         missing.push('Image URL');
@@ -1591,11 +1597,11 @@ function mergeEventMetadata(targetEvent, sourceEvent) {
         targetEvent.image.url = getImageUrl(sourceEvent);
     }
 
-    if (!hasText(getImagePrompt(targetEvent)) && hasText(getImagePrompt(sourceEvent))) {
+    if (!hasText(getImageTheme(targetEvent)) && hasText(getImageTheme(sourceEvent))) {
         if (!targetEvent.image || typeof targetEvent.image !== 'object') {
             targetEvent.image = {};
         }
-        targetEvent.image.prompt = getImagePrompt(sourceEvent);
+        targetEvent.image.theme = getImageTheme(sourceEvent);
     }
 }
 
@@ -1843,6 +1849,7 @@ function renderEvents() {
         const event = entry.event;
         const imageUrl = getImageUrl(event);
         const tagline = getAIPrompt(event);
+        const imageTheme = getImageTheme(event);
         const imagePrompt = getImagePrompt(event);
         const missingFields = getMissingMetadataFields(event);
         const requeueEligible = missingFields.length > 0;
@@ -1889,6 +1896,13 @@ function renderEvents() {
                             ${sourceDetailsMarkup}
                         </div>
                     </details>
+
+                    ${imageTheme ? `
+                        <div class="ai-prompt">
+                            <div class="ai-prompt-label">Image Theme</div>
+                            <div class="ai-prompt-text">${imageTheme}</div>
+                        </div>
+                    ` : ''}
 
                     ${imagePrompt ? `
                         <div class="ai-prompt">
@@ -1985,6 +1999,8 @@ function openUploadModal(index) {
     document.getElementById('modal-event-hex').textContent = event.hex || 'Missing HEX';
     
     const currentImage = getImageUrl(event);
+    const currentImageTheme = getImageTheme(event);
+    const currentImagePrompt = getImagePrompt(event);
     const imgElement = document.getElementById('modal-current-image');
     if (currentImage) {
         imgElement.src = currentImage;
@@ -1994,6 +2010,7 @@ function openUploadModal(index) {
     }
     
     const imageUrlText = document.getElementById('modal-image-url');
+    const imageThemeText = document.getElementById('modal-image-theme');
     const imagePromptText = document.getElementById('modal-image-prompt');
     const taglineText = document.getElementById('modal-tagline');
     const imagePromptInput = document.getElementById('modal-image-prompt-input');
@@ -2004,14 +2021,14 @@ function openUploadModal(index) {
     const requeueButton = document.getElementById('modal-requeue-button');
     const requeueHint = document.getElementById('modal-requeue-hint');
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
-    const storedImagePrompt = getImagePrompt(event) || '';
-    if (imagePromptInput) imagePromptInput.value = storedImagePrompt;
+    if (imagePromptInput) imagePromptInput.value = currentImageTheme || '';
     if (taglineInput) taglineInput.value = getAIPrompt(event) || '';
     if (imageUrlInput) imageUrlInput.value = currentImage || '';
-    if (imagePromptText) imagePromptText.textContent = storedImagePrompt || 'Not set';
+    if (imageThemeText) imageThemeText.textContent = currentImageTheme || 'Not set';
+    if (imagePromptText) imagePromptText.textContent = currentImagePrompt || 'Not set';
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
     if (copyImagePromptButton) {
-        copyImagePromptButton.style.display = storedImagePrompt ? 'inline-flex' : 'none';
+        copyImagePromptButton.style.display = currentImagePrompt ? 'inline-flex' : 'none';
     }
     if (hideToggleButton) {
         const hidden = isEntryHidden(entry);
@@ -2246,8 +2263,8 @@ function getFieldOperationConfig(field) {
         return {
             subject: 'imagePrompt',
             payloadKey: 'imagePrompt',
-            label: 'Image Prompt',
-            queueLabel: 'AI image prompt',
+            label: 'Image Theme',
+            queueLabel: 'AI image theme',
         };
     }
     return {
@@ -2273,10 +2290,12 @@ function getModalFieldValue(field) {
 
 function refreshModalCurrentMetadata(event) {
     const imageUrlText = document.getElementById('modal-image-url');
+    const imageThemeText = document.getElementById('modal-image-theme');
     const imagePromptText = document.getElementById('modal-image-prompt');
     const taglineText = document.getElementById('modal-tagline');
     const currentImage = getImageUrl(event);
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
+    if (imageThemeText) imageThemeText.textContent = getImageTheme(event) || 'Not set';
     if (imagePromptText) imagePromptText.textContent = getImagePrompt(event) || 'Not set';
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
     updateImagePromptCopyStatus('', 'info');
@@ -2296,20 +2315,16 @@ async function copyFullImagePrompt() {
     const entry = getSelectedModalEntry();
     if (!entry) return;
 
-    const shortPrompt = getImagePrompt(entry.event);
-    if (!hasText(shortPrompt)) {
-        updateImagePromptCopyStatus('No stored image prompt available to copy.', 'error');
+    const imagePrompt = getImagePrompt(entry.event);
+    if (!hasText(imagePrompt)) {
+        updateImagePromptCopyStatus('No image prompt available to copy.', 'error');
         return;
     }
 
     updateImagePromptCopyStatus('Building image generation prompt...', 'loading');
 
     try {
-        const imageGenerationPrompt = buildManualImageGenerationPrompt(shortPrompt);
-        if (!hasText(imageGenerationPrompt)) {
-            throw new Error('No valid image prompt available');
-        }
-        await navigator.clipboard.writeText(imageGenerationPrompt);
+        await navigator.clipboard.writeText(imagePrompt);
         updateImagePromptCopyStatus('Image generation prompt copied to clipboard.', 'success');
     } catch (error) {
         console.error('Failed to copy image generation prompt:', error);
@@ -2330,7 +2345,8 @@ function applyLocalPersistedField(entry, field, value) {
         event.image = {};
     }
     if (field === 'imagePrompt') {
-        event.image.prompt = value;
+        event.image.theme = value;
+        if (Object.prototype.hasOwnProperty.call(event.image, 'prompt')) delete event.image.prompt;
         return;
     }
     event.image.url = value;
@@ -2448,7 +2464,8 @@ async function persistCurrentField(field) {
     if (field === 'tagline') {
         subject.tagline = nextValue;
     } else if (field === 'imagePrompt') {
-        subject.image.prompt = nextValue;
+        subject.image.theme = nextValue;
+        if (Object.prototype.hasOwnProperty.call(subject.image, 'prompt')) delete subject.image.prompt;
     } else {
         subject.image.url = nextValue;
     }
@@ -2844,7 +2861,8 @@ async function requeueEvent(eventIndex, fromModal = false) {
     if (Object.prototype.hasOwnProperty.call(subject, 'AI')) delete subject.AI;
     if (Object.prototype.hasOwnProperty.call(subject, 'ai')) delete subject.ai;
     if (!hasText(subject.tagline)) subject.tagline = null;
-    if (!hasText(subject.image.prompt)) subject.image.prompt = null;
+    if (!hasText(subject.image.theme)) subject.image.theme = null;
+    if (Object.prototype.hasOwnProperty.call(subject.image, 'prompt')) delete subject.image.prompt;
     if (!hasText(subject.image.url)) subject.image.url = null;
 
     const payload = {
