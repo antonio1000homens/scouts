@@ -72,17 +72,27 @@
                     >
                     Auto refresh agenda
                 </label>
+                <span id="agenda-auto-refresh-status" class="auto-invoke-header-status">Agenda refresh: after lambda completion</span>
+                <label class="auto-invoke-header-label" for="status-polling-toggle">
+                    <input
+                        type="checkbox"
+                        id="status-polling-toggle"
+                        checked
+                        onchange="toggleStatusPolling(this.checked)"
+                    >
+                    Polling job
+                </label>
                 <input
                     type="number"
-                    id="agenda-auto-refresh-interval-seconds"
+                    id="status-polling-interval-seconds"
                     class="refresh-input auto-invoke-header-interval"
                     min="5"
                     step="1"
                     value="5"
-                    onchange="updateAgendaAutoRefreshInterval(this.value)"
-                    title="Agenda auto refresh interval in seconds"
+                    onchange="updateStatusPollingInterval(this.value)"
+                    title="Polling job interval in seconds"
                 >
-                <span id="agenda-auto-refresh-status" class="auto-invoke-header-status">Agenda refresh: enabled</span>
+                <span id="status-polling-status" class="auto-invoke-header-status">Polling: enabled every 5s</span>
             </div>
         </div>
     </nav>
