@@ -1463,7 +1463,7 @@ function buildManualPromptGuidelinesText(guidelines) {
 function buildExpandedManualImagePrompt(template, event, config, shortPrompt) {
     const effectiveTemplate = hasText(template)
         ? String(template)
-        : 'Create an image for this Scouts event.\n\nEvent details:\n{{EVENT_DETAILS}}\n\nGuidelines:\n{{IMAGE_PROMPT_GUIDELINES}}\n\nFinal short image prompt:\n{{IMAGE_PROMPT}}';
+        : 'You are helping refine a short image theme into one final illustration prompt for a UK Scouts event.\n\nEvent details:\n{{EVENT_DETAILS}}\n\nBase theme to preserve:\n{{IMAGE_PROMPT}}\n\nImage prompt rules:\n{{IMAGE_PROMPT_GUIDELINES}}\n\nReturn strict JSON only: {"imagePrompt":"..."}.'; 
     const replaced = effectiveTemplate
         .replace(/{{EVENT_DETAILS}}/g, buildManualPromptEventDetails(event))
         .replace(/{{IMAGE_PROMPT_GUIDELINES}}/g, buildManualPromptGuidelinesText(config?.imagePromptGuidelines))
