@@ -20,10 +20,11 @@ const MIN_RUNTIME_DETAILS_VISIBLE_MS = 5000;
 const AGENDA_POLL_INTERVAL_MS = 15000;
 const QUEUE_DEPTH_POLL_INTERVAL_MS = 5000;
 const HEX_HYDRATION_POLL_INTERVAL_MS = 6000;
-const AUTO_LAMBDA_INVOKE_INTERVAL_MS = 20000;
+const DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS = 20000;
 const HEX_NOT_FOUND_BACKOFF_MS = 30000;
 const COMPLETED_REQUEST_HIDE_AFTER_MS = 10 * 60 * 1000;
 const AUTO_LAMBDA_PREF_KEY = 'scouts_admin_auto_lambda_enabled';
+const AUTO_LAMBDA_INTERVAL_PREF_KEY = 'scouts_admin_auto_lambda_interval_ms';
 const MAX_TRACKED_REQUEUE_ENTRIES = 30;
 let runtimeDetailsLastShownAt = 0;
 let runtimeDetailsLastMessage = '';
@@ -33,6 +34,8 @@ let runtimeDetailsFlushTimer = null;
 let hexHydrationInFlight = false;
 let autoLambdaInvokeInFlight = false;
 let autoLambdaInvokeEnabled = true;
+let autoLambdaInvokeIntervalMs = DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS;
+let autoLambdaInvokeTimer = null;
 let latestCompletedRequests = [];
 let latestCompletedRequestsUpdatedAt = null;
 let cachedAiConfig = null;
@@ -56,10 +59,10 @@ const DEFAULT_IMAGE_PROMPT_SPECIFICATIONS = [
     'main subjects centered',
     'safe margins for crop',
 ];
-const HEX_HOVER_POLL_INTERVAL_MS = 20000;
-let activeHexHoverCardIndex = null;
-let activeHexHoverHex = null;
-let activeHexHoverPollTimer = null;
+const HEX_PREVIEW_POLL_INTERVAL_MS = 5000;
+let activeHexPreviewCardIndex = null;
+let activeHexPreviewHex = null;
+let activeHexPreviewPollTimer = null;
 
 async function buildHttpError(response) {
     let details = '';
@@ -576,6 +579,17 @@ function readAutoLambdaInvocationPreference() {
     }
 }
 
+function readAutoLambdaIntervalPreference() {
+    try {
+        const stored = window.localStorage.getItem(AUTO_LAMBDA_INTERVAL_PREF_KEY);
+        const parsedSeconds = Number(stored);
+        if (!Number.isFinite(parsedSeconds)) return DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS;
+        return Math.max(5, Math.round(parsedSeconds)) * 1000;
+    } catch {
+        return DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS;
+    }
+}
+
 function persistAutoLambdaInvocationPreference(enabled) {
     try {
         window.localStorage.setItem(AUTO_LAMBDA_PREF_KEY, enabled ? '1' : '0');
@@ -584,14 +598,37 @@ function persistAutoLambdaInvocationPreference(enabled) {
     }
 }
 
+function persistAutoLambdaIntervalPreference(intervalMs) {
+    try {
+        window.localStorage.setItem(AUTO_LAMBDA_INTERVAL_PREF_KEY, String(Math.max(5, Math.round(intervalMs / 1000))));
+    } catch {
+        // Ignore storage errors
+    }
+}
+
+function restartAutoLambdaInvokeTimer() {
+    if (autoLambdaInvokeTimer) {
+        clearInterval(autoLambdaInvokeTimer);
+        autoLambdaInvokeTimer = null;
+    }
+    autoLambdaInvokeTimer = setInterval(() => {
+        invokeLambdaHeartbeat();
+    }, autoLambdaInvokeIntervalMs);
+}
+
 function updateAutoLambdaInvocationUi() {
     const toggle = document.getElementById('auto-lambda-toggle');
+    const intervalInput = document.getElementById('auto-lambda-interval-seconds');
     const statusElement = document.getElementById('auto-lambda-status');
     if (toggle) {
         toggle.checked = autoLambdaInvokeEnabled;
     }
+    if (intervalInput) {
+        intervalInput.value = String(Math.max(5, Math.round(autoLambdaInvokeIntervalMs / 1000)));
+    }
     if (statusElement) {
-        statusElement.textContent = `Auto invocation: ${autoLambdaInvokeEnabled ? 'enabled' : 'disabled'}`;
+        const seconds = Math.max(5, Math.round(autoLambdaInvokeIntervalMs / 1000));
+        statusElement.textContent = `Auto invocation: ${autoLambdaInvokeEnabled ? `enabled every ${seconds}s` : 'disabled'}`;
         statusElement.className = `refresh-status ${autoLambdaInvokeEnabled ? 'success' : 'info'}`;
     }
 }
@@ -606,6 +643,17 @@ function setAutoLambdaInvocationEnabled(enabled, persist = true) {
 
 function toggleAutoLambdaInvocation(enabled) {
     setAutoLambdaInvocationEnabled(enabled, true);
+}
+
+function updateAutoLambdaInvocationInterval(value, persist = true) {
+    const parsedSeconds = Number(value);
+    const safeSeconds = Number.isFinite(parsedSeconds) ? Math.max(5, Math.round(parsedSeconds)) : 20;
+    autoLambdaInvokeIntervalMs = safeSeconds * 1000;
+    if (persist) {
+        persistAutoLambdaIntervalPreference(autoLambdaInvokeIntervalMs);
+    }
+    restartAutoLambdaInvokeTimer();
+    updateAutoLambdaInvocationUi();
 }
 
 async function sendScoutsCommand(payload) {
@@ -1181,6 +1229,10 @@ function getHexPreviewBody(cardIndex) {
     return document.querySelector(`[data-event-card-index="${cardIndex}"] .event-hex-preview-body`);
 }
 
+function getHexPreviewContainer(cardIndex) {
+    return document.querySelector(`[data-event-card-index="${cardIndex}"] .event-hex-preview`);
+}
+
 function setHexPreviewState(cardIndex, message, state = 'info') {
     const body = getHexPreviewBody(cardIndex);
     if (!body) return;
@@ -1188,11 +1240,11 @@ function setHexPreviewState(cardIndex, message, state = 'info') {
     body.dataset.state = state;
 }
 
-async function refreshHoveredHexPreview(cardIndex, hexValue) {
-    if (activeHexHoverCardIndex !== cardIndex || activeHexHoverHex !== hexValue) return;
+async function refreshActiveHexPreview(cardIndex, hexValue) {
+    if (activeHexPreviewCardIndex !== cardIndex || activeHexPreviewHex !== hexValue) return;
     setHexPreviewState(cardIndex, 'Loading HEX JSON...', 'loading');
     const payload = await fetchRawHexEventByHex(hexValue);
-    if (activeHexHoverCardIndex !== cardIndex || activeHexHoverHex !== hexValue) return;
+    if (activeHexPreviewCardIndex !== cardIndex || activeHexPreviewHex !== hexValue) return;
     if (!payload) {
         setHexPreviewState(cardIndex, 'HEX JSON not available.', 'empty');
         return;
@@ -1203,47 +1255,63 @@ async function refreshHoveredHexPreview(cardIndex, hexValue) {
     body.dataset.state = 'loaded';
 }
 
-function scheduleHoveredHexPreviewPoll(cardIndex, hexValue) {
-    if (activeHexHoverPollTimer) {
-        clearTimeout(activeHexHoverPollTimer);
-        activeHexHoverPollTimer = null;
+function scheduleActiveHexPreviewPoll(cardIndex, hexValue) {
+    if (activeHexPreviewPollTimer) {
+        clearTimeout(activeHexPreviewPollTimer);
+        activeHexPreviewPollTimer = null;
     }
-    if (activeHexHoverCardIndex !== cardIndex || activeHexHoverHex !== hexValue) return;
-    activeHexHoverPollTimer = setTimeout(async () => {
-        await refreshHoveredHexPreview(cardIndex, hexValue);
-        scheduleHoveredHexPreviewPoll(cardIndex, hexValue);
-    }, HEX_HOVER_POLL_INTERVAL_MS);
+    if (activeHexPreviewCardIndex !== cardIndex || activeHexPreviewHex !== hexValue) return;
+    activeHexPreviewPollTimer = setTimeout(async () => {
+        await refreshActiveHexPreview(cardIndex, hexValue);
+        scheduleActiveHexPreviewPoll(cardIndex, hexValue);
+    }, HEX_PREVIEW_POLL_INTERVAL_MS);
 }
 
-function startHexHoverPreview(cardIndex) {
+function openHexPreview(cardIndex) {
     const entry = visibleEventEntries[cardIndex];
     const hex = hasText(entry?.event?.hex) ? String(entry.event.hex).trim().toLowerCase() : '';
-    stopHexHoverPreview();
-    activeHexHoverCardIndex = cardIndex;
-    activeHexHoverHex = hex || null;
+    closeHexPreview();
+    activeHexPreviewCardIndex = cardIndex;
+    activeHexPreviewHex = hex || null;
+    const previewContainer = getHexPreviewContainer(cardIndex);
+    if (previewContainer) {
+        previewContainer.style.display = 'block';
+    }
     if (!hex) {
         setHexPreviewState(cardIndex, 'No HEX available for this event.', 'empty');
         return;
     }
-    refreshHoveredHexPreview(cardIndex, hex).catch(() => {
-        if (activeHexHoverCardIndex === cardIndex && activeHexHoverHex === hex) {
+    refreshActiveHexPreview(cardIndex, hex).catch(() => {
+        if (activeHexPreviewCardIndex === cardIndex && activeHexPreviewHex === hex) {
             setHexPreviewState(cardIndex, 'Failed to load HEX JSON.', 'error');
         }
     });
-    scheduleHoveredHexPreviewPoll(cardIndex, hex);
+    scheduleActiveHexPreviewPoll(cardIndex, hex);
 }
 
-function stopHexHoverPreview(cardIndex = null) {
-    if (activeHexHoverPollTimer) {
-        clearTimeout(activeHexHoverPollTimer);
-        activeHexHoverPollTimer = null;
+function closeHexPreview(cardIndex = null) {
+    if (activeHexPreviewPollTimer) {
+        clearTimeout(activeHexPreviewPollTimer);
+        activeHexPreviewPollTimer = null;
     }
-    const indexToReset = cardIndex ?? activeHexHoverCardIndex;
+    const indexToReset = cardIndex ?? activeHexPreviewCardIndex;
     if (indexToReset !== null && indexToReset !== undefined) {
-        setHexPreviewState(indexToReset, 'Hover to load HEX JSON.', 'idle');
+        const previewContainer = getHexPreviewContainer(indexToReset);
+        if (previewContainer) {
+            previewContainer.style.display = 'none';
+        }
+        setHexPreviewState(indexToReset, 'Click "View HEX" to load HEX JSON.', 'idle');
     }
-    activeHexHoverCardIndex = null;
-    activeHexHoverHex = null;
+    activeHexPreviewCardIndex = null;
+    activeHexPreviewHex = null;
+}
+
+function toggleHexPreview(cardIndex) {
+    if (activeHexPreviewCardIndex === cardIndex) {
+        closeHexPreview(cardIndex);
+        return;
+    }
+    openHexPreview(cardIndex);
 }
 
 function applyHexEventMetadata(targetEvent, hexEvent) {
@@ -1910,7 +1978,7 @@ function renderRequeueTracker() {
 // Render all events
 function renderEvents() {
     const container = document.getElementById('events-container');
-    stopHexHoverPreview();
+    closeHexPreview();
     
     if (uniqueEventEntries.length === 0) {
         console.warn('[Admin] No events found after loading');
@@ -1975,8 +2043,6 @@ function renderEvents() {
             <div
                 class="event-card"
                 data-event-card-index="${index}"
-                onmouseenter="startHexHoverPreview(${index})"
-                onmouseleave="stopHexHoverPreview(${index})"
             >
                 <div class="event-image-container">
                     ${imageUrl 
@@ -2042,10 +2108,11 @@ function renderEvents() {
                             ? `<button class="btn btn-secondary requires-api" onclick="requeueEvent(${index})">Requeue Missing Fields</button>`
                             : ''
                         }
+                        <button class="btn btn-secondary" onclick="toggleHexPreview(${index})">View HEX</button>
                     </div>
-                    <div class="event-hex-preview">
+                    <div class="event-hex-preview" style="display:none;">
                         <div class="event-hex-preview-label">HEX JSON</div>
-                        <pre class="event-hex-preview-body" data-state="idle">Hover to load HEX JSON.</pre>
+                        <pre class="event-hex-preview-body" data-state="idle">Click "View HEX" to load HEX JSON.</pre>
                     </div>
                 </div>
             </div>
@@ -3020,7 +3087,9 @@ function requeueCurrentEvent() {
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
+    autoLambdaInvokeIntervalMs = readAutoLambdaIntervalPreference();
     setAutoLambdaInvocationEnabled(readAutoLambdaInvocationPreference(), false);
+    restartAutoLambdaInvokeTimer();
     setApiActionState(false);
     checkApiAuthStatus();
     loadEvents();
@@ -3039,7 +3108,4 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(() => {
         loadEvents({ silent: true });
     }, AGENDA_POLL_INTERVAL_MS);
-    setInterval(() => {
-        invokeLambdaHeartbeat();
-    }, AUTO_LAMBDA_INVOKE_INTERVAL_MS);
 });
