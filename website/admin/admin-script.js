@@ -56,6 +56,10 @@ const DEFAULT_IMAGE_PROMPT_SPECIFICATIONS = [
     'main subjects centered',
     'safe margins for crop',
 ];
+const HEX_HOVER_POLL_INTERVAL_MS = 5000;
+let activeHexHoverCardIndex = null;
+let activeHexHoverHex = null;
+let activeHexHoverPollTimer = null;
 
 async function buildHttpError(response) {
     let details = '';
@@ -1147,6 +1151,101 @@ async function fetchHexEventByHex(hexValue) {
     }
 }
 
+async function fetchRawHexEventByHex(hexValue) {
+    const hex = hasText(hexValue) ? String(hexValue).trim().toLowerCase() : '';
+    if (!hex) return null;
+    const now = Date.now();
+    const nextRetryAt = missingHexRetryAtByHex.get(hex) || 0;
+    if (nextRetryAt > now) return null;
+    try {
+        const response = await fetch(`../../events/${hex}.json?ts=${Date.now()}`, {
+            method: 'GET',
+            credentials: 'same-origin',
+            cache: 'no-store',
+        });
+        if (!response.ok) {
+            if (response.status === 404 || response.status === 410) {
+                missingHexRetryAtByHex.set(hex, now + HEX_NOT_FOUND_BACKOFF_MS);
+            }
+            return null;
+        }
+        const payload = await response.json();
+        missingHexRetryAtByHex.delete(hex);
+        return payload && typeof payload === 'object' ? payload : null;
+    } catch {
+        return null;
+    }
+}
+
+function getHexPreviewBody(cardIndex) {
+    return document.querySelector(`[data-event-card-index="${cardIndex}"] .event-hex-preview-body`);
+}
+
+function setHexPreviewState(cardIndex, message, state = 'info') {
+    const body = getHexPreviewBody(cardIndex);
+    if (!body) return;
+    body.textContent = message;
+    body.dataset.state = state;
+}
+
+async function refreshHoveredHexPreview(cardIndex, hexValue) {
+    if (activeHexHoverCardIndex !== cardIndex || activeHexHoverHex !== hexValue) return;
+    setHexPreviewState(cardIndex, 'Loading HEX JSON...', 'loading');
+    const payload = await fetchRawHexEventByHex(hexValue);
+    if (activeHexHoverCardIndex !== cardIndex || activeHexHoverHex !== hexValue) return;
+    if (!payload) {
+        setHexPreviewState(cardIndex, 'HEX JSON not available.', 'empty');
+        return;
+    }
+    const body = getHexPreviewBody(cardIndex);
+    if (!body) return;
+    body.textContent = JSON.stringify(payload, null, 2);
+    body.dataset.state = 'loaded';
+}
+
+function scheduleHoveredHexPreviewPoll(cardIndex, hexValue) {
+    if (activeHexHoverPollTimer) {
+        clearTimeout(activeHexHoverPollTimer);
+        activeHexHoverPollTimer = null;
+    }
+    if (activeHexHoverCardIndex !== cardIndex || activeHexHoverHex !== hexValue) return;
+    activeHexHoverPollTimer = setTimeout(async () => {
+        await refreshHoveredHexPreview(cardIndex, hexValue);
+        scheduleHoveredHexPreviewPoll(cardIndex, hexValue);
+    }, HEX_HOVER_POLL_INTERVAL_MS);
+}
+
+function startHexHoverPreview(cardIndex) {
+    const entry = visibleEventEntries[cardIndex];
+    const hex = hasText(entry?.event?.hex) ? String(entry.event.hex).trim().toLowerCase() : '';
+    stopHexHoverPreview();
+    activeHexHoverCardIndex = cardIndex;
+    activeHexHoverHex = hex || null;
+    if (!hex) {
+        setHexPreviewState(cardIndex, 'No HEX available for this event.', 'empty');
+        return;
+    }
+    refreshHoveredHexPreview(cardIndex, hex).catch(() => {
+        if (activeHexHoverCardIndex === cardIndex && activeHexHoverHex === hex) {
+            setHexPreviewState(cardIndex, 'Failed to load HEX JSON.', 'error');
+        }
+    });
+    scheduleHoveredHexPreviewPoll(cardIndex, hex);
+}
+
+function stopHexHoverPreview(cardIndex = null) {
+    if (activeHexHoverPollTimer) {
+        clearTimeout(activeHexHoverPollTimer);
+        activeHexHoverPollTimer = null;
+    }
+    const indexToReset = cardIndex ?? activeHexHoverCardIndex;
+    if (indexToReset !== null && indexToReset !== undefined) {
+        setHexPreviewState(indexToReset, 'Hover to load HEX JSON.', 'idle');
+    }
+    activeHexHoverCardIndex = null;
+    activeHexHoverHex = null;
+}
+
 function applyHexEventMetadata(targetEvent, hexEvent) {
     if (!targetEvent || !hexEvent) return false;
     let changed = false;
@@ -1811,6 +1910,7 @@ function renderRequeueTracker() {
 // Render all events
 function renderEvents() {
     const container = document.getElementById('events-container');
+    stopHexHoverPreview();
     
     if (uniqueEventEntries.length === 0) {
         console.warn('[Admin] No events found after loading');
@@ -1872,7 +1972,12 @@ function renderEvents() {
         }
         
         return `
-            <div class="event-card">
+            <div
+                class="event-card"
+                data-event-card-index="${index}"
+                onmouseenter="startHexHoverPreview(${index})"
+                onmouseleave="stopHexHoverPreview(${index})"
+            >
                 <div class="event-image-container">
                     ${imageUrl 
                         ? `<img src="${imageUrl}" alt="${title}" class="event-image" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22300%22%3E%3Crect fill=%22%23ddd%22 width=%22400%22 height=%22300%22/%3E%3Ctext fill=%22%23999%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22%3ENo Image%3C/text%3E%3C/svg%3E'">` 
@@ -1937,6 +2042,10 @@ function renderEvents() {
                             ? `<button class="btn btn-secondary requires-api" onclick="requeueEvent(${index})">Requeue Missing Fields</button>`
                             : ''
                         }
+                    </div>
+                    <div class="event-hex-preview">
+                        <div class="event-hex-preview-label">HEX JSON</div>
+                        <pre class="event-hex-preview-body" data-state="idle">Hover to load HEX JSON.</pre>
                     </div>
                 </div>
             </div>
