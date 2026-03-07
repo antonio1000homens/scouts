@@ -90,10 +90,14 @@ jobs:
       run: |
         if [ -f AI.conf ]; then
           echo "Uploading AI.conf to s3://2ndtolworth/AI.conf"
-          aws s3 cp AI.conf s3://2ndtolworth/AI.conf --acl private
+          aws s3 cp AI.conf s3://2ndtolworth/AI.conf \
+            --acl private \
+            --cache-control "max-age=0, no-cache, no-store, must-revalidate"
         elif [ -f website/AI.conf ]; then
           echo "Uploading website/AI.conf to s3://2ndtolworth/AI.conf"
-          aws s3 cp website/AI.conf s3://2ndtolworth/AI.conf --acl private
+          aws s3 cp website/AI.conf s3://2ndtolworth/AI.conf \
+            --acl private \
+            --cache-control "max-age=0, no-cache, no-store, must-revalidate"
         else
           echo "No AI.conf found in repository root or website/, skipping"
         fi
@@ -105,7 +109,7 @@ jobs:
         if [ -n "${CLOUDFRONT_DISTRIBUTION_ID}" ]; then
           aws cloudfront create-invalidation \
             --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
-            --paths "/index.html" "/website/*"
+            --paths "/index.html" "/AI.conf" "/website/*"
         else
           echo "No CLOUDFRONT_DISTRIBUTION_ID secret set; skipping invalidation."
         fi
