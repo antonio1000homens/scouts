@@ -731,13 +731,44 @@ body {
     padding-top: 0.75rem;
 }
 
+.event-hex-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.4rem;
+}
+
 .event-hex-preview-label {
     font-size: 0.74rem;
     font-weight: 700;
     letter-spacing: 0.05em;
     text-transform: uppercase;
     color: #475467;
-    margin-bottom: 0.4rem;
+    margin-bottom: 0;
+}
+
+.event-hex-preview-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.event-hex-preview-auto {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.78rem;
+    color: #475467;
+}
+
+.event-hex-preview-interval-input {
+    width: 4.5rem;
+    padding: 0.35rem 0.45rem;
+    border: 1px solid #d0d5dd;
+    border-radius: 6px;
+    font-size: 0.78rem;
 }
 
 .event-hex-preview-body {
