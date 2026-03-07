@@ -75,8 +75,18 @@
                                 checked
                                 onchange="toggleAutoLambdaInvocation(this.checked)"
                             >
-                            Auto invoke lambda every 20s
+                            Auto invoke lambda
                         </label>
+                        <input
+                            type="number"
+                            id="auto-lambda-interval-seconds"
+                            class="refresh-input"
+                            min="5"
+                            step="1"
+                            value="20"
+                            onchange="updateAutoLambdaInvocationInterval(this.value)"
+                            title="Auto invoke interval in seconds"
+                        >
                     </div>
                     <p id="auto-lambda-status" class="refresh-status">Auto invocation: enabled</p>
                     <div class="global-actions">
