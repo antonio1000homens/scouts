@@ -19,19 +19,19 @@ let pinnedRuntimeDetails = null;
 const MIN_RUNTIME_DETAILS_VISIBLE_MS = 5000;
 const AGENDA_POLL_INTERVAL_MS = 15000;
 const QUEUE_DEPTH_POLL_INTERVAL_MS = 5000;
-const HEX_HYDRATION_POLL_INTERVAL_MS = 6000;
 const DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS = 20000;
 const HEX_NOT_FOUND_BACKOFF_MS = 30000;
 const COMPLETED_REQUEST_HIDE_AFTER_MS = 10 * 60 * 1000;
 const AUTO_LAMBDA_PREF_KEY = 'scouts_admin_auto_lambda_enabled';
 const AUTO_LAMBDA_INTERVAL_PREF_KEY = 'scouts_admin_auto_lambda_interval_ms';
+const HEX_PREVIEW_AUTO_REFRESH_PREF_KEY = 'scouts_admin_hex_preview_auto_refresh';
+const HEX_PREVIEW_INTERVAL_PREF_KEY = 'scouts_admin_hex_preview_interval_ms';
 const MAX_TRACKED_REQUEUE_ENTRIES = 30;
 let runtimeDetailsLastShownAt = 0;
 let runtimeDetailsLastMessage = '';
 let runtimeDetailsLastType = 'info';
 let runtimeDetailsPending = null;
 let runtimeDetailsFlushTimer = null;
-let hexHydrationInFlight = false;
 let autoLambdaInvokeInFlight = false;
 let autoLambdaInvokeEnabled = true;
 let autoLambdaInvokeIntervalMs = DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS;
@@ -63,6 +63,8 @@ const HEX_PREVIEW_POLL_INTERVAL_MS = 5000;
 let activeHexPreviewCardIndex = null;
 let activeHexPreviewHex = null;
 let activeHexPreviewPollTimer = null;
+let hexPreviewAutoRefreshEnabled = false;
+let hexPreviewIntervalMs = HEX_PREVIEW_POLL_INTERVAL_MS;
 
 async function buildHttpError(response) {
     let details = '';
@@ -590,6 +592,27 @@ function readAutoLambdaIntervalPreference() {
     }
 }
 
+function readHexPreviewAutoRefreshPreference() {
+    try {
+        const stored = window.localStorage.getItem(HEX_PREVIEW_AUTO_REFRESH_PREF_KEY);
+        if (stored === null) return false;
+        return stored === '1' || stored.toLowerCase() === 'true';
+    } catch {
+        return false;
+    }
+}
+
+function readHexPreviewIntervalPreference() {
+    try {
+        const stored = window.localStorage.getItem(HEX_PREVIEW_INTERVAL_PREF_KEY);
+        const parsedSeconds = Number(stored);
+        if (!Number.isFinite(parsedSeconds)) return HEX_PREVIEW_POLL_INTERVAL_MS;
+        return Math.max(5, Math.round(parsedSeconds)) * 1000;
+    } catch {
+        return HEX_PREVIEW_POLL_INTERVAL_MS;
+    }
+}
+
 function persistAutoLambdaInvocationPreference(enabled) {
     try {
         window.localStorage.setItem(AUTO_LAMBDA_PREF_KEY, enabled ? '1' : '0');
@@ -601,6 +624,22 @@ function persistAutoLambdaInvocationPreference(enabled) {
 function persistAutoLambdaIntervalPreference(intervalMs) {
     try {
         window.localStorage.setItem(AUTO_LAMBDA_INTERVAL_PREF_KEY, String(Math.max(5, Math.round(intervalMs / 1000))));
+    } catch {
+        // Ignore storage errors
+    }
+}
+
+function persistHexPreviewAutoRefreshPreference(enabled) {
+    try {
+        window.localStorage.setItem(HEX_PREVIEW_AUTO_REFRESH_PREF_KEY, enabled ? '1' : '0');
+    } catch {
+        // Ignore storage errors
+    }
+}
+
+function persistHexPreviewIntervalPreference(intervalMs) {
+    try {
+        window.localStorage.setItem(HEX_PREVIEW_INTERVAL_PREF_KEY, String(Math.max(5, Math.round(intervalMs / 1000))));
     } catch {
         // Ignore storage errors
     }
@@ -834,7 +873,6 @@ async function loadEvents(options = {}) {
         renderRequeueTracker();
         renderAgendaViewerContent();
         renderEventsJsonViewerContent();
-        hydrateEntriesFromHexFiles();
     } catch (error) {
         console.error('Error loading events:', error);
         if (!silent) {
@@ -1233,6 +1271,21 @@ function getHexPreviewContainer(cardIndex) {
     return document.querySelector(`[data-event-card-index="${cardIndex}"] .event-hex-preview`);
 }
 
+function syncHexPreviewControls(cardIndex = activeHexPreviewCardIndex) {
+    if (cardIndex === null || cardIndex === undefined) return;
+    const card = document.querySelector(`[data-event-card-index="${cardIndex}"]`);
+    if (!card) return;
+    const autoToggle = card.querySelector('.event-hex-preview-auto-toggle');
+    const intervalInput = card.querySelector('.event-hex-preview-interval-input');
+    if (autoToggle) {
+        autoToggle.checked = hexPreviewAutoRefreshEnabled;
+    }
+    if (intervalInput) {
+        intervalInput.value = String(Math.max(5, Math.round(hexPreviewIntervalMs / 1000)));
+        intervalInput.disabled = !hexPreviewAutoRefreshEnabled;
+    }
+}
+
 function setHexPreviewState(cardIndex, message, state = 'info') {
     const body = getHexPreviewBody(cardIndex);
     if (!body) return;
@@ -1260,11 +1313,12 @@ function scheduleActiveHexPreviewPoll(cardIndex, hexValue) {
         clearTimeout(activeHexPreviewPollTimer);
         activeHexPreviewPollTimer = null;
     }
+    if (!hexPreviewAutoRefreshEnabled) return;
     if (activeHexPreviewCardIndex !== cardIndex || activeHexPreviewHex !== hexValue) return;
     activeHexPreviewPollTimer = setTimeout(async () => {
         await refreshActiveHexPreview(cardIndex, hexValue);
         scheduleActiveHexPreviewPoll(cardIndex, hexValue);
-    }, HEX_PREVIEW_POLL_INTERVAL_MS);
+    }, hexPreviewIntervalMs);
 }
 
 function openHexPreview(cardIndex) {
@@ -1277,6 +1331,7 @@ function openHexPreview(cardIndex) {
     if (previewContainer) {
         previewContainer.style.display = 'block';
     }
+    syncHexPreviewControls(cardIndex);
     if (!hex) {
         setHexPreviewState(cardIndex, 'No HEX available for this event.', 'empty');
         return;
@@ -1312,6 +1367,41 @@ function toggleHexPreview(cardIndex) {
         return;
     }
     openHexPreview(cardIndex);
+}
+
+function refreshHexPreviewNow(cardIndex) {
+    if (activeHexPreviewCardIndex !== cardIndex) {
+        openHexPreview(cardIndex);
+        return;
+    }
+    if (!activeHexPreviewHex) {
+        setHexPreviewState(cardIndex, 'No HEX available for this event.', 'empty');
+        return;
+    }
+    refreshActiveHexPreview(cardIndex, activeHexPreviewHex).catch(() => {
+        setHexPreviewState(cardIndex, 'Failed to load HEX JSON.', 'error');
+    });
+    scheduleActiveHexPreviewPoll(cardIndex, activeHexPreviewHex);
+}
+
+function setHexPreviewAutoRefresh(cardIndex, enabled) {
+    hexPreviewAutoRefreshEnabled = Boolean(enabled);
+    persistHexPreviewAutoRefreshPreference(hexPreviewAutoRefreshEnabled);
+    syncHexPreviewControls(cardIndex);
+    if (activeHexPreviewCardIndex === cardIndex && activeHexPreviewHex) {
+        scheduleActiveHexPreviewPoll(cardIndex, activeHexPreviewHex);
+    }
+}
+
+function updateHexPreviewInterval(value, cardIndex) {
+    const parsedSeconds = Number(value);
+    const safeSeconds = Number.isFinite(parsedSeconds) ? Math.max(5, Math.round(parsedSeconds)) : 5;
+    hexPreviewIntervalMs = safeSeconds * 1000;
+    persistHexPreviewIntervalPreference(hexPreviewIntervalMs);
+    syncHexPreviewControls(cardIndex);
+    if (activeHexPreviewCardIndex === cardIndex && activeHexPreviewHex) {
+        scheduleActiveHexPreviewPoll(cardIndex, activeHexPreviewHex);
+    }
 }
 
 function applyHexEventMetadata(targetEvent, hexEvent) {
@@ -1358,52 +1448,6 @@ function applyHexEventMetadata(targetEvent, hexEvent) {
     return changed;
 }
 
-async function hydrateEntriesFromHexFiles() {
-    if (hexHydrationInFlight || !Array.isArray(uniqueEventEntries) || uniqueEventEntries.length === 0) {
-        return;
-    }
-
-    const entriesWithHex = uniqueEventEntries
-        .map((entry, index) => ({ entry, index }))
-        .filter(({ entry }) => hasText(entry?.event?.hex));
-    if (entriesWithHex.length === 0) return;
-
-    hexHydrationInFlight = true;
-    try {
-        const updates = await Promise.all(entriesWithHex.map(async ({ entry, index }) => ({
-            index,
-            hexEvent: await fetchHexEventByHex(entry.event.hex),
-        })));
-
-        let changedAny = false;
-        for (const update of updates) {
-            if (!update.hexEvent) continue;
-            const targetEntry = uniqueEventEntries[update.index];
-            if (!targetEntry?.event) continue;
-            if (applyHexEventMetadata(targetEntry.event, update.hexEvent)) {
-                changedAny = true;
-            }
-        }
-        if (applyVisibilityOverrides(uniqueEventEntries, { allowConfirm: false })) {
-            changedAny = true;
-        }
-
-        if (changedAny) {
-            updateEventsCount(
-                uniqueEventEntries.length,
-                eventsData.length,
-                uniqueEventEntries.filter((entry) => isEntryHidden(entry)).length,
-                uniqueEventEntries.filter((entry) => isCompleteEvent(entry.event)).length,
-            );
-            updateSidebarUi();
-            renderEvents();
-            reconcileRequeueTrackerEntries();
-            renderRequeueTracker();
-        }
-    } finally {
-        hexHydrationInFlight = false;
-    }
-}
 
 async function pollQueueDepthSnapshots() {
     const statusEl = document.getElementById('queue-depth-status');
@@ -2108,10 +2152,31 @@ function renderEvents() {
                             ? `<button class="btn btn-secondary requires-api" onclick="requeueEvent(${index})">Requeue Missing Fields</button>`
                             : ''
                         }
-                        <button class="btn btn-secondary" onclick="toggleHexPreview(${index})">View HEX</button>
+                        <button class="btn btn-secondary" onclick="toggleHexPreview(${index})">HEX</button>
                     </div>
                     <div class="event-hex-preview" style="display:none;">
-                        <div class="event-hex-preview-label">HEX JSON</div>
+                        <div class="event-hex-preview-header">
+                            <div class="event-hex-preview-label">HEX JSON</div>
+                            <div class="event-hex-preview-controls">
+                                <button class="btn btn-secondary" onclick="refreshHexPreviewNow(${index})">Refresh</button>
+                                <label class="event-hex-preview-auto">
+                                    <input
+                                        type="checkbox"
+                                        class="event-hex-preview-auto-toggle"
+                                        onchange="setHexPreviewAutoRefresh(${index}, this.checked)"
+                                    >
+                                    Auto
+                                </label>
+                                <input
+                                    type="number"
+                                    class="event-hex-preview-interval-input"
+                                    min="5"
+                                    step="1"
+                                    value="${Math.max(5, Math.round(hexPreviewIntervalMs / 1000))}"
+                                    onchange="updateHexPreviewInterval(this.value, ${index})"
+                                >
+                            </div>
+                        </div>
                         <pre class="event-hex-preview-body" data-state="idle">Click "View HEX" to load HEX JSON.</pre>
                     </div>
                 </div>
@@ -2681,7 +2746,6 @@ async function persistCurrentField(field) {
 
         await pollQueueDepthSnapshots();
         setTimeout(() => {
-            hydrateEntriesFromHexFiles();
             loadEvents({ silent: true });
         }, 1500);
     } catch (error) {
@@ -2745,7 +2809,6 @@ async function requestGeneratedField(field) {
         pinRuntimeDetails(successMessage, 'success');
         await pollQueueDepthSnapshots();
         setTimeout(() => {
-            hydrateEntriesFromHexFiles();
             loadEvents({ silent: true });
         }, 2000);
     } catch (error) {
@@ -2851,9 +2914,6 @@ async function hideEvent(eventIndex, fromModal = false) {
         const successMessage = `Hide request queued for "${eventLabel}".${backendMessage}`;
         if (fromModal) updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
-        setTimeout(() => {
-            hydrateEntriesFromHexFiles();
-        }, 1800);
     } catch (error) {
         console.error('Error hiding event:', error);
         const failureMessage = `Failed to hide event: ${error.message}`;
@@ -2955,9 +3015,6 @@ async function unhideEvent(eventIndex, fromModal = false) {
         const successMessage = `Unhide request queued for "${eventLabel}".${backendMessage}`;
         if (fromModal) updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
-        setTimeout(() => {
-            hydrateEntriesFromHexFiles();
-        }, 1800);
     } catch (error) {
         console.error('Error unhiding event:', error);
         const failureMessage = `Failed to unhide event: ${error.message}`;
@@ -3089,6 +3146,8 @@ function requeueCurrentEvent() {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     autoLambdaInvokeIntervalMs = readAutoLambdaIntervalPreference();
+    hexPreviewAutoRefreshEnabled = readHexPreviewAutoRefreshPreference();
+    hexPreviewIntervalMs = readHexPreviewIntervalPreference();
     setAutoLambdaInvocationEnabled(readAutoLambdaInvocationPreference(), false);
     restartAutoLambdaInvokeTimer();
     setApiActionState(false);
@@ -3103,9 +3162,6 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(() => {
         pollQueueDepthSnapshots();
     }, QUEUE_DEPTH_POLL_INTERVAL_MS);
-    setInterval(() => {
-        hydrateEntriesFromHexFiles();
-    }, HEX_HYDRATION_POLL_INTERVAL_MS);
     setInterval(() => {
         loadEvents({ silent: true });
     }, AGENDA_POLL_INTERVAL_MS);
