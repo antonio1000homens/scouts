@@ -515,27 +515,43 @@ body {
     object-fit: cover;
 }
 
-.event-badge {
+.event-badge-stack {
     position: absolute;
     top: 10px;
     right: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.35rem;
+    max-width: calc(100% - 20px);
+}
+
+.event-badge {
     background: rgba(255, 255, 255, 0.9);
     padding: 0.25rem 0.75rem;
     border-radius: 20px;
     font-size: 0.85rem;
     font-weight: bold;
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .event-badge.beavers { color: #00a794; }
 .event-badge.cubs { color: #23a950; }
 .event-badge.scouts { color: #004851; }
 .event-badge.hidden { color: #b54708; }
-.event-badge.runtime-updating {
-    top: 46px;
+.event-badge.runtime-queued {
     color: #155eef;
 }
+.event-badge.runtime-processing {
+    color: #6d28d9;
+}
+.event-badge.runtime-updated {
+    color: #b54708;
+}
 .event-badge.runtime-refresh-needed {
-    top: 46px;
     color: #b42318;
 }
 
