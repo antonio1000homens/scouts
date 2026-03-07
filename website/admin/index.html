@@ -214,6 +214,7 @@
                     <div class="form-group">
                         <label>Current Metadata</label>
                         <p><strong>Image URL:</strong> <span id="modal-image-url"></span></p>
+                        <p><strong>Image Theme:</strong> <span id="modal-image-theme"></span></p>
                         <p><strong>Image Prompt:</strong> <span id="modal-image-prompt"></span></p>
                         <p><strong>Tagline:</strong> <span id="modal-tagline"></span></p>
                     </div>
@@ -254,11 +255,11 @@
                     </div>
 
                     <div class="field-editor">
-                        <label for="modal-image-prompt-input">Image Prompt</label>
+                        <label for="modal-image-prompt-input">Image Theme</label>
                         <input
                             type="text"
                             id="modal-image-prompt-input"
-                            placeholder="Prompt used for image generation/search"
+                            placeholder="Short theme used to derive the image prompt"
                             autocomplete="off"
                             spellcheck="false"
                         >
@@ -266,16 +267,16 @@
                             <button
                                 class="btn btn-primary requires-api"
                                 onclick="persistCurrentField('imagePrompt')"
-                            >Persist Image Prompt</button>
+                            >Persist Image Theme</button>
                             <button
                                 class="btn btn-secondary requires-api"
                                 onclick="requestGeneratedField('imagePrompt')"
-                            >Request AI Image Prompt</button>
+                            >Request AI Image Theme</button>
                             <button
                                 id="modal-copy-image-prompt-button"
                                 class="btn btn-secondary"
                                 onclick="copyFullImagePrompt()"
-                            >Copy Full Prompt</button>
+                            >Copy Image Prompt</button>
                         </div>
                         <p id="modal-image-prompt-copy-status" class="refresh-status modal-input-help"></p>
                     </div>
