@@ -705,7 +705,6 @@ function updateAutoLambdaInvocationUi() {
     if (statusElement) {
         const seconds = Math.max(5, Math.round(autoLambdaInvokeIntervalMs / 1000));
         statusElement.textContent = `Auto invocation: ${autoLambdaInvokeEnabled ? `enabled every ${seconds}s` : 'disabled'}`;
-        statusElement.className = `refresh-status ${autoLambdaInvokeEnabled ? 'success' : 'info'}`;
     }
 }
 
