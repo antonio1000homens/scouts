@@ -317,7 +317,53 @@ function formatCompletedRequestOperation(value) {
     if (normalized === 'tagline') return 'Tagline';
     if (normalized === 'hidden') return 'Hidden';
     if (normalized === 'persist') return 'Persist';
+    if (normalized === 'completed') return 'Completed';
     return normalized;
+}
+
+function normaliseCompletedRequestEntry(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+
+    const title = hasText(entry?.title)
+        ? entry.title.trim()
+        : (hasText(entry?.summary)
+            ? entry.summary.trim()
+            : (hasText(entry?.hex)
+                ? entry.hex.trim()
+                : (hasText(entry?.hexId)
+                    ? entry.hexId.trim()
+                    : (hasText(entry?.requestId) ? entry.requestId.trim() : 'Unknown'))));
+
+    const hex = hasText(entry?.hex)
+        ? entry.hex.trim()
+        : (hasText(entry?.hexId) ? entry.hexId.trim() : 'n/a');
+
+    const requestId = hasText(entry?.requestId)
+        ? entry.requestId.trim()
+        : (hasText(entry?.messageId) ? entry.messageId.trim() : 'n/a');
+
+    const operation = formatCompletedRequestOperation(entry?.operation ?? entry?.status);
+    const processedAt = hasText(entry?.processedAt)
+        ? entry.processedAt
+        : (hasText(entry?.requestTime)
+            ? entry.requestTime
+            : (hasText(entry?.completedAt) ? entry.completedAt : ''));
+
+    return {
+        title,
+        hex,
+        requestId,
+        operation,
+        processedAt,
+    };
+}
+
+function setCompletedRequests(entries, updatedAt = null) {
+    latestCompletedRequests = Array.isArray(entries)
+        ? entries.map((entry) => normaliseCompletedRequestEntry(entry)).filter(Boolean)
+        : [];
+    latestCompletedRequestsUpdatedAt = hasText(updatedAt) ? updatedAt : null;
+    renderCompletedRequests();
 }
 
 function renderCompletedRequests() {
@@ -343,26 +389,34 @@ function renderCompletedRequests() {
     }
 
     listEl.innerHTML = latestCompletedRequests.map((entry) => {
-        const title = hasText(entry?.title) ? entry.title.trim() : (hasText(entry?.hex) ? entry.hex.trim() : 'Unknown');
-        const operation = formatCompletedRequestOperation(entry?.operation);
+        const title = hasText(entry?.title) ? entry.title.trim() : 'Unknown';
+        const operation = hasText(entry?.operation) ? entry.operation.trim() : 'unknown';
         const processedAt = hasText(entry?.processedAt)
             ? formatTrackerTimestamp(entry.processedAt)
             : 'n/a';
         const hex = hasText(entry?.hex) ? entry.hex.trim() : 'n/a';
+        const requestId = hasText(entry?.requestId) ? entry.requestId.trim() : 'n/a';
+        const meta = [
+            operation !== 'unknown' ? operation : null,
+            hex !== 'n/a' ? `HEX ${hex}` : null,
+            requestId !== 'n/a' ? `Request ${requestId}` : null,
+            processedAt !== 'n/a' ? processedAt : null,
+        ].filter(Boolean);
         return `<div class="completed-request-item">
             <div><strong>${escapeHtml(title)}</strong></div>
-            <div class="completed-request-meta">${escapeHtml(operation)} | ${escapeHtml(hex)} | ${escapeHtml(processedAt)}</div>
+            <div class="completed-request-meta">${escapeHtml(meta.join(' | ') || 'No metadata available')}</div>
         </div>`;
     }).join('');
 }
 
 function updateCompletedRequestsFromResult(result) {
     const completedRequests = Array.isArray(result?.completedRequests) ? result.completedRequests : null;
-    if (completedRequests && completedRequests.length > 0) {
-        latestCompletedRequests = completedRequests;
-        latestCompletedRequestsUpdatedAt = new Date().toISOString();
+    if (completedRequests) {
+        const updatedAt = hasText(result?.runtimeRequestFiles?.completed?.updatedAt)
+            ? result.runtimeRequestFiles.completed.updatedAt
+            : new Date().toISOString();
+        setCompletedRequests(completedRequests, updatedAt);
     }
-    renderCompletedRequests();
 }
 
 function readAutoLambdaInvocationPreference() {
@@ -607,34 +661,70 @@ function getSnapshotRequests(snapshot) {
     return Array.isArray(snapshot?.requests) ? snapshot.requests : [];
 }
 
-function deriveEventRuntimeRefreshState(event) {
+function getSnapshotRequestHex(request) {
+    if (hasText(request?.hexId)) return String(request.hexId).trim().toLowerCase();
+    if (hasText(request?.hex)) return String(request.hex).trim().toLowerCase();
+    return '';
+}
+
+function getSnapshotRequestId(request) {
+    if (hasText(request?.requestId)) return String(request.requestId).trim();
+    if (hasText(request?.messageId)) return String(request.messageId).trim();
+    return '';
+}
+
+function formatRuntimeBadgeRequestId(requestId) {
+    if (!hasText(requestId)) return '';
+    const normalized = String(requestId).trim();
+    return normalized.length > 10 ? normalized.slice(0, 8) : normalized;
+}
+
+function deriveEventRuntimeBadges(event) {
     const hex = hasText(event?.hex) ? String(event.hex).trim().toLowerCase() : '';
-    if (!hex) return null;
+    if (!hex) return [];
 
-    const queuedRequests = getSnapshotRequests(latestQueuedSnapshot).filter((request) => {
-        const requestHex = hasText(request?.hexId) ? String(request.hexId).trim().toLowerCase() : '';
-        return requestHex === hex && hasText(request?.requestId);
-    });
-    if (queuedRequests.length === 0) {
-        return null;
-    }
-
+    const queuedRequests = getSnapshotRequests(latestQueuedSnapshot)
+        .filter((request) => getSnapshotRequestHex(request) === hex);
+    const processingRequests = getSnapshotRequests(latestProcessingSnapshot)
+        .filter((request) => getSnapshotRequestHex(request) === hex);
     const completedPairs = new Set(
         getSnapshotRequests(latestCompletedSnapshot)
             .map((request) => {
-                const requestHex = hasText(request?.hexId) ? String(request.hexId).trim().toLowerCase() : '';
-                const requestId = hasText(request?.requestId) ? String(request.requestId).trim() : '';
+                const requestHex = getSnapshotRequestHex(request);
+                const requestId = getSnapshotRequestId(request);
                 return requestHex && requestId ? `${requestHex}|${requestId}` : '';
             })
             .filter(Boolean),
     );
 
-    const hasCompletedMatch = queuedRequests.some((request) => {
-        const requestId = hasText(request?.requestId) ? String(request.requestId).trim() : '';
-        return requestId && completedPairs.has(`${hex}|${requestId}`);
+    const badges = [];
+    const seen = new Set();
+    const pushBadge = (kind, label, requestId = '') => {
+        const key = `${kind}|${requestId}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const shortId = formatRuntimeBadgeRequestId(requestId);
+        badges.push({
+            kind,
+            label: shortId ? `${label} ${shortId}` : label,
+            requestId: hasText(requestId) ? requestId : '',
+        });
+    };
+
+    queuedRequests.forEach((request) => {
+        const requestId = getSnapshotRequestId(request);
+        if (requestId && completedPairs.has(`${hex}|${requestId}`)) {
+            pushBadge('updated', 'Updated', requestId);
+            return;
+        }
+        pushBadge('queued', 'Queued', requestId);
     });
 
-    return hasCompletedMatch ? 'refresh-needed' : 'updating';
+    processingRequests.forEach((request) => {
+        pushBadge('processing', 'Processing', getSnapshotRequestId(request));
+    });
+
+    return badges;
 }
 
 function formatObservedIds(snapshot) {
@@ -946,6 +1036,10 @@ async function pollQueueDepthSnapshots() {
     latestQueuedSnapshot = queuedSnapshot;
     latestProcessingSnapshot = processingSnapshot;
     latestCompletedSnapshot = completedSnapshot;
+    setCompletedRequests(
+        Array.isArray(completedSnapshot?.requests) ? completedSnapshot.requests : [],
+        completedSnapshot?.updatedAt ?? null,
+    );
 
     const hasAnySnapshot = Boolean(queuedSnapshot || processingSnapshot || completedSnapshot);
     statusEl.textContent = hasAnySnapshot ? 'Runtime request files loaded' : 'Runtime request files unavailable';
@@ -1000,6 +1094,9 @@ async function pollQueueDepthSnapshots() {
 
     reconcileRequeueTrackerEntries();
     renderRequeueTracker();
+    if (uniqueEventEntries.length > 0) {
+        renderEvents();
+    }
 }
 
 function showError(message) {
@@ -1480,7 +1577,7 @@ function renderEvents() {
         const requeueEligible = missingFields.length > 0;
         const section = getEventSection(event);
         const isHidden = isEntryHidden(entry);
-        const runtimeRefreshState = deriveEventRuntimeRefreshState(event);
+        const runtimeBadges = deriveEventRuntimeBadges(event);
         const title = getEventDisplayTitle(event, entry, index);
         const eventUID = getEntryIdentifier(entry);
         const sourceDetailsMarkup = entry.sourceDetails?.length
@@ -1503,10 +1600,11 @@ function renderEvents() {
                         ? `<img src="${imageUrl}" alt="${title}" class="event-image" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22300%22%3E%3Crect fill=%22%23ddd%22 width=%22400%22 height=%22300%22/%3E%3Ctext fill=%22%23999%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22%3ENo Image%3C/text%3E%3C/svg%3E'">` 
                         : `<div class="event-image" style="background: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #999;">No Image</div>`
                     }
-                    <span class="event-badge ${section}">${section}</span>
-                    ${isHidden ? `<span class="event-badge hidden">Hidden</span>` : ''}
-                    ${runtimeRefreshState === 'updating' ? `<span class="event-badge runtime-updating">Updating</span>` : ''}
-                    ${runtimeRefreshState === 'refresh-needed' ? `<span class="event-badge runtime-refresh-needed">Refresh Needed</span>` : ''}
+                    <div class="event-badge-stack">
+                        <span class="event-badge ${section}">${section}</span>
+                        ${isHidden ? `<span class="event-badge hidden">Hidden</span>` : ''}
+                        ${runtimeBadges.map((badge) => `<span class="event-badge runtime-${badge.kind}"${badge.requestId ? ` title="Request ID: ${escapeHtml(badge.requestId)}"` : ''}>${escapeHtml(badge.label)}</span>`).join('')}
+                    </div>
                 </div>
                 <div class="event-details">
                     <h3 class="event-title">${title}</h3>
