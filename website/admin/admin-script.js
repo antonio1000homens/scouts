@@ -322,7 +322,42 @@ function formatCompletedRequestOperation(value) {
     return normalized;
 }
 
-function normaliseCompletedRequestEntry(entry) {
+function formatRequestStageLabel(value, fallback = 'Unknown') {
+    if (!hasText(value)) return fallback;
+    return formatCompletedRequestOperation(value);
+}
+
+function formatRequestBadgeClass(value) {
+    if (!hasText(value)) return 'badge-unknown';
+    const normalized = String(value).trim().toLowerCase();
+    if (normalized === 'queued') return 'badge-queued';
+    if (normalized === 'processing') return 'badge-processing';
+    if (normalized === 'completed') return 'badge-completed';
+    if (normalized === 'persist') return 'badge-persist';
+    if (normalized === 'hidden') return 'badge-hidden';
+    if (normalized === 'imageurl') return 'badge-image-url';
+    if (normalized === 'imageprompt') return 'badge-image-prompt';
+    if (normalized === 'tagline') return 'badge-tagline';
+    if (normalized === 'updated') return 'badge-updated';
+    return `badge-${normalized.replace(/[^a-z0-9]+/g, '-')}`;
+}
+
+function formatRequestBadgeLabel(value, fallback = 'Unknown') {
+    if (!hasText(value)) return fallback;
+    const normalized = String(value).trim().toLowerCase();
+    if (normalized === 'queued') return 'Q Queued';
+    if (normalized === 'processing') return 'P Processing';
+    if (normalized === 'completed') return 'OK Completed';
+    if (normalized === 'persist') return 'SAVE Persist';
+    if (normalized === 'hidden') return 'OFF Hidden';
+    if (normalized === 'imageurl') return 'IMG Image URL';
+    if (normalized === 'imageprompt') return 'ART Image Prompt';
+    if (normalized === 'tagline') return 'TXT Tagline';
+    if (normalized === 'updated') return 'UP Updated';
+    return formatRequestStageLabel(value, fallback);
+}
+
+function normaliseRequestCardEntry(entry, options = {}) {
     if (!entry || typeof entry !== 'object') return null;
 
     const title = hasText(entry?.title)
@@ -334,29 +369,86 @@ function normaliseCompletedRequestEntry(entry) {
                 : (hasText(entry?.hexId)
                     ? entry.hexId.trim()
                     : (hasText(entry?.requestId) ? entry.requestId.trim() : 'Unknown'))));
-
     const hex = hasText(entry?.hex)
         ? entry.hex.trim()
-        : (hasText(entry?.hexId) ? entry.hexId.trim() : 'n/a');
-
+        : (hasText(entry?.hexId) ? entry.hexId.trim() : '');
     const requestId = hasText(entry?.requestId)
         ? entry.requestId.trim()
-        : (hasText(entry?.messageId) ? entry.messageId.trim() : 'n/a');
-
-    const operation = formatCompletedRequestOperation(entry?.operation ?? entry?.status);
-    const processedAt = hasText(entry?.processedAt)
+        : (hasText(entry?.messageId) ? entry.messageId.trim() : '');
+    const messageId = hasText(entry?.messageId) ? entry.messageId.trim() : '';
+    const rawAction = entry?.operation ?? entry?.status ?? options.defaultAction ?? '';
+    const action = formatRequestStageLabel(rawAction, formatRequestStageLabel(options.defaultAction, 'Unknown'));
+    const timestamp = hasText(entry?.processedAt)
         ? entry.processedAt
         : (hasText(entry?.requestTime)
             ? entry.requestTime
-            : (hasText(entry?.completedAt) ? entry.completedAt : ''));
+            : (hasText(entry?.completedAt)
+                ? entry.completedAt
+                : (hasText(entry?.updatedAt) ? entry.updatedAt : '')));
+    const subtitleParts = [];
+    if (hex) subtitleParts.push(`HEX ${hex}`);
+    if (hasText(options.sourceLabel)) subtitleParts.push(options.sourceLabel);
 
     return {
         title,
         hex,
         requestId,
-        operation,
-        processedAt,
+        messageId,
+        operation: action,
+        badgeLabel: formatRequestBadgeLabel(rawAction || options.defaultAction || '', action),
+        processedAt: timestamp,
+        badgeClass: formatRequestBadgeClass(rawAction || options.defaultAction || ''),
+        subtitle: subtitleParts.join(' • '),
     };
+}
+
+function renderRequestCards(listEl, entries, emptyMessage, options = {}) {
+    if (!listEl) return;
+    if (!Array.isArray(entries) || entries.length === 0) {
+        listEl.innerHTML = `<p class="refresh-status">${escapeHtml(emptyMessage)}</p>`;
+        return;
+    }
+
+    listEl.innerHTML = entries.map((entry) => {
+        const normalized = normaliseRequestCardEntry(entry, options);
+        if (!normalized) return '';
+        const metadata = [
+            ['Request ID', normalized.requestId],
+            ['Message ID', normalized.messageId],
+            ['HEX', normalized.hex],
+            ['Action', normalized.operation],
+            ['Timestamp', normalized.processedAt],
+        ].filter(([, value]) => hasText(value));
+        const metadataRows = metadata.map(([label, value]) => `
+            <div class="request-card-meta-row">
+                <div class="request-card-meta-label">${escapeHtml(label)}</div>
+                <div class="request-card-meta-value">${escapeHtml(String(value).trim())}</div>
+            </div>
+        `).join('');
+        return `
+            <article class="request-card">
+                <div class="request-card-header">
+                    <div class="request-card-lead">
+                        <div class="request-card-time"${hasText(normalized.processedAt) ? ` title="${escapeHtml(normalized.processedAt)}"` : ''}>${escapeHtml(formatTrackerTimestamp(normalized.processedAt))}</div>
+                        <div class="request-card-title">${escapeHtml(normalized.title)}</div>
+                        ${normalized.subtitle ? `<div class="request-card-subtitle">${escapeHtml(normalized.subtitle)}</div>` : ''}
+                    </div>
+                    <span class="request-card-badge ${escapeHtml(normalized.badgeClass)}">${escapeHtml(normalized.badgeLabel)}</span>
+                </div>
+                <details class="request-card-meta-toggle">
+                    <summary>Request metadata</summary>
+                    <div class="request-card-meta-grid">${metadataRows}</div>
+                </details>
+            </article>
+        `;
+    }).filter(Boolean).join('');
+}
+
+function normaliseCompletedRequestEntry(entry) {
+    return normaliseRequestCardEntry(entry, {
+        defaultAction: entry?.operation ?? entry?.status ?? 'completed',
+        sourceLabel: 'Completed',
+    });
 }
 
 function setCompletedRequests(entries, updatedAt = null) {
@@ -413,25 +505,12 @@ function renderCompletedRequests() {
         return;
     }
 
-    listEl.innerHTML = latestCompletedRequests.map((entry) => {
-        const title = hasText(entry?.title) ? entry.title.trim() : 'Unknown';
-        const operation = hasText(entry?.operation) ? entry.operation.trim() : 'unknown';
-        const processedAt = hasText(entry?.processedAt)
-            ? formatTrackerTimestamp(entry.processedAt)
-            : 'n/a';
-        const hex = hasText(entry?.hex) ? entry.hex.trim() : 'n/a';
-        const requestId = hasText(entry?.requestId) ? entry.requestId.trim() : 'n/a';
-        const meta = [
-            operation !== 'unknown' ? operation : null,
-            hex !== 'n/a' ? `HEX ${hex}` : null,
-            requestId !== 'n/a' ? `Request ${requestId}` : null,
-            processedAt !== 'n/a' ? processedAt : null,
-        ].filter(Boolean);
-        return `<div class="completed-request-item">
-            <div><strong>${escapeHtml(title)}</strong></div>
-            <div class="completed-request-meta">${escapeHtml(meta.join(' | ') || 'No metadata available')}</div>
-        </div>`;
-    }).join('');
+    renderRequestCards(
+        listEl,
+        latestCompletedRequests,
+        'No completed requests in the latest refresh.',
+        { defaultAction: 'completed', sourceLabel: 'Completed' },
+    );
 }
 
 function updateCompletedRequestsFromResult(result) {
@@ -1045,9 +1124,11 @@ async function pollQueueDepthSnapshots() {
     const observedDetailsEl = document.getElementById('queue-depth-observed-details');
     const titlesToggleEl = document.getElementById('queue-depth-titles-toggle');
     const titlesDetailsEl = document.getElementById('queue-depth-titles-details');
+    const queuedListEl = document.getElementById('runtime-queued-list');
+    const processingListEl = document.getElementById('runtime-processing-list');
     const updatedEl = document.getElementById('queue-depth-updated');
     const checkedEl = document.getElementById('queue-depth-checked');
-    if (!statusEl || !queuedEl || !processingEl || !completedEl || !updatedEl || !checkedEl) {
+    if (!statusEl || !queuedEl || !processingEl || !completedEl || !queuedListEl || !processingListEl || !updatedEl || !checkedEl) {
         return;
     }
 
@@ -1073,6 +1154,14 @@ async function pollQueueDepthSnapshots() {
     queuedEl.textContent = `scoutsqueued.json: ${formatQueueSnapshotCount(queuedSnapshot)}`;
     processingEl.textContent = `scoutsprocessing.json: ${formatQueueSnapshotCount(processingSnapshot)}`;
     completedEl.textContent = `scoutscompleted.json: ${formatQueueSnapshotCount(completedSnapshot)}`;
+    renderRequestCards(queuedListEl, getSnapshotRequests(queuedSnapshot), 'No queued requests.', {
+        defaultAction: 'queued',
+        sourceLabel: 'Queued snapshot',
+    });
+    renderRequestCards(processingListEl, getSnapshotRequests(processingSnapshot), 'No processing requests.', {
+        defaultAction: 'processing',
+        sourceLabel: 'Processing snapshot',
+    });
 
     const observedBits = [];
     const queuedObserved = formatObservedIds(queuedSnapshot);
