@@ -56,7 +56,7 @@ const DEFAULT_IMAGE_PROMPT_SPECIFICATIONS = [
     'main subjects centered',
     'safe margins for crop',
 ];
-const HEX_HOVER_POLL_INTERVAL_MS = 5000;
+const HEX_HOVER_POLL_INTERVAL_MS = 20000;
 let activeHexHoverCardIndex = null;
 let activeHexHoverHex = null;
 let activeHexHoverPollTimer = null;
