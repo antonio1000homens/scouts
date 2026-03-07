@@ -262,7 +262,12 @@
                                 class="btn btn-secondary requires-api"
                                 onclick="requestGeneratedField('imagePrompt')"
                             >Request AI Image Prompt</button>
+                            <button
+                                class="btn btn-secondary"
+                                onclick="copyFullImagePrompt()"
+                            >Copy Full Prompt</button>
                         </div>
+                        <p id="modal-image-prompt-copy-status" class="refresh-status modal-input-help"></p>
                     </div>
 
                     <div class="field-editor">
