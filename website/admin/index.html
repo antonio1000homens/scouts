@@ -14,15 +14,33 @@
 <body>
     <nav class="admin-top-nav">
         <div class="admin-top-nav-inner">
-            <a href="/index.html" class="nav-link">Website Home</a>
-            <a href="/website/admin/index.html" class="nav-link active">Admin</a>
-            <button class="btn btn-secondary nav-btn" onclick="toggleAgendaViewer()">Show Actual Agenda</button>
-        </div>
-    </nav>
-    <div class="admin-container">
-        <header class="admin-header">
-            <h1>Event Images Administration</h1>
-            <p class="subtitle">Manage images and AI prompts for events</p>
+            <div class="admin-top-nav-primary">
+                <a href="/index.html" class="nav-link">Website Home</a>
+                <a href="/website/admin/index.html" class="nav-link active">Admin</a>
+                <div class="viewer-menu-shell">
+                    <button
+                        id="viewer-menu-button"
+                        class="viewer-menu-button"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="viewer-menu"
+                        aria-label="Open file viewers menu"
+                        onclick="toggleViewerMenu(event)"
+                    >
+                        <span class="viewer-menu-icon" aria-hidden="true">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </span>
+                        Files
+                    </button>
+                    <div id="viewer-menu" class="viewer-menu-dropdown">
+                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showAgendaViewer()">Agenda JSON</button>
+                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showEventsJsonViewer()">events/*.json</button>
+                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showAiConfigViewer()">AI.conf</button>
+                    </div>
+                </div>
+            </div>
             <div class="admin-top-status">
                 <span id="api-ready-indicator" class="api-ready-pill api-loading" title="Checking Cloudflare admin API...">API Checking</span>
                 <label class="auto-invoke-header-label" for="auto-lambda-toggle">
@@ -66,6 +84,12 @@
                 >
                 <span id="agenda-auto-refresh-status" class="auto-invoke-header-status">Agenda refresh: enabled</span>
             </div>
+        </div>
+    </nav>
+    <div class="admin-container">
+        <header class="admin-header">
+            <h1>Event Images Administration</h1>
+            <p class="subtitle">Manage images and AI prompts for events</p>
         </header>
 
         <section class="global-controls">
@@ -113,13 +137,10 @@
                     </div>
                     <p id="refresh-status" class="refresh-status"></p>
                     <div class="global-actions">
-                        <button class="btn btn-secondary" onclick="toggleAgendaViewer()">Consult Agenda</button>
-                        <button class="btn btn-secondary" onclick="toggleAiConfigViewer()">View AI.conf</button>
-                        <button class="btn btn-secondary" onclick="toggleEventsJsonViewer()">List events/*.json</button>
                         <button
                             class="btn btn-primary"
                             onclick="loadEvents()"
-                            title="Reloads ../../agenda.json into the admin UI and rerenders events/tracker. No Lambda call and no queue writes."
+                            title="Reloads ../../agenda.json into the admin UI and rerenders the current events/views. No Lambda call and no queue writes."
                         >Reload Agenda From Disk</button>
                     </div>
                 </div>
@@ -144,28 +165,34 @@
             </div>
         </div>
 
-        <section id="agenda-viewer" class="agenda-viewer" style="display: none;">
-            <div class="agenda-viewer-header">
-                <h2>Actual Agenda JSON</h2>
-                <button class="btn btn-secondary" onclick="toggleAgendaViewer()">Close</button>
+        <section id="agenda-viewer" class="agenda-viewer" style="display: none;" onclick="handleViewerBackdropClick(event)">
+            <div class="agenda-viewer-panel">
+                <div class="agenda-viewer-header">
+                    <h2>Actual Agenda JSON</h2>
+                    <button class="btn btn-secondary" onclick="toggleAgendaViewer()">Close</button>
+                </div>
+                <pre id="agenda-json-content" class="agenda-json-content">Loading agenda...</pre>
             </div>
-            <pre id="agenda-json-content" class="agenda-json-content">Loading agenda...</pre>
         </section>
 
-        <section id="events-json-viewer" class="agenda-viewer" style="display: none;">
-            <div class="agenda-viewer-header">
-                <h2>events/*.json Listing</h2>
-                <button class="btn btn-secondary" onclick="toggleEventsJsonViewer()">Close</button>
+        <section id="events-json-viewer" class="agenda-viewer" style="display: none;" onclick="handleViewerBackdropClick(event)">
+            <div class="agenda-viewer-panel">
+                <div class="agenda-viewer-header">
+                    <h2>events/*.json Listing</h2>
+                    <button class="btn btn-secondary" onclick="toggleEventsJsonViewer()">Close</button>
+                </div>
+                <pre id="events-json-content" class="agenda-json-content">No event JSON entries loaded yet.</pre>
             </div>
-            <pre id="events-json-content" class="agenda-json-content">No event JSON entries loaded yet.</pre>
         </section>
 
-        <section id="ai-config-viewer" class="agenda-viewer" style="display: none;">
-            <div class="agenda-viewer-header">
-                <h2>Active AI.conf</h2>
-                <button class="btn btn-secondary" onclick="toggleAiConfigViewer()">Close</button>
+        <section id="ai-config-viewer" class="agenda-viewer" style="display: none;" onclick="handleViewerBackdropClick(event)">
+            <div class="agenda-viewer-panel">
+                <div class="agenda-viewer-header">
+                    <h2>Active AI.conf</h2>
+                    <button class="btn btn-secondary" onclick="toggleAiConfigViewer()">Close</button>
+                </div>
+                <pre id="ai-config-content" class="agenda-json-content">Loading AI.conf...</pre>
             </div>
-            <pre id="ai-config-content" class="agenda-json-content">Loading AI.conf...</pre>
         </section>
 
         <div class="events-layout">
@@ -211,6 +238,14 @@
                         <label>Current Metadata</label>
                         <p><strong>Image URL:</strong> <span id="modal-image-url"></span></p>
                         <p><strong>Image Theme:</strong> <span id="modal-image-theme"></span></p>
+                        <div id="modal-copy-image-prompt-container" class="field-actions" style="display:none;">
+                            <button
+                                id="modal-copy-image-prompt-button"
+                                class="btn btn-secondary"
+                                onclick="copyFullImagePrompt()"
+                            >Copy Image Prompt</button>
+                        </div>
+                        <p id="modal-image-prompt-copy-status" class="refresh-status modal-input-help"></p>
                         <p><strong>Tagline:</strong> <span id="modal-tagline"></span></p>
                     </div>
 
@@ -267,13 +302,7 @@
                                 class="btn btn-secondary requires-api"
                                 onclick="requestGeneratedField('imagePrompt')"
                             >Request AI Image Theme</button>
-                            <button
-                                id="modal-copy-image-prompt-button"
-                                class="btn btn-secondary"
-                                onclick="copyFullImagePrompt()"
-                            >Copy Image Prompt</button>
                         </div>
-                        <p id="modal-image-prompt-copy-status" class="refresh-status modal-input-help"></p>
                     </div>
 
                     <div class="field-editor">
@@ -296,9 +325,8 @@
                                 class="btn btn-secondary requires-api"
                                 onclick="requestGeneratedField('imageUrl')"
                             >Request AI Image</button>
-                            <button id="modal-requeue-button" class="btn btn-secondary requires-api" style="display:none;" onclick="requeueCurrentEvent()">Requeue Missing Fields</button>
+                            <button id="modal-requeue-button" class="btn btn-secondary requires-api" onclick="requeueCurrentEvent()">Requeue Missing Fields</button>
                         </div>
-                        <p id="modal-requeue-hint" class="refresh-status"></p>
                     </div>
 
                     <p class="note">Image URL persist queued for "Meet the Police" [HTTP 200]. Queue accepted. Persist request submitted for 6d6565742074686520706f6c696365</p>
