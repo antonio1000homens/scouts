@@ -22,6 +22,7 @@ const QUEUE_DEPTH_POLL_INTERVAL_MS = 5000;
 const HEX_HYDRATION_POLL_INTERVAL_MS = 6000;
 const AUTO_LAMBDA_INVOKE_INTERVAL_MS = 20000;
 const HEX_NOT_FOUND_BACKOFF_MS = 30000;
+const COMPLETED_REQUEST_HIDE_AFTER_MS = 10 * 60 * 1000;
 const AUTO_LAMBDA_PREF_KEY = 'scouts_admin_auto_lambda_enabled';
 const MAX_TRACKED_REQUEUE_ENTRIES = 30;
 let runtimeDetailsLastShownAt = 0;
@@ -360,10 +361,34 @@ function normaliseCompletedRequestEntry(entry) {
 
 function setCompletedRequests(entries, updatedAt = null) {
     latestCompletedRequests = Array.isArray(entries)
-        ? entries.map((entry) => normaliseCompletedRequestEntry(entry)).filter(Boolean)
+        ? entries
+            .map((entry) => normaliseCompletedRequestEntry(entry))
+            .filter(Boolean)
+            .filter((entry) => !shouldHideCompletedRequestEntry(entry))
         : [];
     latestCompletedRequestsUpdatedAt = hasText(updatedAt) ? updatedAt : null;
     renderCompletedRequests();
+}
+
+function shouldHideCompletedRequestEntry(entry) {
+    const requestId = hasText(entry?.requestId) ? entry.requestId.trim() : '';
+    if (!requestId) return false;
+
+    const queuedRequestIds = new Set(
+        getSnapshotRequests(latestQueuedSnapshot)
+            .map((request) => getSnapshotRequestId(request))
+            .filter(Boolean),
+    );
+    if (queuedRequestIds.has(requestId)) {
+        return false;
+    }
+
+    const processedAt = hasText(entry?.processedAt) ? entry.processedAt : '';
+    if (!processedAt) return false;
+    const parsed = new Date(processedAt);
+    if (Number.isNaN(parsed.getTime())) return false;
+
+    return (Date.now() - parsed.getTime()) > COMPLETED_REQUEST_HIDE_AFTER_MS;
 }
 
 function renderCompletedRequests() {
