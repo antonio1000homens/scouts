@@ -1460,17 +1460,19 @@ function buildManualPromptGuidelinesText(guidelines) {
         .join('\n');
 }
 
-function buildExpandedManualImagePrompt(template, event, config, shortPrompt) {
-    const effectiveTemplate = hasText(template)
-        ? String(template)
-        : 'You are helping refine a short image theme into one final illustration prompt for a UK Scouts event.\n\nEvent details:\n{{EVENT_DETAILS}}\n\nBase theme to preserve:\n{{IMAGE_PROMPT}}\n\nImage prompt rules:\n{{IMAGE_PROMPT_GUIDELINES}}\n\nReturn strict JSON only: {"imagePrompt":"..."}.'; 
-    const replaced = effectiveTemplate
-        .replace(/{{EVENT_DETAILS}}/g, buildManualPromptEventDetails(event))
-        .replace(/{{IMAGE_PROMPT_GUIDELINES}}/g, buildManualPromptGuidelinesText(config?.imagePromptGuidelines))
-        .replace(/{{IMAGE_TAG_GUIDELINES}}/g, buildManualPromptGuidelinesText(config?.imagePromptGuidelines))
-        .replace(/{{IMAGE_PROMPT}}/g, hasText(shortPrompt) ? String(shortPrompt).trim() : '')
-        .replace(/{{SHORT_IMAGE_PROMPT}}/g, hasText(shortPrompt) ? String(shortPrompt).trim() : '');
-    return replaced;
+function buildManualImageGenerationPrompt(shortPrompt) {
+    if (!hasText(shortPrompt)) {
+        return null;
+    }
+    const candidate = String(shortPrompt).replace(/\s+/g, ' ').trim();
+    if (!candidate) {
+        return null;
+    }
+    const lower = candidate.toLowerCase();
+    if (lower.startsWith('create a cartoonish image of ') || lower.startsWith('cartoonish image of scouts')) {
+        return candidate;
+    }
+    return `cartoonish image of scouts in ${candidate}`;
 }
 
 function updateImagePromptCopyStatus(message, type = 'info') {
@@ -2294,24 +2296,24 @@ async function copyFullImagePrompt() {
     const entry = getSelectedModalEntry();
     if (!entry) return;
 
-    const input = document.getElementById('modal-image-prompt-input');
-    const shortPrompt = hasText(input?.value) ? input.value.trim() : getImagePrompt(entry.event);
+    const shortPrompt = getImagePrompt(entry.event);
     if (!hasText(shortPrompt)) {
-        updateImagePromptCopyStatus('No image prompt to expand.', 'error');
+        updateImagePromptCopyStatus('No stored image prompt available to copy.', 'error');
         return;
     }
 
-    updateImagePromptCopyStatus('Building full prompt...', 'loading');
+    updateImagePromptCopyStatus('Building image generation prompt...', 'loading');
 
     try {
-        const config = await loadAiConfig(true);
-        const template = config?.imagePromptTemplate || config?.aiPromptTemplate || '';
-        const expandedPrompt = buildExpandedManualImagePrompt(template, entry.event, config, shortPrompt);
-        await navigator.clipboard.writeText(expandedPrompt);
-        updateImagePromptCopyStatus('Full image prompt copied to clipboard.', 'success');
+        const imageGenerationPrompt = buildManualImageGenerationPrompt(shortPrompt);
+        if (!hasText(imageGenerationPrompt)) {
+            throw new Error('No valid image prompt available');
+        }
+        await navigator.clipboard.writeText(imageGenerationPrompt);
+        updateImagePromptCopyStatus('Image generation prompt copied to clipboard.', 'success');
     } catch (error) {
-        console.error('Failed to copy full image prompt:', error);
-        updateImagePromptCopyStatus(`Failed to copy full prompt: ${error.message}`, 'error');
+        console.error('Failed to copy image generation prompt:', error);
+        updateImagePromptCopyStatus(`Failed to copy image prompt: ${error.message}`, 'error');
     }
 }
 
