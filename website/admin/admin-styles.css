@@ -529,98 +529,6 @@ body {
     min-width: 0;
 }
 
-.requests-sidebar {
-    flex: 0 0 320px;
-    background: white;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    padding: 1rem;
-    position: sticky;
-    top: 56px;
-    max-height: calc(100vh - 76px);
-    overflow: hidden;
-}
-
-.requests-table-wrapper {
-    margin-top: 0.5rem;
-    overflow: auto;
-    max-height: calc(100vh - 220px);
-    border: 1px solid #e5e7eb;
-    border-radius: 6px;
-}
-
-.requests-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.78rem;
-}
-
-.requests-table th,
-.requests-table td {
-    border-bottom: 1px solid #e5e7eb;
-    padding: 0.4rem 0.45rem;
-    text-align: left;
-    vertical-align: top;
-}
-
-.requests-table th {
-    background: #f8fafc;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-}
-
-.requests-table td {
-    color: #374151;
-    word-break: break-word;
-}
-
-.request-status-pill {
-    display: inline-block;
-    border-radius: 999px;
-    padding: 0.08rem 0.45rem;
-    font-size: 0.7rem;
-    font-weight: 700;
-}
-
-.request-status-submitted {
-    background: #e5e7eb;
-    color: #374151;
-}
-
-.request-status-queued {
-    background: #dbeafe;
-    color: #1d4ed8;
-}
-
-.request-status-processing {
-    background: #ede9fe;
-    color: #6d28d9;
-}
-
-.request-status-processed {
-    background: #e0f2fe;
-    color: #0c4a6e;
-}
-
-.request-status-updated {
-    background: #fef3c7;
-    color: #92400e;
-}
-
-.request-status-resolved {
-    background: #dcfce7;
-    color: #166534;
-}
-
-.request-status-not-found {
-    background: #fee2e2;
-    color: #b91c1c;
-}
-
 .agenda-viewer {
     background: #111827;
     color: #f9fafb;
@@ -1219,17 +1127,6 @@ body {
 
     .events-grid {
         grid-template-columns: 1fr;
-    }
-
-    .requests-sidebar {
-        flex: none;
-        width: 100%;
-        position: static;
-        max-height: none;
-    }
-
-    .requests-table-wrapper {
-        max-height: 340px;
     }
 
     .global-controls-grid {

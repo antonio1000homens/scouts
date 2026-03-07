@@ -10,23 +10,22 @@ let uiCommandInFlight = false;
 let activeFilter = 'all';
 let agendaPayload = null;
 let agendaLoadInFlight = false;
-let lastAgendaScanAtIso = null;
-let requeueTrackerEntries = [];
 let latestQueuedSnapshot = null;
 let latestProcessingSnapshot = null;
 let latestCompletedSnapshot = null;
 let pinnedRuntimeDetails = null;
 const MIN_RUNTIME_DETAILS_VISIBLE_MS = 5000;
-const AGENDA_POLL_INTERVAL_MS = 15000;
 const QUEUE_DEPTH_POLL_INTERVAL_MS = 5000;
 const DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS = 20000;
+const DEFAULT_AGENDA_AUTO_REFRESH_INTERVAL_MS = 5000;
 const HEX_NOT_FOUND_BACKOFF_MS = 30000;
 const COMPLETED_REQUEST_HIDE_AFTER_MS = 10 * 60 * 1000;
 const AUTO_LAMBDA_PREF_KEY = 'scouts_admin_auto_lambda_enabled';
 const AUTO_LAMBDA_INTERVAL_PREF_KEY = 'scouts_admin_auto_lambda_interval_ms';
+const AGENDA_AUTO_REFRESH_PREF_KEY = 'scouts_admin_agenda_auto_refresh_enabled';
+const AGENDA_AUTO_REFRESH_INTERVAL_PREF_KEY = 'scouts_admin_agenda_auto_refresh_interval_seconds';
 const HEX_PREVIEW_AUTO_REFRESH_PREF_KEY = 'scouts_admin_hex_preview_auto_refresh';
 const HEX_PREVIEW_INTERVAL_PREF_KEY = 'scouts_admin_hex_preview_interval_ms';
-const MAX_TRACKED_REQUEUE_ENTRIES = 30;
 let runtimeDetailsLastShownAt = 0;
 let runtimeDetailsLastMessage = '';
 let runtimeDetailsLastType = 'info';
@@ -36,6 +35,9 @@ let autoLambdaInvokeInFlight = false;
 let autoLambdaInvokeEnabled = true;
 let autoLambdaInvokeIntervalMs = DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS;
 let autoLambdaInvokeTimer = null;
+let agendaAutoRefreshEnabled = true;
+let agendaAutoRefreshIntervalMs = DEFAULT_AGENDA_AUTO_REFRESH_INTERVAL_MS;
+let agendaAutoRefreshTimer = null;
 let latestCompletedRequests = [];
 let latestCompletedRequestsUpdatedAt = null;
 let cachedAiConfig = null;
@@ -608,6 +610,31 @@ function updateCompletedRequestsFromResult(result) {
     }
 }
 
+function readCookie(name) {
+    try {
+        const cookieParts = document.cookie ? document.cookie.split('; ') : [];
+        for (const part of cookieParts) {
+            const separatorIndex = part.indexOf('=');
+            const cookieName = separatorIndex >= 0 ? part.slice(0, separatorIndex) : part;
+            if (cookieName !== name) continue;
+            const cookieValue = separatorIndex >= 0 ? part.slice(separatorIndex + 1) : '';
+            return decodeURIComponent(cookieValue);
+        }
+    } catch {
+        // Ignore cookie parsing issues
+    }
+    return null;
+}
+
+function writeCookie(name, value, maxAgeDays = 365) {
+    try {
+        const maxAgeSeconds = Math.max(1, Math.round(maxAgeDays * 24 * 60 * 60));
+        document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAgeSeconds}; SameSite=Lax`;
+    } catch {
+        // Ignore cookie write errors
+    }
+}
+
 function readAutoLambdaInvocationPreference() {
     try {
         const stored = window.localStorage.getItem(AUTO_LAMBDA_PREF_KEY);
@@ -627,6 +654,19 @@ function readAutoLambdaIntervalPreference() {
     } catch {
         return DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS;
     }
+}
+
+function readAgendaAutoRefreshPreference() {
+    const stored = readCookie(AGENDA_AUTO_REFRESH_PREF_KEY);
+    if (stored === null) return true;
+    return stored === '1' || stored.toLowerCase() === 'true';
+}
+
+function readAgendaAutoRefreshIntervalPreference() {
+    const stored = readCookie(AGENDA_AUTO_REFRESH_INTERVAL_PREF_KEY);
+    const parsedSeconds = Number(stored);
+    if (!Number.isFinite(parsedSeconds)) return DEFAULT_AGENDA_AUTO_REFRESH_INTERVAL_MS;
+    return Math.max(5, Math.round(parsedSeconds)) * 1000;
 }
 
 function readHexPreviewAutoRefreshPreference() {
@@ -666,6 +706,17 @@ function persistAutoLambdaIntervalPreference(intervalMs) {
     }
 }
 
+function persistAgendaAutoRefreshPreference(enabled) {
+    writeCookie(AGENDA_AUTO_REFRESH_PREF_KEY, enabled ? '1' : '0');
+}
+
+function persistAgendaAutoRefreshIntervalPreference(intervalMs) {
+    writeCookie(
+        AGENDA_AUTO_REFRESH_INTERVAL_PREF_KEY,
+        String(Math.max(5, Math.round(intervalMs / 1000))),
+    );
+}
+
 function persistHexPreviewAutoRefreshPreference(enabled) {
     try {
         window.localStorage.setItem(HEX_PREVIEW_AUTO_REFRESH_PREF_KEY, enabled ? '1' : '0');
@@ -692,6 +743,19 @@ function restartAutoLambdaInvokeTimer() {
     }, autoLambdaInvokeIntervalMs);
 }
 
+function restartAgendaAutoRefreshTimer() {
+    if (agendaAutoRefreshTimer) {
+        clearInterval(agendaAutoRefreshTimer);
+        agendaAutoRefreshTimer = null;
+    }
+    if (!agendaAutoRefreshEnabled) {
+        return;
+    }
+    agendaAutoRefreshTimer = setInterval(() => {
+        loadEvents({ silent: true });
+    }, agendaAutoRefreshIntervalMs);
+}
+
 function updateAutoLambdaInvocationUi() {
     const toggle = document.getElementById('auto-lambda-toggle');
     const intervalInput = document.getElementById('auto-lambda-interval-seconds');
@@ -708,6 +772,22 @@ function updateAutoLambdaInvocationUi() {
     }
 }
 
+function updateAgendaAutoRefreshUi() {
+    const toggle = document.getElementById('agenda-auto-refresh-toggle');
+    const intervalInput = document.getElementById('agenda-auto-refresh-interval-seconds');
+    const statusElement = document.getElementById('agenda-auto-refresh-status');
+    if (toggle) {
+        toggle.checked = agendaAutoRefreshEnabled;
+    }
+    if (intervalInput) {
+        intervalInput.value = String(Math.max(5, Math.round(agendaAutoRefreshIntervalMs / 1000)));
+    }
+    if (statusElement) {
+        const seconds = Math.max(5, Math.round(agendaAutoRefreshIntervalMs / 1000));
+        statusElement.textContent = `Agenda refresh: ${agendaAutoRefreshEnabled ? `enabled every ${seconds}s` : 'disabled'}`;
+    }
+}
+
 function setAutoLambdaInvocationEnabled(enabled, persist = true) {
     autoLambdaInvokeEnabled = Boolean(enabled);
     if (persist) {
@@ -716,8 +796,21 @@ function setAutoLambdaInvocationEnabled(enabled, persist = true) {
     updateAutoLambdaInvocationUi();
 }
 
+function setAgendaAutoRefreshEnabled(enabled, persist = true) {
+    agendaAutoRefreshEnabled = Boolean(enabled);
+    if (persist) {
+        persistAgendaAutoRefreshPreference(agendaAutoRefreshEnabled);
+    }
+    restartAgendaAutoRefreshTimer();
+    updateAgendaAutoRefreshUi();
+}
+
 function toggleAutoLambdaInvocation(enabled) {
     setAutoLambdaInvocationEnabled(enabled, true);
+}
+
+function toggleAgendaAutoRefresh(enabled) {
+    setAgendaAutoRefreshEnabled(enabled, true);
 }
 
 function updateAutoLambdaInvocationInterval(value, persist = true) {
@@ -729,6 +822,19 @@ function updateAutoLambdaInvocationInterval(value, persist = true) {
     }
     restartAutoLambdaInvokeTimer();
     updateAutoLambdaInvocationUi();
+}
+
+function updateAgendaAutoRefreshInterval(value, persist = true) {
+    const parsedSeconds = Number(value);
+    const safeSeconds = Number.isFinite(parsedSeconds)
+        ? Math.max(5, Math.round(parsedSeconds))
+        : Math.round(DEFAULT_AGENDA_AUTO_REFRESH_INTERVAL_MS / 1000);
+    agendaAutoRefreshIntervalMs = safeSeconds * 1000;
+    if (persist) {
+        persistAgendaAutoRefreshIntervalPreference(agendaAutoRefreshIntervalMs);
+    }
+    restartAgendaAutoRefreshTimer();
+    updateAgendaAutoRefreshUi();
 }
 
 async function sendScoutsCommand(payload) {
@@ -891,7 +997,6 @@ async function loadEvents(options = {}) {
         agendaPayload = data;
         uniqueEventEntries = buildUniqueEventEntries(eventsData);
         applyVisibilityOverrides(uniqueEventEntries);
-        lastAgendaScanAtIso = new Date().toISOString();
         console.log('[Admin] agenda.json fetched', {
             totalEvents: rawEvents.length,
             uniqueEvents: uniqueEventEntries.length,
@@ -905,8 +1010,6 @@ async function loadEvents(options = {}) {
         );
         updateSidebarUi();
         renderEvents();
-        reconcileRequeueTrackerEntries();
-        renderRequeueTracker();
         renderAgendaViewerContent();
         renderEventsJsonViewerContent();
     } catch (error) {
@@ -1179,65 +1282,6 @@ function formatObservedTitles(snapshot) {
 
     if (titles.size === 0) return 'n/a';
     return Array.from(titles).slice(0, 6).join(' | ');
-}
-
-function normaliseTrackerToken(value) {
-    return hasText(value) ? String(value).trim().toLowerCase() : '';
-}
-
-function getSnapshotObservedTokens(snapshot) {
-    const tokens = getSnapshotRequests(snapshot)
-        .flatMap((request) => [request?.requestId, request?.messageId, request?.hexId])
-        .map((token) => normaliseTrackerToken(token))
-        .filter(Boolean);
-    return new Set(tokens);
-}
-
-function collectTrackerTokens(tracked) {
-    const tokens = [];
-    const requestIds = Array.isArray(tracked?.requestIds) ? tracked.requestIds : [];
-    tokens.push(...requestIds);
-    tokens.push(tracked?.hex);
-    tokens.push(tracked?.uid);
-    return Array.from(new Set(tokens.map((value) => normaliseTrackerToken(value)).filter(Boolean)));
-}
-
-function hasTrackedTokenInSnapshot(tracked, snapshot) {
-    const observedTokens = getSnapshotObservedTokens(snapshot);
-    if (observedTokens.size === 0) return false;
-    return collectTrackerTokens(tracked).some((token) => observedTokens.has(token));
-}
-
-function deriveQueueTrackerStatus(tracked) {
-    if (hasTrackedTokenInSnapshot(tracked, latestCompletedSnapshot)) {
-        return 'processed';
-    }
-    if (hasTrackedTokenInSnapshot(tracked, latestProcessingSnapshot)) {
-        return 'processing';
-    }
-    if (hasTrackedTokenInSnapshot(tracked, latestQueuedSnapshot)) return 'queued';
-    return 'submitted';
-}
-
-function extractRequestIdsFromResult(result) {
-    if (!result || typeof result !== 'object') return [];
-    const candidates = [
-        result.requestId,
-        result.requestID,
-        result.request_id,
-        result.queuedRequestId,
-        result.id,
-        result?.request?.id,
-    ];
-    if (Array.isArray(result.requestIds)) candidates.push(...result.requestIds);
-    if (Array.isArray(result.ids)) candidates.push(...result.ids);
-    const queuedRequests = Array.isArray(result?.runtimeRequestFiles?.queued?.requests)
-        ? result.runtimeRequestFiles.queued.requests
-        : [];
-    queuedRequests.forEach((request) => {
-        candidates.push(request?.requestId, request?.messageId);
-    });
-    return Array.from(new Set(candidates.map((value) => normaliseTrackerToken(value)).filter(Boolean)));
 }
 
 async function fetchQueueSnapshot(url) {
@@ -1527,8 +1571,6 @@ async function pollQueueDepthSnapshots() {
         updatedEl.textContent = 'Last update: n/a';
     }
 
-    reconcileRequeueTrackerEntries();
-    renderRequeueTracker();
     if (uniqueEventEntries.length > 0) {
         renderEvents();
     }
@@ -1947,143 +1989,6 @@ function formatTrackerTimestamp(isoString) {
     const parsed = new Date(isoString);
     if (Number.isNaN(parsed.getTime())) return isoString;
     return parsed.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-function normaliseMissingFields(fields) {
-    if (!Array.isArray(fields)) return [];
-    return Array.from(new Set(fields.map((field) => String(field || '').trim()).filter(Boolean)));
-}
-
-function isSameMissingSet(a, b) {
-    const left = normaliseMissingFields(a).sort();
-    const right = normaliseMissingFields(b).sort();
-    if (left.length !== right.length) return false;
-    return left.every((value, index) => value === right[index]);
-}
-
-function findMatchingEntryForTracker(tracked) {
-    const trackedHex = hasText(tracked?.hex) ? tracked.hex.trim().toLowerCase() : '';
-    if (trackedHex) {
-        const byHex = uniqueEventEntries.find((entry) => {
-            const entryHex = hasText(entry?.event?.hex) ? entry.event.hex.trim().toLowerCase() : '';
-            return entryHex === trackedHex;
-        });
-        if (byHex) return byHex;
-    }
-
-    const trackedUid = hasText(tracked?.uid) ? tracked.uid.trim() : '';
-    if (trackedUid) {
-        const byUid = uniqueEventEntries.find((entry) => hasText(entry?.event?.uid) && entry.event.uid.trim() === trackedUid);
-        if (byUid) return byUid;
-    }
-
-    if (hasText(tracked?.entryKey)) {
-        return uniqueEventEntries.find((entry) => entry?.key === tracked.entryKey) || null;
-    }
-
-    return null;
-}
-
-function recordRequeueTrackerEntry(entry, requestedMissing, commandResult = null) {
-    const event = entry?.event || {};
-    const normalizedRequested = normaliseMissingFields(requestedMissing);
-    const requestIds = extractRequestIdsFromResult(commandResult);
-    const tracked = {
-        id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-        title: event.summary || event.title || 'Untitled Event',
-        hex: hasText(event?.hex) ? event.hex.trim().toLowerCase() : '',
-        uid: hasText(event?.uid) ? event.uid.trim() : '',
-        requestIds,
-        entryKey: hasText(entry?.key) ? entry.key : '',
-        requestedAt: new Date().toISOString(),
-        lastCheckedAt: null,
-        requestedMissing: normalizedRequested,
-        latestMissing: normalizedRequested,
-        status: 'submitted',
-    };
-
-    requeueTrackerEntries = [tracked, ...requeueTrackerEntries].slice(0, MAX_TRACKED_REQUEUE_ENTRIES);
-    renderRequeueTracker();
-}
-
-function reconcileRequeueTrackerEntries() {
-    if (!Array.isArray(requeueTrackerEntries) || requeueTrackerEntries.length === 0) {
-        return;
-    }
-
-    const checkedAtIso = new Date().toISOString();
-    requeueTrackerEntries = requeueTrackerEntries.map((tracked) => {
-        const match = findMatchingEntryForTracker(tracked);
-        const next = { ...tracked, lastCheckedAt: checkedAtIso };
-        const queueStatus = deriveQueueTrackerStatus(next);
-
-        if (queueStatus === 'processed' || queueStatus === 'processing' || queueStatus === 'queued') {
-            next.status = queueStatus;
-            return next;
-        }
-
-        if (!match || !match.event) {
-            if (next.status !== 'resolved') {
-                next.status = 'not-found';
-            }
-            return next;
-        }
-
-        next.title = match.event.summary || match.event.title || next.title;
-        const currentMissing = getMissingMetadataFields(match.event);
-        next.latestMissing = currentMissing;
-
-        if (currentMissing.length === 0) {
-            next.status = 'resolved';
-            return next;
-        }
-
-        next.status = 'submitted';
-        return next;
-    });
-}
-
-function statusLabelForTracker(status) {
-    if (status === 'submitted') return 'Submitted';
-    if (status === 'processing') return 'Processing';
-    if (status === 'processed') return 'Processed';
-    if (status === 'resolved') return 'Resolved';
-    if (status === 'updated') return 'Updated';
-    if (status === 'not-found') return 'Not Found';
-    return 'Queued';
-}
-
-function renderRequeueTracker() {
-    const tbody = document.getElementById('requeue-tracker-body');
-    const summary = document.getElementById('requeue-tracker-summary');
-    const lastScan = document.getElementById('requeue-tracker-last-scan');
-    if (!tbody || !summary || !lastScan) return;
-
-    const total = requeueTrackerEntries.length;
-    const resolved = requeueTrackerEntries.filter((entry) => entry.status === 'resolved').length;
-    const open = total - resolved;
-    summary.textContent = total === 0
-        ? 'No requeue requests submitted yet.'
-        : `${open} open, ${resolved} resolved (${total} tracked).`;
-    lastScan.textContent = lastAgendaScanAtIso
-        ? `Last scan: ${new Date(lastAgendaScanAtIso).toLocaleTimeString('en-GB')}`
-        : 'Last scan: not started.';
-
-    if (total === 0) {
-        tbody.innerHTML = '<tr><td colspan="4">No requeue requests yet.</td></tr>';
-        return;
-    }
-
-    tbody.innerHTML = requeueTrackerEntries.map((entry) => {
-        const statusClass = `request-status-pill request-status-${entry.status}`;
-        const missingText = entry.latestMissing.length > 0 ? entry.latestMissing.join(', ') : 'None';
-        return `<tr>
-            <td>${escapeHtml(entry.title)}</td>
-            <td><span class="${statusClass}">${escapeHtml(statusLabelForTracker(entry.status))}</span></td>
-            <td>${escapeHtml(missingText)}</td>
-            <td>${escapeHtml(formatTrackerTimestamp(entry.requestedAt))}</td>
-        </tr>`;
-    }).join('');
 }
 
 // Render all events
@@ -3177,7 +3082,6 @@ async function requeueEvent(eventIndex, fromModal = false) {
         const successMessage = `Requeue request submitted for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
         if (fromModal) updateModalStatus(successMessage, 'success');
         else pinRuntimeDetails(successMessage, 'success');
-        recordRequeueTrackerEntry(entry, missing, result);
     } catch (error) {
         console.error('Error requeueing event:', error);
         const failureMessage = `Failed to requeue event: ${error.message}`;
@@ -3201,14 +3105,15 @@ function requeueCurrentEvent() {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     autoLambdaInvokeIntervalMs = readAutoLambdaIntervalPreference();
+    agendaAutoRefreshIntervalMs = readAgendaAutoRefreshIntervalPreference();
     hexPreviewAutoRefreshEnabled = readHexPreviewAutoRefreshPreference();
     hexPreviewIntervalMs = readHexPreviewIntervalPreference();
     setAutoLambdaInvocationEnabled(readAutoLambdaInvocationPreference(), false);
+    setAgendaAutoRefreshEnabled(readAgendaAutoRefreshPreference(), false);
     restartAutoLambdaInvokeTimer();
     setApiActionState(false);
     checkApiAuthStatus();
     loadEvents();
-    renderRequeueTracker();
     renderCompletedRequests();
     pollQueueDepthSnapshots();
     setInterval(() => {
@@ -3217,7 +3122,4 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(() => {
         pollQueueDepthSnapshots();
     }, QUEUE_DEPTH_POLL_INTERVAL_MS);
-    setInterval(() => {
-        loadEvents({ silent: true });
-    }, AGENDA_POLL_INTERVAL_MS);
 });
