@@ -251,6 +251,30 @@ function toggleEventsJsonViewer() {
     }
 }
 
+async function renderAiConfigViewerContent(force = false) {
+    const content = document.getElementById('ai-config-content');
+    if (!content) return;
+    content.textContent = 'Loading AI.conf...';
+    try {
+        const config = await loadAiConfig(force);
+        content.textContent = JSON.stringify(config ?? {}, null, 2);
+    } catch (error) {
+        content.textContent = `Failed to load AI.conf: ${error.message}`;
+    }
+}
+
+function toggleAiConfigViewer() {
+    const viewer = document.getElementById('ai-config-viewer');
+    if (!viewer) return;
+
+    const isHidden = viewer.style.display === 'none' || viewer.style.display === '';
+    viewer.style.display = isHidden ? 'block' : 'none';
+    if (isHidden) {
+        renderAiConfigViewerContent(true);
+        viewer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+
 function updateApiAuthStatus(message, type = 'info') {
     const statusElement = document.getElementById('api-ready-indicator');
     if (!statusElement) return;
@@ -1291,6 +1315,7 @@ async function loadAiConfig(force = false) {
         .then((config) => {
             cachedAiConfig = config && typeof config === 'object' ? config : {};
             cachedAiConfigLoadedAt = Date.now();
+            renderAiConfigViewerContent(false).catch(() => {});
             return cachedAiConfig;
         })
         .finally(() => {
@@ -2274,7 +2299,7 @@ async function copyFullImagePrompt() {
     updateImagePromptCopyStatus('Building full prompt...', 'loading');
 
     try {
-        const config = await loadAiConfig();
+        const config = await loadAiConfig(true);
         const template = config?.imagePromptTemplate || config?.aiPromptTemplate || '';
         const expandedPrompt = buildExpandedManualImagePrompt(template, entry.event, config, shortPrompt);
         await navigator.clipboard.writeText(expandedPrompt);
