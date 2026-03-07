@@ -17,6 +17,18 @@ function attachAdminLinks(root) {
     });
 }
 
+function initMobileMenu() {
+    var hamburgerMenu = document.querySelector('.hamburger-menu');
+    var mainNav = document.querySelector('.main-nav');
+    if (hamburgerMenu && mainNav) {
+        hamburgerMenu.setAttribute('aria-expanded', 'false');
+        hamburgerMenu.addEventListener('click', function() {
+            mainNav.classList.toggle('active');
+            hamburgerMenu.setAttribute('aria-expanded', mainNav.classList.contains('active'));
+        });
+    }
+}
+
 document.addEventListener("DOMContentLoaded", function() {
     attachAdminLinks(document);
     fetch('/website/shared/header.html')
@@ -28,5 +40,6 @@ document.addEventListener("DOMContentLoaded", function() {
             }
             placeholder.innerHTML = data;
             attachAdminLinks(placeholder);
+            initMobileMenu();
         });
 });
