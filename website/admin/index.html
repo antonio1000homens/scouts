@@ -109,6 +109,20 @@
                 <p id="queue-depth-queued" class="refresh-status">scoutsqueued.json: unknown</p>
                 <p id="queue-depth-processing" class="refresh-status">scoutsprocessing.json: unknown</p>
                 <p id="queue-depth-completed" class="refresh-status">scoutscompleted.json: unknown</p>
+                <div class="runtime-requests-layout">
+                    <section class="runtime-request-group">
+                        <h4>Queued</h4>
+                        <div id="runtime-queued-list" class="request-list">
+                            <p class="refresh-status">No queued requests.</p>
+                        </div>
+                    </section>
+                    <section class="runtime-request-group">
+                        <h4>Processing</h4>
+                        <div id="runtime-processing-list" class="request-list">
+                            <p class="refresh-status">No processing requests.</p>
+                        </div>
+                    </section>
+                </div>
                 <details id="queue-depth-titles-toggle" class="queue-observed-toggle" hidden>
                     <summary>Observed Titles</summary>
                     <p id="queue-depth-titles-details" class="refresh-status">No observed titles</p>
@@ -124,7 +138,7 @@
                 <h3>Completed Requests</h3>
                 <p id="completed-requests-summary" class="status-text status-info">Waiting for refresh...</p>
                 <p id="completed-requests-updated" class="refresh-status">Last refresh: n/a</p>
-                <div id="completed-requests-list" class="completed-requests-list">
+                <div id="completed-requests-list" class="request-list">
                     <p class="refresh-status">No completed requests yet.</p>
                 </div>
             </div>
