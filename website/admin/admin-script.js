@@ -1414,14 +1414,12 @@ function buildManualPromptEventDetails(event) {
     const details = [];
     const title = event.title ?? event.summary ?? event.name ?? null;
     if (hasText(title)) details.push(`Title: ${String(title).trim()}`);
-    if (hasText(event.section)) details.push(`Section: ${String(event.section).trim()}`);
-    const start = event.start?.iso ?? event.start?.raw ?? event.dtstart ?? event.start ?? null;
-    if (hasText(start)) details.push(`Start: ${String(start).trim()}`);
-    if (hasText(event.location)) details.push(`Location: ${String(event.location).trim()}`);
-    if (hasText(event.description)) details.push(`Description: ${String(event.description).trim()}`);
-    if (hasText(event.notes)) details.push(`Notes: ${String(event.notes).trim()}`);
-    if (hasText(event.source) || hasText(event.calendar)) {
-        details.push(`Source: ${String(event.source ?? event.calendar).trim()}`);
+    const rawLocation = hasText(event.location) ? String(event.location).trim() : '';
+    if (rawLocation) {
+        const normalizedLocation = /(^|\b)the den(\b|$)/i.test(rawLocation)
+            ? `${rawLocation} (indoors)`
+            : rawLocation;
+        details.push(`Location: ${normalizedLocation}`);
     }
     return details.join('\n') || 'No additional event context provided.';
 }
