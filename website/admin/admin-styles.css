@@ -936,6 +936,11 @@ body {
     font-style: italic;
 }
 
+.ai-prompt-actions {
+    margin-top: -0.4rem;
+    margin-bottom: 1rem;
+}
+
 .no-ai-prompt {
     color: var(--text-light);
     font-style: italic;

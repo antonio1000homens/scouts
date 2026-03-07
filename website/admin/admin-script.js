@@ -1956,13 +1956,6 @@ function getImagePrompt(event) {
     return null;
 }
 
-function updateImagePromptCopyStatus(message, type = 'info') {
-    const statusElement = document.getElementById('modal-image-prompt-copy-status');
-    if (!statusElement) return;
-    statusElement.textContent = message;
-    statusElement.className = `refresh-status modal-input-help ${type}`;
-}
-
 function getMissingMetadataFields(event) {
     const missing = [];
     if (!hasText(getAIPrompt(event))) {
@@ -2242,6 +2235,9 @@ function renderEvents() {
                             <div class="ai-prompt-label">Image Theme</div>
                             <div class="ai-prompt-text">${imageTheme}</div>
                         </div>
+                        <div class="ai-prompt-actions">
+                            <button class="btn btn-secondary" onclick="copyImagePromptForEvent(${index})">Copy Image Prompt</button>
+                        </div>
                     ` : ''}
 
                     ${tagline ? `
@@ -2371,8 +2367,6 @@ function openUploadModal(index) {
     const imageThemeText = document.getElementById('modal-image-theme');
     const taglineText = document.getElementById('modal-tagline');
     const imagePromptInput = document.getElementById('modal-image-prompt-input');
-    const copyImagePromptContainer = document.getElementById('modal-copy-image-prompt-container');
-    const copyImagePromptButton = document.getElementById('modal-copy-image-prompt-button');
     const taglineInput = document.getElementById('modal-tagline-input');
     const imageUrlInput = document.getElementById('modal-image-url-input');
     const hideToggleButton = document.getElementById('modal-hide-toggle-button');
@@ -2383,12 +2377,6 @@ function openUploadModal(index) {
     if (imageUrlInput) imageUrlInput.value = currentImage || '';
     if (imageThemeText) imageThemeText.textContent = currentImageTheme || 'Not set';
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
-    if (copyImagePromptContainer) {
-        copyImagePromptContainer.style.display = currentImageTheme ? 'flex' : 'none';
-    }
-    if (copyImagePromptButton) {
-        copyImagePromptButton.style.display = currentImageTheme ? 'inline-flex' : 'none';
-    }
     if (hideToggleButton) {
         const hidden = isEntryHidden(entry);
         hideToggleButton.textContent = hidden ? 'Unhide Event' : 'Hide Event';
@@ -2643,18 +2631,9 @@ function refreshModalCurrentMetadata(event) {
     const taglineText = document.getElementById('modal-tagline');
     const currentImage = getImageUrl(event);
     const currentImageTheme = getImageTheme(event);
-    const copyImagePromptContainer = document.getElementById('modal-copy-image-prompt-container');
-    const copyImagePromptButton = document.getElementById('modal-copy-image-prompt-button');
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
     if (imageThemeText) imageThemeText.textContent = currentImageTheme || 'Not set';
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
-    if (copyImagePromptContainer) {
-        copyImagePromptContainer.style.display = currentImageTheme ? 'flex' : 'none';
-    }
-    if (copyImagePromptButton) {
-        copyImagePromptButton.style.display = currentImageTheme ? 'inline-flex' : 'none';
-    }
-    updateImagePromptCopyStatus('', 'info');
 
     const imgElement = document.getElementById('modal-current-image');
     if (imgElement) {
@@ -2667,24 +2646,22 @@ function refreshModalCurrentMetadata(event) {
     }
 }
 
-async function copyFullImagePrompt() {
-    const entry = getSelectedModalEntry();
+async function copyImagePromptForEvent(eventIndex) {
+    const entry = visibleEventEntries[eventIndex];
     if (!entry) return;
 
     const imagePrompt = getImagePrompt(entry.event);
     if (!hasText(imagePrompt)) {
-        updateImagePromptCopyStatus('No image prompt available to copy.', 'error');
+        pinRuntimeDetails('No image prompt available to copy.', 'error');
         return;
     }
 
-    updateImagePromptCopyStatus('Building image generation prompt...', 'loading');
-
     try {
         await navigator.clipboard.writeText(imagePrompt);
-        updateImagePromptCopyStatus('Image generation prompt copied to clipboard.', 'success');
+        pinRuntimeDetails('Image generation prompt copied to clipboard.', 'success');
     } catch (error) {
         console.error('Failed to copy image generation prompt:', error);
-        updateImagePromptCopyStatus(`Failed to copy image prompt: ${error.message}`, 'error');
+        pinRuntimeDetails(`Failed to copy image prompt: ${error.message}`, 'error');
     }
 }
 
