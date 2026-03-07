@@ -999,6 +999,7 @@ function formatRuntimeBadgeRequestId(requestId) {
 function deriveEventRuntimeBadges(event) {
     const hex = hasText(event?.hex) ? String(event.hex).trim().toLowerCase() : '';
     if (!hex) return [];
+    const appliedRequestIds = getAppliedRequestIdSet(event);
 
     const queuedRequests = getSnapshotRequests(latestQueuedSnapshot)
         .filter((request) => getSnapshotRequestHex(request) === hex);
@@ -1030,6 +1031,9 @@ function deriveEventRuntimeBadges(event) {
 
     queuedRequests.forEach((request) => {
         const requestId = getSnapshotRequestId(request);
+        if (requestId && appliedRequestIds.has(requestId)) {
+            return;
+        }
         if (requestId && completedPairs.has(`${hex}|${requestId}`)) {
             pushBadge('updated', 'Updated', requestId);
             return;
@@ -1038,7 +1042,11 @@ function deriveEventRuntimeBadges(event) {
     });
 
     processingRequests.forEach((request) => {
-        pushBadge('processing', 'Processing', getSnapshotRequestId(request));
+        const requestId = getSnapshotRequestId(request);
+        if (requestId && appliedRequestIds.has(requestId)) {
+            return;
+        }
+        pushBadge('processing', 'Processing', requestId);
     });
 
     return badges;
@@ -1586,6 +1594,44 @@ function getStatusData(event) {
     return event?.status && typeof event.status === 'object' ? event.status : null;
 }
 
+function normaliseAppliedRequestRecord(record) {
+    if (typeof record === 'string') {
+        const requestId = hasText(record) ? record.trim() : '';
+        return requestId ? { requestId, timestamp: '' } : null;
+    }
+    if (!record || typeof record !== 'object') return null;
+    const requestId = hasText(record?.requestId) ? record.requestId.trim() : '';
+    const timestamp = hasText(record?.timestamp)
+        ? record.timestamp.trim()
+        : (hasText(record?.appliedAt) ? record.appliedAt.trim() : '');
+    if (!requestId) return null;
+    return { requestId, timestamp };
+}
+
+function normaliseAppliedRequestHistory(value) {
+    if (!Array.isArray(value)) return [];
+    const deduped = new Map();
+    value.forEach((entry) => {
+        const normalized = normaliseAppliedRequestRecord(entry);
+        if (!normalized) return;
+        deduped.set(normalized.requestId, {
+            ...(deduped.get(normalized.requestId) || {}),
+            ...normalized,
+        });
+    });
+    return Array.from(deduped.values());
+}
+
+function getAppliedRequestHistory(event) {
+    if (!event || typeof event !== 'object') return [];
+    const metadata = getMetadataData(event);
+    return normaliseAppliedRequestHistory(metadata?.requestIds ?? event.requestIds ?? []);
+}
+
+function getAppliedRequestIdSet(event) {
+    return new Set(getAppliedRequestHistory(event).map((entry) => entry.requestId));
+}
+
 function normaliseEventRecordForUi(event) {
     if (!event || typeof event !== 'object') return event;
     const source = getSourceData(event);
@@ -1612,6 +1658,7 @@ function normaliseEventRecordForUi(event) {
         tagline: metadata?.tagline ?? event.tagline ?? null,
         hexId: metadata?.hexId ?? event.hexId ?? event.hex ?? null,
         hex: metadata?.hexId ?? event.hexId ?? event.hex ?? null,
+        requestIds: getAppliedRequestHistory(event),
         approved: status?.isApproved === true || event.approved === true,
         status: status?.isHidden === true ? 'hidden' : event.status ?? null,
         hiddenAt: event.hiddenAt ?? null,
@@ -2062,7 +2109,6 @@ function renderEvents() {
         const imageUrl = getImageUrl(event);
         const tagline = getAIPrompt(event);
         const imageTheme = getImageTheme(event);
-        const imagePrompt = getImagePrompt(event);
         const missingFields = getMissingMetadataFields(event);
         const requeueEligible = missingFields.length > 0;
         const section = getEventSection(event);
@@ -2116,13 +2162,6 @@ function renderEvents() {
                         <div class="ai-prompt">
                             <div class="ai-prompt-label">Image Theme</div>
                             <div class="ai-prompt-text">${imageTheme}</div>
-                        </div>
-                    ` : ''}
-
-                    ${imagePrompt ? `
-                        <div class="ai-prompt">
-                            <div class="ai-prompt-label">Image Prompt</div>
-                            <div class="ai-prompt-text">${imagePrompt}</div>
                         </div>
                     ` : ''}
 
@@ -2252,7 +2291,6 @@ function openUploadModal(index) {
     
     const imageUrlText = document.getElementById('modal-image-url');
     const imageThemeText = document.getElementById('modal-image-theme');
-    const imagePromptText = document.getElementById('modal-image-prompt');
     const taglineText = document.getElementById('modal-tagline');
     const imagePromptInput = document.getElementById('modal-image-prompt-input');
     const copyImagePromptButton = document.getElementById('modal-copy-image-prompt-button');
@@ -2266,7 +2304,6 @@ function openUploadModal(index) {
     if (taglineInput) taglineInput.value = getAIPrompt(event) || '';
     if (imageUrlInput) imageUrlInput.value = currentImage || '';
     if (imageThemeText) imageThemeText.textContent = currentImageTheme || 'Not set';
-    if (imagePromptText) imagePromptText.textContent = currentImagePrompt || 'Not set';
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
     if (copyImagePromptButton) {
         copyImagePromptButton.style.display = currentImagePrompt ? 'inline-flex' : 'none';
@@ -2532,12 +2569,10 @@ function getModalFieldValue(field) {
 function refreshModalCurrentMetadata(event) {
     const imageUrlText = document.getElementById('modal-image-url');
     const imageThemeText = document.getElementById('modal-image-theme');
-    const imagePromptText = document.getElementById('modal-image-prompt');
     const taglineText = document.getElementById('modal-tagline');
     const currentImage = getImageUrl(event);
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
     if (imageThemeText) imageThemeText.textContent = getImageTheme(event) || 'Not set';
-    if (imagePromptText) imagePromptText.textContent = getImagePrompt(event) || 'Not set';
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
     updateImagePromptCopyStatus('', 'info');
 
