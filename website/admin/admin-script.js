@@ -499,13 +499,50 @@ function normaliseCompletedRequestEntry(entry) {
     });
 }
 
+function deduplicateRequestsByRequestId(normalizedEntries) {
+    const byRequestId = new Map();
+    const noRequestId = [];
+    normalizedEntries.forEach((entry) => {
+        const requestId = hasText(entry?.requestId) ? entry.requestId.trim() : '';
+        if (!requestId) {
+            noRequestId.push(entry);
+            return;
+        }
+        const existing = byRequestId.get(requestId);
+        if (!existing) {
+            byRequestId.set(requestId, entry);
+            return;
+        }
+        const existingTime = existing.processedAt ? new Date(existing.processedAt).getTime() : -1;
+        const entryTime = entry.processedAt ? new Date(entry.processedAt).getTime() : -1;
+        if (entryTime >= existingTime) {
+            byRequestId.set(requestId, entry);
+        }
+    });
+    return [...byRequestId.values(), ...noRequestId];
+}
+
+function setRequests(entries, updatedAt = null) {
+    const normalized = Array.isArray(entries)
+        ? entries
+            .map((entry) => normaliseRequestCardEntry(entry, {
+                defaultAction: entry?.status ?? entry?.operation ?? '',
+            }))
+            .filter(Boolean)
+        : [];
+    latestCompletedRequests = deduplicateRequestsByRequestId(normalized);
+    latestCompletedRequestsUpdatedAt = hasText(updatedAt) ? updatedAt : null;
+    renderCompletedRequests();
+}
+
 function setCompletedRequests(entries, updatedAt = null) {
-    latestCompletedRequests = Array.isArray(entries)
+    const normalized = Array.isArray(entries)
         ? entries
             .map((entry) => normaliseCompletedRequestEntry(entry))
             .filter(Boolean)
             .filter((entry) => !shouldHideCompletedRequestEntry(entry))
         : [];
+    latestCompletedRequests = deduplicateRequestsByRequestId(normalized);
     latestCompletedRequestsUpdatedAt = hasText(updatedAt) ? updatedAt : null;
     renderCompletedRequests();
 }
@@ -538,7 +575,7 @@ function renderCompletedRequests() {
     if (!summaryEl || !updatedEl || !listEl) return;
 
     const total = Array.isArray(latestCompletedRequests) ? latestCompletedRequests.length : 0;
-    summaryEl.textContent = total > 0 ? `${total} completed` : 'No new completions';
+    summaryEl.textContent = total > 0 ? `${total} requests` : 'No active requests';
     summaryEl.className = `status-text ${total > 0 ? 'status-success' : 'status-info'}`;
 
     if (latestCompletedRequestsUpdatedAt) {
@@ -549,15 +586,15 @@ function renderCompletedRequests() {
     }
 
     if (total === 0) {
-        listEl.innerHTML = '<p class="refresh-status">No completed requests in the latest refresh.</p>';
+        listEl.innerHTML = '<p class="refresh-status">No requests in the latest refresh.</p>';
         return;
     }
 
     renderRequestCards(
         listEl,
         latestCompletedRequests,
-        'No completed requests in the latest refresh.',
-        { defaultAction: 'completed', sourceLabel: 'Completed' },
+        'No requests in the latest refresh.',
+        {},
     );
 }
 
@@ -1458,14 +1495,9 @@ function applyHexEventMetadata(targetEvent, hexEvent) {
 
 
 async function pollQueueDepthSnapshots() {
-    const statusEl = document.getElementById('queue-depth-status');
-    const queuedEl = document.getElementById('queue-depth-queued');
-    const processingEl = document.getElementById('queue-depth-processing');
-    const completedEl = document.getElementById('queue-depth-completed');
-    const runtimeRequestsListEl = document.getElementById('runtime-requests-list');
     const updatedEl = document.getElementById('queue-depth-updated');
     const checkedEl = document.getElementById('queue-depth-checked');
-    if (!statusEl || !queuedEl || !processingEl || !completedEl || !runtimeRequestsListEl || !updatedEl || !checkedEl) {
+    if (!updatedEl || !checkedEl) {
         return;
     }
 
@@ -1479,30 +1511,19 @@ async function pollQueueDepthSnapshots() {
     latestQueuedSnapshot = queuedSnapshot;
     latestProcessingSnapshot = processingSnapshot;
     latestCompletedSnapshot = completedSnapshot;
-    setCompletedRequests(
-        Array.isArray(completedSnapshot?.requests) ? completedSnapshot.requests : [],
-        completedSnapshot?.updatedAt ?? null,
-    );
 
-    const hasAnySnapshot = Boolean(queuedSnapshot || processingSnapshot || completedSnapshot);
-    statusEl.textContent = hasAnySnapshot ? 'Runtime request files loaded' : 'Runtime request files unavailable';
-    statusEl.className = `status-text ${hasAnySnapshot ? 'status-success' : 'status-error'}`;
-
-    queuedEl.textContent = `scoutsqueued.json: ${formatQueueSnapshotCount(queuedSnapshot)}`;
-    processingEl.textContent = `scoutsprocessing.json: ${formatQueueSnapshotCount(processingSnapshot)}`;
-    completedEl.textContent = `scoutscompleted.json: ${formatQueueSnapshotCount(completedSnapshot)}`;
-    renderRequestCards(runtimeRequestsListEl, getAggregateRuntimeRequests(queuedSnapshot, processingSnapshot, completedSnapshot), 'No active runtime requests.', {
-        defaultAction: 'queued',
-        sourceLabel: 'Runtime aggregate',
-    });
-
+    const aggregateRequests = getAggregateRuntimeRequests(queuedSnapshot, processingSnapshot, completedSnapshot);
     const timestamps = [queuedSnapshot?.updatedAt, processingSnapshot?.updatedAt, completedSnapshot?.updatedAt]
         .filter((value) => typeof value === 'string' && value.trim().length > 0)
         .map((value) => new Date(value))
         .filter((date) => !Number.isNaN(date.getTime()));
+    const mostRecentTimestamp = timestamps.length > 0
+        ? timestamps.sort((a, b) => b.getTime() - a.getTime())[0].toISOString()
+        : (completedSnapshot?.updatedAt ?? null);
+    setRequests(aggregateRequests, mostRecentTimestamp);
+
     if (timestamps.length > 0) {
-        const mostRecent = timestamps.sort((a, b) => b.getTime() - a.getTime())[0];
-        updatedEl.textContent = `Last update: ${mostRecent.toLocaleString('en-GB')}`;
+        updatedEl.textContent = `Last update: ${new Date(mostRecentTimestamp).toLocaleString('en-GB')}`;
     } else {
         updatedEl.textContent = 'Last update: n/a';
     }
