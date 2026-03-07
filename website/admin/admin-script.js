@@ -204,21 +204,42 @@ function renderAgendaViewerContent() {
     agendaContentEl.textContent = JSON.stringify(agendaPayload, null, 2);
 }
 
+function setViewerOpen(viewerId, shouldShow) {
+    const viewer = document.getElementById(viewerId);
+    if (!viewer) return null;
+    viewer.style.display = shouldShow ? 'flex' : 'none';
+    return viewer;
+}
+
+function closeAllViewers(exceptViewerId = '') {
+    ['agenda-viewer', 'events-json-viewer', 'ai-config-viewer'].forEach((viewerId) => {
+        if (viewerId === exceptViewerId) return;
+        setViewerOpen(viewerId, false);
+    });
+}
+
+function handleViewerBackdropClick(event) {
+    if (event.target !== event.currentTarget) return;
+    event.currentTarget.style.display = 'none';
+}
+
+function showAgendaViewer() {
+    closeAllViewers('agenda-viewer');
+    const viewer = setViewerOpen('agenda-viewer', true);
+    if (!viewer) return;
+    renderAgendaViewerContent();
+}
+
 function toggleAgendaViewer() {
     const viewer = document.getElementById('agenda-viewer');
-    const navButton = document.querySelector('.admin-top-nav .nav-btn');
     if (!viewer) return;
 
     const shouldShow = viewer.style.display === 'none' || viewer.style.display === '';
-    viewer.style.display = shouldShow ? 'block' : 'none';
-
-    if (navButton) {
-        navButton.textContent = shouldShow ? 'Hide Actual Agenda' : 'Show Actual Agenda';
+    if (!shouldShow) {
+        setViewerOpen('agenda-viewer', false);
+        return;
     }
-
-    if (shouldShow) {
-        renderAgendaViewerContent();
-    }
+    showAgendaViewer();
 }
 
 function renderEventsJsonViewerContent() {
@@ -257,16 +278,23 @@ function renderEventsJsonViewerContent() {
     eventsJsonContentEl.textContent = lines.join('\n');
 }
 
+function showEventsJsonViewer() {
+    closeAllViewers('events-json-viewer');
+    const viewer = setViewerOpen('events-json-viewer', true);
+    if (!viewer) return;
+    renderEventsJsonViewerContent();
+}
+
 function toggleEventsJsonViewer() {
     const viewer = document.getElementById('events-json-viewer');
     if (!viewer) return;
 
     const shouldShow = viewer.style.display === 'none' || viewer.style.display === '';
-    viewer.style.display = shouldShow ? 'block' : 'none';
-
-    if (shouldShow) {
-        renderEventsJsonViewerContent();
+    if (!shouldShow) {
+        setViewerOpen('events-json-viewer', false);
+        return;
     }
+    showEventsJsonViewer();
 }
 
 async function renderAiConfigViewerContent(force = false) {
@@ -281,16 +309,50 @@ async function renderAiConfigViewerContent(force = false) {
     }
 }
 
+function showAiConfigViewer() {
+    closeAllViewers('ai-config-viewer');
+    const viewer = setViewerOpen('ai-config-viewer', true);
+    if (!viewer) return;
+    renderAiConfigViewerContent(true);
+}
+
 function toggleAiConfigViewer() {
     const viewer = document.getElementById('ai-config-viewer');
     if (!viewer) return;
 
-    const isHidden = viewer.style.display === 'none' || viewer.style.display === '';
-    viewer.style.display = isHidden ? 'block' : 'none';
-    if (isHidden) {
-        renderAiConfigViewerContent(true);
-        viewer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const shouldShow = viewer.style.display === 'none' || viewer.style.display === '';
+    if (!shouldShow) {
+        setViewerOpen('ai-config-viewer', false);
+        return;
     }
+    showAiConfigViewer();
+}
+
+function closeViewerMenu() {
+    const menu = document.getElementById('viewer-menu');
+    const button = document.getElementById('viewer-menu-button');
+    if (menu) {
+        menu.classList.remove('is-open');
+    }
+    if (button) {
+        button.setAttribute('aria-expanded', 'false');
+    }
+}
+
+function toggleViewerMenu(event) {
+    if (event) {
+        event.stopPropagation();
+    }
+    const menu = document.getElementById('viewer-menu');
+    const button = document.getElementById('viewer-menu-button');
+    if (!menu || !button) return;
+    const shouldShow = !menu.classList.contains('is-open');
+    if (!shouldShow) {
+        closeViewerMenu();
+        return;
+    }
+    menu.classList.add('is-open');
+    button.setAttribute('aria-expanded', 'true');
 }
 
 function updateApiAuthStatus(message, type = 'info') {
@@ -636,6 +698,10 @@ function writeCookie(name, value, maxAgeDays = 365) {
 }
 
 function readAutoLambdaInvocationPreference() {
+    const cookieValue = readCookie(AUTO_LAMBDA_PREF_KEY);
+    if (cookieValue !== null) {
+        return cookieValue === '1' || cookieValue.toLowerCase() === 'true';
+    }
     try {
         const stored = window.localStorage.getItem(AUTO_LAMBDA_PREF_KEY);
         if (stored === null) return true;
@@ -646,6 +712,11 @@ function readAutoLambdaInvocationPreference() {
 }
 
 function readAutoLambdaIntervalPreference() {
+    const cookieValue = readCookie(AUTO_LAMBDA_INTERVAL_PREF_KEY);
+    const cookieSeconds = Number(cookieValue);
+    if (Number.isFinite(cookieSeconds)) {
+        return Math.max(5, Math.round(cookieSeconds)) * 1000;
+    }
     try {
         const stored = window.localStorage.getItem(AUTO_LAMBDA_INTERVAL_PREF_KEY);
         const parsedSeconds = Number(stored);
@@ -691,19 +762,14 @@ function readHexPreviewIntervalPreference() {
 }
 
 function persistAutoLambdaInvocationPreference(enabled) {
-    try {
-        window.localStorage.setItem(AUTO_LAMBDA_PREF_KEY, enabled ? '1' : '0');
-    } catch {
-        // Ignore storage errors (private mode/quota)
-    }
+    writeCookie(AUTO_LAMBDA_PREF_KEY, enabled ? '1' : '0');
 }
 
 function persistAutoLambdaIntervalPreference(intervalMs) {
-    try {
-        window.localStorage.setItem(AUTO_LAMBDA_INTERVAL_PREF_KEY, String(Math.max(5, Math.round(intervalMs / 1000))));
-    } catch {
-        // Ignore storage errors
-    }
+    writeCookie(
+        AUTO_LAMBDA_INTERVAL_PREF_KEY,
+        String(Math.max(5, Math.round(intervalMs / 1000))),
+    );
 }
 
 function persistAgendaAutoRefreshPreference(enabled) {
@@ -2205,7 +2271,6 @@ function openUploadModal(index) {
     
     const currentImage = getImageUrl(event);
     const currentImageTheme = getImageTheme(event);
-    const currentImagePrompt = getImagePrompt(event);
     const imgElement = document.getElementById('modal-current-image');
     if (currentImage) {
         imgElement.src = currentImage;
@@ -2218,37 +2283,30 @@ function openUploadModal(index) {
     const imageThemeText = document.getElementById('modal-image-theme');
     const taglineText = document.getElementById('modal-tagline');
     const imagePromptInput = document.getElementById('modal-image-prompt-input');
+    const copyImagePromptContainer = document.getElementById('modal-copy-image-prompt-container');
     const copyImagePromptButton = document.getElementById('modal-copy-image-prompt-button');
     const taglineInput = document.getElementById('modal-tagline-input');
     const imageUrlInput = document.getElementById('modal-image-url-input');
     const hideToggleButton = document.getElementById('modal-hide-toggle-button');
     const requeueButton = document.getElementById('modal-requeue-button');
-    const requeueHint = document.getElementById('modal-requeue-hint');
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
     if (imagePromptInput) imagePromptInput.value = currentImageTheme || '';
     if (taglineInput) taglineInput.value = getAIPrompt(event) || '';
     if (imageUrlInput) imageUrlInput.value = currentImage || '';
     if (imageThemeText) imageThemeText.textContent = currentImageTheme || 'Not set';
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
+    if (copyImagePromptContainer) {
+        copyImagePromptContainer.style.display = currentImageTheme ? 'flex' : 'none';
+    }
     if (copyImagePromptButton) {
-        copyImagePromptButton.style.display = currentImagePrompt ? 'inline-flex' : 'none';
+        copyImagePromptButton.style.display = currentImageTheme ? 'inline-flex' : 'none';
     }
     if (hideToggleButton) {
         const hidden = isEntryHidden(entry);
         hideToggleButton.textContent = hidden ? 'Unhide Event' : 'Hide Event';
     }
-    const missing = getMissingMetadataFields(event);
     if (requeueButton) {
-        requeueButton.style.display = missing.length > 0 ? 'inline-block' : 'none';
-    }
-    if (requeueHint) {
-        if (missing.length > 0) {
-            requeueHint.textContent = `Eligible for requeue: missing ${missing.join(', ')}.`;
-            requeueHint.className = 'refresh-status error';
-        } else {
-            requeueHint.textContent = 'Metadata complete. Requeue is not required.';
-            requeueHint.className = 'refresh-status success';
-        }
+        requeueButton.style.display = 'inline-block';
     }
     document.getElementById('modal-status').textContent = '';
     document.getElementById('modal-status').className = 'status-text';
@@ -2496,9 +2554,18 @@ function refreshModalCurrentMetadata(event) {
     const imageThemeText = document.getElementById('modal-image-theme');
     const taglineText = document.getElementById('modal-tagline');
     const currentImage = getImageUrl(event);
+    const currentImageTheme = getImageTheme(event);
+    const copyImagePromptContainer = document.getElementById('modal-copy-image-prompt-container');
+    const copyImagePromptButton = document.getElementById('modal-copy-image-prompt-button');
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
-    if (imageThemeText) imageThemeText.textContent = getImageTheme(event) || 'Not set';
+    if (imageThemeText) imageThemeText.textContent = currentImageTheme || 'Not set';
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
+    if (copyImagePromptContainer) {
+        copyImagePromptContainer.style.display = currentImageTheme ? 'flex' : 'none';
+    }
+    if (copyImagePromptButton) {
+        copyImagePromptButton.style.display = currentImageTheme ? 'inline-flex' : 'none';
+    }
     updateImagePromptCopyStatus('', 'info');
 
     const imgElement = document.getElementById('modal-current-image');
@@ -3110,12 +3177,27 @@ document.addEventListener('DOMContentLoaded', () => {
     hexPreviewIntervalMs = readHexPreviewIntervalPreference();
     setAutoLambdaInvocationEnabled(readAutoLambdaInvocationPreference(), false);
     setAgendaAutoRefreshEnabled(readAgendaAutoRefreshPreference(), false);
+    persistAutoLambdaInvocationPreference(autoLambdaInvokeEnabled);
+    persistAutoLambdaIntervalPreference(autoLambdaInvokeIntervalMs);
     restartAutoLambdaInvokeTimer();
     setApiActionState(false);
     checkApiAuthStatus();
     loadEvents();
     renderCompletedRequests();
     pollQueueDepthSnapshots();
+    document.addEventListener('click', (event) => {
+        const menu = document.getElementById('viewer-menu');
+        const button = document.getElementById('viewer-menu-button');
+        if (!menu || !button) return;
+        const target = event.target;
+        if (menu.contains(target) || button.contains(target)) return;
+        closeViewerMenu();
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        closeViewerMenu();
+        closeAllViewers();
+    });
     setInterval(() => {
         pollLambdaRuntimeStatus(true);
     }, 5000);
