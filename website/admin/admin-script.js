@@ -2726,6 +2726,7 @@ async function requestGeneratedField(field) {
         subject: config.subject,
         action: 'generate',
         hex,
+        event: JSON.parse(JSON.stringify(event || {})),
     };
 
     updateModalStatus(`Queueing ${config.queueLabel} for "${eventLabel}"...`, 'loading');
