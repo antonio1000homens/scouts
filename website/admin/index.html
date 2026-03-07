@@ -88,16 +88,16 @@
                             title="Reloads ../../agenda.json into the admin UI and rerenders events/tracker. No Lambda call and no queue writes."
                         >Reload Agenda From Disk</button>
                     </div>
+                    <div class="section-status-group">
+                        <h4>Events Loaded</h4>
+                        <p id="events-count" class="status-text">-</p>
+                    </div>
                     <p class="refresh-status">The events list is generated from loaded agenda items and HEX identifiers.</p>
                 </div>
             </div>
         </section>
 
         <div class="admin-info">
-            <div class="info-card">
-                <h3>Events Loaded</h3>
-                <p id="events-count" class="status-text">-</p>
-            </div>
             <div class="info-card">
                 <h3>Lambda Run State</h3>
                 <p id="runtime-state-status" class="status-text">Checking runtime state...</p>
@@ -109,28 +109,9 @@
                 <p id="queue-depth-queued" class="refresh-status">scoutsqueued.json: unknown</p>
                 <p id="queue-depth-processing" class="refresh-status">scoutsprocessing.json: unknown</p>
                 <p id="queue-depth-completed" class="refresh-status">scoutscompleted.json: unknown</p>
-                <div class="runtime-requests-layout">
-                    <section class="runtime-request-group">
-                        <h4>Queued</h4>
-                        <div id="runtime-queued-list" class="request-list">
-                            <p class="refresh-status">No queued requests.</p>
-                        </div>
-                    </section>
-                    <section class="runtime-request-group">
-                        <h4>Processing</h4>
-                        <div id="runtime-processing-list" class="request-list">
-                            <p class="refresh-status">No processing requests.</p>
-                        </div>
-                    </section>
+                <div id="runtime-requests-list" class="request-list">
+                    <p class="refresh-status">No active runtime requests.</p>
                 </div>
-                <details id="queue-depth-titles-toggle" class="queue-observed-toggle" hidden>
-                    <summary>Observed Titles</summary>
-                    <p id="queue-depth-titles-details" class="refresh-status">No observed titles</p>
-                </details>
-                <details id="queue-depth-observed-toggle" class="queue-observed-toggle" hidden>
-                    <summary>Observed IDs</summary>
-                    <p id="queue-depth-observed-details" class="refresh-status">No observed IDs</p>
-                </details>
                 <p id="queue-depth-updated" class="refresh-status">Last update: n/a</p>
                 <p id="queue-depth-checked" class="refresh-status">Last checked: n/a</p>
             </div>

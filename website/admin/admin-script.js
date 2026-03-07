@@ -313,6 +313,7 @@ function updateGlobalRefreshStatus(message, type = 'info') {
 function formatCompletedRequestOperation(value) {
     if (!hasText(value)) return 'unknown';
     const normalized = String(value).trim();
+    if (normalized === 'processing-complete') return 'Processing Complete';
     if (normalized === 'imagePrompt') return 'Image Prompt';
     if (normalized === 'imageUrl') return 'Image URL';
     if (normalized === 'tagline') return 'Tagline';
@@ -332,6 +333,7 @@ function formatRequestBadgeClass(value) {
     const normalized = String(value).trim().toLowerCase();
     if (normalized === 'queued') return 'badge-queued';
     if (normalized === 'processing') return 'badge-processing';
+    if (normalized === 'processing-complete') return 'badge-processing-complete';
     if (normalized === 'completed') return 'badge-completed';
     if (normalized === 'persist') return 'badge-persist';
     if (normalized === 'hidden') return 'badge-hidden';
@@ -347,6 +349,7 @@ function formatRequestBadgeLabel(value, fallback = 'Unknown') {
     const normalized = String(value).trim().toLowerCase();
     if (normalized === 'queued') return 'Q Queued';
     if (normalized === 'processing') return 'P Processing';
+    if (normalized === 'processing-complete') return 'DONE Processing';
     if (normalized === 'completed') return 'OK Completed';
     if (normalized === 'persist') return 'SAVE Persist';
     if (normalized === 'hidden') return 'OFF Hidden';
@@ -777,6 +780,90 @@ function getSnapshotRequestId(request) {
     return '';
 }
 
+function getSnapshotRequestKey(request) {
+    const requestId = getSnapshotRequestId(request);
+    if (requestId) return requestId;
+    const hex = getSnapshotRequestHex(request);
+    const title = hasText(request?.title) ? request.title.trim() : '';
+    return [hex, title].filter(Boolean).join('|');
+}
+
+function mergeRuntimeRequestEntries(primary, secondary) {
+    return {
+        ...(secondary && typeof secondary === 'object' ? secondary : {}),
+        ...(primary && typeof primary === 'object' ? primary : {}),
+        title: hasText(primary?.title) ? primary.title : secondary?.title,
+        summary: hasText(primary?.summary) ? primary.summary : secondary?.summary,
+        hex: hasText(primary?.hex) ? primary.hex : (hasText(primary?.hexId) ? primary.hexId : (secondary?.hex ?? secondary?.hexId)),
+        hexId: hasText(primary?.hexId) ? primary.hexId : (hasText(primary?.hex) ? primary.hex : (secondary?.hexId ?? secondary?.hex)),
+        requestId: hasText(primary?.requestId) ? primary.requestId : (secondary?.requestId ?? ''),
+        messageId: hasText(primary?.messageId) ? primary.messageId : (secondary?.messageId ?? ''),
+        requestTime: hasText(primary?.requestTime) ? primary.requestTime : (secondary?.requestTime ?? secondary?.processedAt ?? ''),
+        processedAt: hasText(primary?.processedAt) ? primary.processedAt : (secondary?.processedAt ?? ''),
+    };
+}
+
+function getAggregateRuntimeRequests(queuedSnapshot, processingSnapshot, completedSnapshot) {
+    const queuedMap = new Map(
+        getSnapshotRequests(queuedSnapshot)
+            .map((request) => [getSnapshotRequestKey(request), request])
+            .filter(([key]) => hasText(key)),
+    );
+    const processingMap = new Map(
+        getSnapshotRequests(processingSnapshot)
+            .map((request) => [getSnapshotRequestKey(request), request])
+            .filter(([key]) => hasText(key)),
+    );
+    const completedMap = new Map(
+        getSnapshotRequests(completedSnapshot)
+            .map((request) => [getSnapshotRequestKey(request), request])
+            .filter(([key]) => hasText(key)),
+    );
+
+    const merged = [];
+    const allKeys = new Set([
+        ...queuedMap.keys(),
+        ...processingMap.keys(),
+        ...completedMap.keys(),
+    ]);
+
+    allKeys.forEach((key) => {
+        const queued = queuedMap.get(key) || null;
+        const processing = processingMap.get(key) || null;
+        const completed = completedMap.get(key) || null;
+
+        if (processing && completed) {
+            return;
+        }
+
+        if (queued && completed && !processing) {
+            const entry = mergeRuntimeRequestEntries(completed, queued);
+            entry.status = 'processing-complete';
+            merged.push(entry);
+            return;
+        }
+
+        if (processing) {
+            const entry = mergeRuntimeRequestEntries(processing, queued);
+            entry.status = 'processing';
+            merged.push(entry);
+            return;
+        }
+
+        if (queued) {
+            const entry = mergeRuntimeRequestEntries(queued, completed);
+            entry.status = 'queued';
+            merged.push(entry);
+        }
+    });
+
+    return merged.sort((left, right) => {
+        const leftTime = new Date(left?.processedAt ?? left?.requestTime ?? 0).getTime();
+        const rightTime = new Date(right?.processedAt ?? right?.requestTime ?? 0).getTime();
+        return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+    });
+}
+
 function formatRuntimeBadgeRequestId(requestId) {
     if (!hasText(requestId)) return '';
     const normalized = String(requestId).trim();
@@ -1120,15 +1207,10 @@ async function pollQueueDepthSnapshots() {
     const queuedEl = document.getElementById('queue-depth-queued');
     const processingEl = document.getElementById('queue-depth-processing');
     const completedEl = document.getElementById('queue-depth-completed');
-    const observedToggleEl = document.getElementById('queue-depth-observed-toggle');
-    const observedDetailsEl = document.getElementById('queue-depth-observed-details');
-    const titlesToggleEl = document.getElementById('queue-depth-titles-toggle');
-    const titlesDetailsEl = document.getElementById('queue-depth-titles-details');
-    const queuedListEl = document.getElementById('runtime-queued-list');
-    const processingListEl = document.getElementById('runtime-processing-list');
+    const runtimeRequestsListEl = document.getElementById('runtime-requests-list');
     const updatedEl = document.getElementById('queue-depth-updated');
     const checkedEl = document.getElementById('queue-depth-checked');
-    if (!statusEl || !queuedEl || !processingEl || !completedEl || !queuedListEl || !processingListEl || !updatedEl || !checkedEl) {
+    if (!statusEl || !queuedEl || !processingEl || !completedEl || !runtimeRequestsListEl || !updatedEl || !checkedEl) {
         return;
     }
 
@@ -1154,46 +1236,10 @@ async function pollQueueDepthSnapshots() {
     queuedEl.textContent = `scoutsqueued.json: ${formatQueueSnapshotCount(queuedSnapshot)}`;
     processingEl.textContent = `scoutsprocessing.json: ${formatQueueSnapshotCount(processingSnapshot)}`;
     completedEl.textContent = `scoutscompleted.json: ${formatQueueSnapshotCount(completedSnapshot)}`;
-    renderRequestCards(queuedListEl, getSnapshotRequests(queuedSnapshot), 'No queued requests.', {
+    renderRequestCards(runtimeRequestsListEl, getAggregateRuntimeRequests(queuedSnapshot, processingSnapshot, completedSnapshot), 'No active runtime requests.', {
         defaultAction: 'queued',
-        sourceLabel: 'Queued snapshot',
+        sourceLabel: 'Runtime aggregate',
     });
-    renderRequestCards(processingListEl, getSnapshotRequests(processingSnapshot), 'No processing requests.', {
-        defaultAction: 'processing',
-        sourceLabel: 'Processing snapshot',
-    });
-
-    const observedBits = [];
-    const queuedObserved = formatObservedIds(queuedSnapshot);
-    const processingObserved = formatObservedIds(processingSnapshot);
-    const completedObserved = formatObservedIds(completedSnapshot);
-    if (queuedObserved !== 'n/a') observedBits.push(`queued(${queuedObserved})`);
-    if (processingObserved !== 'n/a') observedBits.push(`processing(${processingObserved})`);
-    if (completedObserved !== 'n/a') observedBits.push(`completed(${completedObserved})`);
-    if (observedToggleEl && observedDetailsEl) {
-        const hasObservedIds = observedBits.length > 0;
-        observedToggleEl.hidden = !hasObservedIds;
-        if (!hasObservedIds && observedToggleEl.open) {
-            observedToggleEl.open = false;
-        }
-        observedDetailsEl.textContent = hasObservedIds ? observedBits.join(' | ') : 'No observed IDs';
-    }
-
-    const titleBits = [];
-    const queuedTitles = formatObservedTitles(queuedSnapshot);
-    const processingTitles = formatObservedTitles(processingSnapshot);
-    const completedTitles = formatObservedTitles(completedSnapshot);
-    if (queuedTitles !== 'n/a') titleBits.push(`queued(${queuedTitles})`);
-    if (processingTitles !== 'n/a') titleBits.push(`processing(${processingTitles})`);
-    if (completedTitles !== 'n/a') titleBits.push(`completed(${completedTitles})`);
-    if (titlesToggleEl && titlesDetailsEl) {
-        const hasObservedTitles = titleBits.length > 0;
-        titlesToggleEl.hidden = !hasObservedTitles;
-        if (!hasObservedTitles && titlesToggleEl.open) {
-            titlesToggleEl.open = false;
-        }
-        titlesDetailsEl.textContent = hasObservedTitles ? titleBits.join(' | ') : 'No observed titles';
-    }
 
     const timestamps = [queuedSnapshot?.updatedAt, processingSnapshot?.updatedAt, completedSnapshot?.updatedAt]
         .filter((value) => typeof value === 'string' && value.trim().length > 0)
