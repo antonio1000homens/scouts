@@ -991,6 +991,14 @@ body {
     font-size: 0.82rem;
 }
 
+.modal-input-help.success {
+    color: var(--success-color);
+}
+
+.modal-input-help.error {
+    color: var(--danger-color);
+}
+
 .operation-group {
     border: 1px solid #d9e2ec;
     border-radius: 6px;

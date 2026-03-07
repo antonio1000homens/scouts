@@ -35,6 +35,9 @@ let autoLambdaInvokeInFlight = false;
 let autoLambdaInvokeEnabled = true;
 let latestCompletedRequests = [];
 let latestCompletedRequestsUpdatedAt = null;
+let cachedAiConfig = null;
+let cachedAiConfigLoadedAt = 0;
+let aiConfigLoadPromise = null;
 const missingHexRetryAtByHex = new Map();
 const warnedMissingDtstartIds = new Set();
 const localVisibilityOverrides = new Map();
@@ -44,6 +47,8 @@ const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth
 const QUEUED_REQUESTS_RUNTIME_URL = '../../runtime/scoutsqueued.json';
 const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/scoutsprocessing.json';
 const COMPLETED_REQUESTS_RUNTIME_URL = '../../runtime/scoutscompleted.json';
+const AI_CONFIG_URL = '../../AI.conf';
+const AI_CONFIG_CACHE_MS = 5 * 60 * 1000;
 
 async function buildHttpError(response) {
     let details = '';
@@ -1264,6 +1269,37 @@ function showError(message) {
     container.innerHTML = `<div class="error">${message}</div>`;
 }
 
+async function loadAiConfig(force = false) {
+    const now = Date.now();
+    if (!force && cachedAiConfig && (now - cachedAiConfigLoadedAt) < AI_CONFIG_CACHE_MS) {
+        return cachedAiConfig;
+    }
+    if (!force && aiConfigLoadPromise) {
+        return aiConfigLoadPromise;
+    }
+
+    aiConfigLoadPromise = fetch(`${AI_CONFIG_URL}?ts=${Date.now()}`, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+    })
+        .then(async (response) => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return response.json();
+        })
+        .then((config) => {
+            cachedAiConfig = config && typeof config === 'object' ? config : {};
+            cachedAiConfigLoadedAt = Date.now();
+            return cachedAiConfig;
+        })
+        .finally(() => {
+            aiConfigLoadPromise = null;
+        });
+
+    return aiConfigLoadPromise;
+}
+
 // Generate a unique identifier for an event (UID or HEX)
 function generateEventUID(event, index) {
     // If event has a uid, use it
@@ -1369,6 +1405,62 @@ function getImagePrompt(event) {
         if (trimmed) return trimmed;
     }
     return null;
+}
+
+function buildManualPromptEventDetails(event) {
+    if (!event || typeof event !== 'object') {
+        return 'No additional event context provided.';
+    }
+    const details = [];
+    const title = event.title ?? event.summary ?? event.name ?? null;
+    if (hasText(title)) details.push(`Title: ${String(title).trim()}`);
+    if (hasText(event.section)) details.push(`Section: ${String(event.section).trim()}`);
+    const start = event.start?.iso ?? event.start?.raw ?? event.dtstart ?? event.start ?? null;
+    if (hasText(start)) details.push(`Start: ${String(start).trim()}`);
+    if (hasText(event.location)) details.push(`Location: ${String(event.location).trim()}`);
+    if (hasText(event.description)) details.push(`Description: ${String(event.description).trim()}`);
+    if (hasText(event.notes)) details.push(`Notes: ${String(event.notes).trim()}`);
+    if (hasText(event.source) || hasText(event.calendar)) {
+        details.push(`Source: ${String(event.source ?? event.calendar).trim()}`);
+    }
+    return details.join('\n') || 'No additional event context provided.';
+}
+
+function buildManualPromptGuidelinesText(guidelines) {
+    if (!Array.isArray(guidelines) || guidelines.length === 0) {
+        return '- Use common descriptive words only.';
+    }
+    return guidelines
+        .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+        .filter(Boolean)
+        .map((entry) => `- ${entry}`)
+        .join('\n');
+}
+
+function buildExpandedManualImagePrompt(template, event, config, shortPrompt) {
+    const effectiveTemplate = hasText(template)
+        ? String(template)
+        : 'Create an image for this Scouts event.\n\nEvent details:\n{{EVENT_DETAILS}}\n\nGuidelines:\n{{IMAGE_PROMPT_GUIDELINES}}\n\nFinal short image prompt:\n{{IMAGE_PROMPT}}';
+    const replaced = effectiveTemplate
+        .replace(/{{EVENT_DETAILS}}/g, buildManualPromptEventDetails(event))
+        .replace(/{{IMAGE_PROMPT_GUIDELINES}}/g, buildManualPromptGuidelinesText(config?.imagePromptGuidelines))
+        .replace(/{{IMAGE_TAG_GUIDELINES}}/g, buildManualPromptGuidelinesText(config?.imagePromptGuidelines))
+        .replace(/{{IMAGE_PROMPT}}/g, hasText(shortPrompt) ? String(shortPrompt).trim() : '')
+        .replace(/{{SHORT_IMAGE_PROMPT}}/g, hasText(shortPrompt) ? String(shortPrompt).trim() : '');
+    if (!hasText(shortPrompt)) {
+        return replaced;
+    }
+    if (replaced.includes(String(shortPrompt).trim())) {
+        return replaced;
+    }
+    return `${replaced}\n\nUse this final image prompt exactly:\n${String(shortPrompt).trim()}`;
+}
+
+function updateImagePromptCopyStatus(message, type = 'info') {
+    const statusElement = document.getElementById('modal-image-prompt-copy-status');
+    if (!statusElement) return;
+    statusElement.textContent = message;
+    statusElement.className = `refresh-status modal-input-help ${type}`;
 }
 
 function getMissingMetadataFields(event) {
@@ -2163,6 +2255,7 @@ function refreshModalCurrentMetadata(event) {
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
     if (imagePromptText) imagePromptText.textContent = getImagePrompt(event) || 'Not set';
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
+    updateImagePromptCopyStatus('', 'info');
 
     const imgElement = document.getElementById('modal-current-image');
     if (imgElement) {
@@ -2172,6 +2265,31 @@ function refreshModalCurrentMetadata(event) {
         } else {
             imgElement.style.display = 'none';
         }
+    }
+}
+
+async function copyFullImagePrompt() {
+    const entry = getSelectedModalEntry();
+    if (!entry) return;
+
+    const input = document.getElementById('modal-image-prompt-input');
+    const shortPrompt = hasText(input?.value) ? input.value.trim() : getImagePrompt(entry.event);
+    if (!hasText(shortPrompt)) {
+        updateImagePromptCopyStatus('No image prompt to expand.', 'error');
+        return;
+    }
+
+    updateImagePromptCopyStatus('Building full prompt...', 'loading');
+
+    try {
+        const config = await loadAiConfig();
+        const template = config?.imagePromptTemplate || config?.aiPromptTemplate || '';
+        const expandedPrompt = buildExpandedManualImagePrompt(template, entry.event, config, shortPrompt);
+        await navigator.clipboard.writeText(expandedPrompt);
+        updateImagePromptCopyStatus('Full image prompt copied to clipboard.', 'success');
+    } catch (error) {
+        console.error('Failed to copy full image prompt:', error);
+        updateImagePromptCopyStatus(`Failed to copy full prompt: ${error.message}`, 'error');
     }
 }
 
