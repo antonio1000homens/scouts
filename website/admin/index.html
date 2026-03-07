@@ -25,6 +25,26 @@
             <p class="subtitle">Manage images and AI prompts for events</p>
             <div class="admin-top-status">
                 <span id="api-ready-indicator" class="api-ready-pill api-loading" title="Checking Cloudflare admin API...">API Checking</span>
+                <label class="auto-invoke-header-label" for="auto-lambda-toggle">
+                    <input
+                        type="checkbox"
+                        id="auto-lambda-toggle"
+                        checked
+                        onchange="toggleAutoLambdaInvocation(this.checked)"
+                    >
+                    Auto invoke lambda
+                </label>
+                <input
+                    type="number"
+                    id="auto-lambda-interval-seconds"
+                    class="refresh-input auto-invoke-header-interval"
+                    min="5"
+                    step="1"
+                    value="20"
+                    onchange="updateAutoLambdaInvocationInterval(this.value)"
+                    title="Auto invoke interval in seconds"
+                >
+                <span id="auto-lambda-status" class="auto-invoke-header-status">Auto invocation: enabled</span>
             </div>
         </header>
 
@@ -46,6 +66,11 @@
                         <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('beavers-programme', 'Beavers Programme')">Beavers Programme</button>
                     </div>
                     <p id="global-refresh-status" class="refresh-status">No global refresh triggered yet.</p>
+                    <div class="section-status-group">
+                        <h4>Events Loaded</h4>
+                        <p id="events-count" class="status-text">-</p>
+                    </div>
+                    <p class="refresh-status">The events list is generated from loaded agenda items and HEX identifiers.</p>
                 </div>
                 <div class="global-card">
                     <h3>Events</h3>
@@ -67,28 +92,6 @@
                         >Refresh Agenda events</button>
                     </div>
                     <p id="refresh-status" class="refresh-status"></p>
-                    <div class="refresh-controls">
-                        <label class="refresh-status" for="auto-lambda-toggle">
-                            <input
-                                type="checkbox"
-                                id="auto-lambda-toggle"
-                                checked
-                                onchange="toggleAutoLambdaInvocation(this.checked)"
-                            >
-                            Auto invoke lambda
-                        </label>
-                        <input
-                            type="number"
-                            id="auto-lambda-interval-seconds"
-                            class="refresh-input"
-                            min="5"
-                            step="1"
-                            value="20"
-                            onchange="updateAutoLambdaInvocationInterval(this.value)"
-                            title="Auto invoke interval in seconds"
-                        >
-                    </div>
-                    <p id="auto-lambda-status" class="refresh-status">Auto invocation: enabled</p>
                     <div class="global-actions">
                         <button class="btn btn-secondary" onclick="toggleAgendaViewer()">Consult Agenda</button>
                         <button class="btn btn-secondary" onclick="toggleAiConfigViewer()">View AI.conf</button>
@@ -99,11 +102,6 @@
                             title="Reloads ../../agenda.json into the admin UI and rerenders events/tracker. No Lambda call and no queue writes."
                         >Reload Agenda From Disk</button>
                     </div>
-                    <div class="section-status-group">
-                        <h4>Events Loaded</h4>
-                        <p id="events-count" class="status-text">-</p>
-                    </div>
-                    <p class="refresh-status">The events list is generated from loaded agenda items and HEX identifiers.</p>
                 </div>
             </div>
         </section>
