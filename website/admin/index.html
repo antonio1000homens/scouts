@@ -25,6 +25,26 @@
             <p class="subtitle">Manage images and AI prompts for events</p>
             <div class="admin-top-status">
                 <span id="api-ready-indicator" class="api-ready-pill api-loading" title="Checking Cloudflare admin API...">API Checking</span>
+                <label class="auto-invoke-header-label" for="auto-lambda-toggle">
+                    <input
+                        type="checkbox"
+                        id="auto-lambda-toggle"
+                        checked
+                        onchange="toggleAutoLambdaInvocation(this.checked)"
+                    >
+                    Auto invoke lambda
+                </label>
+                <input
+                    type="number"
+                    id="auto-lambda-interval-seconds"
+                    class="refresh-input auto-invoke-header-interval"
+                    min="5"
+                    step="1"
+                    value="20"
+                    onchange="updateAutoLambdaInvocationInterval(this.value)"
+                    title="Auto invoke interval in seconds"
+                >
+                <span id="auto-lambda-status" class="auto-invoke-header-status">Auto invocation: enabled</span>
             </div>
         </header>
 
@@ -46,6 +66,11 @@
                         <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('beavers-programme', 'Beavers Programme')">Beavers Programme</button>
                     </div>
                     <p id="global-refresh-status" class="refresh-status">No global refresh triggered yet.</p>
+                    <div class="section-status-group">
+                        <h4>Events Loaded</h4>
+                        <p id="events-count" class="status-text">-</p>
+                    </div>
+                    <p class="refresh-status">The events list is generated from loaded agenda items and HEX identifiers.</p>
                 </div>
                 <div class="global-card">
                     <h3>Events</h3>
@@ -67,28 +92,6 @@
                         >Refresh Agenda events</button>
                     </div>
                     <p id="refresh-status" class="refresh-status"></p>
-                    <div class="refresh-controls">
-                        <label class="refresh-status" for="auto-lambda-toggle">
-                            <input
-                                type="checkbox"
-                                id="auto-lambda-toggle"
-                                checked
-                                onchange="toggleAutoLambdaInvocation(this.checked)"
-                            >
-                            Auto invoke lambda
-                        </label>
-                        <input
-                            type="number"
-                            id="auto-lambda-interval-seconds"
-                            class="refresh-input"
-                            min="5"
-                            step="1"
-                            value="20"
-                            onchange="updateAutoLambdaInvocationInterval(this.value)"
-                            title="Auto invoke interval in seconds"
-                        >
-                    </div>
-                    <p id="auto-lambda-status" class="refresh-status">Auto invocation: enabled</p>
                     <div class="global-actions">
                         <button class="btn btn-secondary" onclick="toggleAgendaViewer()">Consult Agenda</button>
                         <button class="btn btn-secondary" onclick="toggleAiConfigViewer()">View AI.conf</button>
@@ -99,39 +102,24 @@
                             title="Reloads ../../agenda.json into the admin UI and rerenders events/tracker. No Lambda call and no queue writes."
                         >Reload Agenda From Disk</button>
                     </div>
-                    <div class="section-status-group">
-                        <h4>Events Loaded</h4>
-                        <p id="events-count" class="status-text">-</p>
-                    </div>
-                    <p class="refresh-status">The events list is generated from loaded agenda items and HEX identifiers.</p>
                 </div>
             </div>
         </section>
 
         <div class="admin-info">
             <div class="info-card">
-                <h3>Lambda Run State</h3>
+                <h3>Backend Status</h3>
                 <p id="runtime-state-status" class="status-text">Checking runtime state...</p>
                 <p id="runtime-state-details" class="refresh-status">No lambda commands yet.</p>
-            </div>
-            <div class="info-card">
-                <h3>Runtime Requests</h3>
-                <p id="queue-depth-status" class="status-text status-info">Checking runtime request files...</p>
-                <p id="queue-depth-queued" class="refresh-status">scoutsqueued.json: unknown</p>
-                <p id="queue-depth-processing" class="refresh-status">scoutsprocessing.json: unknown</p>
-                <p id="queue-depth-completed" class="refresh-status">scoutscompleted.json: unknown</p>
-                <div id="runtime-requests-list" class="request-list">
-                    <p class="refresh-status">No active runtime requests.</p>
-                </div>
                 <p id="queue-depth-updated" class="refresh-status">Last update: n/a</p>
                 <p id="queue-depth-checked" class="refresh-status">Last checked: n/a</p>
             </div>
             <div class="info-card">
-                <h3>Completed Requests</h3>
+                <h3>Requests</h3>
                 <p id="completed-requests-summary" class="status-text status-info">Waiting for refresh...</p>
                 <p id="completed-requests-updated" class="refresh-status">Last refresh: n/a</p>
                 <div id="completed-requests-list" class="request-list">
-                    <p class="refresh-status">No completed requests yet.</p>
+                    <p class="refresh-status">No requests yet.</p>
                 </div>
             </div>
         </div>

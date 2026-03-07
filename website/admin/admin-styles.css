@@ -86,6 +86,31 @@ body {
 
 .admin-top-status {
     margin-top: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+
+.auto-invoke-header-label {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-dark);
+    cursor: pointer;
+}
+
+.auto-invoke-header-interval {
+    width: 4.5rem;
+    font-size: 0.82rem;
+    padding: 0.2rem 0.4rem;
+}
+
+.auto-invoke-header-status {
+    font-size: 0.78rem;
+    color: var(--text-light);
 }
 
 .api-ready-pill {
