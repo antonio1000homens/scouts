@@ -1995,17 +1995,22 @@ function openUploadModal(index) {
     const imagePromptText = document.getElementById('modal-image-prompt');
     const taglineText = document.getElementById('modal-tagline');
     const imagePromptInput = document.getElementById('modal-image-prompt-input');
+    const copyImagePromptButton = document.getElementById('modal-copy-image-prompt-button');
     const taglineInput = document.getElementById('modal-tagline-input');
     const imageUrlInput = document.getElementById('modal-image-url-input');
     const hideToggleButton = document.getElementById('modal-hide-toggle-button');
     const requeueButton = document.getElementById('modal-requeue-button');
     const requeueHint = document.getElementById('modal-requeue-hint');
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
-    if (imagePromptInput) imagePromptInput.value = getImagePrompt(event) || '';
+    const storedImagePrompt = getImagePrompt(event) || '';
+    if (imagePromptInput) imagePromptInput.value = storedImagePrompt;
     if (taglineInput) taglineInput.value = getAIPrompt(event) || '';
     if (imageUrlInput) imageUrlInput.value = currentImage || '';
-    if (imagePromptText) imagePromptText.textContent = getImagePrompt(event) || 'Not set';
+    if (imagePromptText) imagePromptText.textContent = storedImagePrompt || 'Not set';
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
+    if (copyImagePromptButton) {
+        copyImagePromptButton.style.display = storedImagePrompt ? 'inline-flex' : 'none';
+    }
     if (hideToggleButton) {
         const hidden = isEntryHidden(entry);
         hideToggleButton.textContent = hidden ? 'Unhide Event' : 'Hide Event';
