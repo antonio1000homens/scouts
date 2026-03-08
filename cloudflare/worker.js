@@ -124,11 +124,15 @@ async function handleContact(request, env) {
   });
 
   if (!iftttResp.ok) {
+    const responseText = await iftttResp.text();
     return new Response(
       JSON.stringify({
         ok: false,
         code: "NOTIFICATION_FAILED",
         message: "Failed to send notification. Please try again later.",
+        upstreamStatus: iftttResp.status,
+        upstreamStatusText: iftttResp.statusText,
+        upstreamBody: responseText,
       }),
       { status: 502, headers: { ...JSON_HEADERS, ...corsHeaders } },
     );
