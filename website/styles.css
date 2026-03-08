@@ -36,6 +36,12 @@ body {
     text-shadow: 0 6px 24px rgba(0, 0, 0, 0.32);
 }
 
+.home-page .about.about-detail h2 {
+    position: relative;
+    top: -4rem;
+    margin-bottom: 2.5rem;
+}
+
 @media (max-width: 900px) {
     .home-page .about.about-detail {
         min-height: 70vh;
