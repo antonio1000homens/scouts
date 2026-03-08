@@ -17,6 +17,13 @@ document.addEventListener("DOMContentLoaded", function() {
             })
             .then(data => {
                 footerPlaceholder.innerHTML = data;
+
+                if (footerPlaceholder.getAttribute('data-footer-remove-content') === 'true') {
+                    const footerContent = footerPlaceholder.querySelector('.footer-content');
+                    if (footerContent) {
+                        footerContent.remove();
+                    }
+                }
                 
                 // Update current year in footer - looks for common year element IDs
                 const yearElement = footerPlaceholder.querySelector('#current-year, #footer-year, [data-year]');
