@@ -1689,6 +1689,7 @@ function getFieldOperationConfig(field) {
     if (field === 'imagePrompt') {
         return {
             subject: 'imagePrompt',
+            requestSubject: 'imagePrompt',
             payloadKey: 'imagePrompt',
             label: 'Image Prompt',
             queueLabel: 'AI image prompt',
@@ -1696,9 +1697,10 @@ function getFieldOperationConfig(field) {
     }
     return {
         subject: 'imageUrl',
+        requestSubject: 'eventImage',
         payloadKey: 'imageUrl',
         label: 'Image URL',
-        queueLabel: 'Pixabay image URL',
+        queueLabel: 'AI image',
     };
 }
 
@@ -1894,7 +1896,7 @@ async function requestGeneratedField(field) {
 
     const payload = {
         realm: 'scouts',
-        subject: config.subject,
+        subject: config.requestSubject || config.subject,
         action: 'generate',
         hex,
     };
