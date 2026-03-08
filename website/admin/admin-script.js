@@ -1839,8 +1839,11 @@ function normaliseAppliedRequestRecord(record) {
     const timestamp = hasText(record?.timestamp)
         ? record.timestamp.trim()
         : (hasText(record?.appliedAt) ? record.appliedAt.trim() : '');
+    const realm = hasText(record?.realm) ? record.realm.trim() : '';
+    const subject = hasText(record?.subject) ? record.subject.trim() : '';
+    const action = hasText(record?.action) ? record.action.trim() : '';
     if (!requestId) return null;
-    return { requestId, timestamp };
+    return { requestId, timestamp, realm, subject, action };
 }
 
 function normaliseAppliedRequestHistory(value) {
@@ -1860,7 +1863,7 @@ function normaliseAppliedRequestHistory(value) {
 function getAppliedRequestHistory(event) {
     if (!event || typeof event !== 'object') return [];
     const metadata = getMetadataData(event);
-    return normaliseAppliedRequestHistory(metadata?.requestIds ?? event.requestIds ?? []);
+    return normaliseAppliedRequestHistory(metadata?.requests ?? metadata?.requestIds ?? event.requestIds ?? []);
 }
 
 function getAppliedRequestIdSet(event) {
@@ -1891,8 +1894,8 @@ function normaliseEventRecordForUi(event) {
         icsType: source?.icsType ?? event.icsType ?? null,
         image,
         tagline: metadata?.tagline ?? event.tagline ?? null,
-        hexId: metadata?.hexId ?? event.hexId ?? event.hex ?? null,
-        hex: metadata?.hexId ?? event.hexId ?? event.hex ?? null,
+        hexId: metadata?.hex ?? metadata?.hexId ?? event.hexId ?? event.hex ?? null,
+        hex: metadata?.hex ?? metadata?.hexId ?? event.hexId ?? event.hex ?? null,
         requestIds: getAppliedRequestHistory(event),
         approved: status?.isApproved === true || event.approved === true,
         status: status?.isHidden === true ? 'hidden' : event.status ?? null,

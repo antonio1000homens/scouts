@@ -245,8 +245,8 @@ function normaliseEventRecord(event) {
         icsType: source?.icsType ?? event.icsType,
         tagline: metadata?.tagline ?? event.tagline,
         image: metadata?.image ?? event.image,
-        hexId: metadata?.hexId ?? event.hexId ?? event.hex ?? null,
-        hex: metadata?.hexId ?? event.hexId ?? event.hex ?? null,
+        hexId: metadata?.hex ?? metadata?.hexId ?? event.hexId ?? event.hex ?? null,
+        hex: metadata?.hex ?? metadata?.hexId ?? event.hexId ?? event.hex ?? null,
         approved: status?.isApproved === true || event.approved === true,
         status: status?.isHidden === true ? 'hidden' : event.status,
     };
