@@ -357,8 +357,7 @@ function renderPastEventsCarousel(events, container) {
 
     cards.push(`
         <div class="event-card carousel-item event-card--cta" data-section="all">
-            <p class="event-card-kicker">Still curious?</p>
-            <h4>Would you like to know more?</h4>
+            <p class="event-card-kicker">Still<br>curious?</p>
             <p class="ai-text">Send us a message and we can help you find the right section, answer questions, or explain how to get involved.</p>
             <a class="event-card-cta-link" href="${CONTACT_PAGE_URL}">Go to the contact form</a>
         </div>

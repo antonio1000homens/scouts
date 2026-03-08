@@ -1773,22 +1773,38 @@ footer {
     display: flex;
     flex-direction: column;
     justify-content: center;
+    align-items: center;
     gap: 0.9rem;
     min-height: 100%;
-    background: linear-gradient(135deg, #153a5b 0%, #1f6f78 100%);
-    color: #ffffff;
-    border: none;
+    background: #ffffff;
+    color: #153a5b;
+    border: 1px solid rgba(21, 58, 91, 0.12);
     position: relative;
+    text-align: center;
 }
 
 .event-card--cta h4,
 .event-card--cta .ai-text {
-    color: #ffffff;
+    color: #153a5b;
+}
+
+.event-card--cta .event-card-kicker {
+    margin: 0;
+    font-size: clamp(2.1rem, 5vw, 3.1rem);
+    line-height: 0.92;
+    letter-spacing: -0.04em;
+    text-transform: none;
+    font-weight: 900;
+    background: linear-gradient(90deg, #7413dc 0%, #00a0e1 50%, #00a651 100%);
+    color: #5c10b3;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
 
 .event-card--cta .ai-text {
     margin-top: 0;
-    color: rgba(255, 255, 255, 0.88);
+    color: #35536b;
 }
 
 .event-card-cta-link {
@@ -1796,6 +1812,7 @@ footer {
     align-items: center;
     justify-content: center;
     width: fit-content;
+    align-self: center;
     padding: 0.85rem 1.2rem;
     border-radius: 999px;
     background: #ffffff;
@@ -1820,6 +1837,11 @@ footer {
 .past-events .event-card {
     background: #ffffff;
     border: 1px solid rgba(0,0,0,0.05);
+}
+
+.past-events .event-card--cta {
+    background: #ffffff;
+    border: 1px solid rgba(21, 58, 91, 0.12);
 }
 
 .future-events .event-card {
@@ -2203,6 +2225,11 @@ footer {
         border-radius: 12px;
         background: linear-gradient(145deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0) 70%);
         pointer-events: none;
+    }
+
+    .past-events .event-card--cta {
+        background: #ffffff;
+        border: 1px solid rgba(21, 58, 91, 0.12);
     }
 
     .badge-gallery {
