@@ -17,6 +17,7 @@ const EVENT_LOADER_SCRIPT_URL = new URL(
 );
 const LOCAL_WEBSITE_BASE_URL = new URL('..', EVENT_LOADER_SCRIPT_URL);
 const LOCAL_AGENDA_URL = new URL('../agenda.json', LOCAL_WEBSITE_BASE_URL).href;
+const CONTACT_PAGE_URL = new URL('contact/index.html', LOCAL_WEBSITE_BASE_URL).href;
 
 async function fetchAgendaJson() {
     const requestUrls = [AGENDA_URL, LOCAL_AGENDA_URL, FALLBACK_AGENDA_URL].map((url) => `${url}?ts=${Date.now()}`);
@@ -352,14 +353,23 @@ function renderPastEventsCarousel(events, container) {
                 ${aiCopy}
             </div>
         `;
-    }).join('');
+    });
+
+    cards.push(`
+        <div class="event-card carousel-item event-card--cta" data-section="all">
+            <p class="event-card-kicker">Still curious?</p>
+            <h4>Would you like to know more?</h4>
+            <p class="ai-text">Send us a message and we can help you find the right section, answer questions, or explain how to get involved.</p>
+            <a class="event-card-cta-link" href="${CONTACT_PAGE_URL}">Go to the contact form</a>
+        </div>
+    `);
 
     container.innerHTML = `
         <div class="event-carousel">
             <button class="carousel-control prev" type="button" aria-label="Previous events"><span aria-hidden="true">‹</span></button>
             <div class="carousel-viewport">
                 <div class="carousel-track">
-                    ${cards}
+                    ${cards.join('')}
                 </div>
             </div>
             <button class="carousel-control next" type="button" aria-label="Next events"><span aria-hidden="true">›</span></button>

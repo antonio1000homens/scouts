@@ -1761,6 +1761,55 @@ footer {
     margin-top: 0.35rem;
 }
 
+.event-card-kicker {
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-weight: 800;
+    opacity: 0.78;
+}
+
+.event-card--cta {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.9rem;
+    min-height: 100%;
+    background: linear-gradient(135deg, #153a5b 0%, #1f6f78 100%);
+    color: #ffffff;
+    border: none;
+    position: relative;
+}
+
+.event-card--cta h4,
+.event-card--cta .ai-text {
+    color: #ffffff;
+}
+
+.event-card--cta .ai-text {
+    margin-top: 0;
+    color: rgba(255, 255, 255, 0.88);
+}
+
+.event-card-cta-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: fit-content;
+    padding: 0.85rem 1.2rem;
+    border-radius: 999px;
+    background: #ffffff;
+    color: #153a5b;
+    font-weight: 800;
+    text-decoration: none;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+}
+
+.event-card-cta-link:hover,
+.event-card-cta-link:focus-visible {
+    transform: translateY(-1px);
+}
+
 .past-events {
     background: #f0f2f5;
     padding: 2.5rem;
