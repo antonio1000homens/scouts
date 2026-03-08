@@ -3,7 +3,8 @@ main = "worker.js"
 compatibility_date = "2026-03-03"
 
 routes = [
-  { pattern = "2ndtolworth.org.uk/admin-api/*", zone_name = "2ndtolworth.org.uk" }
+  { pattern = "2ndtolworth.org.uk/admin-api/*", zone_name = "2ndtolworth.org.uk" },
+  { pattern = "2ndtolworth.org.uk/api/contact", zone_name = "2ndtolworth.org.uk" }
 ]
 
 [vars]
