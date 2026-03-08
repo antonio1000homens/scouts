@@ -7,6 +7,137 @@ function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
 }
 
+async function verifyTurnstile(token, secretKey, remoteIp) {
+  const body = new URLSearchParams({
+    secret: secretKey,
+    response: token,
+  });
+  if (remoteIp) body.set("remoteip", remoteIp);
+
+  const resp = await fetch(
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    { method: "POST", body },
+  );
+  const data = await resp.json();
+  return data.success === true;
+}
+
+async function handleContact(request, env) {
+  const corsHeaders = {
+    "access-control-allow-origin": "https://2ndtolworth.org.uk",
+    "access-control-allow-methods": "POST,OPTIONS",
+    "access-control-allow-headers": "Content-Type",
+  };
+
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
+  if (request.method !== "POST") {
+    return new Response(
+      JSON.stringify({ ok: false, code: "METHOD_NOT_ALLOWED" }),
+      { status: 405, headers: { ...JSON_HEADERS, ...corsHeaders } },
+    );
+  }
+
+  // Validate required secrets
+  const turnstileSecret = (env.TURNSTILE_SECRET_KEY || "").trim();
+  const iftttKey = (env.IFTTT_WEBHOOK_KEY || "").trim();
+  const iftttEvent = (env.IFTTT_EVENT_NAME || "scouts_contact").trim();
+
+  if (!turnstileSecret) {
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        code: "MISSING_CONFIG",
+        message: "TURNSTILE_SECRET_KEY is not configured.",
+      }),
+      { status: 500, headers: { ...JSON_HEADERS, ...corsHeaders } },
+    );
+  }
+  if (!iftttKey) {
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        code: "MISSING_CONFIG",
+        message: "IFTTT_WEBHOOK_KEY is not configured.",
+      }),
+      { status: 500, headers: { ...JSON_HEADERS, ...corsHeaders } },
+    );
+  }
+
+  // Parse request body
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(
+      JSON.stringify({ ok: false, code: "INVALID_BODY", message: "Request body must be JSON." }),
+      { status: 400, headers: { ...JSON_HEADERS, ...corsHeaders } },
+    );
+  }
+
+  const { name, email, message, turnstileToken } = body;
+
+  // Validate required fields
+  if (!name || !email || !message || !turnstileToken) {
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        code: "MISSING_FIELDS",
+        message: "name, email, message, and turnstileToken are all required.",
+      }),
+      { status: 400, headers: { ...JSON_HEADERS, ...corsHeaders } },
+    );
+  }
+
+  // Verify Turnstile CAPTCHA
+  const remoteIp =
+    request.headers.get("cf-connecting-ip") ||
+    request.headers.get("x-forwarded-for") ||
+    "";
+  const captchaOk = await verifyTurnstile(turnstileToken, turnstileSecret, remoteIp);
+
+  if (!captchaOk) {
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        code: "CAPTCHA_FAILED",
+        message: "CAPTCHA verification failed. Please try again.",
+      }),
+      { status: 400, headers: { ...JSON_HEADERS, ...corsHeaders } },
+    );
+  }
+
+  // Forward to IFTTT webhook
+  const iftttUrl = `https://maker.ifttt.com/trigger/${encodeURIComponent(iftttEvent)}/with/key/${encodeURIComponent(iftttKey)}`;
+  const iftttResp = await fetch(iftttUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      value1: name,
+      value2: email,
+      value3: message,
+    }),
+  });
+
+  if (!iftttResp.ok) {
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        code: "NOTIFICATION_FAILED",
+        message: "Failed to send notification. Please try again later.",
+      }),
+      { status: 502, headers: { ...JSON_HEADERS, ...corsHeaders } },
+    );
+  }
+
+  return new Response(
+    JSON.stringify({ ok: true, message: "Message sent successfully." }),
+    { status: 200, headers: { ...JSON_HEADERS, ...corsHeaders } },
+  );
+}
+
 function isAccessAuthenticated(request) {
   const jwt = request.headers.get("cf-access-jwt-assertion");
   return Boolean(jwt && jwt.trim());
@@ -99,7 +230,14 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
+      if (url.pathname === "/api/contact") {
+        return handleContact(request, env);
+      }
       return handleOptions();
+    }
+
+    if (url.pathname === "/api/contact") {
+      return handleContact(request, env);
     }
 
     if (!url.pathname.startsWith("/admin-api/")) {

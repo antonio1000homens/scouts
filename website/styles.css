@@ -1386,6 +1386,31 @@ header h1 {
     transform: translateY(-2px);
 }
 
+.contact-form button:disabled {
+    background-color: #a67dd4;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.contact-status {
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.contact-status--success {
+    background-color: #e6f4ea;
+    color: #1e7e34;
+    border: 1px solid #c3e6cb;
+}
+
+.contact-status--error {
+    background-color: #fdecea;
+    color: #b71c1c;
+    border: 1px solid #f5c6cb;
+}
+
 /* Footer */
 footer {
     background-color: #1a1a1a;
