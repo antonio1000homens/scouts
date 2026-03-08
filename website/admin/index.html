@@ -14,18 +14,92 @@
 <body>
     <nav class="admin-top-nav">
         <div class="admin-top-nav-inner">
-            <a href="/index.html" class="nav-link">Website Home</a>
-            <a href="/website/admin/index.html" class="nav-link active">Admin</a>
-            <button class="btn btn-secondary nav-btn" onclick="toggleAgendaViewer()">Show Actual Agenda</button>
+            <div class="admin-top-nav-primary">
+                <a href="/index.html" class="nav-link">Website Home</a>
+                <a href="/website/admin/index.html" class="nav-link active">Admin</a>
+                <div class="viewer-menu-shell">
+                    <button
+                        id="viewer-menu-button"
+                        class="viewer-menu-button"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="viewer-menu"
+                        aria-label="Open file viewers menu"
+                        onclick="toggleViewerMenu(event)"
+                    >
+                        <span class="viewer-menu-icon" aria-hidden="true">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </span>
+                        Files
+                    </button>
+                    <div id="viewer-menu" class="viewer-menu-dropdown">
+                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showAgendaViewer()">Agenda JSON</button>
+                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showEventsJsonViewer()">events/*.json</button>
+                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showAiConfigViewer()">AI.conf</button>
+                    </div>
+                </div>
+            </div>
+            <div class="admin-top-status">
+                <span id="api-ready-indicator" class="api-ready-pill api-loading" title="Checking Cloudflare admin API...">API Checking</span>
+                <label class="auto-invoke-header-label" for="auto-lambda-toggle">
+                    <input
+                        type="checkbox"
+                        id="auto-lambda-toggle"
+                        checked
+                        onchange="toggleAutoLambdaInvocation(this.checked)"
+                    >
+                    Auto invoke lambda
+                </label>
+                <input
+                    type="number"
+                    id="auto-lambda-interval-seconds"
+                    class="refresh-input auto-invoke-header-interval"
+                    min="5"
+                    step="1"
+                    value="20"
+                    onchange="updateAutoLambdaInvocationInterval(this.value)"
+                    title="Auto invoke interval in seconds"
+                >
+                <span id="auto-lambda-status" class="auto-invoke-header-status">Auto invocation: enabled</span>
+                <label class="auto-invoke-header-label" for="agenda-auto-refresh-toggle">
+                    <input
+                        type="checkbox"
+                        id="agenda-auto-refresh-toggle"
+                        checked
+                        onchange="toggleAgendaAutoRefresh(this.checked)"
+                    >
+                    Auto refresh agenda
+                </label>
+                <span id="agenda-auto-refresh-status" class="auto-invoke-header-status">Agenda refresh: after lambda completion</span>
+                <label class="auto-invoke-header-label" for="status-polling-toggle">
+                    <input
+                        type="checkbox"
+                        id="status-polling-toggle"
+                        checked
+                        onchange="toggleStatusPolling(this.checked)"
+                    >
+                    Polling job
+                </label>
+                <input
+                    type="number"
+                    id="status-polling-interval-seconds"
+                    class="refresh-input auto-invoke-header-interval"
+                    min="5"
+                    step="1"
+                    value="5"
+                    onchange="updateStatusPollingInterval(this.value)"
+                    title="Polling job interval in seconds"
+                >
+                <span id="status-polling-status" class="auto-invoke-header-status">Polling: enabled every 5s</span>
+            </div>
         </div>
     </nav>
     <div class="admin-container">
         <header class="admin-header">
             <h1>Event Images Administration</h1>
             <p class="subtitle">Manage images and AI prompts for events</p>
-            <div class="admin-top-status">
-                <span id="api-ready-indicator" class="api-ready-pill api-loading" title="Checking Cloudflare admin API...">API Checking</span>
-            </div>
         </header>
 
         <section class="global-controls">
@@ -46,6 +120,11 @@
                         <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('beavers-programme', 'Beavers Programme')">Beavers Programme</button>
                     </div>
                     <p id="global-refresh-status" class="refresh-status">No global refresh triggered yet.</p>
+                    <div class="section-status-group">
+                        <h4>Events Loaded</h4>
+                        <p id="events-count" class="status-text">-</p>
+                    </div>
+                    <p class="refresh-status">The events list is generated from loaded agenda items and HEX identifiers.</p>
                 </div>
                 <div class="global-card">
                     <h3>Events</h3>
@@ -67,74 +146,63 @@
                         >Refresh Agenda events</button>
                     </div>
                     <p id="refresh-status" class="refresh-status"></p>
-                    <div class="refresh-controls">
-                        <label class="refresh-status" for="auto-lambda-toggle">
-                            <input
-                                type="checkbox"
-                                id="auto-lambda-toggle"
-                                checked
-                                onchange="toggleAutoLambdaInvocation(this.checked)"
-                            >
-                            Auto invoke lambda every 20s
-                        </label>
-                    </div>
-                    <p id="auto-lambda-status" class="refresh-status">Auto invocation: enabled</p>
                     <div class="global-actions">
-                        <button class="btn btn-secondary" onclick="toggleAgendaViewer()">Consult Agenda</button>
-                        <button class="btn btn-secondary" onclick="toggleEventsJsonViewer()">List events/*.json</button>
                         <button
                             class="btn btn-primary"
                             onclick="loadEvents()"
-                            title="Reloads ../../agenda.json into the admin UI and rerenders events/tracker. No Lambda call and no queue writes."
-                        >Reload Agenda From Disk</button>
+                            title="Reloads the S3 agenda.json feed into the admin UI and rerenders the current events/views. No Lambda call and no queue writes."
+                        >Reload Agenda From S3</button>
                     </div>
-                    <p class="refresh-status">The events list is generated from loaded agenda items and HEX identifiers.</p>
                 </div>
             </div>
         </section>
 
         <div class="admin-info">
             <div class="info-card">
-                <h3>Events Loaded</h3>
-                <p id="events-count" class="status-text">-</p>
-            </div>
-            <div class="info-card">
-                <h3>Lambda Run State</h3>
+                <h3>Backend Status</h3>
                 <p id="runtime-state-status" class="status-text">Checking runtime state...</p>
                 <p id="runtime-state-details" class="refresh-status">No lambda commands yet.</p>
-            </div>
-            <div class="info-card">
-                <h3>Queue Depth</h3>
-                <p id="queue-depth-status" class="status-text status-info">Checking queue snapshots...</p>
-                <p id="queue-depth-queued" class="refresh-status">scoutsRequests: unknown</p>
-                <p id="queue-depth-processing" class="refresh-status">scoutsProcessing: unknown</p>
-                <details id="queue-depth-titles-toggle" class="queue-observed-toggle" hidden>
-                    <summary>Observed Titles</summary>
-                    <p id="queue-depth-titles-details" class="refresh-status">No observed titles</p>
-                </details>
-                <details id="queue-depth-observed-toggle" class="queue-observed-toggle" hidden>
-                    <summary>Observed IDs</summary>
-                    <p id="queue-depth-observed-details" class="refresh-status">No observed IDs</p>
-                </details>
                 <p id="queue-depth-updated" class="refresh-status">Last update: n/a</p>
                 <p id="queue-depth-checked" class="refresh-status">Last checked: n/a</p>
             </div>
+            <div class="info-card">
+                <h3>Requests</h3>
+                <p id="completed-requests-summary" class="status-text status-info">Waiting for refresh...</p>
+                <p id="completed-requests-updated" class="refresh-status">Last refresh: n/a</p>
+                <div id="completed-requests-list" class="request-list">
+                    <p class="refresh-status">No requests yet.</p>
+                </div>
+            </div>
         </div>
 
-        <section id="agenda-viewer" class="agenda-viewer" style="display: none;">
-            <div class="agenda-viewer-header">
-                <h2>Actual Agenda JSON</h2>
-                <button class="btn btn-secondary" onclick="toggleAgendaViewer()">Close</button>
+        <section id="agenda-viewer" class="agenda-viewer" style="display: none;" onclick="handleViewerBackdropClick(event)">
+            <div class="agenda-viewer-panel">
+                <div class="agenda-viewer-header">
+                    <h2>Actual Agenda JSON</h2>
+                    <button class="btn btn-secondary" onclick="toggleAgendaViewer()">Close</button>
+                </div>
+                <pre id="agenda-json-content" class="agenda-json-content">Loading agenda...</pre>
             </div>
-            <pre id="agenda-json-content" class="agenda-json-content">Loading agenda...</pre>
         </section>
 
-        <section id="events-json-viewer" class="agenda-viewer" style="display: none;">
-            <div class="agenda-viewer-header">
-                <h2>events/*.json Listing</h2>
-                <button class="btn btn-secondary" onclick="toggleEventsJsonViewer()">Close</button>
+        <section id="events-json-viewer" class="agenda-viewer" style="display: none;" onclick="handleViewerBackdropClick(event)">
+            <div class="agenda-viewer-panel">
+                <div class="agenda-viewer-header">
+                    <h2>events/*.json Listing</h2>
+                    <button class="btn btn-secondary" onclick="toggleEventsJsonViewer()">Close</button>
+                </div>
+                <pre id="events-json-content" class="agenda-json-content">No event JSON entries loaded yet.</pre>
             </div>
-            <pre id="events-json-content" class="agenda-json-content">No event JSON entries loaded yet.</pre>
+        </section>
+
+        <section id="ai-config-viewer" class="agenda-viewer" style="display: none;" onclick="handleViewerBackdropClick(event)">
+            <div class="agenda-viewer-panel">
+                <div class="agenda-viewer-header">
+                    <h2>Active AI.conf</h2>
+                    <button class="btn btn-secondary" onclick="toggleAiConfigViewer()">Close</button>
+                </div>
+                <pre id="ai-config-content" class="agenda-json-content">Loading AI.conf...</pre>
+            </div>
         </section>
 
         <div class="events-layout">
@@ -162,28 +230,6 @@
             <div id="events-container" class="events-grid">
                 <p class="loading">Loading events...</p>
             </div>
-            <aside class="requests-sidebar">
-                <h3 class="sidebar-title">Requeue Tracker</h3>
-                <p id="requeue-tracker-summary" class="refresh-status">No requeue requests submitted yet.</p>
-                <p id="requeue-tracker-last-scan" class="refresh-status">Last scan: not started.</p>
-                <div class="requests-table-wrapper">
-                    <table class="requests-table">
-                        <thead>
-                            <tr>
-                                <th>Event</th>
-                                <th>Status</th>
-                                <th>Missing</th>
-                                <th>Requested</th>
-                            </tr>
-                        </thead>
-                        <tbody id="requeue-tracker-body">
-                            <tr>
-                                <td colspan="4">No requeue requests yet.</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </aside>
         </div>
 
         <!-- Upload Modal -->
@@ -201,14 +247,14 @@
                     <div class="form-group">
                         <label>Current Metadata</label>
                         <p><strong>Image URL:</strong> <span id="modal-image-url"></span></p>
-                        <p><strong>Image Prompt:</strong> <span id="modal-image-prompt"></span></p>
+                        <p><strong>Image Theme:</strong> <span id="modal-image-theme"></span></p>
                         <p><strong>Tagline:</strong> <span id="modal-tagline"></span></p>
                     </div>
 
                     <div class="operation-group">
                         <h3>Operation Types</h3>
                         <p class="refresh-status modal-input-help"><strong>Persist to HEX:</strong> immediately replaces the selected field in the HEX payload.</p>
-                        <p class="refresh-status modal-input-help"><strong>Request AI:</strong> queues AI generation for that field and updates later through the existing SQS workflow.</p>
+                        <p class="refresh-status modal-input-help"><strong>Request AI/Image:</strong> queues generation for that field and updates later through the existing SQS workflow.</p>
                         <p class="refresh-status modal-input-help"><strong>Hide/Unhide Event:</strong> toggles visibility in HEX and agenda for this event.</p>
                         <div class="field-actions">
                             <button
@@ -241,11 +287,11 @@
                     </div>
 
                     <div class="field-editor">
-                        <label for="modal-image-prompt-input">Image Prompt</label>
+                        <label for="modal-image-prompt-input">Image Theme</label>
                         <input
                             type="text"
                             id="modal-image-prompt-input"
-                            placeholder="Prompt used for image generation/search"
+                            placeholder="Short theme used to derive the image prompt"
                             autocomplete="off"
                             spellcheck="false"
                         >
@@ -253,11 +299,11 @@
                             <button
                                 class="btn btn-primary requires-api"
                                 onclick="persistCurrentField('imagePrompt')"
-                            >Persist Image Prompt</button>
+                            >Persist Image Theme</button>
                             <button
                                 class="btn btn-secondary requires-api"
                                 onclick="requestGeneratedField('imagePrompt')"
-                            >Request AI Image Prompt</button>
+                            >Request AI Image Theme</button>
                         </div>
                     </div>
 
@@ -283,10 +329,9 @@
                             >Request AI Image</button>
                             <button id="modal-requeue-button" class="btn btn-secondary requires-api" style="display:none;" onclick="requeueCurrentEvent()">Requeue Missing Fields</button>
                         </div>
-                        <p id="modal-requeue-hint" class="refresh-status"></p>
                     </div>
 
-                    <p class="note">Admin UI calls the scouts lambda only. Direct scouts2sqs invocation has been removed.</p>
+                    <p class="note">Image URL persist queued for "Meet the Police" [HTTP 200]. Queue accepted. Persist request submitted for 6d6565742074686520706f6c696365</p>
                     <p id="modal-status" class="status-text"></p>
                 </div>
                 <div class="modal-footer">

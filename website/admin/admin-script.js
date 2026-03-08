@@ -10,34 +10,68 @@ let uiCommandInFlight = false;
 let activeFilter = 'all';
 let agendaPayload = null;
 let agendaLoadInFlight = false;
-let lastAgendaScanAtIso = null;
-let requeueTrackerEntries = [];
 let latestQueuedSnapshot = null;
 let latestProcessingSnapshot = null;
+let latestCompletedSnapshot = null;
 let pinnedRuntimeDetails = null;
 const MIN_RUNTIME_DETAILS_VISIBLE_MS = 5000;
-const AGENDA_POLL_INTERVAL_MS = 15000;
-const QUEUE_DEPTH_POLL_INTERVAL_MS = 5000;
-const HEX_HYDRATION_POLL_INTERVAL_MS = 6000;
-const AUTO_LAMBDA_INVOKE_INTERVAL_MS = 20000;
+const DEFAULT_STATUS_POLL_INTERVAL_MS = 5000;
+const DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS = 20000;
 const HEX_NOT_FOUND_BACKOFF_MS = 30000;
+const COMPLETED_REQUEST_HIDE_AFTER_MS = 10 * 60 * 1000;
 const AUTO_LAMBDA_PREF_KEY = 'scouts_admin_auto_lambda_enabled';
-const MAX_TRACKED_REQUEUE_ENTRIES = 30;
+const AUTO_LAMBDA_INTERVAL_PREF_KEY = 'scouts_admin_auto_lambda_interval_ms';
+const AGENDA_AUTO_REFRESH_PREF_KEY = 'scouts_admin_agenda_auto_refresh_enabled';
+const AGENDA_URL = '/agenda.json';
+const FALLBACK_AGENDA_URL = 'https://2ndtolworth.s3.eu-west-2.amazonaws.com/agenda.json';
+const STATUS_POLL_PREF_KEY = 'scouts_admin_status_poll_enabled';
+const STATUS_POLL_INTERVAL_PREF_KEY = 'scouts_admin_status_poll_interval_seconds';
+const HEX_PREVIEW_AUTO_REFRESH_PREF_KEY = 'scouts_admin_hex_preview_auto_refresh';
+const HEX_PREVIEW_INTERVAL_PREF_KEY = 'scouts_admin_hex_preview_interval_ms';
 let runtimeDetailsLastShownAt = 0;
 let runtimeDetailsLastMessage = '';
 let runtimeDetailsLastType = 'info';
 let runtimeDetailsPending = null;
 let runtimeDetailsFlushTimer = null;
-let hexHydrationInFlight = false;
 let autoLambdaInvokeInFlight = false;
 let autoLambdaInvokeEnabled = true;
+let autoLambdaInvokeIntervalMs = DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS;
+let autoLambdaInvokeTimer = null;
+let agendaAutoRefreshEnabled = true;
+let statusPollingEnabled = true;
+let statusPollingIntervalMs = DEFAULT_STATUS_POLL_INTERVAL_MS;
+let statusPollingTimer = null;
+let statusPollingInFlight = false;
+let lastObservedRuntimeCompletedAt = '';
+let latestCompletedRequests = [];
+let latestCompletedRequestsUpdatedAt = null;
+let cachedAiConfig = null;
+let cachedAiConfigLoadedAt = 0;
+let aiConfigLoadPromise = null;
 const missingHexRetryAtByHex = new Map();
 const warnedMissingDtstartIds = new Set();
+const localVisibilityOverrides = new Map();
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
 const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
 const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
-const QUEUED_REQUESTS_RUNTIME_URL = '../../runtime/queuedrequests.json';
-const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/processingrequests.json';
+const QUEUED_REQUESTS_RUNTIME_URL = '../../runtime/scoutsqueued.json';
+const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/scoutsprocessing.json';
+const COMPLETED_REQUESTS_RUNTIME_URL = '../../runtime/scoutscompleted.json';
+const AI_CONFIG_URL = '../../AI.conf';
+const AI_CONFIG_CACHE_MS = 5 * 60 * 1000;
+const DEFAULT_IMAGE_PROMPT_TEMPLATE = 'cartoonish image of scouts in {{IMAGE_THEME}}, {{IMAGE_PROMPT_SPECIFICATIONS}}';
+const DEFAULT_IMAGE_PROMPT_SPECIFICATIONS = [
+    'landscape 4:3 composition suitable for website event cards',
+    'approximately 1600x1200',
+    'main subjects centered',
+    'safe margins for crop',
+];
+const HEX_PREVIEW_POLL_INTERVAL_MS = 5000;
+let activeHexPreviewCardIndex = null;
+let activeHexPreviewHex = null;
+let activeHexPreviewPollTimer = null;
+let hexPreviewAutoRefreshEnabled = false;
+let hexPreviewIntervalMs = HEX_PREVIEW_POLL_INTERVAL_MS;
 
 async function buildHttpError(response) {
     let details = '';
@@ -175,21 +209,42 @@ function renderAgendaViewerContent() {
     agendaContentEl.textContent = JSON.stringify(agendaPayload, null, 2);
 }
 
+function setViewerOpen(viewerId, shouldShow) {
+    const viewer = document.getElementById(viewerId);
+    if (!viewer) return null;
+    viewer.style.display = shouldShow ? 'flex' : 'none';
+    return viewer;
+}
+
+function closeAllViewers(exceptViewerId = '') {
+    ['agenda-viewer', 'events-json-viewer', 'ai-config-viewer'].forEach((viewerId) => {
+        if (viewerId === exceptViewerId) return;
+        setViewerOpen(viewerId, false);
+    });
+}
+
+function handleViewerBackdropClick(event) {
+    if (event.target !== event.currentTarget) return;
+    event.currentTarget.style.display = 'none';
+}
+
+function showAgendaViewer() {
+    closeAllViewers('agenda-viewer');
+    const viewer = setViewerOpen('agenda-viewer', true);
+    if (!viewer) return;
+    renderAgendaViewerContent();
+}
+
 function toggleAgendaViewer() {
     const viewer = document.getElementById('agenda-viewer');
-    const navButton = document.querySelector('.admin-top-nav .nav-btn');
     if (!viewer) return;
 
     const shouldShow = viewer.style.display === 'none' || viewer.style.display === '';
-    viewer.style.display = shouldShow ? 'block' : 'none';
-
-    if (navButton) {
-        navButton.textContent = shouldShow ? 'Hide Actual Agenda' : 'Show Actual Agenda';
+    if (!shouldShow) {
+        setViewerOpen('agenda-viewer', false);
+        return;
     }
-
-    if (shouldShow) {
-        renderAgendaViewerContent();
-    }
+    showAgendaViewer();
 }
 
 function renderEventsJsonViewerContent() {
@@ -228,16 +283,81 @@ function renderEventsJsonViewerContent() {
     eventsJsonContentEl.textContent = lines.join('\n');
 }
 
+function showEventsJsonViewer() {
+    closeAllViewers('events-json-viewer');
+    const viewer = setViewerOpen('events-json-viewer', true);
+    if (!viewer) return;
+    renderEventsJsonViewerContent();
+}
+
 function toggleEventsJsonViewer() {
     const viewer = document.getElementById('events-json-viewer');
     if (!viewer) return;
 
     const shouldShow = viewer.style.display === 'none' || viewer.style.display === '';
-    viewer.style.display = shouldShow ? 'block' : 'none';
-
-    if (shouldShow) {
-        renderEventsJsonViewerContent();
+    if (!shouldShow) {
+        setViewerOpen('events-json-viewer', false);
+        return;
     }
+    showEventsJsonViewer();
+}
+
+async function renderAiConfigViewerContent(force = false) {
+    const content = document.getElementById('ai-config-content');
+    if (!content) return;
+    content.textContent = 'Loading AI.conf...';
+    try {
+        const config = await loadAiConfig(force);
+        content.textContent = JSON.stringify(config ?? {}, null, 2);
+    } catch (error) {
+        content.textContent = `Failed to load AI.conf: ${error.message}`;
+    }
+}
+
+function showAiConfigViewer() {
+    closeAllViewers('ai-config-viewer');
+    const viewer = setViewerOpen('ai-config-viewer', true);
+    if (!viewer) return;
+    renderAiConfigViewerContent(true);
+}
+
+function toggleAiConfigViewer() {
+    const viewer = document.getElementById('ai-config-viewer');
+    if (!viewer) return;
+
+    const shouldShow = viewer.style.display === 'none' || viewer.style.display === '';
+    if (!shouldShow) {
+        setViewerOpen('ai-config-viewer', false);
+        return;
+    }
+    showAiConfigViewer();
+}
+
+function closeViewerMenu() {
+    const menu = document.getElementById('viewer-menu');
+    const button = document.getElementById('viewer-menu-button');
+    if (menu) {
+        menu.classList.remove('is-open');
+    }
+    if (button) {
+        button.setAttribute('aria-expanded', 'false');
+    }
+}
+
+function toggleViewerMenu(event) {
+    if (event) {
+        event.stopPropagation();
+    }
+    const menu = document.getElementById('viewer-menu');
+    const button = document.getElementById('viewer-menu-button');
+    if (!menu || !button) return;
+    const shouldShow = !menu.classList.contains('is-open');
+    if (!shouldShow) {
+        closeViewerMenu();
+        return;
+    }
+    menu.classList.add('is-open');
+    button.setAttribute('aria-expanded', 'true');
 }
 
 function updateApiAuthStatus(message, type = 'info') {
@@ -304,7 +424,289 @@ function updateGlobalRefreshStatus(message, type = 'info') {
     statusElement.className = `refresh-status ${type}`;
 }
 
+function formatCompletedRequestOperation(value) {
+    if (!hasText(value)) return 'unknown';
+    const normalized = String(value).trim();
+    if (normalized === 'processing-complete') return 'Processing Complete';
+    if (normalized === 'imagePrompt') return 'Image Theme';
+    if (normalized === 'imageUrl') return 'Image URL';
+    if (normalized === 'tagline') return 'Tagline';
+    if (normalized === 'hidden') return 'Hidden';
+    if (normalized === 'persist') return 'Persist';
+    if (normalized === 'completed') return 'Completed';
+    return normalized;
+}
+
+function formatRequestStageLabel(value, fallback = 'Unknown') {
+    if (!hasText(value)) return fallback;
+    return formatCompletedRequestOperation(value);
+}
+
+function formatRequestBadgeClass(value) {
+    if (!hasText(value)) return 'badge-unknown';
+    const normalized = String(value).trim().toLowerCase();
+    if (normalized === 'queued') return 'badge-queued';
+    if (normalized === 'processing') return 'badge-processing';
+    if (normalized === 'processing-complete') return 'badge-processing-complete';
+    if (normalized === 'completed') return 'badge-completed';
+    if (normalized === 'persist') return 'badge-persist';
+    if (normalized === 'hidden') return 'badge-hidden';
+    if (normalized === 'imageurl') return 'badge-image-url';
+    if (normalized === 'imageprompt') return 'badge-image-prompt';
+    if (normalized === 'tagline') return 'badge-tagline';
+    if (normalized === 'updated') return 'badge-updated';
+    return `badge-${normalized.replace(/[^a-z0-9]+/g, '-')}`;
+}
+
+function formatRequestBadgeLabel(value, fallback = 'Unknown') {
+    if (!hasText(value)) return fallback;
+    const normalized = String(value).trim().toLowerCase();
+    if (normalized === 'queued') return 'Q Queued';
+    if (normalized === 'processing') return 'P Processing';
+    if (normalized === 'processing-complete') return 'DONE Processing';
+    if (normalized === 'completed') return 'OK Completed';
+    if (normalized === 'persist') return 'SAVE Persist';
+    if (normalized === 'hidden') return 'OFF Hidden';
+    if (normalized === 'imageurl') return 'IMG Image URL';
+    if (normalized === 'imageprompt') return 'ART Image Theme';
+    if (normalized === 'tagline') return 'TXT Tagline';
+    if (normalized === 'updated') return 'UP Updated';
+    return formatRequestStageLabel(value, fallback);
+}
+
+function normaliseRequestCardEntry(entry, options = {}) {
+    if (!entry || typeof entry !== 'object') return null;
+
+    const title = hasText(entry?.title)
+        ? entry.title.trim()
+        : (hasText(entry?.summary)
+            ? entry.summary.trim()
+            : (hasText(entry?.hex)
+                ? entry.hex.trim()
+                : (hasText(entry?.hexId)
+                    ? entry.hexId.trim()
+                    : (hasText(entry?.requestId) ? entry.requestId.trim() : 'Unknown'))));
+    const hex = hasText(entry?.hex)
+        ? entry.hex.trim()
+        : (hasText(entry?.hexId) ? entry.hexId.trim() : '');
+    const requestId = hasText(entry?.requestId)
+        ? entry.requestId.trim()
+        : (hasText(entry?.messageId) ? entry.messageId.trim() : '');
+    const messageId = hasText(entry?.messageId) ? entry.messageId.trim() : '';
+    const rawAction = entry?.operation ?? entry?.status ?? options.defaultAction ?? '';
+    const action = formatRequestStageLabel(rawAction, formatRequestStageLabel(options.defaultAction, 'Unknown'));
+    const timestamp = hasText(entry?.processedAt)
+        ? entry.processedAt
+        : (hasText(entry?.requestTime)
+            ? entry.requestTime
+            : (hasText(entry?.completedAt)
+                ? entry.completedAt
+                : (hasText(entry?.updatedAt) ? entry.updatedAt : '')));
+    const subtitleParts = [];
+    if (hex) subtitleParts.push(`HEX ${hex}`);
+    if (hasText(options.sourceLabel)) subtitleParts.push(options.sourceLabel);
+
+    return {
+        title,
+        hex,
+        requestId,
+        messageId,
+        operation: action,
+        badgeLabel: formatRequestBadgeLabel(rawAction || options.defaultAction || '', action),
+        processedAt: timestamp,
+        badgeClass: formatRequestBadgeClass(rawAction || options.defaultAction || ''),
+        subtitle: subtitleParts.join(' • '),
+    };
+}
+
+function renderRequestCards(listEl, entries, emptyMessage, options = {}) {
+    if (!listEl) return;
+    if (!Array.isArray(entries) || entries.length === 0) {
+        listEl.innerHTML = `<p class="refresh-status">${escapeHtml(emptyMessage)}</p>`;
+        return;
+    }
+
+    listEl.innerHTML = entries.map((entry) => {
+        const normalized = normaliseRequestCardEntry(entry, options);
+        if (!normalized) return '';
+        const metadata = [
+            ['Request ID', normalized.requestId],
+            ['Message ID', normalized.messageId],
+            ['HEX', normalized.hex],
+            ['Action', normalized.operation],
+            ['Timestamp', normalized.processedAt],
+        ].filter(([, value]) => hasText(value));
+        const metadataRows = metadata.map(([label, value]) => `
+            <div class="request-card-meta-row">
+                <div class="request-card-meta-label">${escapeHtml(label)}</div>
+                <div class="request-card-meta-value">${escapeHtml(String(value).trim())}</div>
+            </div>
+        `).join('');
+        return `
+            <article class="request-card">
+                <div class="request-card-header">
+                    <div class="request-card-lead">
+                        <div class="request-card-time"${hasText(normalized.processedAt) ? ` title="${escapeHtml(normalized.processedAt)}"` : ''}>${escapeHtml(formatTrackerTimestamp(normalized.processedAt))}</div>
+                        <div class="request-card-title">${escapeHtml(normalized.title)}</div>
+                        ${normalized.subtitle ? `<div class="request-card-subtitle">${escapeHtml(normalized.subtitle)}</div>` : ''}
+                    </div>
+                    <span class="request-card-badge ${escapeHtml(normalized.badgeClass)}">${escapeHtml(normalized.badgeLabel)}</span>
+                </div>
+                <details class="request-card-meta-toggle">
+                    <summary>Request metadata</summary>
+                    <div class="request-card-meta-grid">${metadataRows}</div>
+                </details>
+            </article>
+        `;
+    }).filter(Boolean).join('');
+}
+
+function normaliseCompletedRequestEntry(entry) {
+    return normaliseRequestCardEntry(entry, {
+        defaultAction: entry?.operation ?? entry?.status ?? 'completed',
+        sourceLabel: 'Completed',
+    });
+}
+
+function deduplicateRequestsByRequestId(normalizedEntries) {
+    const byRequestId = new Map();
+    const noRequestId = [];
+    normalizedEntries.forEach((entry) => {
+        const requestId = hasText(entry?.requestId) ? entry.requestId.trim() : '';
+        if (!requestId) {
+            noRequestId.push(entry);
+            return;
+        }
+        const existing = byRequestId.get(requestId);
+        if (!existing) {
+            byRequestId.set(requestId, entry);
+            return;
+        }
+        const existingTime = existing.processedAt ? new Date(existing.processedAt).getTime() : -1;
+        const entryTime = entry.processedAt ? new Date(entry.processedAt).getTime() : -1;
+        if (entryTime >= existingTime) {
+            byRequestId.set(requestId, entry);
+        }
+    });
+    return [...byRequestId.values(), ...noRequestId];
+}
+
+function setRequests(entries, updatedAt = null) {
+    const normalized = Array.isArray(entries)
+        ? entries
+            .map((entry) => normaliseRequestCardEntry(entry, {
+                defaultAction: entry?.status ?? entry?.operation ?? '',
+            }))
+            .filter(Boolean)
+        : [];
+    latestCompletedRequests = deduplicateRequestsByRequestId(normalized);
+    latestCompletedRequestsUpdatedAt = hasText(updatedAt) ? updatedAt : null;
+    renderCompletedRequests();
+}
+
+function setCompletedRequests(entries, updatedAt = null) {
+    const normalized = Array.isArray(entries)
+        ? entries
+            .map((entry) => normaliseCompletedRequestEntry(entry))
+            .filter(Boolean)
+            .filter((entry) => !shouldHideCompletedRequestEntry(entry))
+        : [];
+    latestCompletedRequests = deduplicateRequestsByRequestId(normalized);
+    latestCompletedRequestsUpdatedAt = hasText(updatedAt) ? updatedAt : null;
+    renderCompletedRequests();
+}
+
+function shouldHideCompletedRequestEntry(entry) {
+    const requestId = hasText(entry?.requestId) ? entry.requestId.trim() : '';
+    if (!requestId) return false;
+
+    const queuedRequestIds = new Set(
+        getSnapshotRequests(latestQueuedSnapshot)
+            .map((request) => getSnapshotRequestId(request))
+            .filter(Boolean),
+    );
+    if (queuedRequestIds.has(requestId)) {
+        return false;
+    }
+
+    const processedAt = hasText(entry?.processedAt) ? entry.processedAt : '';
+    if (!processedAt) return false;
+    const parsed = new Date(processedAt);
+    if (Number.isNaN(parsed.getTime())) return false;
+
+    return (Date.now() - parsed.getTime()) > COMPLETED_REQUEST_HIDE_AFTER_MS;
+}
+
+function renderCompletedRequests() {
+    const summaryEl = document.getElementById('completed-requests-summary');
+    const updatedEl = document.getElementById('completed-requests-updated');
+    const listEl = document.getElementById('completed-requests-list');
+    if (!summaryEl || !updatedEl || !listEl) return;
+
+    const total = Array.isArray(latestCompletedRequests) ? latestCompletedRequests.length : 0;
+    summaryEl.textContent = total > 0 ? `${total} requests` : 'No active requests';
+    summaryEl.className = `status-text ${total > 0 ? 'status-success' : 'status-info'}`;
+
+    if (latestCompletedRequestsUpdatedAt) {
+        const parsed = new Date(latestCompletedRequestsUpdatedAt);
+        updatedEl.textContent = `Last refresh: ${Number.isNaN(parsed.getTime()) ? latestCompletedRequestsUpdatedAt : parsed.toLocaleString('en-GB')}`;
+    } else {
+        updatedEl.textContent = 'Last refresh: n/a';
+    }
+
+    if (total === 0) {
+        listEl.innerHTML = '<p class="refresh-status">No requests in the latest refresh.</p>';
+        return;
+    }
+
+    renderRequestCards(
+        listEl,
+        latestCompletedRequests,
+        'No requests in the latest refresh.',
+        {},
+    );
+}
+
+function updateCompletedRequestsFromResult(result) {
+    const completedRequests = Array.isArray(result?.completedRequests) ? result.completedRequests : null;
+    if (completedRequests) {
+        const updatedAt = hasText(result?.runtimeRequestFiles?.completed?.updatedAt)
+            ? result.runtimeRequestFiles.completed.updatedAt
+            : new Date().toISOString();
+        setCompletedRequests(completedRequests, updatedAt);
+    }
+}
+
+function readCookie(name) {
+    try {
+        const cookieParts = document.cookie ? document.cookie.split('; ') : [];
+        for (const part of cookieParts) {
+            const separatorIndex = part.indexOf('=');
+            const cookieName = separatorIndex >= 0 ? part.slice(0, separatorIndex) : part;
+            if (cookieName !== name) continue;
+            const cookieValue = separatorIndex >= 0 ? part.slice(separatorIndex + 1) : '';
+            return decodeURIComponent(cookieValue);
+        }
+    } catch {
+        // Ignore cookie parsing issues
+    }
+    return null;
+}
+
+function writeCookie(name, value, maxAgeDays = 365) {
+    try {
+        const maxAgeSeconds = Math.max(1, Math.round(maxAgeDays * 24 * 60 * 60));
+        document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAgeSeconds}; SameSite=Lax`;
+    } catch {
+        // Ignore cookie write errors
+    }
+}
+
 function readAutoLambdaInvocationPreference() {
+    const cookieValue = readCookie(AUTO_LAMBDA_PREF_KEY);
+    if (cookieValue !== null) {
+        return cookieValue === '1' || cookieValue.toLowerCase() === 'true';
+    }
     try {
         const stored = window.localStorage.getItem(AUTO_LAMBDA_PREF_KEY);
         if (stored === null) return true;
@@ -314,23 +716,181 @@ function readAutoLambdaInvocationPreference() {
     }
 }
 
-function persistAutoLambdaInvocationPreference(enabled) {
-    try {
-        window.localStorage.setItem(AUTO_LAMBDA_PREF_KEY, enabled ? '1' : '0');
-    } catch {
-        // Ignore storage errors (private mode/quota)
+function readAutoLambdaIntervalPreference() {
+    const cookieValue = readCookie(AUTO_LAMBDA_INTERVAL_PREF_KEY);
+    const cookieSeconds = Number(cookieValue);
+    if (Number.isFinite(cookieSeconds)) {
+        return Math.max(5, Math.round(cookieSeconds)) * 1000;
     }
+    try {
+        const stored = window.localStorage.getItem(AUTO_LAMBDA_INTERVAL_PREF_KEY);
+        const parsedSeconds = Number(stored);
+        if (!Number.isFinite(parsedSeconds)) return DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS;
+        return Math.max(5, Math.round(parsedSeconds)) * 1000;
+    } catch {
+        return DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS;
+    }
+}
+
+function readAgendaAutoRefreshPreference() {
+    const stored = readCookie(AGENDA_AUTO_REFRESH_PREF_KEY);
+    if (stored === null) return true;
+    return stored === '1' || stored.toLowerCase() === 'true';
+}
+
+function readStatusPollingPreference() {
+    const stored = readCookie(STATUS_POLL_PREF_KEY);
+    if (stored === null) return true;
+    return stored === '1' || stored.toLowerCase() === 'true';
+}
+
+function readStatusPollingIntervalPreference() {
+    const stored = readCookie(STATUS_POLL_INTERVAL_PREF_KEY);
+    const parsedSeconds = Number(stored);
+    if (!Number.isFinite(parsedSeconds)) return DEFAULT_STATUS_POLL_INTERVAL_MS;
+    return Math.max(5, Math.round(parsedSeconds)) * 1000;
+}
+
+function readHexPreviewAutoRefreshPreference() {
+    try {
+        const stored = window.localStorage.getItem(HEX_PREVIEW_AUTO_REFRESH_PREF_KEY);
+        if (stored === null) return false;
+        return stored === '1' || stored.toLowerCase() === 'true';
+    } catch {
+        return false;
+    }
+}
+
+function readHexPreviewIntervalPreference() {
+    try {
+        const stored = window.localStorage.getItem(HEX_PREVIEW_INTERVAL_PREF_KEY);
+        const parsedSeconds = Number(stored);
+        if (!Number.isFinite(parsedSeconds)) return HEX_PREVIEW_POLL_INTERVAL_MS;
+        return Math.max(5, Math.round(parsedSeconds)) * 1000;
+    } catch {
+        return HEX_PREVIEW_POLL_INTERVAL_MS;
+    }
+}
+
+function persistAutoLambdaInvocationPreference(enabled) {
+    writeCookie(AUTO_LAMBDA_PREF_KEY, enabled ? '1' : '0');
+}
+
+function persistAutoLambdaIntervalPreference(intervalMs) {
+    writeCookie(
+        AUTO_LAMBDA_INTERVAL_PREF_KEY,
+        String(Math.max(5, Math.round(intervalMs / 1000))),
+    );
+}
+
+function persistAgendaAutoRefreshPreference(enabled) {
+    writeCookie(AGENDA_AUTO_REFRESH_PREF_KEY, enabled ? '1' : '0');
+}
+
+function persistStatusPollingPreference(enabled) {
+    writeCookie(STATUS_POLL_PREF_KEY, enabled ? '1' : '0');
+}
+
+function persistStatusPollingIntervalPreference(intervalMs) {
+    writeCookie(
+        STATUS_POLL_INTERVAL_PREF_KEY,
+        String(Math.max(5, Math.round(intervalMs / 1000))),
+    );
+}
+
+function persistHexPreviewAutoRefreshPreference(enabled) {
+    try {
+        window.localStorage.setItem(HEX_PREVIEW_AUTO_REFRESH_PREF_KEY, enabled ? '1' : '0');
+    } catch {
+        // Ignore storage errors
+    }
+}
+
+function persistHexPreviewIntervalPreference(intervalMs) {
+    try {
+        window.localStorage.setItem(HEX_PREVIEW_INTERVAL_PREF_KEY, String(Math.max(5, Math.round(intervalMs / 1000))));
+    } catch {
+        // Ignore storage errors
+    }
+}
+
+function restartAutoLambdaInvokeTimer() {
+    if (autoLambdaInvokeTimer) {
+        clearInterval(autoLambdaInvokeTimer);
+        autoLambdaInvokeTimer = null;
+    }
+    if (!autoLambdaInvokeEnabled) {
+        return;
+    }
+    autoLambdaInvokeTimer = setInterval(() => {
+        invokeLambdaHeartbeat();
+    }, autoLambdaInvokeIntervalMs);
+}
+
+function runStatusPollingJob() {
+    if (statusPollingInFlight) return;
+    statusPollingInFlight = true;
+    Promise.all([
+        pollLambdaRuntimeStatus(true),
+        pollQueueDepthSnapshots(),
+    ]).finally(() => {
+        statusPollingInFlight = false;
+    });
+}
+
+function restartStatusPollingTimer() {
+    if (statusPollingTimer) {
+        clearInterval(statusPollingTimer);
+        statusPollingTimer = null;
+    }
+    if (!statusPollingEnabled) {
+        return;
+    }
+    statusPollingTimer = setInterval(() => {
+        runStatusPollingJob();
+    }, statusPollingIntervalMs);
 }
 
 function updateAutoLambdaInvocationUi() {
     const toggle = document.getElementById('auto-lambda-toggle');
+    const intervalInput = document.getElementById('auto-lambda-interval-seconds');
     const statusElement = document.getElementById('auto-lambda-status');
     if (toggle) {
         toggle.checked = autoLambdaInvokeEnabled;
     }
+    if (intervalInput) {
+        intervalInput.value = String(Math.max(5, Math.round(autoLambdaInvokeIntervalMs / 1000)));
+    }
     if (statusElement) {
-        statusElement.textContent = `Auto invocation: ${autoLambdaInvokeEnabled ? 'enabled' : 'disabled'}`;
-        statusElement.className = `refresh-status ${autoLambdaInvokeEnabled ? 'success' : 'info'}`;
+        const seconds = Math.max(5, Math.round(autoLambdaInvokeIntervalMs / 1000));
+        statusElement.textContent = `Auto invocation: ${autoLambdaInvokeEnabled ? `enabled every ${seconds}s` : 'disabled'}`;
+    }
+}
+
+function updateAgendaAutoRefreshUi() {
+    const toggle = document.getElementById('agenda-auto-refresh-toggle');
+    const statusElement = document.getElementById('agenda-auto-refresh-status');
+    if (toggle) {
+        toggle.checked = agendaAutoRefreshEnabled;
+    }
+    if (statusElement) {
+        statusElement.textContent = `Agenda refresh: ${agendaAutoRefreshEnabled ? 'after lambda completion' : 'disabled'}`;
+    }
+}
+
+function updateStatusPollingUi() {
+    const toggle = document.getElementById('status-polling-toggle');
+    const intervalInput = document.getElementById('status-polling-interval-seconds');
+    const statusElement = document.getElementById('status-polling-status');
+    if (toggle) {
+        toggle.checked = statusPollingEnabled;
+    }
+    if (intervalInput) {
+        intervalInput.value = String(Math.max(5, Math.round(statusPollingIntervalMs / 1000)));
+    }
+    if (statusElement) {
+        const seconds = Math.max(5, Math.round(statusPollingIntervalMs / 1000));
+        statusElement.textContent = `Polling: ${statusPollingEnabled ? `enabled every ${seconds}s` : 'disabled'}`;
     }
 }
 
@@ -339,11 +899,64 @@ function setAutoLambdaInvocationEnabled(enabled, persist = true) {
     if (persist) {
         persistAutoLambdaInvocationPreference(autoLambdaInvokeEnabled);
     }
+    restartAutoLambdaInvokeTimer();
     updateAutoLambdaInvocationUi();
+}
+
+function setAgendaAutoRefreshEnabled(enabled, persist = true) {
+    agendaAutoRefreshEnabled = Boolean(enabled);
+    if (persist) {
+        persistAgendaAutoRefreshPreference(agendaAutoRefreshEnabled);
+    }
+    updateAgendaAutoRefreshUi();
 }
 
 function toggleAutoLambdaInvocation(enabled) {
     setAutoLambdaInvocationEnabled(enabled, true);
+}
+
+function toggleAgendaAutoRefresh(enabled) {
+    setAgendaAutoRefreshEnabled(enabled, true);
+}
+
+function setStatusPollingEnabled(enabled, persist = true) {
+    statusPollingEnabled = Boolean(enabled);
+    if (persist) {
+        persistStatusPollingPreference(statusPollingEnabled);
+    }
+    restartStatusPollingTimer();
+    if (statusPollingEnabled) {
+        runStatusPollingJob();
+    }
+    updateStatusPollingUi();
+}
+
+function toggleStatusPolling(enabled) {
+    setStatusPollingEnabled(enabled, true);
+}
+
+function updateAutoLambdaInvocationInterval(value, persist = true) {
+    const parsedSeconds = Number(value);
+    const safeSeconds = Number.isFinite(parsedSeconds) ? Math.max(5, Math.round(parsedSeconds)) : 20;
+    autoLambdaInvokeIntervalMs = safeSeconds * 1000;
+    if (persist) {
+        persistAutoLambdaIntervalPreference(autoLambdaInvokeIntervalMs);
+    }
+    restartAutoLambdaInvokeTimer();
+    updateAutoLambdaInvocationUi();
+}
+
+function updateStatusPollingInterval(value, persist = true) {
+    const parsedSeconds = Number(value);
+    const safeSeconds = Number.isFinite(parsedSeconds)
+        ? Math.max(5, Math.round(parsedSeconds))
+        : Math.round(DEFAULT_STATUS_POLL_INTERVAL_MS / 1000);
+    statusPollingIntervalMs = safeSeconds * 1000;
+    if (persist) {
+        persistStatusPollingIntervalPreference(statusPollingIntervalMs);
+    }
+    restartStatusPollingTimer();
+    updateStatusPollingUi();
 }
 
 async function sendScoutsCommand(payload) {
@@ -377,6 +990,20 @@ function setApiActionState(enabled) {
     refreshApiActionButtons();
 }
 
+function maybeRefreshAgendaAfterRuntimeCompletion(runtime, wasRunning = false) {
+    const completedAt = hasText(runtime?.lastCompletedAt) ? runtime.lastCompletedAt.trim() : '';
+    if (!completedAt) return;
+
+    const isNewCompletion = completedAt !== lastObservedRuntimeCompletedAt;
+    lastObservedRuntimeCompletedAt = completedAt;
+
+    if (!agendaAutoRefreshEnabled) return;
+    if (runtime?.status === 'running') return;
+    if (!isNewCompletion && !wasRunning) return;
+
+    loadEvents({ silent: true });
+}
+
 function refreshApiActionButtons() {
     const enabled = apiAuthReady && !lambdaRuntimeRunning && !uiCommandInFlight;
     const actionButtons = document.querySelectorAll('.requires-api');
@@ -398,6 +1025,7 @@ async function pollLambdaRuntimeStatus(silent = false) {
     }
 
     try {
+        const wasRunning = lambdaRuntimeRunning;
         const result = await sendScoutsCommand({
             realm: 'scouts',
             subject: 'status',
@@ -406,6 +1034,7 @@ async function pollLambdaRuntimeStatus(silent = false) {
         const runtime = result?.runtime || {};
         lambdaRuntimeRunning = runtime?.status === 'running';
         refreshApiActionButtons();
+        maybeRefreshAgendaAfterRuntimeCompletion(runtime, wasRunning);
 
         if (lambdaRuntimeRunning) {
             pinnedRuntimeDetails = null;
@@ -484,7 +1113,26 @@ async function checkApiAuthStatus() {
     }
 }
 
-// Load events from agenda.json
+async function fetchAgendaJson() {
+    const requestUrls = [AGENDA_URL, FALLBACK_AGENDA_URL].map((url) => `${url}?ts=${Date.now()}`);
+    let lastError = null;
+
+    for (const url of requestUrls) {
+        try {
+            const response = await fetch(url, { cache: 'no-store' });
+            if (!response.ok) {
+                throw new Error('Failed to load agenda.json: ' + response.status);
+            }
+            return await response.json();
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    throw lastError ?? new Error('Failed to load agenda.json.');
+}
+
+// Load events from the current site's agenda feed
 async function loadEvents(options = {}) {
     const { silent = false } = options;
     if (agendaLoadInFlight) {
@@ -493,22 +1141,12 @@ async function loadEvents(options = {}) {
 
     agendaLoadInFlight = true;
     try {
-        // Try to load from parent directory (assuming admin is in website/admin/)
-        const response = await fetch(`../../agenda.json?ts=${Date.now()}`, { cache: 'no-store' });
-        
-        if (!response.ok) {
-            throw new Error('Failed to load events.json: ' + response.status);
-        }
-
-        const data = await response.json();
+        const data = await fetchAgendaJson();
         const rawEvents = Array.isArray(data.events) ? data.events : [];
         eventsData = rawEvents.map((event) => normaliseEventTaglineFields(cloneEventRecord(event)));
-        agendaPayload = {
-            ...data,
-            events: eventsData.map((event) => cloneEventRecord(event)),
-        };
+        agendaPayload = data;
         uniqueEventEntries = buildUniqueEventEntries(eventsData);
-        lastAgendaScanAtIso = new Date().toISOString();
+        applyVisibilityOverrides(uniqueEventEntries);
         console.log('[Admin] agenda.json fetched', {
             totalEvents: rawEvents.length,
             uniqueEvents: uniqueEventEntries.length,
@@ -522,15 +1160,12 @@ async function loadEvents(options = {}) {
         );
         updateSidebarUi();
         renderEvents();
-        reconcileRequeueTrackerEntries();
-        renderRequeueTracker();
         renderAgendaViewerContent();
         renderEventsJsonViewerContent();
-        hydrateEntriesFromHexFiles();
     } catch (error) {
         console.error('Error loading events:', error);
         if (!silent) {
-            showError('Failed to load events data. Please ensure agenda.json exists and is accessible.');
+            showError('Failed to load events data from agenda.json.');
         }
     } finally {
         agendaLoadInFlight = false;
@@ -538,32 +1173,217 @@ async function loadEvents(options = {}) {
 }
 
 function formatQueueSnapshotCount(snapshot) {
-    if (!snapshot || !snapshot.counts || typeof snapshot.counts !== 'object') {
+    if (!snapshot || !Array.isArray(snapshot.requests)) {
         return 'unknown';
     }
-    const visible = Number.isFinite(snapshot.counts.visible) ? snapshot.counts.visible : '?';
-    const inFlight = Number.isFinite(snapshot.counts.inFlight) ? snapshot.counts.inFlight : '?';
-    const delayed = Number.isFinite(snapshot.counts.delayed) ? snapshot.counts.delayed : '?';
-    return `visible=${visible}, in-flight=${inFlight}, delayed=${delayed}`;
+    return `requests=${snapshot.requests.length}`;
+}
+
+function getSnapshotRequests(snapshot) {
+    return Array.isArray(snapshot?.requests) ? snapshot.requests : [];
+}
+
+function getSnapshotRequestHex(request) {
+    if (hasText(request?.hexId)) return String(request.hexId).trim().toLowerCase();
+    if (hasText(request?.hex)) return String(request.hex).trim().toLowerCase();
+    return '';
+}
+
+function getSnapshotRequestId(request) {
+    if (hasText(request?.requestId)) return String(request.requestId).trim();
+    if (hasText(request?.messageId)) return String(request.messageId).trim();
+    return '';
+}
+
+function getSnapshotRequestKey(request) {
+    const requestId = getSnapshotRequestId(request);
+    if (requestId) return requestId;
+    const hex = getSnapshotRequestHex(request);
+    const title = hasText(request?.title) ? request.title.trim() : '';
+    return [hex, title].filter(Boolean).join('|');
+}
+
+function mergeRuntimeRequestEntries(primary, secondary) {
+    return {
+        ...(secondary && typeof secondary === 'object' ? secondary : {}),
+        ...(primary && typeof primary === 'object' ? primary : {}),
+        title: hasText(primary?.title) ? primary.title : secondary?.title,
+        summary: hasText(primary?.summary) ? primary.summary : secondary?.summary,
+        hex: hasText(primary?.hex) ? primary.hex : (hasText(primary?.hexId) ? primary.hexId : (secondary?.hex ?? secondary?.hexId)),
+        hexId: hasText(primary?.hexId) ? primary.hexId : (hasText(primary?.hex) ? primary.hex : (secondary?.hexId ?? secondary?.hex)),
+        requestId: hasText(primary?.requestId) ? primary.requestId : (secondary?.requestId ?? ''),
+        messageId: hasText(primary?.messageId) ? primary.messageId : (secondary?.messageId ?? ''),
+        requestTime: hasText(primary?.requestTime) ? primary.requestTime : (secondary?.requestTime ?? secondary?.processedAt ?? ''),
+        processedAt: hasText(primary?.processedAt) ? primary.processedAt : (secondary?.processedAt ?? ''),
+    };
+}
+
+function getAggregateRuntimeRequests(queuedSnapshot, processingSnapshot, completedSnapshot) {
+    const queuedMap = new Map(
+        getSnapshotRequests(queuedSnapshot)
+            .map((request) => [getSnapshotRequestKey(request), request])
+            .filter(([key]) => hasText(key)),
+    );
+    const processingMap = new Map(
+        getSnapshotRequests(processingSnapshot)
+            .map((request) => [getSnapshotRequestKey(request), request])
+            .filter(([key]) => hasText(key)),
+    );
+    const completedMap = new Map(
+        getSnapshotRequests(completedSnapshot)
+            .map((request) => [getSnapshotRequestKey(request), request])
+            .filter(([key]) => hasText(key)),
+    );
+
+    const merged = [];
+    const allKeys = new Set([
+        ...queuedMap.keys(),
+        ...processingMap.keys(),
+        ...completedMap.keys(),
+    ]);
+
+    allKeys.forEach((key) => {
+        const queued = queuedMap.get(key) || null;
+        const processing = processingMap.get(key) || null;
+        const completed = completedMap.get(key) || null;
+
+        if (processing && completed) {
+            return;
+        }
+
+        if (queued && completed && !processing) {
+            const entry = mergeRuntimeRequestEntries(completed, queued);
+            entry.status = 'processing-complete';
+            merged.push(entry);
+            return;
+        }
+
+        if (processing) {
+            const entry = mergeRuntimeRequestEntries(processing, queued);
+            entry.status = 'processing';
+            merged.push(entry);
+            return;
+        }
+
+        if (queued) {
+            const entry = mergeRuntimeRequestEntries(queued, completed);
+            entry.status = 'queued';
+            merged.push(entry);
+        }
+    });
+
+    return merged.sort((left, right) => {
+        const leftTime = new Date(left?.processedAt ?? left?.requestTime ?? 0).getTime();
+        const rightTime = new Date(right?.processedAt ?? right?.requestTime ?? 0).getTime();
+        return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+    });
+}
+
+function formatRuntimeBadgeRequestId(requestId) {
+    if (!hasText(requestId)) return '';
+    const normalized = String(requestId).trim();
+    return normalized.length > 10 ? normalized.slice(0, 8) : normalized;
+}
+
+function deriveEventRuntimeBadges(event) {
+    const hex = hasText(event?.hex) ? String(event.hex).trim().toLowerCase() : '';
+    if (!hex) return [];
+    const appliedRequestIds = getAppliedRequestIdSet(event);
+
+    const queuedRequests = getSnapshotRequests(latestQueuedSnapshot)
+        .filter((request) => getSnapshotRequestHex(request) === hex);
+    const processingRequests = getSnapshotRequests(latestProcessingSnapshot)
+        .filter((request) => getSnapshotRequestHex(request) === hex);
+    const completedPairs = new Set(
+        getSnapshotRequests(latestCompletedSnapshot)
+            .map((request) => {
+                const requestHex = getSnapshotRequestHex(request);
+                const requestId = getSnapshotRequestId(request);
+                return requestHex && requestId ? `${requestHex}|${requestId}` : '';
+            })
+            .filter(Boolean),
+    );
+
+    const badges = [];
+    const seen = new Set();
+    const pushBadge = (kind, label, requestId = '') => {
+        const key = `${kind}|${requestId}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const shortId = formatRuntimeBadgeRequestId(requestId);
+        badges.push({
+            kind,
+            label: shortId ? `${label} ${shortId}` : label,
+            requestId: hasText(requestId) ? requestId : '',
+        });
+    };
+
+    queuedRequests.forEach((request) => {
+        const requestId = getSnapshotRequestId(request);
+        if (requestId && appliedRequestIds.has(requestId)) {
+            return;
+        }
+        if (requestId && completedPairs.has(`${hex}|${requestId}`)) {
+            pushBadge('updated', 'Updated', requestId);
+            return;
+        }
+        pushBadge('queued', 'Queued', requestId);
+    });
+
+    processingRequests.forEach((request) => {
+        const requestId = getSnapshotRequestId(request);
+        if (requestId && appliedRequestIds.has(requestId)) {
+            return;
+        }
+        pushBadge('processing', 'Processing', requestId);
+    });
+
+    return badges;
+}
+
+function renderEventRuntimeBadgesMarkup(event) {
+    return deriveEventRuntimeBadges(event)
+        .map((badge) => `<span class="event-badge runtime-${badge.kind}"${badge.requestId ? ` title="Request ID: ${escapeHtml(badge.requestId)}"` : ''}>${escapeHtml(badge.label)}</span>`)
+        .join('');
+}
+
+function refreshVisibleEventRuntimeBadges() {
+    if (!Array.isArray(visibleEventEntries) || visibleEventEntries.length === 0) {
+        return;
+    }
+    visibleEventEntries.forEach((entry, index) => {
+        const card = document.querySelector(`[data-event-card-index="${index}"]`);
+        if (!card) return;
+        const runtimeBadgeContainer = card.querySelector('.event-runtime-badges');
+        if (!runtimeBadgeContainer) return;
+        runtimeBadgeContainer.innerHTML = renderEventRuntimeBadgesMarkup(entry?.event || {});
+    });
 }
 
 function formatObservedIds(snapshot) {
-    if (!snapshot || !snapshot.observed || typeof snapshot.observed !== 'object') {
+    const requests = getSnapshotRequests(snapshot);
+    if (requests.length === 0) {
         return 'n/a';
     }
-    const requestIds = Array.isArray(snapshot.observed.requestIds) ? snapshot.observed.requestIds : [];
-    const hexIds = Array.isArray(snapshot.observed.hexIds) ? snapshot.observed.hexIds : [];
-    const requestSample = requestIds.slice(0, 3);
-    const hexSample = hexIds.slice(0, 3);
-    if (requestSample.length === 0 && hexSample.length === 0) return 'n/a';
+    const requestIds = [];
+    const messageIds = [];
+    const hexIds = [];
+    requests.forEach((request) => {
+        if (hasText(request?.requestId)) requestIds.push(request.requestId.trim());
+        if (hasText(request?.messageId)) messageIds.push(request.messageId.trim());
+        if (hasText(request?.hexId)) hexIds.push(request.hexId.trim());
+    });
     const parts = [];
-    if (requestSample.length > 0) {
-        parts.push(`requestIds=${requestSample.join(', ')}`);
+    if (requestIds.length > 0) {
+        parts.push(`requestIds=${Array.from(new Set(requestIds)).slice(0, 3).join(', ')}`);
     }
-    if (hexSample.length > 0) {
-        parts.push(`hex=${hexSample.join(', ')}`);
+    if (messageIds.length > 0) {
+        parts.push(`messageIds=${Array.from(new Set(messageIds)).slice(0, 3).join(', ')}`);
     }
-    return parts.join(' | ');
+    if (hexIds.length > 0) {
+        parts.push(`hex=${Array.from(new Set(hexIds)).slice(0, 3).join(', ')}`);
+    }
+    return parts.length > 0 ? parts.join(' | ') : 'n/a';
 }
 
 function decodeHexToText(hexValue) {
@@ -594,98 +1414,43 @@ function resolveEventTitleByHex(hexValue) {
 }
 
 function formatObservedTitles(snapshot) {
-    if (!snapshot || !snapshot.observed || typeof snapshot.observed !== 'object') {
+    const requests = getSnapshotRequests(snapshot);
+    if (requests.length === 0) {
         return 'n/a';
     }
 
     const titles = new Set();
-    const links = Array.isArray(snapshot.observed.links) ? snapshot.observed.links : [];
-    links.forEach((link) => {
-        const directTitle = link?.title ?? link?.subjectTitle ?? link?.name ?? null;
+    requests.forEach((request) => {
+        const directTitle = request?.title ?? null;
         if (hasText(directTitle)) {
-            titles.add(String(directTitle).trim());
+            const statusSuffix = hasText(request?.status) ? ` [${String(request.status).trim()}]` : '';
+            titles.add(`${String(directTitle).trim()}${statusSuffix}`);
             return;
         }
-        const byHex = resolveEventTitleByHex(link?.hex);
+        const byHex = resolveEventTitleByHex(request?.hexId);
         if (hasText(byHex)) {
-            titles.add(byHex);
+            const statusSuffix = hasText(request?.status) ? ` [${String(request.status).trim()}]` : '';
+            titles.add(`${byHex}${statusSuffix}`);
         }
     });
 
-    const hexIds = Array.isArray(snapshot.observed.hexIds) ? snapshot.observed.hexIds : [];
-    hexIds.forEach((hex) => {
+    requests.forEach((request) => {
+        const hex = request?.hexId;
         const byHex = resolveEventTitleByHex(hex);
         if (hasText(byHex)) {
-            titles.add(byHex);
+            const statusSuffix = hasText(request?.status) ? ` [${String(request.status).trim()}]` : '';
+            titles.add(`${byHex}${statusSuffix}`);
             return;
         }
         const decoded = decodeHexToText(hex);
         if (hasText(decoded)) {
-            titles.add(decoded);
+            const statusSuffix = hasText(request?.status) ? ` [${String(request.status).trim()}]` : '';
+            titles.add(`${decoded}${statusSuffix}`);
         }
     });
 
     if (titles.size === 0) return 'n/a';
     return Array.from(titles).slice(0, 6).join(' | ');
-}
-
-function normaliseTrackerToken(value) {
-    return hasText(value) ? String(value).trim().toLowerCase() : '';
-}
-
-function getSnapshotObservedTokens(snapshot) {
-    if (!snapshot || !snapshot.observed || typeof snapshot.observed !== 'object') {
-        return new Set();
-    }
-    const requestIds = Array.isArray(snapshot.observed.requestIds) ? snapshot.observed.requestIds : [];
-    const hexIds = Array.isArray(snapshot.observed.hexIds) ? snapshot.observed.hexIds : [];
-    const tokens = [...requestIds, ...hexIds]
-        .map((token) => normaliseTrackerToken(token))
-        .filter(Boolean);
-    return new Set(tokens);
-}
-
-function collectTrackerTokens(tracked) {
-    const tokens = [];
-    const requestIds = Array.isArray(tracked?.requestIds) ? tracked.requestIds : [];
-    tokens.push(...requestIds);
-    tokens.push(tracked?.hex);
-    tokens.push(tracked?.uid);
-    return Array.from(new Set(tokens.map((value) => normaliseTrackerToken(value)).filter(Boolean)));
-}
-
-function hasTrackedTokenInSnapshot(tracked, snapshot) {
-    const observedTokens = getSnapshotObservedTokens(snapshot);
-    if (observedTokens.size === 0) return false;
-    return collectTrackerTokens(tracked).some((token) => observedTokens.has(token));
-}
-
-function getSnapshotStage(snapshot) {
-    if (!snapshot || typeof snapshot.stage !== 'string') return '';
-    return snapshot.stage.trim().toLowerCase();
-}
-
-function deriveQueueTrackerStatus(tracked) {
-    if (hasTrackedTokenInSnapshot(tracked, latestProcessingSnapshot)) {
-        return getSnapshotStage(latestProcessingSnapshot) === 'final' ? 'processed' : 'processing';
-    }
-    if (hasTrackedTokenInSnapshot(tracked, latestQueuedSnapshot)) return 'queued';
-    return 'submitted';
-}
-
-function extractRequestIdsFromResult(result) {
-    if (!result || typeof result !== 'object') return [];
-    const candidates = [
-        result.requestId,
-        result.requestID,
-        result.request_id,
-        result.queuedRequestId,
-        result.id,
-        result?.request?.id,
-    ];
-    if (Array.isArray(result.requestIds)) candidates.push(...result.requestIds);
-    if (Array.isArray(result.ids)) candidates.push(...result.ids);
-    return Array.from(new Set(candidates.map((value) => normaliseTrackerToken(value)).filter(Boolean)));
 }
 
 async function fetchQueueSnapshot(url) {
@@ -723,9 +1488,176 @@ async function fetchHexEventByHex(hexValue) {
         }
         const payload = await response.json();
         missingHexRetryAtByHex.delete(hex);
+        return payload && typeof payload === 'object' ? normaliseEventRecordForUi(payload) : null;
+    } catch {
+        return null;
+    }
+}
+
+async function fetchRawHexEventByHex(hexValue) {
+    const hex = hasText(hexValue) ? String(hexValue).trim().toLowerCase() : '';
+    if (!hex) return null;
+    const now = Date.now();
+    const nextRetryAt = missingHexRetryAtByHex.get(hex) || 0;
+    if (nextRetryAt > now) return null;
+    try {
+        const response = await fetch(`../../events/${hex}.json?ts=${Date.now()}`, {
+            method: 'GET',
+            credentials: 'same-origin',
+            cache: 'no-store',
+        });
+        if (!response.ok) {
+            if (response.status === 404 || response.status === 410) {
+                missingHexRetryAtByHex.set(hex, now + HEX_NOT_FOUND_BACKOFF_MS);
+            }
+            return null;
+        }
+        const payload = await response.json();
+        missingHexRetryAtByHex.delete(hex);
         return payload && typeof payload === 'object' ? payload : null;
     } catch {
         return null;
+    }
+}
+
+function getHexPreviewBody(cardIndex) {
+    return document.querySelector(`[data-event-card-index="${cardIndex}"] .event-hex-preview-body`);
+}
+
+function getHexPreviewContainer(cardIndex) {
+    return document.querySelector(`[data-event-card-index="${cardIndex}"] .event-hex-preview`);
+}
+
+function syncHexPreviewControls(cardIndex = activeHexPreviewCardIndex) {
+    if (cardIndex === null || cardIndex === undefined) return;
+    const card = document.querySelector(`[data-event-card-index="${cardIndex}"]`);
+    if (!card) return;
+    const autoToggle = card.querySelector('.event-hex-preview-auto-toggle');
+    const intervalInput = card.querySelector('.event-hex-preview-interval-input');
+    if (autoToggle) {
+        autoToggle.checked = hexPreviewAutoRefreshEnabled;
+    }
+    if (intervalInput) {
+        intervalInput.value = String(Math.max(5, Math.round(hexPreviewIntervalMs / 1000)));
+        intervalInput.disabled = !hexPreviewAutoRefreshEnabled;
+    }
+}
+
+function setHexPreviewState(cardIndex, message, state = 'info') {
+    const body = getHexPreviewBody(cardIndex);
+    if (!body) return;
+    body.textContent = message;
+    body.dataset.state = state;
+}
+
+async function refreshActiveHexPreview(cardIndex, hexValue) {
+    if (activeHexPreviewCardIndex !== cardIndex || activeHexPreviewHex !== hexValue) return;
+    setHexPreviewState(cardIndex, 'Loading HEX JSON...', 'loading');
+    const payload = await fetchRawHexEventByHex(hexValue);
+    if (activeHexPreviewCardIndex !== cardIndex || activeHexPreviewHex !== hexValue) return;
+    if (!payload) {
+        setHexPreviewState(cardIndex, 'HEX JSON not available.', 'empty');
+        return;
+    }
+    const body = getHexPreviewBody(cardIndex);
+    if (!body) return;
+    body.textContent = JSON.stringify(payload, null, 2);
+    body.dataset.state = 'loaded';
+}
+
+function scheduleActiveHexPreviewPoll(cardIndex, hexValue) {
+    if (activeHexPreviewPollTimer) {
+        clearTimeout(activeHexPreviewPollTimer);
+        activeHexPreviewPollTimer = null;
+    }
+    if (!hexPreviewAutoRefreshEnabled) return;
+    if (activeHexPreviewCardIndex !== cardIndex || activeHexPreviewHex !== hexValue) return;
+    activeHexPreviewPollTimer = setTimeout(async () => {
+        await refreshActiveHexPreview(cardIndex, hexValue);
+        scheduleActiveHexPreviewPoll(cardIndex, hexValue);
+    }, hexPreviewIntervalMs);
+}
+
+function openHexPreview(cardIndex) {
+    const entry = visibleEventEntries[cardIndex];
+    const hex = hasText(entry?.event?.hex) ? String(entry.event.hex).trim().toLowerCase() : '';
+    closeHexPreview();
+    activeHexPreviewCardIndex = cardIndex;
+    activeHexPreviewHex = hex || null;
+    const previewContainer = getHexPreviewContainer(cardIndex);
+    if (previewContainer) {
+        previewContainer.style.display = 'block';
+    }
+    syncHexPreviewControls(cardIndex);
+    if (!hex) {
+        setHexPreviewState(cardIndex, 'No HEX available for this event.', 'empty');
+        return;
+    }
+    refreshActiveHexPreview(cardIndex, hex).catch(() => {
+        if (activeHexPreviewCardIndex === cardIndex && activeHexPreviewHex === hex) {
+            setHexPreviewState(cardIndex, 'Failed to load HEX JSON.', 'error');
+        }
+    });
+    scheduleActiveHexPreviewPoll(cardIndex, hex);
+}
+
+function closeHexPreview(cardIndex = null) {
+    if (activeHexPreviewPollTimer) {
+        clearTimeout(activeHexPreviewPollTimer);
+        activeHexPreviewPollTimer = null;
+    }
+    const indexToReset = cardIndex ?? activeHexPreviewCardIndex;
+    if (indexToReset !== null && indexToReset !== undefined) {
+        const previewContainer = getHexPreviewContainer(indexToReset);
+        if (previewContainer) {
+            previewContainer.style.display = 'none';
+        }
+        setHexPreviewState(indexToReset, 'Click "View HEX" to load HEX JSON.', 'idle');
+    }
+    activeHexPreviewCardIndex = null;
+    activeHexPreviewHex = null;
+}
+
+function toggleHexPreview(cardIndex) {
+    if (activeHexPreviewCardIndex === cardIndex) {
+        closeHexPreview(cardIndex);
+        return;
+    }
+    openHexPreview(cardIndex);
+}
+
+function refreshHexPreviewNow(cardIndex) {
+    if (activeHexPreviewCardIndex !== cardIndex) {
+        openHexPreview(cardIndex);
+        return;
+    }
+    if (!activeHexPreviewHex) {
+        setHexPreviewState(cardIndex, 'No HEX available for this event.', 'empty');
+        return;
+    }
+    refreshActiveHexPreview(cardIndex, activeHexPreviewHex).catch(() => {
+        setHexPreviewState(cardIndex, 'Failed to load HEX JSON.', 'error');
+    });
+    scheduleActiveHexPreviewPoll(cardIndex, activeHexPreviewHex);
+}
+
+function setHexPreviewAutoRefresh(cardIndex, enabled) {
+    hexPreviewAutoRefreshEnabled = Boolean(enabled);
+    persistHexPreviewAutoRefreshPreference(hexPreviewAutoRefreshEnabled);
+    syncHexPreviewControls(cardIndex);
+    if (activeHexPreviewCardIndex === cardIndex && activeHexPreviewHex) {
+        scheduleActiveHexPreviewPoll(cardIndex, activeHexPreviewHex);
+    }
+}
+
+function updateHexPreviewInterval(value, cardIndex) {
+    const parsedSeconds = Number(value);
+    const safeSeconds = Number.isFinite(parsedSeconds) ? Math.max(5, Math.round(parsedSeconds)) : 5;
+    hexPreviewIntervalMs = safeSeconds * 1000;
+    persistHexPreviewIntervalPreference(hexPreviewIntervalMs);
+    syncHexPreviewControls(cardIndex);
+    if (activeHexPreviewCardIndex === cardIndex && activeHexPreviewHex) {
+        scheduleActiveHexPreviewPoll(cardIndex, activeHexPreviewHex);
     }
 }
 
@@ -739,15 +1671,15 @@ function applyHexEventMetadata(targetEvent, hexEvent) {
         changed = true;
     }
 
-    const nextPrompt = getImagePrompt(hexEvent);
+    const nextTheme = getImageTheme(hexEvent);
     const nextUrl = getImageUrl(hexEvent);
-    if (hasText(nextPrompt) || hasText(nextUrl)) {
+    if (hasText(nextTheme) || hasText(nextUrl)) {
         if (!targetEvent.image || typeof targetEvent.image !== 'object') {
             targetEvent.image = {};
             changed = true;
         }
-        if (hasText(nextPrompt) && targetEvent.image.prompt !== nextPrompt) {
-            targetEvent.image.prompt = nextPrompt;
+        if (hasText(nextTheme) && targetEvent.image.theme !== nextTheme) {
+            targetEvent.image.theme = nextTheme;
             changed = true;
         }
         if (hasText(nextUrl) && targetEvent.image.url !== nextUrl) {
@@ -756,138 +1688,98 @@ function applyHexEventMetadata(targetEvent, hexEvent) {
         }
     }
 
-    if (hasText(hexEvent.status) && targetEvent.status !== hexEvent.status) {
-        targetEvent.status = hexEvent.status;
+    const nextHidden = isHiddenEvent(hexEvent);
+    if (targetEvent.isHidden !== nextHidden) {
+        targetEvent.isHidden = nextHidden;
         changed = true;
     }
     if (hexEvent.hiddenAt && targetEvent.hiddenAt !== hexEvent.hiddenAt) {
         targetEvent.hiddenAt = hexEvent.hiddenAt;
         changed = true;
     }
+    if (hexEvent.approved === true && targetEvent.approved !== true) {
+        targetEvent.approved = true;
+        changed = true;
+    }
 
     return changed;
 }
 
-async function hydrateEntriesFromHexFiles() {
-    if (hexHydrationInFlight || !Array.isArray(uniqueEventEntries) || uniqueEventEntries.length === 0) {
-        return;
-    }
-
-    const entriesWithHex = uniqueEventEntries
-        .map((entry, index) => ({ entry, index }))
-        .filter(({ entry }) => hasText(entry?.event?.hex));
-    if (entriesWithHex.length === 0) return;
-
-    hexHydrationInFlight = true;
-    try {
-        const updates = await Promise.all(entriesWithHex.map(async ({ entry, index }) => ({
-            index,
-            hexEvent: await fetchHexEventByHex(entry.event.hex),
-        })));
-
-        let changedAny = false;
-        for (const update of updates) {
-            if (!update.hexEvent) continue;
-            const targetEntry = uniqueEventEntries[update.index];
-            if (!targetEntry?.event) continue;
-            if (applyHexEventMetadata(targetEntry.event, update.hexEvent)) {
-                changedAny = true;
-            }
-        }
-
-        if (changedAny) {
-            updateEventsCount(
-                uniqueEventEntries.length,
-                eventsData.length,
-                uniqueEventEntries.filter((entry) => isEntryHidden(entry)).length,
-                uniqueEventEntries.filter((entry) => isCompleteEvent(entry.event)).length,
-            );
-            updateSidebarUi();
-            renderEvents();
-            reconcileRequeueTrackerEntries();
-            renderRequeueTracker();
-        }
-    } finally {
-        hexHydrationInFlight = false;
-    }
-}
 
 async function pollQueueDepthSnapshots() {
-    const statusEl = document.getElementById('queue-depth-status');
-    const queuedEl = document.getElementById('queue-depth-queued');
-    const processingEl = document.getElementById('queue-depth-processing');
-    const observedToggleEl = document.getElementById('queue-depth-observed-toggle');
-    const observedDetailsEl = document.getElementById('queue-depth-observed-details');
-    const titlesToggleEl = document.getElementById('queue-depth-titles-toggle');
-    const titlesDetailsEl = document.getElementById('queue-depth-titles-details');
     const updatedEl = document.getElementById('queue-depth-updated');
     const checkedEl = document.getElementById('queue-depth-checked');
-    if (!statusEl || !queuedEl || !processingEl || !updatedEl || !checkedEl) {
+    if (!updatedEl || !checkedEl) {
         return;
     }
 
     checkedEl.textContent = `Last checked: ${new Date().toLocaleString('en-GB')}`;
 
-    const [queuedSnapshot, processingSnapshot] = await Promise.all([
+    const [queuedSnapshot, processingSnapshot, completedSnapshot] = await Promise.all([
         fetchQueueSnapshot(QUEUED_REQUESTS_RUNTIME_URL),
         fetchQueueSnapshot(PROCESSING_REQUESTS_RUNTIME_URL),
+        fetchQueueSnapshot(COMPLETED_REQUESTS_RUNTIME_URL),
     ]);
     latestQueuedSnapshot = queuedSnapshot;
     latestProcessingSnapshot = processingSnapshot;
+    latestCompletedSnapshot = completedSnapshot;
 
-    const hasAnySnapshot = Boolean(queuedSnapshot || processingSnapshot);
-    statusEl.textContent = hasAnySnapshot ? 'Queue snapshots loaded' : 'Queue snapshots unavailable';
-    statusEl.className = `status-text ${hasAnySnapshot ? 'status-success' : 'status-error'}`;
-
-    queuedEl.textContent = `scoutsRequests: ${formatQueueSnapshotCount(queuedSnapshot)}`;
-    processingEl.textContent = `scoutsProcessing: ${formatQueueSnapshotCount(processingSnapshot)}`;
-
-    const observedBits = [];
-    const queuedObserved = formatObservedIds(queuedSnapshot);
-    const processingObserved = formatObservedIds(processingSnapshot);
-    if (queuedObserved !== 'n/a') observedBits.push(`queued(${queuedObserved})`);
-    if (processingObserved !== 'n/a') observedBits.push(`processing(${processingObserved})`);
-    if (observedToggleEl && observedDetailsEl) {
-        const hasObservedIds = observedBits.length > 0;
-        observedToggleEl.hidden = !hasObservedIds;
-        if (!hasObservedIds && observedToggleEl.open) {
-            observedToggleEl.open = false;
-        }
-        observedDetailsEl.textContent = hasObservedIds ? observedBits.join(' | ') : 'No observed IDs';
-    }
-
-    const titleBits = [];
-    const queuedTitles = formatObservedTitles(queuedSnapshot);
-    const processingTitles = formatObservedTitles(processingSnapshot);
-    if (queuedTitles !== 'n/a') titleBits.push(`queued(${queuedTitles})`);
-    if (processingTitles !== 'n/a') titleBits.push(`processing(${processingTitles})`);
-    if (titlesToggleEl && titlesDetailsEl) {
-        const hasObservedTitles = titleBits.length > 0;
-        titlesToggleEl.hidden = !hasObservedTitles;
-        if (!hasObservedTitles && titlesToggleEl.open) {
-            titlesToggleEl.open = false;
-        }
-        titlesDetailsEl.textContent = hasObservedTitles ? titleBits.join(' | ') : 'No observed titles';
-    }
-
-    const timestamps = [queuedSnapshot?.updatedAt, processingSnapshot?.updatedAt]
+    const aggregateRequests = getAggregateRuntimeRequests(queuedSnapshot, processingSnapshot, completedSnapshot);
+    const timestamps = [queuedSnapshot?.updatedAt, processingSnapshot?.updatedAt, completedSnapshot?.updatedAt]
         .filter((value) => typeof value === 'string' && value.trim().length > 0)
         .map((value) => new Date(value))
         .filter((date) => !Number.isNaN(date.getTime()));
+    const mostRecentTimestamp = timestamps.length > 0
+        ? timestamps.sort((a, b) => b.getTime() - a.getTime())[0].toISOString()
+        : (completedSnapshot?.updatedAt ?? null);
+    setRequests(aggregateRequests, mostRecentTimestamp);
+
     if (timestamps.length > 0) {
-        const mostRecent = timestamps.sort((a, b) => b.getTime() - a.getTime())[0];
-        updatedEl.textContent = `Last update: ${mostRecent.toLocaleString('en-GB')}`;
+        updatedEl.textContent = `Last update: ${new Date(mostRecentTimestamp).toLocaleString('en-GB')}`;
     } else {
         updatedEl.textContent = 'Last update: n/a';
     }
 
-    reconcileRequeueTrackerEntries();
-    renderRequeueTracker();
+    if (uniqueEventEntries.length > 0) {
+        refreshVisibleEventRuntimeBadges();
+    }
 }
 
 function showError(message) {
     const container = document.getElementById('events-container');
     container.innerHTML = `<div class="error">${message}</div>`;
+}
+
+async function loadAiConfig(force = false) {
+    const now = Date.now();
+    if (!force && cachedAiConfig && (now - cachedAiConfigLoadedAt) < AI_CONFIG_CACHE_MS) {
+        return cachedAiConfig;
+    }
+    if (!force && aiConfigLoadPromise) {
+        return aiConfigLoadPromise;
+    }
+
+    aiConfigLoadPromise = fetch(`${AI_CONFIG_URL}?ts=${Date.now()}`, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+    })
+        .then(async (response) => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return response.json();
+        })
+        .then((config) => {
+            cachedAiConfig = config && typeof config === 'object' ? config : {};
+            cachedAiConfigLoadedAt = Date.now();
+            renderAiConfigViewerContent(false).catch(() => {});
+            return cachedAiConfig;
+        })
+        .finally(() => {
+            aiConfigLoadPromise = null;
+        });
+
+    return aiConfigLoadPromise;
 }
 
 // Generate a unique identifier for an event (UID or HEX)
@@ -921,12 +1813,98 @@ function normaliseImagePath(url) {
     return `/${trimmed.replace(/^(\.\/)+/, '')}`;
 }
 
+function getSourceData(event) {
+    return event?.source && typeof event.source === 'object' ? event.source : null;
+}
+
+function getMetadataData(event) {
+    return event?.metadata && typeof event.metadata === 'object' ? event.metadata : null;
+}
+
+function getStatusData(event) {
+    return event?.status && typeof event.status === 'object' ? event.status : null;
+}
+
+function normaliseAppliedRequestRecord(record) {
+    if (typeof record === 'string') {
+        const requestId = hasText(record) ? record.trim() : '';
+        return requestId ? { requestId, timestamp: '' } : null;
+    }
+    if (!record || typeof record !== 'object') return null;
+    const requestId = hasText(record?.requestId) ? record.requestId.trim() : '';
+    const timestamp = hasText(record?.timestamp)
+        ? record.timestamp.trim()
+        : (hasText(record?.appliedAt) ? record.appliedAt.trim() : '');
+    if (!requestId) return null;
+    return { requestId, timestamp };
+}
+
+function normaliseAppliedRequestHistory(value) {
+    if (!Array.isArray(value)) return [];
+    const deduped = new Map();
+    value.forEach((entry) => {
+        const normalized = normaliseAppliedRequestRecord(entry);
+        if (!normalized) return;
+        deduped.set(normalized.requestId, {
+            ...(deduped.get(normalized.requestId) || {}),
+            ...normalized,
+        });
+    });
+    return Array.from(deduped.values());
+}
+
+function getAppliedRequestHistory(event) {
+    if (!event || typeof event !== 'object') return [];
+    const metadata = getMetadataData(event);
+    return normaliseAppliedRequestHistory(metadata?.requestIds ?? event.requestIds ?? []);
+}
+
+function getAppliedRequestIdSet(event) {
+    return new Set(getAppliedRequestHistory(event).map((entry) => entry.requestId));
+}
+
+function normaliseEventRecordForUi(event) {
+    if (!event || typeof event !== 'object') return event;
+    const source = getSourceData(event);
+    const metadata = getMetadataData(event);
+    const status = getStatusData(event);
+    const image = metadata?.image ?? event.image ?? null;
+    const lastModified = event?.lastModified && typeof event.lastModified === 'object'
+        ? {
+            ...(event.lastModified.raw ? { raw: event.lastModified.raw } : {}),
+            ...(event.lastModified.ISO ? { ISO: event.lastModified.ISO } : {}),
+        }
+        : event?.lastModified ?? null;
+
+    return {
+        ...event,
+        uid: source?.uid ?? event.uid ?? null,
+        title: source?.title ?? event.title ?? source?.summary ?? event.summary ?? null,
+        summary: source?.summary ?? event.summary ?? source?.title ?? event.title ?? null,
+        location: source?.location ?? event.location ?? null,
+        dtstart: source?.dtstart ?? event.dtstart ?? null,
+        section: source?.section ?? event.section ?? null,
+        icsType: source?.icsType ?? event.icsType ?? null,
+        image,
+        tagline: metadata?.tagline ?? event.tagline ?? null,
+        hexId: metadata?.hexId ?? event.hexId ?? event.hex ?? null,
+        hex: metadata?.hexId ?? event.hexId ?? event.hex ?? null,
+        requestIds: getAppliedRequestHistory(event),
+        approved: status?.isApproved === true || event.approved === true,
+        status: status?.isHidden === true ? 'hidden' : event.status ?? null,
+        hiddenAt: event.hiddenAt ?? null,
+        lastModified,
+    };
+}
+
 function getImageUrl(event) {
+    const metadata = getMetadataData(event);
     let candidate = null;
-    if (event.image) {
-        if (typeof event.image === 'string') candidate = event.image;
-        else if (event.image.url) candidate = event.image.url;
-        else if (event.image.src) candidate = event.image.src;
+    const image = metadata?.image ?? event?.image;
+    if (image) {
+        if (typeof image === 'string') candidate = image;
+        else if (image.url) candidate = image.url;
+        else if (image.src) candidate = image.src;
     } else if (event.imageUrl) {
         candidate = event.imageUrl;
     }
@@ -936,13 +1914,57 @@ function getImageUrl(event) {
 // Get tagline from event data (prioritise `tagline`, fallback to legacy `AI`)
 function getAIPrompt(event) {
     if (!event || typeof event !== 'object') return null;
-    return event.tagline || event.AI || event.ai || event.aiPrompt || null;
+    const metadata = getMetadataData(event);
+    return metadata?.tagline || event.tagline || event.AI || event.ai || event.aiPrompt || null;
+}
+
+function getImageTheme(event) {
+    if (!event || typeof event !== 'object') return null;
+    const image = getMetadataData(event)?.image ?? event.image;
+    if (image && typeof image === 'object' && typeof image.theme === 'string') {
+        const trimmed = image.theme.trim();
+        if (trimmed) return trimmed;
+    }
+    return null;
+}
+
+function buildImagePromptSpecificationsText(specifications) {
+    if (!Array.isArray(specifications) || specifications.length === 0) {
+        return DEFAULT_IMAGE_PROMPT_SPECIFICATIONS.join(', ');
+    }
+    const cleaned = specifications
+        .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+        .filter(Boolean);
+    return cleaned.length > 0 ? cleaned.join(', ') : DEFAULT_IMAGE_PROMPT_SPECIFICATIONS.join(', ');
+}
+
+function buildDerivedImagePromptFromTheme(theme, config = cachedAiConfig) {
+    if (!hasText(theme)) return null;
+    const normalizedTheme = String(theme).trim();
+    const lower = normalizedTheme.toLowerCase();
+    if (lower.startsWith('create a cartoonish image of ') || lower.startsWith('cartoonish image of scouts')) {
+        return normalizedTheme;
+    }
+    const template = hasText(config?.imagePromptTemplate)
+        ? String(config.imagePromptTemplate)
+        : DEFAULT_IMAGE_PROMPT_TEMPLATE;
+    const specifications = buildImagePromptSpecificationsText(config?.imagePromptSpecifications);
+    return template
+        .replace(/{{IMAGE_THEME}}/g, normalizedTheme)
+        .replace(/{{IMAGE_PROMPT_SPECIFICATIONS}}/g, specifications)
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 function getImagePrompt(event) {
     if (!event || typeof event !== 'object') return null;
-    if (event.image && typeof event.image === 'object' && typeof event.image.prompt === 'string') {
-        const trimmed = event.image.prompt.trim();
+    const derivedFromTheme = buildDerivedImagePromptFromTheme(getImageTheme(event));
+    if (hasText(derivedFromTheme)) {
+        return derivedFromTheme;
+    }
+    const image = getMetadataData(event)?.image ?? event.image;
+    if (image && typeof image === 'object' && typeof image.prompt === 'string') {
+        const trimmed = image.prompt.trim();
         if (trimmed) return trimmed;
     }
     return null;
@@ -953,8 +1975,8 @@ function getMissingMetadataFields(event) {
     if (!hasText(getAIPrompt(event))) {
         missing.push('Tagline');
     }
-    if (!hasText(getImagePrompt(event))) {
-        missing.push('Image Prompt');
+    if (!hasText(getImageTheme(event))) {
+        missing.push('Image Theme');
     }
     if (!hasText(getImageUrl(event))) {
         missing.push('Image URL');
@@ -964,7 +1986,8 @@ function getMissingMetadataFields(event) {
 
 // Determine event section/type
 function getEventSection(event) {
-    const type = (event.icsType || event.section || '').toLowerCase();
+    const source = getSourceData(event);
+    const type = (source?.icsType || source?.section || event.icsType || event.section || '').toLowerCase();
     if (type.includes('beaver')) return 'beavers';
     if (type.includes('cub')) return 'cubs';
     if (type.includes('scout')) return 'scouts';
@@ -977,14 +2000,23 @@ function hasText(value) {
 
 function normaliseEventTaglineFields(event) {
     if (!event || typeof event !== 'object') return event;
-    const derivedTagline = getAIPrompt(event);
+    const normalised = normaliseEventRecordForUi(event);
+    const derivedTagline = getAIPrompt(normalised);
     if (hasText(derivedTagline) && !hasText(event.tagline)) {
-        event.tagline = derivedTagline.trim();
+        normalised.tagline = derivedTagline.trim();
     }
-    return event;
+    return normalised;
 }
 
 function isHiddenEvent(event) {
+    const structuredStatus = getStatusData(event);
+    if (structuredStatus?.isHidden === true) return true;
+    if (typeof event?.isHidden === 'boolean') return event.isHidden;
+    if (typeof event?.isHidden === 'string') {
+        const normalized = event.isHidden.trim().toLowerCase();
+        if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+        if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+    }
     const statusValue = typeof event?.status === 'string' ? event.status.trim().toLowerCase() : '';
     return statusValue === 'hidden' || Boolean(event?.hiddenAt);
 }
@@ -1047,11 +2079,11 @@ function mergeEventMetadata(targetEvent, sourceEvent) {
         targetEvent.image.url = getImageUrl(sourceEvent);
     }
 
-    if (!hasText(getImagePrompt(targetEvent)) && hasText(getImagePrompt(sourceEvent))) {
+    if (!hasText(getImageTheme(targetEvent)) && hasText(getImageTheme(sourceEvent))) {
         if (!targetEvent.image || typeof targetEvent.image !== 'object') {
             targetEvent.image = {};
         }
-        targetEvent.image.prompt = getImagePrompt(sourceEvent);
+        targetEvent.image.theme = getImageTheme(sourceEvent);
     }
 }
 
@@ -1121,146 +2153,10 @@ function formatTrackerTimestamp(isoString) {
     return parsed.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-function normaliseMissingFields(fields) {
-    if (!Array.isArray(fields)) return [];
-    return Array.from(new Set(fields.map((field) => String(field || '').trim()).filter(Boolean)));
-}
-
-function isSameMissingSet(a, b) {
-    const left = normaliseMissingFields(a).sort();
-    const right = normaliseMissingFields(b).sort();
-    if (left.length !== right.length) return false;
-    return left.every((value, index) => value === right[index]);
-}
-
-function findMatchingEntryForTracker(tracked) {
-    const trackedHex = hasText(tracked?.hex) ? tracked.hex.trim().toLowerCase() : '';
-    if (trackedHex) {
-        const byHex = uniqueEventEntries.find((entry) => {
-            const entryHex = hasText(entry?.event?.hex) ? entry.event.hex.trim().toLowerCase() : '';
-            return entryHex === trackedHex;
-        });
-        if (byHex) return byHex;
-    }
-
-    const trackedUid = hasText(tracked?.uid) ? tracked.uid.trim() : '';
-    if (trackedUid) {
-        const byUid = uniqueEventEntries.find((entry) => hasText(entry?.event?.uid) && entry.event.uid.trim() === trackedUid);
-        if (byUid) return byUid;
-    }
-
-    if (hasText(tracked?.entryKey)) {
-        return uniqueEventEntries.find((entry) => entry?.key === tracked.entryKey) || null;
-    }
-
-    return null;
-}
-
-function recordRequeueTrackerEntry(entry, requestedMissing, commandResult = null) {
-    const event = entry?.event || {};
-    const normalizedRequested = normaliseMissingFields(requestedMissing);
-    const requestIds = extractRequestIdsFromResult(commandResult);
-    const tracked = {
-        id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-        title: event.summary || event.title || 'Untitled Event',
-        hex: hasText(event?.hex) ? event.hex.trim().toLowerCase() : '',
-        uid: hasText(event?.uid) ? event.uid.trim() : '',
-        requestIds,
-        entryKey: hasText(entry?.key) ? entry.key : '',
-        requestedAt: new Date().toISOString(),
-        lastCheckedAt: null,
-        requestedMissing: normalizedRequested,
-        latestMissing: normalizedRequested,
-        status: 'submitted',
-    };
-
-    requeueTrackerEntries = [tracked, ...requeueTrackerEntries].slice(0, MAX_TRACKED_REQUEUE_ENTRIES);
-    renderRequeueTracker();
-}
-
-function reconcileRequeueTrackerEntries() {
-    if (!Array.isArray(requeueTrackerEntries) || requeueTrackerEntries.length === 0) {
-        return;
-    }
-
-    const checkedAtIso = new Date().toISOString();
-    requeueTrackerEntries = requeueTrackerEntries.map((tracked) => {
-        const match = findMatchingEntryForTracker(tracked);
-        const next = { ...tracked, lastCheckedAt: checkedAtIso };
-        const queueStatus = deriveQueueTrackerStatus(next);
-
-        if (queueStatus === 'processed' || queueStatus === 'processing' || queueStatus === 'queued') {
-            next.status = queueStatus;
-            return next;
-        }
-
-        if (!match || !match.event) {
-            if (next.status !== 'resolved') {
-                next.status = 'not-found';
-            }
-            return next;
-        }
-
-        next.title = match.event.summary || match.event.title || next.title;
-        const currentMissing = getMissingMetadataFields(match.event);
-        next.latestMissing = currentMissing;
-
-        if (currentMissing.length === 0) {
-            next.status = 'resolved';
-            return next;
-        }
-
-        next.status = 'submitted';
-        return next;
-    });
-}
-
-function statusLabelForTracker(status) {
-    if (status === 'submitted') return 'Submitted';
-    if (status === 'processing') return 'Processing';
-    if (status === 'processed') return 'Processed';
-    if (status === 'resolved') return 'Resolved';
-    if (status === 'updated') return 'Updated';
-    if (status === 'not-found') return 'Not Found';
-    return 'Queued';
-}
-
-function renderRequeueTracker() {
-    const tbody = document.getElementById('requeue-tracker-body');
-    const summary = document.getElementById('requeue-tracker-summary');
-    const lastScan = document.getElementById('requeue-tracker-last-scan');
-    if (!tbody || !summary || !lastScan) return;
-
-    const total = requeueTrackerEntries.length;
-    const resolved = requeueTrackerEntries.filter((entry) => entry.status === 'resolved').length;
-    const open = total - resolved;
-    summary.textContent = total === 0
-        ? 'No requeue requests submitted yet.'
-        : `${open} open, ${resolved} resolved (${total} tracked).`;
-    lastScan.textContent = lastAgendaScanAtIso
-        ? `Last scan: ${new Date(lastAgendaScanAtIso).toLocaleTimeString('en-GB')}`
-        : 'Last scan: not started.';
-
-    if (total === 0) {
-        tbody.innerHTML = '<tr><td colspan="4">No requeue requests yet.</td></tr>';
-        return;
-    }
-
-    tbody.innerHTML = requeueTrackerEntries.map((entry) => {
-        const statusClass = `request-status-pill request-status-${entry.status}`;
-        const missingText = entry.latestMissing.length > 0 ? entry.latestMissing.join(', ') : 'None';
-        return `<tr>
-            <td>${escapeHtml(entry.title)}</td>
-            <td><span class="${statusClass}">${escapeHtml(statusLabelForTracker(entry.status))}</span></td>
-            <td>${escapeHtml(missingText)}</td>
-            <td>${escapeHtml(formatTrackerTimestamp(entry.requestedAt))}</td>
-        </tr>`;
-    }).join('');
-}
-
 // Render all events
 function renderEvents() {
     const container = document.getElementById('events-container');
+    closeHexPreview();
     
     if (uniqueEventEntries.length === 0) {
         console.warn('[Admin] No events found after loading');
@@ -1299,7 +2195,7 @@ function renderEvents() {
         const event = entry.event;
         const imageUrl = getImageUrl(event);
         const tagline = getAIPrompt(event);
-        const imagePrompt = getImagePrompt(event);
+        const imageTheme = getImageTheme(event);
         const missingFields = getMissingMetadataFields(event);
         const requeueEligible = missingFields.length > 0;
         const section = getEventSection(event);
@@ -1320,14 +2216,20 @@ function renderEvents() {
         }
         
         return `
-            <div class="event-card">
+            <div
+                class="event-card"
+                data-event-card-index="${index}"
+            >
                 <div class="event-image-container">
                     ${imageUrl 
                         ? `<img src="${imageUrl}" alt="${title}" class="event-image" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22300%22%3E%3Crect fill=%22%23ddd%22 width=%22400%22 height=%22300%22/%3E%3Ctext fill=%22%23999%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22%3ENo Image%3C/text%3E%3C/svg%3E'">` 
                         : `<div class="event-image" style="background: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #999;">No Image</div>`
                     }
-                    <span class="event-badge ${section}">${section}</span>
-                    ${isHidden ? `<span class="event-badge hidden">Hidden</span>` : ''}
+                    <div class="event-badge-stack">
+                        <span class="event-badge ${section}">${section}</span>
+                        ${isHidden ? `<span class="event-badge hidden">Hidden</span>` : ''}
+                        <div class="event-runtime-badges">${renderEventRuntimeBadgesMarkup(event)}</div>
+                    </div>
                 </div>
                 <div class="event-details">
                     <h3 class="event-title">${title}</h3>
@@ -1342,10 +2244,13 @@ function renderEvents() {
                         </div>
                     </details>
 
-                    ${imagePrompt ? `
+                    ${imageTheme ? `
                         <div class="ai-prompt">
-                            <div class="ai-prompt-label">Image Prompt</div>
-                            <div class="ai-prompt-text">${imagePrompt}</div>
+                            <div class="ai-prompt-label">Image Theme</div>
+                            <div class="ai-prompt-text">${imageTheme}</div>
+                        </div>
+                        <div class="ai-prompt-actions">
+                            <button class="btn btn-secondary" onclick="copyImagePromptForEvent(${index})">Copy Image Prompt</button>
                         </div>
                     ` : ''}
 
@@ -1358,7 +2263,7 @@ function renderEvents() {
 
                     ${requeueEligible
                         ? `<p class="requeue-hint">Missing: ${missingFields.join(', ')}</p>`
-                        : `<p class="requeue-hint requeue-ready">Metadata complete. No requeue needed.</p>`
+                        : ''
                     }
                     <div class="event-actions">
                         <button 
@@ -1375,6 +2280,32 @@ function renderEvents() {
                             ? `<button class="btn btn-secondary requires-api" onclick="requeueEvent(${index})">Requeue Missing Fields</button>`
                             : ''
                         }
+                        <button class="btn btn-secondary" onclick="toggleHexPreview(${index})">HEX</button>
+                    </div>
+                    <div class="event-hex-preview" style="display:none;">
+                        <div class="event-hex-preview-header">
+                            <div class="event-hex-preview-label">HEX JSON</div>
+                            <div class="event-hex-preview-controls">
+                                <button class="btn btn-secondary" onclick="refreshHexPreviewNow(${index})">Refresh</button>
+                                <label class="event-hex-preview-auto">
+                                    <input
+                                        type="checkbox"
+                                        class="event-hex-preview-auto-toggle"
+                                        onchange="setHexPreviewAutoRefresh(${index}, this.checked)"
+                                    >
+                                    Auto
+                                </label>
+                                <input
+                                    type="number"
+                                    class="event-hex-preview-interval-input"
+                                    min="5"
+                                    step="1"
+                                    value="${Math.max(5, Math.round(hexPreviewIntervalMs / 1000))}"
+                                    onchange="updateHexPreviewInterval(this.value, ${index})"
+                                >
+                            </div>
+                        </div>
+                        <pre class="event-hex-preview-body" data-state="idle">Click "View HEX" to load HEX JSON.</pre>
                     </div>
                 </div>
             </div>
@@ -1437,6 +2368,7 @@ function openUploadModal(index) {
     document.getElementById('modal-event-hex').textContent = event.hex || 'Missing HEX';
     
     const currentImage = getImageUrl(event);
+    const currentImageTheme = getImageTheme(event);
     const imgElement = document.getElementById('modal-current-image');
     if (currentImage) {
         imgElement.src = currentImage;
@@ -1446,36 +2378,25 @@ function openUploadModal(index) {
     }
     
     const imageUrlText = document.getElementById('modal-image-url');
-    const imagePromptText = document.getElementById('modal-image-prompt');
+    const imageThemeText = document.getElementById('modal-image-theme');
     const taglineText = document.getElementById('modal-tagline');
     const imagePromptInput = document.getElementById('modal-image-prompt-input');
     const taglineInput = document.getElementById('modal-tagline-input');
     const imageUrlInput = document.getElementById('modal-image-url-input');
     const hideToggleButton = document.getElementById('modal-hide-toggle-button');
     const requeueButton = document.getElementById('modal-requeue-button');
-    const requeueHint = document.getElementById('modal-requeue-hint');
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
-    if (imagePromptInput) imagePromptInput.value = getImagePrompt(event) || '';
+    if (imagePromptInput) imagePromptInput.value = currentImageTheme || '';
     if (taglineInput) taglineInput.value = getAIPrompt(event) || '';
     if (imageUrlInput) imageUrlInput.value = currentImage || '';
-    if (imagePromptText) imagePromptText.textContent = getImagePrompt(event) || 'Not set';
+    if (imageThemeText) imageThemeText.textContent = currentImageTheme || 'Not set';
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
     if (hideToggleButton) {
         const hidden = isEntryHidden(entry);
         hideToggleButton.textContent = hidden ? 'Unhide Event' : 'Hide Event';
     }
-    const missing = getMissingMetadataFields(event);
     if (requeueButton) {
-        requeueButton.style.display = missing.length > 0 ? 'inline-block' : 'none';
-    }
-    if (requeueHint) {
-        if (missing.length > 0) {
-            requeueHint.textContent = `Eligible for requeue: missing ${missing.join(', ')}.`;
-            requeueHint.className = 'refresh-status error';
-        } else {
-            requeueHint.textContent = 'Metadata complete. Requeue is not required.';
-            requeueHint.className = 'refresh-status success';
-        }
+        requeueButton.style.display = 'inline-block';
     }
     document.getElementById('modal-status').textContent = '';
     document.getElementById('modal-status').className = 'status-text';
@@ -1549,6 +2470,7 @@ async function refreshLambda() {
         const result = await sendScoutsCommand(payload);
         await pollLambdaRuntimeStatus(true);
         await pollQueueDepthSnapshots();
+        updateCompletedRequestsFromResult(result);
 
         const resultText = result?.status || result?.message || 'ok';
         const modifiedEvents = Array.isArray(result?.modifiedEvents) ? result.modifiedEvents : [];
@@ -1613,6 +2535,7 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
         const result = await sendScoutsCommand(payload);
         await pollLambdaRuntimeStatus(true);
         await pollQueueDepthSnapshots();
+        updateCompletedRequestsFromResult(result);
         const count = Number.isFinite(result?.eventsCount) ? result.eventsCount : null;
         const generatedAt = result?.generatedAt ? new Date(result.generatedAt).toLocaleString('en-GB') : null;
         const countSuffix = count !== null ? ` (${count} events in agenda)` : '';
@@ -1644,9 +2567,10 @@ async function invokeLambdaHeartbeat() {
             subject: 'agenda',
             action: 0,
         };
-        await sendScoutsCommand(payload);
+        const result = await sendScoutsCommand(payload);
         await pollLambdaRuntimeStatus(true);
         await pollQueueDepthSnapshots();
+        updateCompletedRequestsFromResult(result);
     } catch (error) {
         console.warn('[Admin] Auto lambda heartbeat failed:', error?.message || error);
     } finally {
@@ -1691,8 +2615,8 @@ function getFieldOperationConfig(field) {
             subject: 'imagePrompt',
             requestSubject: 'imagePrompt',
             payloadKey: 'imagePrompt',
-            label: 'Image Prompt',
-            queueLabel: 'AI image prompt',
+            label: 'Image Theme',
+            queueLabel: 'AI image theme',
         };
     }
     return {
@@ -1719,11 +2643,12 @@ function getModalFieldValue(field) {
 
 function refreshModalCurrentMetadata(event) {
     const imageUrlText = document.getElementById('modal-image-url');
-    const imagePromptText = document.getElementById('modal-image-prompt');
+    const imageThemeText = document.getElementById('modal-image-theme');
     const taglineText = document.getElementById('modal-tagline');
     const currentImage = getImageUrl(event);
+    const currentImageTheme = getImageTheme(event);
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
-    if (imagePromptText) imagePromptText.textContent = getImagePrompt(event) || 'Not set';
+    if (imageThemeText) imageThemeText.textContent = currentImageTheme || 'Not set';
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
 
     const imgElement = document.getElementById('modal-current-image');
@@ -1734,6 +2659,25 @@ function refreshModalCurrentMetadata(event) {
         } else {
             imgElement.style.display = 'none';
         }
+    }
+}
+
+async function copyImagePromptForEvent(eventIndex) {
+    const entry = visibleEventEntries[eventIndex];
+    if (!entry) return;
+
+    const imagePrompt = getImagePrompt(entry.event);
+    if (!hasText(imagePrompt)) {
+        pinRuntimeDetails('No image prompt available to copy.', 'error');
+        return;
+    }
+
+    try {
+        await navigator.clipboard.writeText(imagePrompt);
+        pinRuntimeDetails('Image generation prompt copied to clipboard.', 'success');
+    } catch (error) {
+        console.error('Failed to copy image generation prompt:', error);
+        pinRuntimeDetails(`Failed to copy image prompt: ${error.message}`, 'error');
     }
 }
 
@@ -1750,7 +2694,8 @@ function applyLocalPersistedField(entry, field, value) {
         event.image = {};
     }
     if (field === 'imagePrompt') {
-        event.image.prompt = value;
+        event.image.theme = value;
+        if (Object.prototype.hasOwnProperty.call(event.image, 'prompt')) delete event.image.prompt;
         return;
     }
     event.image.url = value;
@@ -1759,15 +2704,69 @@ function applyLocalPersistedField(entry, field, value) {
 function applyLocalHiddenState(entry, hiddenAtIso, hidden = true) {
     if (!entry || !entry.event) return;
     const event = entry.event;
+    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
     if (hidden) {
-        event.status = 'hidden';
+        event.isHidden = true;
         event.hiddenAt = hasText(hiddenAtIso) ? hiddenAtIso : new Date().toISOString();
         entry.allHidden = true;
+        if (hex) {
+            localVisibilityOverrides.set(hex, {
+                hidden: true,
+                hiddenAt: event.hiddenAt,
+            });
+        }
     } else {
-        event.status = null;
+        event.isHidden = false;
         event.hiddenAt = null;
         entry.allHidden = false;
+        if (hex) {
+            localVisibilityOverrides.set(hex, {
+                hidden: false,
+                hiddenAt: null,
+            });
+        }
     }
+}
+
+function applyVisibilityOverrides(entries, options = {}) {
+    if (!Array.isArray(entries) || localVisibilityOverrides.size === 0) return false;
+    const allowConfirm = options.allowConfirm !== false;
+    let changed = false;
+
+    entries.forEach((entry) => {
+        const event = entry?.event;
+        const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+        if (!hex) return;
+
+        const override = localVisibilityOverrides.get(hex);
+        if (!override) return;
+
+        const backendStateMatches = isHiddenEvent(event) === Boolean(override.hidden);
+        if (allowConfirm && backendStateMatches) {
+            localVisibilityOverrides.delete(hex);
+            return;
+        }
+
+        if (override.hidden) {
+            const nextHiddenAt = hasText(override.hiddenAt) ? override.hiddenAt : (event.hiddenAt || new Date().toISOString());
+            if (event.isHidden !== true || event.hiddenAt !== nextHiddenAt || entry.allHidden !== true) {
+                event.isHidden = true;
+                event.hiddenAt = nextHiddenAt;
+                entry.allHidden = true;
+                changed = true;
+            }
+            return;
+        }
+
+        if (event.isHidden !== false || event.hiddenAt !== null || entry.allHidden !== false) {
+            event.isHidden = false;
+            event.hiddenAt = null;
+            entry.allHidden = false;
+            changed = true;
+        }
+    });
+
+    return changed;
 }
 
 async function persistCurrentField(field) {
@@ -1814,7 +2813,8 @@ async function persistCurrentField(field) {
     if (field === 'tagline') {
         subject.tagline = nextValue;
     } else if (field === 'imagePrompt') {
-        subject.image.prompt = nextValue;
+        subject.image.theme = nextValue;
+        if (Object.prototype.hasOwnProperty.call(subject.image, 'prompt')) delete subject.image.prompt;
     } else {
         subject.image.url = nextValue;
     }
@@ -1854,7 +2854,6 @@ async function persistCurrentField(field) {
 
         await pollQueueDepthSnapshots();
         setTimeout(() => {
-            hydrateEntriesFromHexFiles();
             loadEvents({ silent: true });
         }, 1500);
     } catch (error) {
@@ -1899,6 +2898,7 @@ async function requestGeneratedField(field) {
         subject: config.requestSubject || config.subject,
         action: 'generate',
         hex,
+        event: JSON.parse(JSON.stringify(event || {})),
     };
 
     updateModalStatus(`Queueing ${config.queueLabel} for "${eventLabel}"...`, 'loading');
@@ -1917,7 +2917,6 @@ async function requestGeneratedField(field) {
         pinRuntimeDetails(successMessage, 'success');
         await pollQueueDepthSnapshots();
         setTimeout(() => {
-            hydrateEntriesFromHexFiles();
             loadEvents({ silent: true });
         }, 2000);
     } catch (error) {
@@ -1976,7 +2975,7 @@ async function hideEvent(eventIndex, fromModal = false) {
     const hiddenAtIso = new Date().toISOString();
     const subject = JSON.parse(JSON.stringify(event || {}));
     subject.hex = hex;
-    subject.status = 'hidden';
+    subject.isHidden = true;
     subject.hiddenAt = hiddenAtIso;
     if (!subject.image || typeof subject.image !== 'object') {
         subject.image = {};
@@ -2023,9 +3022,6 @@ async function hideEvent(eventIndex, fromModal = false) {
         const successMessage = `Hide request queued for "${eventLabel}".${backendMessage}`;
         if (fromModal) updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
-        setTimeout(() => {
-            loadEvents({ silent: true });
-        }, 1800);
     } catch (error) {
         console.error('Error hiding event:', error);
         const failureMessage = `Failed to hide event: ${error.message}`;
@@ -2081,7 +3077,7 @@ async function unhideEvent(eventIndex, fromModal = false) {
 
     const subject = JSON.parse(JSON.stringify(event || {}));
     subject.hex = hex;
-    subject.status = null;
+    subject.isHidden = false;
     subject.hiddenAt = null;
     if (!subject.image || typeof subject.image !== 'object') {
         subject.image = {};
@@ -2127,9 +3123,6 @@ async function unhideEvent(eventIndex, fromModal = false) {
         const successMessage = `Unhide request queued for "${eventLabel}".${backendMessage}`;
         if (fromModal) updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
-        setTimeout(() => {
-            loadEvents({ silent: true });
-        }, 1800);
     } catch (error) {
         console.error('Error unhiding event:', error);
         const failureMessage = `Failed to unhide event: ${error.message}`;
@@ -2210,7 +3203,8 @@ async function requeueEvent(eventIndex, fromModal = false) {
     if (Object.prototype.hasOwnProperty.call(subject, 'AI')) delete subject.AI;
     if (Object.prototype.hasOwnProperty.call(subject, 'ai')) delete subject.ai;
     if (!hasText(subject.tagline)) subject.tagline = null;
-    if (!hasText(subject.image.prompt)) subject.image.prompt = null;
+    if (!hasText(subject.image.theme)) subject.image.theme = null;
+    if (Object.prototype.hasOwnProperty.call(subject.image, 'prompt')) delete subject.image.prompt;
     if (!hasText(subject.image.url)) subject.image.url = null;
 
     const payload = {
@@ -2236,7 +3230,6 @@ async function requeueEvent(eventIndex, fromModal = false) {
         const successMessage = `Requeue request submitted for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
         if (fromModal) updateModalStatus(successMessage, 'success');
         else pinRuntimeDetails(successMessage, 'success');
-        recordRequeueTrackerEntry(entry, missing, result);
     } catch (error) {
         console.error('Error requeueing event:', error);
         const failureMessage = `Failed to requeue event: ${error.message}`;
@@ -2259,25 +3252,32 @@ function requeueCurrentEvent() {
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
+    autoLambdaInvokeIntervalMs = readAutoLambdaIntervalPreference();
+    statusPollingIntervalMs = readStatusPollingIntervalPreference();
+    hexPreviewAutoRefreshEnabled = readHexPreviewAutoRefreshPreference();
+    hexPreviewIntervalMs = readHexPreviewIntervalPreference();
     setAutoLambdaInvocationEnabled(readAutoLambdaInvocationPreference(), false);
+    setAgendaAutoRefreshEnabled(readAgendaAutoRefreshPreference(), false);
+    setStatusPollingEnabled(readStatusPollingPreference(), false);
+    persistAutoLambdaInvocationPreference(autoLambdaInvokeEnabled);
+    persistAutoLambdaIntervalPreference(autoLambdaInvokeIntervalMs);
+    persistStatusPollingPreference(statusPollingEnabled);
+    persistStatusPollingIntervalPreference(statusPollingIntervalMs);
     setApiActionState(false);
     checkApiAuthStatus();
     loadEvents();
-    renderRequeueTracker();
-    pollQueueDepthSnapshots();
-    setInterval(() => {
-        pollLambdaRuntimeStatus(true);
-    }, 5000);
-    setInterval(() => {
-        pollQueueDepthSnapshots();
-    }, QUEUE_DEPTH_POLL_INTERVAL_MS);
-    setInterval(() => {
-        hydrateEntriesFromHexFiles();
-    }, HEX_HYDRATION_POLL_INTERVAL_MS);
-    setInterval(() => {
-        loadEvents({ silent: true });
-    }, AGENDA_POLL_INTERVAL_MS);
-    setInterval(() => {
-        invokeLambdaHeartbeat();
-    }, AUTO_LAMBDA_INVOKE_INTERVAL_MS);
+    renderCompletedRequests();
+    document.addEventListener('click', (event) => {
+        const menu = document.getElementById('viewer-menu');
+        const button = document.getElementById('viewer-menu-button');
+        if (!menu || !button) return;
+        const target = event.target;
+        if (menu.contains(target) || button.contains(target)) return;
+        closeViewerMenu();
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        closeViewerMenu();
+        closeAllViewers();
+    });
 });
