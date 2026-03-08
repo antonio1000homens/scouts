@@ -8,4 +8,4 @@ REQUIRE_CF_ACCESS="false"
 TURNSTILE_SECRET_KEY="replace-with-turnstile-secret-key"
 IFTTT_WEBHOOK_KEY="replace-with-ifttt-webhook-key"
 # The IFTTT event name configured in your Webhooks applet (default: scouts_contact)
-IFTTT_EVENT_NAME="scouts_contact"
+IFTTT_EVENT_NAME="scoutsContactForm"
