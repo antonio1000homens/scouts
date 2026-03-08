@@ -23,6 +23,7 @@ const AUTO_LAMBDA_PREF_KEY = 'scouts_admin_auto_lambda_enabled';
 const AUTO_LAMBDA_INTERVAL_PREF_KEY = 'scouts_admin_auto_lambda_interval_ms';
 const AGENDA_AUTO_REFRESH_PREF_KEY = 'scouts_admin_agenda_auto_refresh_enabled';
 const AGENDA_URL = '/agenda.json';
+const FALLBACK_AGENDA_URL = 'https://2ndtolworth.s3.eu-west-2.amazonaws.com/agenda.json';
 const STATUS_POLL_PREF_KEY = 'scouts_admin_status_poll_enabled';
 const STATUS_POLL_INTERVAL_PREF_KEY = 'scouts_admin_status_poll_interval_seconds';
 const HEX_PREVIEW_AUTO_REFRESH_PREF_KEY = 'scouts_admin_hex_preview_auto_refresh';
@@ -1112,6 +1113,25 @@ async function checkApiAuthStatus() {
     }
 }
 
+async function fetchAgendaJson() {
+    const requestUrls = [AGENDA_URL, FALLBACK_AGENDA_URL].map((url) => `${url}?ts=${Date.now()}`);
+    let lastError = null;
+
+    for (const url of requestUrls) {
+        try {
+            const response = await fetch(url, { cache: 'no-store' });
+            if (!response.ok) {
+                throw new Error('Failed to load agenda.json: ' + response.status);
+            }
+            return await response.json();
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    throw lastError ?? new Error('Failed to load agenda.json.');
+}
+
 // Load events from the current site's agenda feed
 async function loadEvents(options = {}) {
     const { silent = false } = options;
@@ -1121,13 +1141,7 @@ async function loadEvents(options = {}) {
 
     agendaLoadInFlight = true;
     try {
-        const response = await fetch(`${AGENDA_URL}?ts=${Date.now()}`, { cache: 'no-store' });
-        
-        if (!response.ok) {
-            throw new Error('Failed to load agenda.json: ' + response.status);
-        }
-
-        const data = await response.json();
+        const data = await fetchAgendaJson();
         const rawEvents = Array.isArray(data.events) ? data.events : [];
         eventsData = rawEvents.map((event) => normaliseEventTaglineFields(cloneEventRecord(event)));
         agendaPayload = data;

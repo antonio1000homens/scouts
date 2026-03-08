@@ -8,7 +8,34 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
 });
 
 const AGENDA_URL = '/agenda.json';
+const FALLBACK_AGENDA_URL = 'https://2ndtolworth.s3.eu-west-2.amazonaws.com/agenda.json';
 const LEGACY_S3_SITE_ORIGIN = 'http://2ndtolworth.s3-website.eu-west-2.amazonaws.com';
+const S3_OBJECT_BASE_URL = 'https://2ndtolworth.s3.eu-west-2.amazonaws.com';
+const EVENT_LOADER_SCRIPT_URL = new URL(
+    document.currentScript?.src || 'event-loader.js',
+    window.location.href
+);
+const LOCAL_WEBSITE_BASE_URL = new URL('..', EVENT_LOADER_SCRIPT_URL);
+const LOCAL_AGENDA_URL = new URL('../agenda.json', LOCAL_WEBSITE_BASE_URL).href;
+
+async function fetchAgendaJson() {
+    const requestUrls = [AGENDA_URL, LOCAL_AGENDA_URL, FALLBACK_AGENDA_URL].map((url) => `${url}?ts=${Date.now()}`);
+    let lastError = null;
+
+    for (const url of requestUrls) {
+        try {
+            const response = await fetch(url, { cache: 'no-store' });
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return await response.json();
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    throw lastError ?? new Error('Failed to load agenda.json');
+}
 
 function normaliseDateString(value) {
     if (!value) return null;
@@ -73,16 +100,19 @@ function normaliseImagePath(url) {
     const trimmed = url.trim();
     if (!trimmed) return trimmed;
     if (trimmed.startsWith(`${LEGACY_S3_SITE_ORIGIN}/website/`)) {
-        return trimmed.slice(LEGACY_S3_SITE_ORIGIN.length);
+        return `${S3_OBJECT_BASE_URL}${trimmed.slice(LEGACY_S3_SITE_ORIGIN.length)}`;
     }
     if (/^https?:\/\//i.test(trimmed)) {
         return trimmed;
     }
     if (trimmed.startsWith('/website/eventImages/')) {
-        return trimmed;
+        return `${S3_OBJECT_BASE_URL}${trimmed}`;
     }
     if (trimmed.startsWith('website/eventImages/')) {
-        return `/${trimmed}`;
+        return `${S3_OBJECT_BASE_URL}/${trimmed}`;
+    }
+    if (!trimmed.includes('/') && /\.(?:avif|gif|jpe?g|png|webp)$/i.test(trimmed)) {
+        return `${S3_OBJECT_BASE_URL}/website/eventImages/${trimmed}`;
     }
     if (trimmed.startsWith('/')) {
         return trimmed;
@@ -400,15 +430,7 @@ function renderPastEventsCarousel(events, container) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    fetch(`${AGENDA_URL}?ts=${Date.now()}`, {
-        cache: 'no-store',
-    })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            return response.json();
-        })
+    fetchAgendaJson()
         .then(data => {
             const events = (data.events || [])
                 .filter(event => {
