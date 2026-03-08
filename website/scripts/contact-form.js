@@ -37,6 +37,10 @@
         submitBtn.textContent = loading ? 'Sending…' : 'Send Message';
     }
 
+    function isValidEmail(value) {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+    }
+
     form.addEventListener('submit', function (event) {
         event.preventDefault();
 
@@ -48,6 +52,11 @@
 
         if (!name || !email || !message) {
             showStatus('Please fill in all fields.', true);
+            return;
+        }
+
+        if (!isValidEmail(email)) {
+            showStatus('Please enter a valid email address.', true);
             return;
         }
 
