@@ -565,6 +565,20 @@ header h1 {
     margin: 0 0 1.5rem;
 }
 
+.about-feature-image {
+    max-width: 900px;
+    margin: 0 auto 2.5rem;
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.14);
+}
+
+.about-feature-image img {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
 .about-buttons {
     display: flex;
     gap: 1rem;
