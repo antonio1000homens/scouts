@@ -1822,6 +1822,10 @@ function getMetadataData(event) {
 }
 
 function getStatusData(event) {
+    const metadata = getMetadataData(event);
+    if (metadata?.status && typeof metadata.status === 'object') {
+        return metadata.status;
+    }
     return event?.status && typeof event.status === 'object' ? event.status : null;
 }
 
