@@ -169,7 +169,7 @@ function isNewEvent(event) {
 
 function getFilterCounts() {
     return {
-        new: uniqueEventEntries.filter((entry) => isNewEvent(entry.event)).length,
+        new: uniqueEventEntries.filter((entry) => !isEntryHidden(entry) && isNewEvent(entry.event)).length,
         all: uniqueEventEntries.length,
         missing: uniqueEventEntries.filter((entry) => {
             const missingCount = getMissingMetadataFields(entry.event).length;
@@ -2174,7 +2174,7 @@ function renderEvents() {
         const event = entry.event;
         switch (activeFilter) {
             case 'new':
-                return isNewEvent(event);
+                return !isEntryHidden(entry) && isNewEvent(event);
             case 'missing':
                 return (() => {
                     const missingCount = getMissingMetadataFields(event).length;
