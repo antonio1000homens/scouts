@@ -1842,8 +1842,9 @@ function normaliseAppliedRequestRecord(record) {
     const realm = hasText(record?.realm) ? record.realm.trim() : '';
     const subject = hasText(record?.subject) ? record.subject.trim() : '';
     const action = hasText(record?.action) ? record.action.trim() : '';
+    const status = hasText(record?.status) ? record.status.trim() : '';
     if (!requestId) return null;
-    return { requestId, timestamp, realm, subject, action };
+    return { requestId, timestamp, realm, subject, action, status };
 }
 
 function normaliseAppliedRequestHistory(value) {
@@ -1863,7 +1864,7 @@ function normaliseAppliedRequestHistory(value) {
 function getAppliedRequestHistory(event) {
     if (!event || typeof event !== 'object') return [];
     const metadata = getMetadataData(event);
-    return normaliseAppliedRequestHistory(metadata?.requests ?? metadata?.requestIds ?? event.requestIds ?? []);
+    return normaliseAppliedRequestHistory(metadata?.requests ?? metadata?.requestIds ?? event.requests ?? event.requestIds ?? []);
 }
 
 function getAppliedRequestIdSet(event) {
