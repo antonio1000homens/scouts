@@ -18,7 +18,7 @@ body {
     display: flex;
     align-items: center;
     margin-top: -132px;
-    padding-top: calc(8rem + 132px);
+    padding-top: calc(6.5rem + 132px);
     background:
         linear-gradient(rgba(12, 16, 28, 0.58), rgba(12, 16, 28, 0.58)),
         url('http://2ndtolworth.s3-website.eu-west-2.amazonaws.com/website/images/photos/kingston-night.jpg') center 35%/cover no-repeat;
@@ -40,7 +40,7 @@ body {
     .home-page .about.about-detail {
         min-height: 70vh;
         margin-top: -107px;
-        padding-top: calc(7rem + 107px);
+        padding-top: calc(5.75rem + 107px);
     }
 }
 
