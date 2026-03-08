@@ -59,8 +59,8 @@ const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/scoutsprocessing.json';
 const COMPLETED_REQUESTS_RUNTIME_URL = '../../runtime/scoutscompleted.json';
 const AI_CONFIG_URL = '../../AI.conf';
 const AI_CONFIG_CACHE_MS = 5 * 60 * 1000;
-const DEFAULT_IMAGE_PROMPT_TEMPLATE = 'cartoonish image of scouts in {{IMAGE_THEME}}, {{IMAGE_PROMPT_SPECIFICATIONS}}';
-const DEFAULT_IMAGE_PROMPT_SPECIFICATIONS = [
+const DEFAULT_IMAGE_GENERATION_PROMPT_TEMPLATE = 'cartoonish image of scouts in {{IMAGE_THEME}}, {{IMAGE_PROMPT_SPECIFICATIONS}}';
+const DEFAULT_IMAGE_GENERATION_PROMPT_SPECIFICATIONS = [
     'landscape 4:3 composition suitable for website event cards',
     'approximately 1600x1200',
     'main subjects centered',
@@ -160,11 +160,11 @@ function getPinnedRuntimeDetails() {
 }
 
 function isCompleteEvent(event) {
-    return hasText(getAIPrompt(event)) && hasText(getImagePrompt(event)) && hasText(getImageUrl(event));
+    return hasText(getAIPrompt(event)) && hasText(getImageGenerationPrompt(event)) && hasText(getImageUrl(event));
 }
 
 function isNewEvent(event) {
-    return !hasText(getAIPrompt(event)) && !hasText(getImagePrompt(event)) && !hasText(getImageUrl(event));
+    return !hasText(getAIPrompt(event)) && !hasText(getImageGenerationPrompt(event)) && !hasText(getImageUrl(event));
 }
 
 function getFilterCounts() {
@@ -1930,25 +1930,27 @@ function getImageTheme(event) {
 
 function buildImagePromptSpecificationsText(specifications) {
     if (!Array.isArray(specifications) || specifications.length === 0) {
-        return DEFAULT_IMAGE_PROMPT_SPECIFICATIONS.join(', ');
+        return DEFAULT_IMAGE_GENERATION_PROMPT_SPECIFICATIONS.join(', ');
     }
     const cleaned = specifications
         .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
         .filter(Boolean);
-    return cleaned.length > 0 ? cleaned.join(', ') : DEFAULT_IMAGE_PROMPT_SPECIFICATIONS.join(', ');
+    return cleaned.length > 0 ? cleaned.join(', ') : DEFAULT_IMAGE_GENERATION_PROMPT_SPECIFICATIONS.join(', ');
 }
 
-function buildDerivedImagePromptFromTheme(theme, config = cachedAiConfig) {
+function buildImageGenerationPromptFromTheme(theme, config = cachedAiConfig) {
     if (!hasText(theme)) return null;
     const normalizedTheme = String(theme).trim();
     const lower = normalizedTheme.toLowerCase();
     if (lower.startsWith('create a cartoonish image of ') || lower.startsWith('cartoonish image of scouts')) {
         return normalizedTheme;
     }
-    const template = hasText(config?.imagePromptTemplate)
-        ? String(config.imagePromptTemplate)
-        : DEFAULT_IMAGE_PROMPT_TEMPLATE;
-    const specifications = buildImagePromptSpecificationsText(config?.imagePromptSpecifications);
+    const template = hasText(config?.imageGenerationPromptTemplate)
+        ? String(config.imageGenerationPromptTemplate)
+        : hasText(config?.imagePromptTemplate)
+            ? String(config.imagePromptTemplate)
+            : DEFAULT_IMAGE_GENERATION_PROMPT_TEMPLATE;
+    const specifications = buildImagePromptSpecificationsText(config?.imageGenerationPromptSpecifications ?? config?.imagePromptSpecifications);
     return template
         .replace(/{{IMAGE_THEME}}/g, normalizedTheme)
         .replace(/{{IMAGE_PROMPT_SPECIFICATIONS}}/g, specifications)
@@ -1956,9 +1958,9 @@ function buildDerivedImagePromptFromTheme(theme, config = cachedAiConfig) {
         .trim();
 }
 
-function getImagePrompt(event) {
+function getImageGenerationPrompt(event) {
     if (!event || typeof event !== 'object') return null;
-    const derivedFromTheme = buildDerivedImagePromptFromTheme(getImageTheme(event));
+    const derivedFromTheme = buildImageGenerationPromptFromTheme(getImageTheme(event));
     if (hasText(derivedFromTheme)) {
         return derivedFromTheme;
     }
@@ -2666,7 +2668,7 @@ async function copyImagePromptForEvent(eventIndex) {
     const entry = visibleEventEntries[eventIndex];
     if (!entry) return;
 
-    const imagePrompt = getImagePrompt(entry.event);
+    const imagePrompt = getImageGenerationPrompt(entry.event);
     if (!hasText(imagePrompt)) {
         pinRuntimeDetails('No image prompt available to copy.', 'error');
         return;
