@@ -4,3 +4,9 @@ SCOUTS_LAMBDA_API_KEY="replace-with-real-key"
 # Set to false locally if you are not testing through Cloudflare Access.
 REQUIRE_CF_ACCESS="false"
 
+# Contact form – Cloudflare Turnstile secret key (get from Cloudflare dashboard > Turnstile)
+TURNSTILE_SECRET_KEY="replace-with-turnstile-secret-key"
+# IFTTT Maker webhook API key (get from https://ifttt.com/maker_webhooks/settings)
+IFTTT_WEBHOOK_KEY="replace-with-ifttt-webhook-key"
+# IFTTT event name to trigger (must match your IFTTT applet trigger)
+IFTTT_WEBHOOK_EVENT="scouts_contact_form"

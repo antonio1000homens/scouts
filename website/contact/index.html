@@ -7,6 +7,7 @@
     <link rel="icon" href="../images/scouts-logo-white-png.png">
     <link rel="stylesheet" href="../fonts/fonts.css">
     <link rel="stylesheet" href="../styles.css?v=20260308-1">
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=_onTurnstileLoad&render=explicit" async defer></script>
 </head>
 <body>
     <div id="header-placeholder"></div>
@@ -24,11 +25,21 @@
                     </div>
                     <div class="contact-form">
                         <h3>Send us a message</h3>
-                        <form>
-                            <input type="text" placeholder="Your Name" required>
-                            <input type="email" placeholder="Your Email" required>
-                            <textarea placeholder="Your Message" rows="5" required></textarea>
-                            <button type="submit">Send Message</button>
+                        <form id="contact-form" novalidate>
+                            <input id="contact-name" type="text" name="name" placeholder="Your Name" required>
+                            <input id="contact-email" type="email" name="email" placeholder="Your Email" required>
+                            <textarea id="contact-message" name="message" placeholder="Your Message" rows="5" required></textarea>
+                            <!--
+                              Cloudflare Turnstile widget container.
+                              IMPORTANT: Set the TURNSTILE_SITE_KEY below in the JS block to your
+                              Turnstile SITE KEY from the Cloudflare dashboard (Turnstile > Sites).
+                              The site key is public and safe to commit once you have a real value.
+                              The matching secret key must be set as the TURNSTILE_SECRET_KEY Worker
+                              secret (see cloudflare/README.md).
+                            -->
+                            <div id="cf-turnstile-container"></div>
+                            <div id="contact-status" role="status" aria-live="polite"></div>
+                            <button type="submit" id="contact-submit">Send Message</button>
                         </form>
                     </div>
                 </div>
@@ -40,5 +51,84 @@
 
     <script src="/website/scripts/header-loader.js"></script>
     <script src="/website/scripts/footer-loader.js"></script>
+    <script>
+      (function () {
+        // IMPORTANT: Replace this value with your Cloudflare Turnstile SITE KEY.
+        // Get it from the Cloudflare dashboard under Turnstile > Sites.
+        // The site key is public and safe to commit once you have a real value.
+        var TURNSTILE_SITE_KEY = "0x4AAAAAAA_REPLACE_WITH_YOUR_SITEKEY";
+
+        var form = document.getElementById("contact-form");
+        var submitBtn = document.getElementById("contact-submit");
+        var statusEl = document.getElementById("contact-status");
+        var turnstileWidgetId = null;
+
+        // Called by the Turnstile script once it has finished loading (?onload=_onTurnstileLoad).
+        window._onTurnstileLoad = function () {
+          turnstileWidgetId = window.turnstile.render("#cf-turnstile-container", {
+            sitekey: TURNSTILE_SITE_KEY,
+            theme: "light",
+          });
+        };
+
+        function setStatus(msg, isError) {
+          statusEl.textContent = msg;
+          statusEl.style.color = isError ? "#c0392b" : "#27ae60";
+        }
+
+        function resetWidget() {
+          if (window.turnstile && turnstileWidgetId !== null) {
+            window.turnstile.reset(turnstileWidgetId);
+          }
+        }
+
+        form.addEventListener("submit", async function (e) {
+          e.preventDefault();
+
+          var name = document.getElementById("contact-name").value.trim();
+          var email = document.getElementById("contact-email").value.trim();
+          var message = document.getElementById("contact-message").value.trim();
+
+          // The Turnstile widget injects a hidden input named cf-turnstile-response.
+          var tokenInput = form.querySelector('[name="cf-turnstile-response"]');
+          var token = tokenInput ? tokenInput.value : "";
+
+          if (!name || !email || !message) {
+            setStatus("Please fill in all fields.", true);
+            return;
+          }
+
+          if (!token) {
+            setStatus("Please complete the security check.", true);
+            return;
+          }
+
+          submitBtn.disabled = true;
+          setStatus("Sending…", false);
+
+          try {
+            var res = await fetch("/contact-api/submit", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: name, email: email, message: message, "cf-turnstile-response": token }),
+            });
+
+            var data = await res.json();
+            if (res.ok && data.ok) {
+              setStatus("Message sent! We'll be in touch soon.", false);
+              form.reset();
+              resetWidget();
+            } else {
+              setStatus(data.message || "Something went wrong. Please try again.", true);
+              resetWidget();
+            }
+          } catch (err) {
+            setStatus("Network error. Please check your connection and try again.", true);
+          } finally {
+            submitBtn.disabled = false;
+          }
+        });
+      })();
+    </script>
 </body>
 </html>
