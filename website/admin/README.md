@@ -4,7 +4,7 @@ This admin page provides an interface to view and manage event images and AI pro
 
 ## Features
 
-- **View All Events**: Lists all events from `agenda.json` with their details
+- **View All Events**: Lists all events from the S3 `agenda.json` feed with their details
 - **Event Information**: Shows event name, index, date, location
 - **Image Display**: Shows current event images with their URLs
 - **AI Prompts**: Displays AI-generated descriptions for each event
@@ -50,7 +50,7 @@ Security model:
 
 ### Data Source
 
-The admin page reads event data from `agenda.json` located at the repository root. Each event can have:
+The admin page reads event data from the S3 root `agenda.json` feed. Each event can have:
 
 ```json
 {
@@ -67,7 +67,7 @@ The admin page reads event data from `agenda.json` located at the repository roo
 
 ### Event Index
 
-Each event is assigned an index (0, 1, 2, etc.) based on its position in the `events` array in `agenda.json`. This index is displayed to help identify events when updating the JSON file.
+Each event is assigned an index (0, 1, 2, etc.) based on its position in the `events` array in `agenda.json`. This index is displayed to help identify events when updating the JSON feed.
 
 ### Image URLs
 
@@ -141,18 +141,18 @@ website/admin/
 To update event images or AI prompts:
 
 1. **Manual Update** (current method):
-   - Edit `agenda.json` directly
+   - Update the S3 `agenda.json` feed
    - Add or update the `image` and `AI` fields
    - Commit and push changes
 
 2. **Future S3 Upload** (when enabled):
    - Click "Replace Image" button on any event
    - Upload a new image or provide a URL
-   - The system will upload to S3 and update agenda.json
+   - The system will upload to S3 and update `agenda.json`
 
 ## Maintenance
 
-- The admin page automatically detects events from `agenda.json`
+- The admin page automatically detects events from the S3 `agenda.json` feed
 - No manual configuration needed for new events
 - Images load with error handling (shows placeholder if image fails)
 - Responsive design works on desktop and mobile devices
@@ -185,4 +185,4 @@ Potential improvements:
 - [ ] AI prompt editor with save functionality
 - [ ] Event filtering by section (Beavers/Cubs/Scouts)
 - [ ] Search and sort functionality
-- [ ] Direct agenda.json editing interface
+- [ ] Direct S3 agenda.json editing interface

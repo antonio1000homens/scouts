@@ -22,6 +22,7 @@ const COMPLETED_REQUEST_HIDE_AFTER_MS = 10 * 60 * 1000;
 const AUTO_LAMBDA_PREF_KEY = 'scouts_admin_auto_lambda_enabled';
 const AUTO_LAMBDA_INTERVAL_PREF_KEY = 'scouts_admin_auto_lambda_interval_ms';
 const AGENDA_AUTO_REFRESH_PREF_KEY = 'scouts_admin_agenda_auto_refresh_enabled';
+const AGENDA_URL = 'http://2ndtolworth.s3-website.eu-west-2.amazonaws.com/agenda.json';
 const STATUS_POLL_PREF_KEY = 'scouts_admin_status_poll_enabled';
 const STATUS_POLL_INTERVAL_PREF_KEY = 'scouts_admin_status_poll_interval_seconds';
 const HEX_PREVIEW_AUTO_REFRESH_PREF_KEY = 'scouts_admin_hex_preview_auto_refresh';
@@ -1111,7 +1112,7 @@ async function checkApiAuthStatus() {
     }
 }
 
-// Load events from agenda.json
+// Load events from the S3 agenda feed
 async function loadEvents(options = {}) {
     const { silent = false } = options;
     if (agendaLoadInFlight) {
@@ -1120,11 +1121,10 @@ async function loadEvents(options = {}) {
 
     agendaLoadInFlight = true;
     try {
-        // Try to load from parent directory (assuming admin is in website/admin/)
-        const response = await fetch(`../../agenda.json?ts=${Date.now()}`, { cache: 'no-store' });
+        const response = await fetch(`${AGENDA_URL}?ts=${Date.now()}`, { cache: 'no-store' });
         
         if (!response.ok) {
-            throw new Error('Failed to load events.json: ' + response.status);
+            throw new Error('Failed to load S3 agenda.json: ' + response.status);
         }
 
         const data = await response.json();
@@ -1133,7 +1133,7 @@ async function loadEvents(options = {}) {
         agendaPayload = data;
         uniqueEventEntries = buildUniqueEventEntries(eventsData);
         applyVisibilityOverrides(uniqueEventEntries);
-        console.log('[Admin] agenda.json fetched', {
+        console.log('[Admin] S3 agenda.json fetched', {
             totalEvents: rawEvents.length,
             uniqueEvents: uniqueEventEntries.length,
         });
@@ -1151,7 +1151,7 @@ async function loadEvents(options = {}) {
     } catch (error) {
         console.error('Error loading events:', error);
         if (!silent) {
-            showError('Failed to load events data. Please ensure agenda.json exists and is accessible.');
+            showError('Failed to load events data from S3 agenda.json.');
         }
     } finally {
         agendaLoadInFlight = false;

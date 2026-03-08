@@ -121,7 +121,7 @@ The workflow deploys these files:
 │   └── calendar-render.js
 ├── 2tolworthcub_booklet_html/
 │   └── [9 HTML pages]
-├── events.json (from Lambda)
+├── agenda.json (from Lambda)
 └── programme.json (from Lambda)
 ```
 
@@ -130,12 +130,12 @@ The workflow deploys these files:
 1. **Lambda Function** (automated):
    - Runs periodically (or on trigger)
    - Fetches OSM calendar data
-   - Writes `events.json` and `programme.json` to S3
+   - Writes `agenda.json` and `programme.json` to S3
 
 2. **Static Website** (this deployment):
    - Deployed via GitHub Actions on push
    - HTML pages load from S3
-   - JavaScript fetches `events.json` and `programme.json`
+   - JavaScript fetches `agenda.json` and `programme.json`
    - Renders calendar events dynamically
 
 ## 🎯 Website URL
