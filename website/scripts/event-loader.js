@@ -7,8 +7,8 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
     minute: '2-digit'
 });
 
-const AGENDA_URL = 'http://2ndtolworth.s3-website.eu-west-2.amazonaws.com/agenda.json';
-const S3_SITE_ORIGIN = 'http://2ndtolworth.s3-website.eu-west-2.amazonaws.com';
+const AGENDA_URL = '/agenda.json';
+const LEGACY_S3_SITE_ORIGIN = 'http://2ndtolworth.s3-website.eu-west-2.amazonaws.com';
 
 function normaliseDateString(value) {
     if (!value) return null;
@@ -72,14 +72,17 @@ function normaliseImagePath(url) {
     if (!url || typeof url !== 'string') return url;
     const trimmed = url.trim();
     if (!trimmed) return trimmed;
+    if (trimmed.startsWith(`${LEGACY_S3_SITE_ORIGIN}/website/`)) {
+        return trimmed.slice(LEGACY_S3_SITE_ORIGIN.length);
+    }
     if (/^https?:\/\//i.test(trimmed)) {
         return trimmed;
     }
     if (trimmed.startsWith('/website/eventImages/')) {
-        return `${S3_SITE_ORIGIN}${trimmed}`;
+        return trimmed;
     }
     if (trimmed.startsWith('website/eventImages/')) {
-        return `${S3_SITE_ORIGIN}/${trimmed}`;
+        return `/${trimmed}`;
     }
     if (trimmed.startsWith('/')) {
         return trimmed;
