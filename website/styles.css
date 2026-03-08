@@ -566,8 +566,9 @@ header h1 {
 }
 
 .about-feature-image {
-    max-width: 900px;
-    margin: 0 auto 2.5rem;
+    float: right;
+    width: min(38%, 320px);
+    margin: 0 0 1.5rem 2rem;
     border-radius: 18px;
     overflow: hidden;
     box-shadow: 0 16px 36px rgba(0, 0, 0, 0.14);
@@ -577,6 +578,21 @@ header h1 {
     display: block;
     width: 100%;
     height: auto;
+}
+
+.about-text::after {
+    content: "";
+    display: block;
+    clear: both;
+}
+
+@media (max-width: 700px) {
+    .about-feature-image {
+        float: none;
+        width: 100%;
+        max-width: 420px;
+        margin: 0 auto 1.5rem;
+    }
 }
 
 .about-buttons {
