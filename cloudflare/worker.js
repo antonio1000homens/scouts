@@ -109,15 +109,17 @@ async function handleContact(request, env) {
     );
   }
 
-  // Forward to IFTTT webhook
-  const iftttUrl = `https://maker.ifttt.com/trigger/${encodeURIComponent(iftttEvent)}/with/key/${encodeURIComponent(iftttKey)}`;
+  // Forward to the IFTTT JSON-payload webhook endpoint.
+  const iftttUrl = `https://maker.ifttt.com/trigger/${encodeURIComponent(iftttEvent)}/json/with/key/${encodeURIComponent(iftttKey)}`;
   const iftttResp = await fetch(iftttUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      value1: name,
-      value2: email,
-      value3: message,
+      name,
+      email,
+      message,
+      submittedAt: new Date().toISOString(),
+      source: "2ndtolworth-contact-form",
     }),
   });
 
