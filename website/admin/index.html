@@ -208,7 +208,7 @@
                     <div class="operation-group">
                         <h3>Operation Types</h3>
                         <p class="refresh-status modal-input-help"><strong>Persist to HEX:</strong> immediately replaces the selected field in the HEX payload.</p>
-                        <p class="refresh-status modal-input-help"><strong>Request AI/Pixabay:</strong> queues generation for that field and updates later through the existing SQS workflow.</p>
+                        <p class="refresh-status modal-input-help"><strong>Request AI:</strong> queues AI generation for that field and updates later through the existing SQS workflow.</p>
                         <p class="refresh-status modal-input-help"><strong>Hide/Unhide Event:</strong> toggles visibility in HEX and agenda for this event.</p>
                         <div class="field-actions">
                             <button
@@ -280,7 +280,7 @@
                             <button
                                 class="btn btn-secondary requires-api"
                                 onclick="requestGeneratedField('imageUrl')"
-                            >Request Pixabay Image URL</button>
+                            >Request AI Image</button>
                             <button id="modal-requeue-button" class="btn btn-secondary requires-api" style="display:none;" onclick="requeueCurrentEvent()">Requeue Missing Fields</button>
                         </div>
                         <p id="modal-requeue-hint" class="refresh-status"></p>

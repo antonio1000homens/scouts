@@ -37,8 +37,16 @@ function formatDisplayDate(dateOrString) {
     return dateFormatter.format(date);
 }
 
+function isApprovedEventImage(event) {
+    if (!event || typeof event !== 'object') return false;
+    if (event.approved === true || event.isApproved === true) return true;
+    if (event.image && typeof event.image === 'object' && event.image.isApproved === true) return true;
+    return false;
+}
+
 function resolveImageUrl(event) {
     if (!event) return null;
+    if (!isApprovedEventImage(event)) return null;
     const { image, imageUrl } = event;
     if (typeof image === 'string') return image;
     if (typeof imageUrl === 'string') return imageUrl;
