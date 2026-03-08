@@ -21,7 +21,7 @@ body {
     padding-top: calc(6.5rem + 132px);
     background:
         linear-gradient(rgba(12, 16, 28, 0.58), rgba(12, 16, 28, 0.58)),
-        url('http://2ndtolworth.s3-website.eu-west-2.amazonaws.com/website/images/photos/kingston-night.jpg') center 35%/cover no-repeat;
+        url('/website/images/photos/kingston-night.jpg') center 35%/cover no-repeat;
     color: #ffffff;
 }
 
