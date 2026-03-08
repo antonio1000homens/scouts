@@ -11,6 +11,27 @@
         statusEl.hidden = false;
     }
 
+    function buildErrorMessage(data) {
+        if (!data || typeof data !== 'object') {
+            return 'Something went wrong. Please try again.';
+        }
+
+        if (data.code === 'NOTIFICATION_FAILED') {
+            var details = [];
+            if (data.upstreamStatus) {
+                details.push('IFTTT status ' + data.upstreamStatus + (data.upstreamStatusText ? ' ' + data.upstreamStatusText : ''));
+            }
+            if (data.upstreamBody) {
+                details.push(String(data.upstreamBody).trim());
+            }
+            return details.length
+                ? 'Failed to notify IFTTT. ' + details.join(' - ')
+                : 'Failed to notify IFTTT. Please try again later.';
+        }
+
+        return data.message || 'Something went wrong. Please try again.';
+    }
+
     function setLoading(loading) {
         submitBtn.disabled = loading;
         submitBtn.textContent = loading ? 'Sending…' : 'Send Message';
@@ -53,7 +74,15 @@
                 turnstileToken: turnstileToken
             })
         })
-        .then(function (resp) { return resp.json(); })
+        .then(function (resp) {
+            return resp.json().catch(function () {
+                return {
+                    ok: false,
+                    message: 'Unexpected non-JSON response from contact endpoint.',
+                    httpStatus: resp.status
+                };
+            });
+        })
         .then(function (data) {
             setLoading(false);
             if (data.ok) {
@@ -64,7 +93,7 @@
                     window.turnstile.reset();
                 }
             } else {
-                showStatus(data.message || 'Something went wrong. Please try again.', true);
+                showStatus(buildErrorMessage(data), true);
             }
         })
         .catch(function () {
