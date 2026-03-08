@@ -7,6 +7,9 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
     minute: '2-digit'
 });
 
+const AGENDA_URL = 'http://2ndtolworth.s3-website.eu-west-2.amazonaws.com/agenda.json';
+const S3_SITE_ORIGIN = 'http://2ndtolworth.s3-website.eu-west-2.amazonaws.com';
+
 function normaliseDateString(value) {
     if (!value) return null;
     if (typeof value !== 'string') return value;
@@ -71,6 +74,12 @@ function normaliseImagePath(url) {
     if (!trimmed) return trimmed;
     if (/^https?:\/\//i.test(trimmed)) {
         return trimmed;
+    }
+    if (trimmed.startsWith('/website/eventImages/')) {
+        return `${S3_SITE_ORIGIN}${trimmed}`;
+    }
+    if (trimmed.startsWith('website/eventImages/')) {
+        return `${S3_SITE_ORIGIN}/${trimmed}`;
     }
     if (trimmed.startsWith('/')) {
         return trimmed;
@@ -388,9 +397,8 @@ function renderPastEventsCarousel(events, container) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    fetch(`agenda.json?ts=${Date.now()}`, {
+    fetch(`${AGENDA_URL}?ts=${Date.now()}`, {
         cache: 'no-store',
-        credentials: 'same-origin',
     })
         .then(response => {
             if (!response.ok) {
@@ -410,7 +418,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
                 .map(normaliseEventRecord)
                 .filter(Boolean);
-            console.log('[EventsLoader] agenda.json fetched', {
+            console.log('[EventsLoader] S3 agenda.json fetched', {
                 totalEvents: data.events?.length ?? 0,
                 visibleEvents: events.length,
             });
