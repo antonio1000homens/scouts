@@ -1,12 +1,29 @@
+const FOOTER_LOADER_SCRIPT_URL = new URL(
+    document.currentScript?.src || 'footer-loader.js',
+    window.location.href
+);
+const FOOTER_WEBSITE_BASE_URL = new URL('..', FOOTER_LOADER_SCRIPT_URL);
+const FOOTER_WEBSITE_BASE_PATH = FOOTER_WEBSITE_BASE_URL.pathname;
+
+function rewriteWebsiteLinks(root) {
+    (root || document).querySelectorAll('a[href^="/website/"]').forEach(function(link) {
+        const href = link.getAttribute('href');
+        if (!href) {
+            return;
+        }
+        link.setAttribute('href', `${FOOTER_WEBSITE_BASE_PATH}${href.slice('/website/'.length)}`);
+    });
+}
+
 document.addEventListener("DOMContentLoaded", function() {
     const footerPlaceholder = document.getElementById('footer-placeholder');
     
     if (footerPlaceholder) {
         // Determine which footer to load based on data attribute
         const footerType = footerPlaceholder.getAttribute('data-footer-type') || 'simple';
-        const footerFile = footerType === 'detailed' 
-            ? '/website/shared/footer-detailed.html' 
-            : '/website/shared/footer-simple.html';
+        const footerFile = footerType === 'detailed'
+            ? new URL('shared/footer-detailed.html', FOOTER_WEBSITE_BASE_URL).href
+            : new URL('shared/footer-simple.html', FOOTER_WEBSITE_BASE_URL).href;
         
         fetch(footerFile)
             .then(response => {
@@ -17,6 +34,14 @@ document.addEventListener("DOMContentLoaded", function() {
             })
             .then(data => {
                 footerPlaceholder.innerHTML = data;
+                rewriteWebsiteLinks(footerPlaceholder);
+
+                if (footerPlaceholder.getAttribute('data-footer-remove-content') === 'true') {
+                    const footerContent = footerPlaceholder.querySelector('.footer-content');
+                    if (footerContent) {
+                        footerContent.remove();
+                    }
+                }
                 
                 // Update current year in footer - looks for common year element IDs
                 const yearElement = footerPlaceholder.querySelector('#current-year, #footer-year, [data-year]');

@@ -7,6 +7,37 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
     minute: '2-digit'
 });
 
+const AGENDA_URL = '/agenda.json';
+const FALLBACK_AGENDA_URL = 'https://2ndtolworth.s3.eu-west-2.amazonaws.com/agenda.json';
+const LEGACY_S3_SITE_ORIGIN = 'http://2ndtolworth.s3-website.eu-west-2.amazonaws.com';
+const S3_OBJECT_BASE_URL = 'https://2ndtolworth.s3.eu-west-2.amazonaws.com';
+const EVENT_LOADER_SCRIPT_URL = new URL(
+    document.currentScript?.src || 'event-loader.js',
+    window.location.href
+);
+const LOCAL_WEBSITE_BASE_URL = new URL('..', EVENT_LOADER_SCRIPT_URL);
+const LOCAL_AGENDA_URL = new URL('../agenda.json', LOCAL_WEBSITE_BASE_URL).href;
+const CONTACT_PAGE_URL = new URL('contact/index.html', LOCAL_WEBSITE_BASE_URL).href;
+
+async function fetchAgendaJson() {
+    const requestUrls = [AGENDA_URL, LOCAL_AGENDA_URL, FALLBACK_AGENDA_URL].map((url) => `${url}?ts=${Date.now()}`);
+    let lastError = null;
+
+    for (const url of requestUrls) {
+        try {
+            const response = await fetch(url, { cache: 'no-store' });
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return await response.json();
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    throw lastError ?? new Error('Failed to load agenda.json');
+}
+
 function normaliseDateString(value) {
     if (!value) return null;
     if (typeof value !== 'string') return value;
@@ -21,9 +52,22 @@ function normaliseDateString(value) {
     return value;
 }
 
+function getSourceData(event) {
+    return event?.source && typeof event.source === 'object' ? event.source : null;
+}
+
+function getMetadataData(event) {
+    return event?.metadata && typeof event.metadata === 'object' ? event.metadata : null;
+}
+
+function getStatusData(event) {
+    return event?.status && typeof event.status === 'object' ? event.status : null;
+}
+
 function getEventDate(event) {
     if (!event) return null;
-    const candidate = event.dtstart || event.start?.iso || event.start?.raw || event.start;
+    const source = getSourceData(event);
+    const candidate = source?.dtstart || event.dtstart || event.start?.iso || event.start?.raw || event.start;
     const normalised = normaliseDateString(candidate);
     if (!normalised) return null;
     const parsed = new Date(normalised);
@@ -39,23 +83,54 @@ function formatDisplayDate(dateOrString) {
 
 function isApprovedEventImage(event) {
     if (!event || typeof event !== 'object') return false;
+    const metadata = getMetadataData(event);
+    const status = getStatusData(event);
+    const image = metadata?.image ?? event.image;
+    if (status?.isApproved === true) return true;
     if (event.approved === true || event.isApproved === true) return true;
-    if (event.image && typeof event.image === 'object' && event.image.isApproved === true) return true;
+    if (image && typeof image === 'object' && image.isApproved === true) return true;
     return false;
 }
 
 function resolveImageUrl(event) {
     if (!event) return null;
     if (!isApprovedEventImage(event)) return null;
-    const { image, imageUrl } = event;
-    if (typeof image === 'string') return image;
-    if (typeof imageUrl === 'string') return imageUrl;
+    const metadata = getMetadataData(event);
+    const image = metadata?.image ?? event.image;
+    const imageUrl = event.imageUrl;
+    if (typeof image === 'string') return normaliseImagePath(image);
+    if (typeof imageUrl === 'string') return normaliseImagePath(imageUrl);
     if (image && typeof image === 'object') {
-        if (typeof image.url === 'string') return image.url;
-        if (typeof image.src === 'string') return image.src;
-        if (typeof image.href === 'string') return image.href;
+        if (typeof image.url === 'string') return normaliseImagePath(image.url);
+        if (typeof image.src === 'string') return normaliseImagePath(image.src);
+        if (typeof image.href === 'string') return normaliseImagePath(image.href);
     }
     return null;
+}
+
+function normaliseImagePath(url) {
+    if (!url || typeof url !== 'string') return url;
+    const trimmed = url.trim();
+    if (!trimmed) return trimmed;
+    if (trimmed.startsWith(`${LEGACY_S3_SITE_ORIGIN}/website/`)) {
+        return `${S3_OBJECT_BASE_URL}${trimmed.slice(LEGACY_S3_SITE_ORIGIN.length)}`;
+    }
+    if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
+    }
+    if (trimmed.startsWith('/website/eventImages/')) {
+        return `${S3_OBJECT_BASE_URL}${trimmed}`;
+    }
+    if (trimmed.startsWith('website/eventImages/')) {
+        return `${S3_OBJECT_BASE_URL}/${trimmed}`;
+    }
+    if (!trimmed.includes('/') && /\.(?:avif|gif|jpe?g|png|webp)$/i.test(trimmed)) {
+        return `${S3_OBJECT_BASE_URL}/website/eventImages/${trimmed}`;
+    }
+    if (trimmed.startsWith('/')) {
+        return trimmed;
+    }
+    return `/${trimmed.replace(/^(\.\/)+/, '')}`;
 }
 
 function withImageWidthParam(imageUrl, width = 400) {
@@ -112,7 +187,10 @@ function normaliseSectionValue(value) {
 
 function resolveEventSection(event) {
     if (!event) return 'cubs';
-    return normaliseSectionValue(event.icsType ?? event.section ?? event.audience ?? event.group ?? null);
+    const source = getSourceData(event);
+    return normaliseSectionValue(
+        source?.icsType ?? source?.section ?? event.icsType ?? event.section ?? event.audience ?? event.group ?? null,
+    );
 }
 
 
@@ -130,12 +208,44 @@ function createEventHeading(tagName, event) {
 
 function getTagline(event) {
     if (!event || typeof event !== 'object') return null;
-    return event.tagline || event.AI || event.ai || event.aiPrompt || null;
+    const metadata = getMetadataData(event);
+    return metadata?.tagline || event.tagline || event.AI || event.ai || event.aiPrompt || null;
+}
+
+function isHiddenEvent(event) {
+    if (!event || typeof event !== 'object') return false;
+    const status = getStatusData(event);
+    if (status?.isHidden === true) return true;
+    if (typeof event.isHidden === 'boolean') return event.isHidden;
+    if (typeof event.isHidden === 'string') {
+        const normalized = event.isHidden.trim().toLowerCase();
+        if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+        if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+    }
+    return event.status === 'hidden' || event.hidden === true;
 }
 
 function normaliseEventRecord(event) {
     if (!event || typeof event !== 'object') return null;
-    const normalised = { ...event };
+    const source = getSourceData(event);
+    const metadata = getMetadataData(event);
+    const status = getStatusData(event);
+    const normalised = {
+        ...event,
+        uid: source?.uid ?? event.uid,
+        title: source?.title ?? event.title ?? source?.summary ?? event.summary,
+        summary: source?.summary ?? event.summary ?? source?.title ?? event.title,
+        location: source?.location ?? event.location,
+        dtstart: source?.dtstart ?? event.dtstart,
+        section: source?.section ?? event.section,
+        icsType: source?.icsType ?? event.icsType,
+        tagline: metadata?.tagline ?? event.tagline,
+        image: metadata?.image ?? event.image,
+        hexId: metadata?.hexId ?? event.hexId ?? event.hex ?? null,
+        hex: metadata?.hexId ?? event.hexId ?? event.hex ?? null,
+        approved: status?.isApproved === true || event.approved === true,
+        status: status?.isHidden === true ? 'hidden' : event.status,
+    };
 
     if (!normalised.title) {
         normalised.title = normalised.summary || normalised.name || 'Scout event';
@@ -177,14 +287,28 @@ function renderNextEventCard(event, container) {
     const image = createEventImageMarkup(event);
     const sectionKey = resolveEventSection(event);
     const headingMarkup = createEventHeading('h3', event);
+    const frontMarkup = image
+        ? `
+            <div class="next-event-hero next-event-hero--with-image">
+                <div class="next-event-hero-media">${image}</div>
+                <div class="next-event-hero-copy">
+                    ${headingMarkup}
+                    ${aiCopy}
+                </div>
+            </div>
+        `
+        : `
+            <div class="next-event-hero next-event-hero--text-only">
+                ${headingMarkup}
+                ${aiCopy}
+            </div>
+        `;
 
     container.innerHTML = `
         <div class="event-card flip-card" tabindex="0" data-section="${sectionKey}">
             <div class="flip-card-inner">
                 <div class="flip-card-face flip-card-front">
-                    ${image}
-                    ${headingMarkup}
-                    ${aiCopy}
+                    ${frontMarkup}
                 </div>
                 <div class="flip-card-face flip-card-back">
                     ${headingMarkup}
@@ -241,14 +365,22 @@ function renderPastEventsCarousel(events, container) {
                 ${aiCopy}
             </div>
         `;
-    }).join('');
+    });
+
+    cards.push(`
+        <div class="event-card carousel-item event-card--cta" data-section="all">
+            <p class="event-card-kicker">Still<br>curious?</p>
+            <p class="ai-text">Send us a message and we can help you find the right section, answer questions, or explain how to get involved.</p>
+            <a class="event-card-cta-link" href="${CONTACT_PAGE_URL}">Go to the contact form</a>
+        </div>
+    `);
 
     container.innerHTML = `
         <div class="event-carousel">
             <button class="carousel-control prev" type="button" aria-label="Previous events"><span aria-hidden="true">‹</span></button>
             <div class="carousel-viewport">
                 <div class="carousel-track">
-                    ${cards}
+                    ${cards.join('')}
                 </div>
             </div>
             <button class="carousel-control next" type="button" aria-label="Next events"><span aria-hidden="true">›</span></button>
@@ -319,18 +451,12 @@ function renderPastEventsCarousel(events, container) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    fetch('agenda.json')
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            return response.json();
-        })
+    fetchAgendaJson()
         .then(data => {
             const events = (data.events || [])
                 .filter(event => {
                     // Filter out hidden events
-                    if (event.status === 'hidden' || event.hidden === true) {
+                    if (isHiddenEvent(event)) {
                         console.log('Filtering out hidden event:', event.uid ?? event.title);
                         return false;
                     }
@@ -338,7 +464,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
                 .map(normaliseEventRecord)
                 .filter(Boolean);
-            console.log('[EventsLoader] agenda.json fetched', {
+            console.log('[EventsLoader] S3 agenda.json fetched', {
                 totalEvents: data.events?.length ?? 0,
                 visibleEvents: events.length,
             });
@@ -383,3 +509,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 });
+
+function isHiddenEvent(event) {
+    const status = getStatusData(event);
+    if (status?.isHidden === true) return true;
+    return event?.status === 'hidden' || event?.hidden === true;
+}
