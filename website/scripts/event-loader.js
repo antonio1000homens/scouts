@@ -61,6 +61,10 @@ function getMetadataData(event) {
 }
 
 function getStatusData(event) {
+    const metadata = getMetadataData(event);
+    if (metadata?.status && typeof metadata.status === 'object') {
+        return metadata.status;
+    }
     return event?.status && typeof event.status === 'object' ? event.status : null;
 }
 
@@ -513,5 +517,11 @@ document.addEventListener('DOMContentLoaded', () => {
 function isHiddenEvent(event) {
     const status = getStatusData(event);
     if (status?.isHidden === true) return true;
+    if (typeof event?.isHidden === 'boolean') return event.isHidden;
+    if (typeof event?.isHidden === 'string') {
+        const normalized = event.isHidden.trim().toLowerCase();
+        if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+        if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+    }
     return event?.status === 'hidden' || event?.hidden === true;
 }
