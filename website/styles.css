@@ -2087,6 +2087,8 @@ footer {
     .event-carousel {
         --carousel-columns: 1;
         gap: 0.75rem;
+        flex-wrap: wrap;
+        justify-content: center;
     }
 
     .event-carousel .carousel-track {
@@ -2098,11 +2100,22 @@ footer {
     }
 
     .past-events .carousel-viewport {
+        order: 1;
+        flex: 0 0 100%;
         width: 100%;
     }
 
     .past-events .carousel-track {
         width: 100%;
+    }
+
+    .past-events .carousel-control {
+        order: 2;
+        margin-top: 0.5rem;
+    }
+
+    .past-events .carousel-control.next {
+        order: 3;
     }
 
     .past-events .event-card {
