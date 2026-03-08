@@ -1375,6 +1375,13 @@ header h1 {
     border-color: #7413dc;
 }
 
+.contact-privacy-note {
+    margin: -0.25rem 0 0;
+    font-size: 0.92rem;
+    line-height: 1.5;
+    color: #5a5a5a;
+}
+
 .contact-form button {
     background-color: #7413dc;
     color: white;
