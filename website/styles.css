@@ -23,6 +23,16 @@ body {
     color: #ffffff;
 }
 
+.home-page #header-placeholder {
+    position: relative;
+    z-index: 2;
+}
+
+.home-page main {
+    margin-top: -84px;
+    padding-top: 84px;
+}
+
 .home-page .about.about-detail h2,
 .home-page .about.about-detail p {
     color: #ffffff;
@@ -30,6 +40,11 @@ body {
 }
 
 @media (max-width: 900px) {
+    .home-page main {
+        margin-top: -74px;
+        padding-top: 74px;
+    }
+
     .home-page .about.about-detail {
         min-height: 70vh;
     }
