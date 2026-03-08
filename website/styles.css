@@ -603,6 +603,88 @@ header h1 {
     margin-top: 2.5rem;
 }
 
+.about-section-links {
+    gap: 1.5rem;
+    align-items: stretch;
+}
+
+.about-section-button {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    width: min(100%, 220px);
+    min-height: 220px;
+    padding: 1.5rem 1.25rem;
+    border-radius: 24px;
+    text-decoration: none;
+    color: #ffffff;
+    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.14);
+    transition: transform 0.28s ease, box-shadow 0.28s ease, filter 0.28s ease;
+    overflow: hidden;
+}
+
+.about-section-button::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0));
+    opacity: 0;
+    transition: opacity 0.28s ease;
+}
+
+.about-section-button:hover,
+.about-section-button:focus-visible {
+    transform: translateY(-8px) scale(1.02);
+    box-shadow: 0 24px 44px rgba(0, 0, 0, 0.2);
+    filter: saturate(1.08);
+}
+
+.about-section-button:hover::before,
+.about-section-button:focus-visible::before {
+    opacity: 1;
+}
+
+.about-section-button img,
+.about-section-button span,
+.about-section-button small {
+    position: relative;
+    z-index: 1;
+}
+
+.about-section-button img {
+    width: min(150px, 80%);
+    height: auto;
+    filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.22));
+}
+
+.about-section-button span {
+    font-size: 1.25rem;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+}
+
+.about-section-button small {
+    font-size: 0.88rem;
+    line-height: 1.4;
+    opacity: 0.9;
+    max-width: 16ch;
+}
+
+.about-section-button--beavers {
+    background: linear-gradient(135deg, #00a794 0%, #00c6b0 100%);
+}
+
+.about-section-button--cubs {
+    background: linear-gradient(135deg, #23a950 0%, #49c96f 100%);
+}
+
+.about-section-button--scouts {
+    background: linear-gradient(135deg, #004851 0%, #0a6b7a 100%);
+}
+
 .about-list {
     max-width: 720px;
     margin: 1.5rem auto 0;
@@ -1406,6 +1488,11 @@ footer {
     .about-buttons {
         flex-direction: column;
         align-items: center;
+    }
+
+    .about-section-button {
+        width: min(100%, 320px);
+        min-height: 190px;
     }
 
     .badges-panel {
