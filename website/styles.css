@@ -14,9 +14,12 @@ body {
 
 .home-page .about.about-detail {
     position: relative;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
     background:
         linear-gradient(rgba(12, 16, 28, 0.58), rgba(12, 16, 28, 0.58)),
-        url('http://2ndtolworth.s3-website.eu-west-2.amazonaws.com/website/images/photos/kingston-night.jpg') center/cover no-repeat;
+        url('http://2ndtolworth.s3-website.eu-west-2.amazonaws.com/website/images/photos/kingston-night.jpg') center 35%/cover no-repeat;
     color: #ffffff;
 }
 
@@ -24,6 +27,12 @@ body {
 .home-page .about.about-detail p {
     color: #ffffff;
     text-shadow: 0 6px 24px rgba(0, 0, 0, 0.32);
+}
+
+@media (max-width: 900px) {
+    .home-page .about.about-detail {
+        min-height: 70vh;
+    }
 }
 
 .container {
