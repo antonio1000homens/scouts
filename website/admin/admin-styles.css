@@ -330,6 +330,7 @@ body {
     display: grid;
     grid-template-columns: 1fr;
     gap: 1rem;
+    align-content: start;
 }
 
 .info-card {
@@ -648,6 +649,55 @@ body {
     gap: 1rem;
     flex: 1;
     min-width: 0;
+}
+
+.admin-runtime-footer {
+    margin-top: 1.25rem;
+    background: #111827;
+    border-radius: 10px;
+    border: 1px solid #1f2937;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+}
+
+.admin-runtime-footer-inner {
+    display: grid;
+    grid-template-columns: auto minmax(180px, auto) minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 0.75rem 1rem;
+    padding: 0.6rem 0.9rem;
+    color: #e5e7eb;
+}
+
+.admin-runtime-footer-label {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #93c5fd;
+    white-space: nowrap;
+}
+
+.admin-runtime-footer-status.status-text {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.admin-runtime-footer-details.refresh-status,
+.admin-runtime-footer-meta.refresh-status {
+    margin: 0;
+    min-height: 0;
+    font-size: 0.82rem;
+    color: #cbd5e1;
+}
+
+.admin-runtime-footer-details {
+    overflow-wrap: anywhere;
+}
+
+.admin-runtime-footer-meta {
+    white-space: nowrap;
 }
 
 .agenda-viewer {
@@ -1277,6 +1327,14 @@ body {
 
     .admin-overview-inline {
         grid-template-columns: 1fr;
+    }
+
+    .admin-runtime-footer-inner {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-runtime-footer-meta {
+        white-space: normal;
     }
 
     .admin-header h1 {
