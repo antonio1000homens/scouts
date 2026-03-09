@@ -111,13 +111,13 @@
                 <div class="global-card">
                     <h3>Calendar</h3>
                     <div class="calendar-refresh-grid">
-                        <button class="btn btn-primary requires-api" onclick="refreshSelectedCalendar('all', 'All Calendars')">Refresh All Calendars</button>
-                        <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('cubs-events', 'Cubs Events')">Cubs Events</button>
-                        <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('cubs-programme', 'Cubs Programme')">Cubs Programme</button>
-                        <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('scouts-events', 'Scouts Events')">Scouts Events</button>
-                        <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('scouts-programme', 'Scouts Programme')">Scouts Programme</button>
-                        <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('beavers-events', 'Beavers Events')">Beavers Events</button>
-                        <button class="btn btn-secondary requires-api" onclick="refreshSelectedCalendar('beavers-programme', 'Beavers Programme')">Beavers Programme</button>
+                        <button class="btn btn-primary requires-api" value="refreshAllCalendars" onclick="refreshSelectedCalendar('all', 'All Calendars', this.value)">Refresh All Calendars</button>
+                        <button class="btn btn-secondary requires-api" value="refreshCubsEvents" onclick="refreshSelectedCalendar('cubs-events', 'Cubs Events', this.value)">Cubs Events</button>
+                        <button class="btn btn-secondary requires-api" value="refreshCubsProgramme" onclick="refreshSelectedCalendar('cubs-programme', 'Cubs Programme', this.value)">Cubs Programme</button>
+                        <button class="btn btn-secondary requires-api" value="refreshScoutsEvents" onclick="refreshSelectedCalendar('scouts-events', 'Scouts Events', this.value)">Scouts Events</button>
+                        <button class="btn btn-secondary requires-api" value="refreshScoutsProgramme" onclick="refreshSelectedCalendar('scouts-programme', 'Scouts Programme', this.value)">Scouts Programme</button>
+                        <button class="btn btn-secondary requires-api" value="refreshBeaversEvents" onclick="refreshSelectedCalendar('beavers-events', 'Beavers Events', this.value)">Beavers Events</button>
+                        <button class="btn btn-secondary requires-api" value="refreshBeaversProgramme" onclick="refreshSelectedCalendar('beavers-programme', 'Beavers Programme', this.value)">Beavers Programme</button>
                     </div>
                     <p id="global-refresh-status" class="refresh-status">No global refresh triggered yet.</p>
                     <div class="section-status-group">
@@ -141,7 +141,8 @@
                         <button
                             id="refresh-button"
                             class="btn btn-primary requires-api"
-                            onclick="refreshLambda()"
+                            value="refreshAgenda"
+                            onclick="refreshLambda(this.value)"
                             title="Runs agenda enrichment with the integer as max queue publish count. This does not do a full calendar feed refresh."
                         >Refresh Agenda events</button>
                     </div>
@@ -260,7 +261,8 @@
                             <button
                                 id="modal-hide-toggle-button"
                                 class="btn btn-secondary requires-api"
-                                onclick="toggleCurrentEventHidden()"
+                                value="hide"
+                                onclick="toggleCurrentEventHidden(this.value)"
                             >Hide Event</button>
                         </div>
                     </div>
@@ -277,11 +279,13 @@
                         <div class="field-actions">
                             <button
                                 class="btn btn-primary requires-api"
-                                onclick="persistCurrentField('tagline')"
+                                value="persistTagline"
+                                onclick="persistCurrentField('tagline', this.value)"
                             >Persist Tagline</button>
                             <button
                                 class="btn btn-secondary requires-api"
-                                onclick="requestGeneratedField('tagline')"
+                                value="generateTagline"
+                                onclick="requestGeneratedField('tagline', this.value)"
                             >Request AI Tagline</button>
                         </div>
                     </div>
@@ -298,11 +302,13 @@
                         <div class="field-actions">
                             <button
                                 class="btn btn-primary requires-api"
-                                onclick="persistCurrentField('imagePrompt')"
+                                value="persistImageTheme"
+                                onclick="persistCurrentField('imageTheme', this.value)"
                             >Persist Image Theme</button>
                             <button
                                 class="btn btn-secondary requires-api"
-                                onclick="requestGeneratedField('imagePrompt')"
+                                value="generateImageTheme"
+                                onclick="requestGeneratedField('imageTheme', this.value)"
                             >Request AI Image Theme</button>
                         </div>
                     </div>
@@ -321,13 +327,15 @@
                             <button
                                 id="modal-save-image-url-button"
                                 class="btn btn-primary requires-api"
-                                onclick="persistCurrentField('imageUrl')"
+                                value="persistUrl"
+                                onclick="persistCurrentField('imageUrl', this.value)"
                             >Persist Image URL</button>
                             <button
                                 class="btn btn-secondary requires-api"
-                                onclick="requestGeneratedField('imageUrl')"
+                                value="generateImage"
+                                onclick="requestGeneratedField('imageUrl', this.value)"
                             >Request AI Image</button>
-                            <button id="modal-requeue-button" class="btn btn-secondary requires-api" style="display:none;" onclick="requeueCurrentEvent()">Requeue Missing Fields</button>
+                            <button id="modal-requeue-button" class="btn btn-secondary requires-api" value="requeue" style="display:none;" onclick="requeueCurrentEvent(this.value)">Requeue Missing Fields</button>
                         </div>
                     </div>
 

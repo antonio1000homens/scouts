@@ -441,7 +441,7 @@ function formatCompletedRequestOperation(value) {
     if (!hasText(value)) return 'unknown';
     const normalized = String(value).trim();
     if (normalized === 'processing-complete') return 'Processing Complete';
-    if (normalized === 'imagePrompt') return 'Image Theme';
+    if (normalized === 'imageTheme' || normalized === 'imagePrompt') return 'Image Theme';
     if (normalized === 'imageUrl') return 'Image URL';
     if (normalized === 'tagline') return 'Tagline';
     if (normalized === 'hidden') return 'Hidden';
@@ -2297,11 +2297,11 @@ function renderEvents() {
                             View Details
                         </button>
                         ${isHidden
-                            ? `<button class="btn btn-secondary requires-api" onclick="unhideEvent(${index})">Unhide Event</button>`
-                            : `<button class="btn btn-secondary requires-api" onclick="hideEvent(${index})">Hide Event</button>`
+                            ? `<button class="btn btn-secondary requires-api" value="unhide" onclick="unhideEvent(${index}, false, this.value)">Unhide Event</button>`
+                            : `<button class="btn btn-secondary requires-api" value="hide" onclick="hideEvent(${index}, false, this.value)">Hide Event</button>`
                         }
                         ${requeueEligible
-                            ? `<button class="btn btn-secondary requires-api" onclick="requeueEvent(${index})">Requeue Missing Fields</button>`
+                            ? `<button class="btn btn-secondary requires-api" value="requeue" onclick="requeueEvent(${index}, false, this.value)">Requeue Missing Fields</button>`
                             : ''
                         }
                         <button class="btn btn-secondary" onclick="toggleHexPreview(${index})">HEX</button>
@@ -2418,6 +2418,7 @@ function openUploadModal(index) {
     if (hideToggleButton) {
         const hidden = isEntryHidden(entry);
         hideToggleButton.textContent = hidden ? 'Unhide Event' : 'Hide Event';
+        hideToggleButton.value = hidden ? 'unhide' : 'hide';
     }
     if (requeueButton) {
         requeueButton.style.display = 'inline-block';
@@ -2456,7 +2457,7 @@ window.onclick = function(event) {
 }
 
 // Lambda refresh functionality
-async function refreshLambda() {
+async function refreshLambda(action = 'refreshAgenda') {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -2470,7 +2471,7 @@ async function refreshLambda() {
 
     const actionInput = document.getElementById('refresh-action');
     const statusElement = document.getElementById('refresh-status');
-    const action = actionInput.value;
+    const requestedCount = actionInput.value;
     if (lambdaRuntimeRunning || uiCommandInFlight) {
         statusElement.textContent = 'Lambda currently running. Wait for completion.';
         statusElement.className = 'refresh-status error';
@@ -2481,11 +2482,12 @@ async function refreshLambda() {
     statusElement.textContent = 'Sending request...';
     statusElement.className = 'refresh-status loading';
 
-    const actionCount = Number.isFinite(parseInt(action, 10)) ? parseInt(action, 10) : 0;
+    const actionCount = Number.isFinite(parseInt(requestedCount, 10)) ? parseInt(requestedCount, 10) : 0;
     const payload = {
         realm: 'scouts',
         subject: 'agenda',
-        action: actionCount,
+        action,
+        maxEvents: actionCount,
     };
 
     uiCommandInFlight = true;
@@ -2531,7 +2533,7 @@ async function refreshLambda() {
     }
 }
 
-async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected Calendar') {
+async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected Calendar', action = 'refreshCalendars') {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -2548,7 +2550,7 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
     const payload = {
         realm: 'scouts',
         subject: calendarToken && calendarToken !== 'all' ? String(calendarToken).trim().toLowerCase() : 'calendars',
-        action: 'refresh',
+        action,
     };
 
     updateGlobalRefreshStatus(`Refreshing ${label}...`, 'loading');
@@ -2628,23 +2630,23 @@ function getSelectedModalEntry() {
 function getFieldOperationConfig(field) {
     if (field === 'tagline') {
         return {
-            subject: 'tagline',
+            subjectKey: 'tagline',
             payloadKey: 'tagline',
             label: 'Tagline',
             queueLabel: 'AI tagline',
         };
     }
-    if (field === 'imagePrompt') {
+    if (field === 'imageTheme' || field === 'imagePrompt') {
         return {
-            subject: 'imagePrompt',
-            requestSubject: 'imagePrompt',
-            payloadKey: 'imagePrompt',
+            subjectKey: 'imageTheme',
+            requestSubject: 'imageTheme',
+            payloadKey: 'imageTheme',
             label: 'Image Theme',
             queueLabel: 'AI image theme',
         };
     }
     return {
-        subject: 'imageUrl',
+        subjectKey: 'imageUrl',
         requestSubject: 'eventImage',
         payloadKey: 'imageUrl',
         label: 'Image URL',
@@ -2657,7 +2659,7 @@ function getModalFieldValue(field) {
         const input = document.getElementById('modal-tagline-input');
         return hasText(input?.value) ? input.value.trim() : '';
     }
-    if (field === 'imagePrompt') {
+    if (field === 'imageTheme' || field === 'imagePrompt') {
         const input = document.getElementById('modal-image-prompt-input');
         return hasText(input?.value) ? input.value.trim() : '';
     }
@@ -2724,7 +2726,7 @@ function applyLocalPersistedField(entry, field, value) {
     if (!event.image || typeof event.image !== 'object') {
         event.image = {};
     }
-    if (field === 'imagePrompt') {
+    if (field === 'imageTheme' || field === 'imagePrompt') {
         event.image.theme = value;
         if (Object.prototype.hasOwnProperty.call(event.image, 'prompt')) delete event.image.prompt;
         return;
@@ -2800,7 +2802,7 @@ function applyVisibilityOverrides(entries, options = {}) {
     return changed;
 }
 
-async function persistCurrentField(field) {
+async function persistCurrentField(field, action = 'persist') {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -2836,34 +2838,16 @@ async function persistCurrentField(field) {
         return;
     }
 
-    const subject = JSON.parse(JSON.stringify(event || {}));
-    subject.hex = hex;
-    if (!subject.image || typeof subject.image !== 'object') {
-        subject.image = {};
-    }
-    if (field === 'tagline') {
-        subject.tagline = nextValue;
-    } else if (field === 'imagePrompt') {
-        subject.image.theme = nextValue;
-        if (Object.prototype.hasOwnProperty.call(subject.image, 'prompt')) delete subject.image.prompt;
-    } else {
-        subject.image.url = nextValue;
-    }
-
-    if (!hasText(subject.tagline) && hasText(subject.AI)) {
-        subject.tagline = subject.AI;
-    }
-    if (Object.prototype.hasOwnProperty.call(subject, 'AI')) delete subject.AI;
-    if (Object.prototype.hasOwnProperty.call(subject, 'ai')) delete subject.ai;
+    const subject = {
+        hexId: hex,
+        [config.subjectKey]: nextValue,
+    };
 
     const payload = {
         realm: 'scouts',
-        subject: config.subject,
-        action: 'persist',
-        hex,
-        event: subject,
+        subject,
+        action,
     };
-    payload[config.payloadKey] = nextValue;
 
     updateModalStatus(`Persisting ${config.label.toLowerCase()} for "${eventLabel}"...`, 'loading');
 
@@ -2876,7 +2860,7 @@ async function persistCurrentField(field) {
             ? ` ${result.message.trim()}`
             : '';
         const queueAcceptedSuffix = result?.queueAccepted === true ? ' Queue accepted.' : '';
-        const successMessage = `${config.label} persist queued for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
+        const successMessage = `${config.label} ${action} queued for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
         updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
 
@@ -2898,7 +2882,7 @@ async function persistCurrentField(field) {
     }
 }
 
-async function requestGeneratedField(field) {
+async function requestGeneratedField(field, action = 'generate') {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -2926,10 +2910,10 @@ async function requestGeneratedField(field) {
 
     const payload = {
         realm: 'scouts',
-        subject: config.requestSubject || config.subject,
-        action: 'generate',
-        hex,
-        event: JSON.parse(JSON.stringify(event || {})),
+        subject: {
+            hexId: hex,
+        },
+        action,
     };
 
     updateModalStatus(`Queueing ${config.queueLabel} for "${eventLabel}"...`, 'loading');
@@ -2943,7 +2927,7 @@ async function requestGeneratedField(field) {
             ? ` ${result.message.trim()}`
             : '';
         const queueAcceptedSuffix = result?.queueAccepted === true ? ' Queue accepted.' : '';
-        const successMessage = `${config.queueLabel} request queued for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
+        const successMessage = `${config.queueLabel} ${action} queued for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
         updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
         await pollQueueDepthSnapshots();
@@ -2961,7 +2945,7 @@ async function requestGeneratedField(field) {
     }
 }
 
-async function hideEvent(eventIndex, fromModal = false) {
+async function hideEvent(eventIndex, fromModal = false, action = 'hide') {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -3004,25 +2988,15 @@ async function hideEvent(eventIndex, fromModal = false) {
     }
 
     const hiddenAtIso = new Date().toISOString();
-    const subject = JSON.parse(JSON.stringify(event || {}));
-    subject.hex = hex;
-    subject.isHidden = true;
-    subject.hiddenAt = hiddenAtIso;
-    if (!subject.image || typeof subject.image !== 'object') {
-        subject.image = {};
-    }
-    if (!hasText(subject.tagline) && hasText(subject.AI)) {
-        subject.tagline = subject.AI;
-    }
-    if (Object.prototype.hasOwnProperty.call(subject, 'AI')) delete subject.AI;
-    if (Object.prototype.hasOwnProperty.call(subject, 'ai')) delete subject.ai;
+    const subject = {
+        hexId: hex,
+        isHidden: true,
+    };
 
     const payload = {
         realm: 'scouts',
-        subject: 'metadata',
-        action: 'hide',
-        hex,
-        event: subject,
+        subject,
+        action,
         hiddenAt: hiddenAtIso,
     };
 
@@ -3064,7 +3038,7 @@ async function hideEvent(eventIndex, fromModal = false) {
     }
 }
 
-async function unhideEvent(eventIndex, fromModal = false) {
+async function unhideEvent(eventIndex, fromModal = false, action = 'unhide') {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -3106,25 +3080,15 @@ async function unhideEvent(eventIndex, fromModal = false) {
         return;
     }
 
-    const subject = JSON.parse(JSON.stringify(event || {}));
-    subject.hex = hex;
-    subject.isHidden = false;
-    subject.hiddenAt = null;
-    if (!subject.image || typeof subject.image !== 'object') {
-        subject.image = {};
-    }
-    if (!hasText(subject.tagline) && hasText(subject.AI)) {
-        subject.tagline = subject.AI;
-    }
-    if (Object.prototype.hasOwnProperty.call(subject, 'AI')) delete subject.AI;
-    if (Object.prototype.hasOwnProperty.call(subject, 'ai')) delete subject.ai;
+    const subject = {
+        hexId: hex,
+        isHidden: false,
+    };
 
     const payload = {
         realm: 'scouts',
-        subject: 'metadata',
-        action: 'unhide',
-        hex,
-        event: subject,
+        subject,
+        action,
     };
 
     const loadingMessage = `Unhiding "${eventLabel}"...`;
@@ -3165,7 +3129,7 @@ async function unhideEvent(eventIndex, fromModal = false) {
     }
 }
 
-function toggleCurrentEventHidden() {
+function toggleCurrentEventHidden(action = null) {
     if (currentEventIndex === null) {
         updateModalStatus('Open an event first before toggling visibility.', 'error');
         return;
@@ -3176,13 +3140,13 @@ function toggleCurrentEventHidden() {
         return;
     }
     if (isEntryHidden(entry)) {
-        unhideEvent(currentEventIndex, true);
+        unhideEvent(currentEventIndex, true, action || 'unhide');
     } else {
-        hideEvent(currentEventIndex, true);
+        hideEvent(currentEventIndex, true, action || 'hide');
     }
 }
 
-async function requeueEvent(eventIndex, fromModal = false) {
+async function requeueEvent(eventIndex, fromModal = false, action = 'requeue') {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -3241,7 +3205,7 @@ async function requeueEvent(eventIndex, fromModal = false) {
     const payload = {
         realm: 'scouts',
         subject: 'scoutsRequest',
-        action: 'requeue',
+        action,
         event: subject,
     };
 
@@ -3272,12 +3236,12 @@ async function requeueEvent(eventIndex, fromModal = false) {
     }
 }
 
-function requeueCurrentEvent() {
+function requeueCurrentEvent(action = 'requeue') {
     if (currentEventIndex === null) {
         updateModalStatus('Open an event first before requeueing.', 'error');
         return;
     }
-    requeueEvent(currentEventIndex, true);
+    requeueEvent(currentEventIndex, true, action);
 }
 
 
