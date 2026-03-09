@@ -34,6 +34,7 @@ let runtimeDetailsLastMessage = '';
 let runtimeDetailsLastType = 'info';
 let runtimeDetailsPending = null;
 let runtimeDetailsFlushTimer = null;
+let latestBackendRequestId = '';
 let autoLambdaInvokeInFlight = false;
 let autoLambdaInvokeEnabled = true;
 let autoLambdaInvokeIntervalMs = DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS;
@@ -156,6 +157,28 @@ function updateRuntimeDetails(message, type = 'info') {
     if (!runtimeDetailsFlushTimer) {
         runtimeDetailsFlushTimer = setTimeout(flushPendingRuntimeDetails, waitMs);
     }
+}
+
+function updateRuntimeRequestId(requestId, label = 'Latest request ID') {
+    const requestIdElement = document.getElementById('runtime-state-request-id');
+    if (!requestIdElement) return;
+
+    const normalizedRequestId = hasText(requestId) ? String(requestId).trim() : '';
+    latestBackendRequestId = normalizedRequestId;
+    requestIdElement.textContent = `${label}: ${normalizedRequestId || 'n/a'}`;
+}
+
+function extractBackendRequestId(result) {
+    const candidates = [
+        result?.queuedMessage?.messageId,
+        result?.queuedMessage?.requestId,
+        result?.requestId,
+        result?.messageId,
+    ];
+    for (const candidate of candidates) {
+        if (hasText(candidate)) return String(candidate).trim();
+    }
+    return '';
 }
 
 function pinRuntimeDetails(message, type = 'info', ttlMs = 45000) {
@@ -2230,6 +2253,7 @@ function renderEvents() {
         const section = getEventSection(event);
         const isHidden = isEntryHidden(entry);
         const isApproved = isEntryApproved(entry);
+        const showApprovalState = !isHidden && !isApproved;
         const title = getEventDisplayTitle(event, entry, index);
         const eventUID = getEntryIdentifier(entry);
         const sourceDetailsMarkup = entry.sourceDetails?.length
@@ -2258,7 +2282,7 @@ function renderEvents() {
                     <div class="event-badge-stack">
                         <span class="event-badge ${section}">${section}</span>
                         ${isHidden ? `<span class="event-badge hidden">Hidden</span>` : ''}
-                        ${!isApproved ? `<span class="event-badge approval">Needs Approval</span>` : ''}
+                        ${showApprovalState ? `<span class="event-badge approval">Needs Approval</span>` : ''}
                         <div class="event-runtime-badges">${renderEventRuntimeBadgesMarkup(event)}</div>
                     </div>
                 </div>
@@ -2307,7 +2331,7 @@ function renderEvents() {
                             ? `<button class="btn btn-secondary requires-api" value="unhide" onclick="unhideEvent(${index}, false, this.value)">Unhide Event</button>`
                             : `<button class="btn btn-secondary requires-api" value="hide" onclick="hideEvent(${index}, false, this.value)">Hide Event</button>`
                         }
-                        ${!isApproved
+                        ${showApprovalState
                             ? `<button class="btn btn-primary requires-api" value="approve" onclick="approveEvent(${index}, false, this.value)">Approve</button>`
                             : ''
                         }
@@ -2436,7 +2460,7 @@ function openUploadModal(index) {
         hideToggleButton.value = hidden ? 'unhide' : 'hide';
     }
     if (approveButton) {
-        approveButton.style.display = isEntryApproved(entry) ? 'none' : 'inline-block';
+        approveButton.style.display = isEntryHidden(entry) || isEntryApproved(entry) ? 'none' : 'inline-block';
     }
     if (requeueButton) {
         requeueButton.style.display = 'inline-block';
@@ -3234,6 +3258,7 @@ async function approveEvent(eventIndex, fromModal = false, action = 'approve') {
     refreshApiActionButtons();
     try {
         const result = await sendScoutsCommand(payload);
+        const requestId = extractBackendRequestId(result);
         await pollQueueDepthSnapshots();
         applyLocalApprovalState(entry, true);
         updateEventsCount(
@@ -3250,7 +3275,9 @@ async function approveEvent(eventIndex, fromModal = false, action = 'approve') {
         const backendMessage = typeof result?.message === 'string' && result.message.trim()
             ? ` ${result.message.trim()}`
             : '';
-        const successMessage = `Approve request queued for "${eventLabel}".${backendMessage}`;
+        const requestIdSuffix = requestId ? ` Request ID: ${requestId}.` : '';
+        updateRuntimeRequestId(requestId || latestBackendRequestId);
+        const successMessage = `Approve request queued for "${eventLabel}".${backendMessage}${requestIdSuffix}`;
         if (fromModal) updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
     } catch (error) {
