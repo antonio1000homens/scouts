@@ -59,13 +59,6 @@ const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/scoutsprocessing.json';
 const COMPLETED_REQUESTS_RUNTIME_URL = '../../runtime/scoutscompleted.json';
 const SCOUTS_CONFIG_URL = window.SCOUTS_CONFIG_URL || '../../scouts.conf';
 const SCOUTS_CONFIG_CACHE_MS = 5 * 60 * 1000;
-const DEFAULT_IMAGE_GENERATION_PROMPT_TEMPLATE = 'cartoonish image of scouts in {{IMAGE_THEME}}, {{IMAGE_PROMPT_SPECIFICATIONS}}';
-const DEFAULT_IMAGE_GENERATION_PROMPT_SPECIFICATIONS = [
-    'landscape 4:3 composition suitable for website event cards',
-    'approximately 1600x1200',
-    'main subjects centered',
-    'safe margins for crop',
-];
 const HEX_PREVIEW_POLL_INTERVAL_MS = 5000;
 let activeHexPreviewCardIndex = null;
 let activeHexPreviewHex = null;
@@ -1949,13 +1942,11 @@ function getImageTheme(event) {
 }
 
 function buildImagePromptSpecificationsText(specifications) {
-    if (!Array.isArray(specifications) || specifications.length === 0) {
-        return DEFAULT_IMAGE_GENERATION_PROMPT_SPECIFICATIONS.join(', ');
-    }
+    if (!Array.isArray(specifications) || specifications.length === 0) return '';
     const cleaned = specifications
         .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
         .filter(Boolean);
-    return cleaned.length > 0 ? cleaned.join(', ') : DEFAULT_IMAGE_GENERATION_PROMPT_SPECIFICATIONS.join(', ');
+    return cleaned.length > 0 ? cleaned.join(', ') : '';
 }
 
 function buildImageGenerationPromptFromTheme(theme, config = null) {
@@ -1970,9 +1961,8 @@ function buildImageGenerationPromptFromTheme(theme, config = null) {
         : cachedScoutsConfig;
     const template = hasText(resolvedConfig?.imageGenerationPromptTemplate)
         ? String(resolvedConfig.imageGenerationPromptTemplate)
-        : hasText(resolvedConfig?.imagePromptTemplate)
-            ? String(resolvedConfig.imagePromptTemplate)
-            : DEFAULT_IMAGE_GENERATION_PROMPT_TEMPLATE;
+        : null;
+    if (!template) return null;
     const specifications = buildImagePromptSpecificationsText(
         resolvedConfig?.imageGenerationPromptSpecifications ?? resolvedConfig?.imagePromptSpecifications,
     );
