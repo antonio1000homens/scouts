@@ -22,6 +22,7 @@ body {
     background-color: var(--background-light);
     color: var(--text-dark);
     line-height: 1.6;
+    min-height: 100vh;
 }
 
 .admin-notification {
@@ -166,7 +167,7 @@ body {
 .admin-container {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 2rem;
+    padding: 2rem 2rem 7rem;
 }
 
 .admin-header {
@@ -652,16 +653,22 @@ body {
 }
 
 .admin-runtime-footer {
+    position: fixed;
+    left: 50%;
+    bottom: 1rem;
+    transform: translateX(-50%);
+    width: min(calc(100% - 2rem), 1400px);
     margin-top: 1.25rem;
     background: #111827;
     border-radius: 10px;
     border: 1px solid #1f2937;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+    box-shadow: 0 16px 36px rgba(15, 23, 42, 0.24);
+    z-index: 1000;
 }
 
 .admin-runtime-footer-inner {
     display: grid;
-    grid-template-columns: auto minmax(180px, auto) minmax(0, 1fr) auto auto;
+    grid-template-columns: auto minmax(180px, auto) minmax(0, 1fr) auto auto auto;
     align-items: center;
     gap: 0.75rem 1rem;
     padding: 0.6rem 0.9rem;
@@ -1322,7 +1329,7 @@ body {
     }
 
     .admin-container {
-        padding: 1rem;
+        padding: 1rem 1rem 8.5rem;
     }
 
     .admin-overview-inline {
@@ -1331,6 +1338,11 @@ body {
 
     .admin-runtime-footer-inner {
         grid-template-columns: 1fr;
+    }
+
+    .admin-runtime-footer {
+        width: calc(100% - 1rem);
+        bottom: 0.5rem;
     }
 
     .admin-runtime-footer-meta {
