@@ -122,13 +122,6 @@
 
             <div class="admin-info">
                 <div class="info-card">
-                    <h3>Backend Status</h3>
-                    <p id="runtime-state-status" class="status-text">Checking runtime state...</p>
-                    <p id="runtime-state-details" class="refresh-status">No lambda commands yet.</p>
-                    <p id="queue-depth-updated" class="refresh-status">Last update: n/a</p>
-                    <p id="queue-depth-checked" class="refresh-status">Last checked: n/a</p>
-                </div>
-                <div class="info-card">
                     <h3>Requests</h3>
                     <p id="completed-requests-summary" class="status-text status-info">Waiting for refresh...</p>
                     <p id="completed-requests-updated" class="refresh-status">Last refresh: n/a</p>
@@ -195,6 +188,16 @@
                 <p class="loading">Loading events...</p>
             </div>
         </div>
+
+        <footer class="admin-runtime-footer">
+            <div class="admin-runtime-footer-inner">
+                <div class="admin-runtime-footer-label">Backend Status</div>
+                <p id="runtime-state-status" class="status-text admin-runtime-footer-status">Checking runtime state...</p>
+                <p id="runtime-state-details" class="refresh-status admin-runtime-footer-details">No lambda commands yet.</p>
+                <p id="queue-depth-updated" class="refresh-status admin-runtime-footer-meta">Last update: n/a</p>
+                <p id="queue-depth-checked" class="refresh-status admin-runtime-footer-meta">Last checked: n/a</p>
+            </div>
+        </footer>
 
         <!-- Upload Modal -->
         <div id="upload-modal" class="modal" style="display: none;">
