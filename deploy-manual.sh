@@ -48,6 +48,9 @@ ADMIN_API_BASE_VALUE="${ADMIN_API_BASE:-/admin-api}"
   if [ -n "${SCOUTS2SQS_URL:-}" ]; then
     echo "window.SCOUTS2SQS_URL = '${SCOUTS2SQS_URL}';"
   fi
+  if [ -n "${SCOUTS_CONFIG_URL:-}" ]; then
+    echo "window.SCOUTS_CONFIG_URL = '${SCOUTS_CONFIG_URL}';"
+  fi
 } > website/admin/admin-config.js
 
 aws s3 sync website/ s3://2ndtolworth/website/ \
@@ -63,6 +66,18 @@ if [ -d "website/eventImages" ]; then
     --cache-control "max-age=0, no-cache, no-store, must-revalidate"
 fi
 
+if [ -f "lambdas/scouts/sqs/sqs2scouts/scouts.conf" ]; then
+  echo "Uploading lambdas/scouts/sqs/sqs2scouts/scouts.conf to s3://2ndtolworth/scouts.conf..."
+  aws s3 cp lambdas/scouts/sqs/sqs2scouts/scouts.conf s3://2ndtolworth/scouts.conf \
+    --cache-control "max-age=0, no-cache, no-store, must-revalidate"
+elif [ -f "scouts.conf" ]; then
+  echo "Uploading scouts.conf to s3://2ndtolworth/scouts.conf..."
+  aws s3 cp scouts.conf s3://2ndtolworth/scouts.conf \
+    --cache-control "max-age=0, no-cache, no-store, must-revalidate"
+else
+  echo "No scouts.conf found locally, skipping upload."
+fi
+
 echo ""
 echo "✅ Deployment complete!"
 echo "Website URL: http://2ndtolworth.s3-website.eu-west-2.amazonaws.com"
@@ -71,7 +86,7 @@ if [ -n "${CLOUDFRONT_DISTRIBUTION_ID:-}" ]; then
   echo "Creating CloudFront invalidation for ${CLOUDFRONT_DISTRIBUTION_ID}..."
   aws cloudfront create-invalidation \
     --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
-    --paths "/index.html" "/website/*" >/dev/null
+    --paths "/index.html" "/scouts.conf" "/website/*" >/dev/null
   echo "CloudFront invalidation submitted."
 else
   echo "Skipping CloudFront invalidation (set CLOUDFRONT_DISTRIBUTION_ID to enable)."
