@@ -45,9 +45,9 @@ let statusPollingInFlight = false;
 let lastObservedRuntimeCompletedAt = '';
 let latestCompletedRequests = [];
 let latestCompletedRequestsUpdatedAt = null;
-let cachedAiConfig = null;
-let cachedAiConfigLoadedAt = 0;
-let aiConfigLoadPromise = null;
+let cachedScoutsConfig = null;
+let cachedScoutsConfigLoadedAt = 0;
+let scoutsConfigLoadPromise = null;
 const missingHexRetryAtByHex = new Map();
 const warnedMissingDtstartIds = new Set();
 const localVisibilityOverrides = new Map();
@@ -57,8 +57,8 @@ const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth
 const QUEUED_REQUESTS_RUNTIME_URL = '../../runtime/scoutsqueued.json';
 const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/scoutsprocessing.json';
 const COMPLETED_REQUESTS_RUNTIME_URL = '../../runtime/scoutscompleted.json';
-const AI_CONFIG_URL = '../../AI.conf';
-const AI_CONFIG_CACHE_MS = 5 * 60 * 1000;
+const SCOUTS_CONFIG_URL = window.SCOUTS_CONFIG_URL || '../../scouts.conf';
+const SCOUTS_CONFIG_CACHE_MS = 5 * 60 * 1000;
 const DEFAULT_IMAGE_GENERATION_PROMPT_TEMPLATE = 'cartoonish image of scouts in {{IMAGE_THEME}}, {{IMAGE_PROMPT_SPECIFICATIONS}}';
 const DEFAULT_IMAGE_GENERATION_PROMPT_SPECIFICATIONS = [
     'landscape 4:3 composition suitable for website event cards',
@@ -315,35 +315,35 @@ function toggleEventsJsonViewer() {
     showEventsJsonViewer();
 }
 
-async function renderAiConfigViewerContent(force = false) {
-    const content = document.getElementById('ai-config-content');
+async function renderScoutsConfigViewerContent(force = false) {
+    const content = document.getElementById('scouts-config-content');
     if (!content) return;
-    content.textContent = 'Loading AI.conf...';
+    content.textContent = 'Loading scouts.conf...';
     try {
-        const config = await loadAiConfig(force);
+        const config = await loadScoutsConfig(force);
         content.textContent = JSON.stringify(config ?? {}, null, 2);
     } catch (error) {
-        content.textContent = `Failed to load AI.conf: ${error.message}`;
+        content.textContent = `Failed to load scouts.conf: ${error.message}`;
     }
 }
 
-function showAiConfigViewer() {
-    closeAllViewers('ai-config-viewer');
-    const viewer = setViewerOpen('ai-config-viewer', true);
+function showScoutsConfigViewer() {
+    closeAllViewers('scouts-config-viewer');
+    const viewer = setViewerOpen('scouts-config-viewer', true);
     if (!viewer) return;
-    renderAiConfigViewerContent(true);
+    renderScoutsConfigViewerContent(true);
 }
 
-function toggleAiConfigViewer() {
-    const viewer = document.getElementById('ai-config-viewer');
+function toggleScoutsConfigViewer() {
+    const viewer = document.getElementById('scouts-config-viewer');
     if (!viewer) return;
 
     const shouldShow = viewer.style.display === 'none' || viewer.style.display === '';
     if (!shouldShow) {
-        setViewerOpen('ai-config-viewer', false);
+        setViewerOpen('scouts-config-viewer', false);
         return;
     }
-    showAiConfigViewer();
+    showScoutsConfigViewer();
 }
 
 function closeViewerMenu() {
@@ -1763,16 +1763,16 @@ function showError(message) {
     container.innerHTML = `<div class="error">${message}</div>`;
 }
 
-async function loadAiConfig(force = false) {
+async function loadScoutsConfig(force = false) {
     const now = Date.now();
-    if (!force && cachedAiConfig && (now - cachedAiConfigLoadedAt) < AI_CONFIG_CACHE_MS) {
-        return cachedAiConfig;
+    if (!force && cachedScoutsConfig && (now - cachedScoutsConfigLoadedAt) < SCOUTS_CONFIG_CACHE_MS) {
+        return cachedScoutsConfig;
     }
-    if (!force && aiConfigLoadPromise) {
-        return aiConfigLoadPromise;
+    if (!force && scoutsConfigLoadPromise) {
+        return scoutsConfigLoadPromise;
     }
 
-    aiConfigLoadPromise = fetch(`${AI_CONFIG_URL}?ts=${Date.now()}`, {
+    scoutsConfigLoadPromise = fetch(`${SCOUTS_CONFIG_URL}?ts=${Date.now()}`, {
         cache: 'no-store',
         credentials: 'same-origin',
     })
@@ -1783,16 +1783,15 @@ async function loadAiConfig(force = false) {
             return response.json();
         })
         .then((config) => {
-            cachedAiConfig = config && typeof config === 'object' ? config : {};
-            cachedAiConfigLoadedAt = Date.now();
-            renderAiConfigViewerContent(false).catch(() => {});
-            return cachedAiConfig;
+            cachedScoutsConfig = config && typeof config === 'object' ? config : {};
+            cachedScoutsConfigLoadedAt = Date.now();
+            return cachedScoutsConfig;
         })
         .finally(() => {
-            aiConfigLoadPromise = null;
+            scoutsConfigLoadPromise = null;
         });
 
-    return aiConfigLoadPromise;
+    return scoutsConfigLoadPromise;
 }
 
 // Generate a unique identifier for an event (UID or HEX)
@@ -1959,19 +1958,24 @@ function buildImagePromptSpecificationsText(specifications) {
     return cleaned.length > 0 ? cleaned.join(', ') : DEFAULT_IMAGE_GENERATION_PROMPT_SPECIFICATIONS.join(', ');
 }
 
-function buildImageGenerationPromptFromTheme(theme, config = cachedAiConfig) {
+function buildImageGenerationPromptFromTheme(theme, config = null) {
     if (!hasText(theme)) return null;
     const normalizedTheme = String(theme).trim();
     const lower = normalizedTheme.toLowerCase();
     if (lower.startsWith('create a cartoonish image of ') || lower.startsWith('cartoonish image of scouts')) {
         return normalizedTheme;
     }
-    const template = hasText(config?.imageGenerationPromptTemplate)
-        ? String(config.imageGenerationPromptTemplate)
-        : hasText(config?.imagePromptTemplate)
-            ? String(config.imagePromptTemplate)
+    const resolvedConfig = config && typeof config === 'object'
+        ? config
+        : cachedScoutsConfig;
+    const template = hasText(resolvedConfig?.imageGenerationPromptTemplate)
+        ? String(resolvedConfig.imageGenerationPromptTemplate)
+        : hasText(resolvedConfig?.imagePromptTemplate)
+            ? String(resolvedConfig.imagePromptTemplate)
             : DEFAULT_IMAGE_GENERATION_PROMPT_TEMPLATE;
-    const specifications = buildImagePromptSpecificationsText(config?.imageGenerationPromptSpecifications ?? config?.imagePromptSpecifications);
+    const specifications = buildImagePromptSpecificationsText(
+        resolvedConfig?.imageGenerationPromptSpecifications ?? resolvedConfig?.imagePromptSpecifications,
+    );
     return template
         .replace(/{{IMAGE_THEME}}/g, normalizedTheme)
         .replace(/{{IMAGE_PROMPT_SPECIFICATIONS}}/g, specifications)
@@ -1979,9 +1983,9 @@ function buildImageGenerationPromptFromTheme(theme, config = cachedAiConfig) {
         .trim();
 }
 
-function getImageGenerationPrompt(event) {
+function getImageGenerationPrompt(event, config = null) {
     if (!event || typeof event !== 'object') return null;
-    const derivedFromTheme = buildImageGenerationPromptFromTheme(getImageTheme(event));
+    const derivedFromTheme = buildImageGenerationPromptFromTheme(getImageTheme(event), config);
     if (hasText(derivedFromTheme)) {
         return derivedFromTheme;
     }
@@ -2686,7 +2690,14 @@ async function copyImagePromptForEvent(eventIndex) {
     const entry = visibleEventEntries[eventIndex];
     if (!entry) return;
 
-    const imagePrompt = getImageGenerationPrompt(entry.event);
+    let scoutsConfig = cachedScoutsConfig;
+    try {
+        scoutsConfig = await loadScoutsConfig();
+    } catch (error) {
+        console.warn('Failed to load scouts.conf for image prompt copy:', error);
+    }
+
+    const imagePrompt = getImageGenerationPrompt(entry.event, scoutsConfig);
     if (!hasText(imagePrompt)) {
         pinRuntimeDetails('No image prompt available to copy.', 'error');
         return;

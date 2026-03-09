@@ -1,5 +1,6 @@
 // Reference template for website/admin/admin-config.js.
 // The deployed admin-config.js is generated during CI deploy from GitHub Secrets.
+// window.SCOUTS_CONFIG_URL = '../../scouts.conf';
 
 window.ADMIN_API_BASE = '/admin-api';
 

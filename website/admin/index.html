@@ -37,7 +37,7 @@
                     <div id="viewer-menu" class="viewer-menu-dropdown">
                         <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showAgendaViewer()">Agenda JSON</button>
                         <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showEventsJsonViewer()">events/*.json</button>
-                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showAiConfigViewer()">AI.conf</button>
+                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showScoutsConfigViewer()">scouts.conf</button>
                     </div>
                 </div>
             </div>
@@ -195,13 +195,13 @@
             </div>
         </section>
 
-        <section id="ai-config-viewer" class="agenda-viewer" style="display: none;" onclick="handleViewerBackdropClick(event)">
+        <section id="scouts-config-viewer" class="agenda-viewer" style="display: none;" onclick="handleViewerBackdropClick(event)">
             <div class="agenda-viewer-panel">
                 <div class="agenda-viewer-header">
-                    <h2>Active AI.conf</h2>
-                    <button class="btn btn-secondary" onclick="toggleAiConfigViewer()">Close</button>
+                    <h2>Active scouts.conf</h2>
+                    <button class="btn btn-secondary" onclick="toggleScoutsConfigViewer()">Close</button>
                 </div>
-                <pre id="ai-config-content" class="agenda-json-content">Loading AI.conf...</pre>
+                <pre id="scouts-config-content" class="agenda-json-content">Loading scouts.conf...</pre>
             </div>
         </section>
 
