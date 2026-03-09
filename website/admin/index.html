@@ -93,10 +93,6 @@
                             <button class="btn btn-primary requires-api" value="refreshAllCalendars" onclick="refreshSelectedCalendar('all', 'All Calendars', this.value)">Refresh All Calendars</button>
                             <button class="btn btn-secondary requires-api" value="refreshCubsEvents" onclick="refreshSelectedCalendar('cubs-events', 'Cubs Events', this.value)">Cubs Events</button>
                             <button class="btn btn-secondary requires-api" value="refreshCubsProgramme" onclick="refreshSelectedCalendar('cubs-programme', 'Cubs Programme', this.value)">Cubs Programme</button>
-                            <button class="btn btn-secondary requires-api" value="refreshScoutsEvents" onclick="refreshSelectedCalendar('scouts-events', 'Scouts Events', this.value)">Scouts Events</button>
-                            <button class="btn btn-secondary requires-api" value="refreshScoutsProgramme" onclick="refreshSelectedCalendar('scouts-programme', 'Scouts Programme', this.value)">Scouts Programme</button>
-                            <button class="btn btn-secondary requires-api" value="refreshBeaversEvents" onclick="refreshSelectedCalendar('beavers-events', 'Beavers Events', this.value)">Beavers Events</button>
-                            <button class="btn btn-secondary requires-api" value="refreshBeaversProgramme" onclick="refreshSelectedCalendar('beavers-programme', 'Beavers Programme', this.value)">Beavers Programme</button>
                         </div>
                         <p id="global-refresh-status" class="refresh-status">No global refresh triggered yet.</p>
                     </div>
@@ -121,13 +117,6 @@
                             >Refresh Agenda events</button>
                         </div>
                         <p id="refresh-status" class="refresh-status"></p>
-                        <div class="global-actions">
-                            <button
-                                class="btn btn-primary"
-                                onclick="loadEvents()"
-                                title="Reloads the S3 agenda.json feed into the admin UI and rerenders the current events/views. No Lambda call and no queue writes."
-                            >Reload Agenda From S3</button>
-                        </div>
                     </div>
                 </div>
             </section>
