@@ -167,17 +167,30 @@ function isNewEvent(event) {
     return !hasText(getAIPrompt(event)) && !hasText(getImageGenerationPrompt(event)) && !hasText(getImageUrl(event));
 }
 
+function isEntryMissingMetadata(entry) {
+    if (isEntryHidden(entry)) return false;
+    const missingCount = getMissingMetadataFields(entry?.event).length;
+    return missingCount > 0 && missingCount < 3;
+}
+
+function isEntryComplete(entry) {
+    if (isEntryHidden(entry)) return false;
+    return isCompleteEvent(entry?.event);
+}
+
+function isEntryPendingApproval(entry) {
+    if (isEntryHidden(entry)) return false;
+    return getMissingMetadataFields(entry?.event).length > 0 && hasText(entry?.event?.hex);
+}
+
 function getFilterCounts() {
     return {
         new: uniqueEventEntries.filter((entry) => !isEntryHidden(entry) && isNewEvent(entry.event)).length,
         all: uniqueEventEntries.length,
-        missing: uniqueEventEntries.filter((entry) => {
-            const missingCount = getMissingMetadataFields(entry.event).length;
-            return missingCount > 0 && missingCount < 3;
-        }).length,
+        missing: uniqueEventEntries.filter((entry) => isEntryMissingMetadata(entry)).length,
         hidden: uniqueEventEntries.filter((entry) => isEntryHidden(entry)).length,
-        complete: uniqueEventEntries.filter((entry) => isCompleteEvent(entry.event)).length,
-        approval: uniqueEventEntries.filter((entry) => getMissingMetadataFields(entry.event).length > 0 && hasText(entry.event?.hex)).length,
+        complete: uniqueEventEntries.filter((entry) => isEntryComplete(entry)).length,
+        approval: uniqueEventEntries.filter((entry) => isEntryPendingApproval(entry)).length,
     };
 }
 
@@ -1156,7 +1169,7 @@ async function loadEvents(options = {}) {
             uniqueEventEntries.length,
             eventsData.length,
             uniqueEventEntries.filter((entry) => isEntryHidden(entry)).length,
-            uniqueEventEntries.filter((entry) => isCompleteEvent(entry.event)).length,
+            uniqueEventEntries.filter((entry) => isEntryComplete(entry)).length,
         );
         updateSidebarUi();
         renderEvents();
@@ -2180,16 +2193,13 @@ function renderEvents() {
             case 'new':
                 return !isEntryHidden(entry) && isNewEvent(event);
             case 'missing':
-                return (() => {
-                    const missingCount = getMissingMetadataFields(event).length;
-                    return missingCount > 0 && missingCount < 3;
-                })();
+                return isEntryMissingMetadata(entry);
             case 'hidden':
                 return isEntryHidden(entry);
             case 'complete':
-                return isCompleteEvent(event);
+                return isEntryComplete(entry);
             case 'approval':
-                return getMissingMetadataFields(event).length > 0 && hasText(event?.hex);
+                return isEntryPendingApproval(entry);
             case 'all':
             default:
                 return true;
@@ -3019,7 +3029,7 @@ async function hideEvent(eventIndex, fromModal = false) {
             uniqueEventEntries.length,
             eventsData.length,
             uniqueEventEntries.filter((candidate) => isEntryHidden(candidate)).length,
-            uniqueEventEntries.filter((candidate) => isCompleteEvent(candidate.event)).length,
+            uniqueEventEntries.filter((candidate) => isEntryComplete(candidate)).length,
         );
         updateSidebarUi();
         renderEvents();
@@ -3120,7 +3130,7 @@ async function unhideEvent(eventIndex, fromModal = false) {
             uniqueEventEntries.length,
             eventsData.length,
             uniqueEventEntries.filter((candidate) => isEntryHidden(candidate)).length,
-            uniqueEventEntries.filter((candidate) => isCompleteEvent(candidate.event)).length,
+            uniqueEventEntries.filter((candidate) => isEntryComplete(candidate)).length,
         );
         updateSidebarUi();
         renderEvents();
