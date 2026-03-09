@@ -1964,7 +1964,7 @@ function buildImageGenerationPromptFromTheme(theme, config = null) {
         : null;
     if (!template) return null;
     const specifications = buildImagePromptSpecificationsText(
-        resolvedConfig?.imageGenerationPromptSpecifications ?? resolvedConfig?.imagePromptSpecifications,
+        resolvedConfig?.imageGenerationPromptSpecifications,
     );
     return template
         .replace(/{{IMAGE_THEME}}/g, normalizedTheme)
