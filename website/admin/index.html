@@ -343,6 +343,8 @@
                     <p id="modal-status" class="status-text"></p>
                 </div>
                 <div class="modal-footer">
+                    <button id="modal-approve-button" class="btn btn-primary requires-api" value="approve" onclick="approveCurrentEvent(this.value)">Approve</button>
+                    <button id="modal-hide-toggle-button" class="btn btn-secondary requires-api" value="hide" onclick="toggleCurrentEventHidden(this.value)">Hide Event</button>
                     <button class="btn btn-secondary" onclick="closeUploadModal()">Close</button>
                 </div>
             </div>

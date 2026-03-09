@@ -171,9 +171,23 @@ function isEntryComplete(entry) {
     return isCompleteEvent(entry?.event);
 }
 
+function isEventApproved(event) {
+    if (!event || typeof event !== 'object') return false;
+    if (event.approved === true || event.isApproved === true) return true;
+    const status = event.status;
+    if (status && typeof status === 'object' && status.isApproved === true) return true;
+    const metadataStatus = event.metadata?.status;
+    return metadataStatus && typeof metadataStatus === 'object' && metadataStatus.isApproved === true;
+}
+
+function isEntryApproved(entry) {
+    if (!entry || typeof entry !== 'object') return false;
+    return isEventApproved(entry.event);
+}
+
 function isEntryPendingApproval(entry) {
     if (isEntryHidden(entry)) return false;
-    return getMissingMetadataFields(entry?.event).length > 0 && hasText(entry?.event?.hex);
+    return hasText(entry?.event?.hex) && !isEntryApproved(entry);
 }
 
 function getFilterCounts() {
@@ -2214,6 +2228,7 @@ function renderEvents() {
         const requeueEligible = missingFields.length > 0;
         const section = getEventSection(event);
         const isHidden = isEntryHidden(entry);
+        const isApproved = isEntryApproved(entry);
         const title = getEventDisplayTitle(event, entry, index);
         const eventUID = getEntryIdentifier(entry);
         const sourceDetailsMarkup = entry.sourceDetails?.length
@@ -2242,6 +2257,7 @@ function renderEvents() {
                     <div class="event-badge-stack">
                         <span class="event-badge ${section}">${section}</span>
                         ${isHidden ? `<span class="event-badge hidden">Hidden</span>` : ''}
+                        ${!isApproved ? `<span class="event-badge approval">Needs Approval</span>` : ''}
                         <div class="event-runtime-badges">${renderEventRuntimeBadgesMarkup(event)}</div>
                     </div>
                 </div>
@@ -2289,6 +2305,10 @@ function renderEvents() {
                         ${isHidden
                             ? `<button class="btn btn-secondary requires-api" value="unhide" onclick="unhideEvent(${index}, false, this.value)">Unhide Event</button>`
                             : `<button class="btn btn-secondary requires-api" value="hide" onclick="hideEvent(${index}, false, this.value)">Hide Event</button>`
+                        }
+                        ${!isApproved
+                            ? `<button class="btn btn-primary requires-api" value="approve" onclick="approveEvent(${index}, false, this.value)">Approve</button>`
+                            : ''
                         }
                         ${requeueEligible
                             ? `<button class="btn btn-secondary requires-api" value="requeue" onclick="requeueEvent(${index}, false, this.value)">Requeue Missing Fields</button>`
@@ -2398,6 +2418,7 @@ function openUploadModal(index) {
     const taglineInput = document.getElementById('modal-tagline-input');
     const imageUrlInput = document.getElementById('modal-image-url-input');
     const hideToggleButton = document.getElementById('modal-hide-toggle-button');
+    const approveButton = document.getElementById('modal-approve-button');
     const requeueButton = document.getElementById('modal-requeue-button');
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
     if (imagePromptInput) imagePromptInput.value = currentImageTheme || '';
@@ -2409,6 +2430,9 @@ function openUploadModal(index) {
         const hidden = isEntryHidden(entry);
         hideToggleButton.textContent = hidden ? 'Unhide Event' : 'Hide Event';
         hideToggleButton.value = hidden ? 'unhide' : 'hide';
+    }
+    if (approveButton) {
+        approveButton.style.display = isEntryApproved(entry) ? 'none' : 'inline-block';
     }
     if (requeueButton) {
         requeueButton.style.display = 'inline-block';
@@ -3134,6 +3158,121 @@ function toggleCurrentEventHidden(action = null) {
     } else {
         hideEvent(currentEventIndex, true, action || 'hide');
     }
+}
+
+function applyLocalApprovalState(entry, approved = true) {
+    if (!entry || !entry.event) return;
+    const event = entry.event;
+    event.approved = approved;
+    event.isApproved = approved;
+    if (!event.status || typeof event.status !== 'object') {
+        event.status = {};
+    }
+    event.status.isApproved = approved;
+    if (!event.metadata || typeof event.metadata !== 'object') {
+        event.metadata = {};
+    }
+    if (!event.metadata.status || typeof event.metadata.status !== 'object') {
+        event.metadata.status = {};
+    }
+    event.metadata.status.isApproved = approved;
+}
+
+async function approveEvent(eventIndex, fromModal = false, action = 'approve') {
+    if (!apiAuthReady) {
+        updateApiAuthStatus(
+            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
+            'error',
+        );
+        if (fromModal) updateModalStatus('Admin API auth not ready.', 'error');
+        else updateRuntimeDetails('Admin API auth not ready.', 'error');
+        return;
+    }
+    if (lambdaRuntimeRunning || uiCommandInFlight) {
+        const message = 'Lambda currently running. Wait for completion before approving.';
+        if (fromModal) updateModalStatus(message, 'error');
+        else updateRuntimeDetails(message, 'error');
+        return;
+    }
+
+    const entry = visibleEventEntries[eventIndex];
+    if (!entry || !entry.event) {
+        const message = 'Unable to find selected event entry.';
+        if (fromModal) updateModalStatus(message, 'error');
+        else updateRuntimeDetails(message, 'error');
+        return;
+    }
+
+    const event = entry.event;
+    if (isEntryApproved(entry)) {
+        const message = 'Event is already approved.';
+        if (fromModal) updateModalStatus(message, 'info');
+        else updateRuntimeDetails(message, 'info');
+        return;
+    }
+
+    const eventLabel = event.summary || event.title || `Event ${eventIndex + 1}`;
+    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+    if (!hex) {
+        const message = 'Cannot approve event: missing HEX.';
+        if (fromModal) updateModalStatus(message, 'error');
+        else updateRuntimeDetails(message, 'error');
+        return;
+    }
+
+    const payload = {
+        realm: 'scouts',
+        subject: {
+            hexId: hex,
+            isApproved: true,
+        },
+        action,
+    };
+
+    const loadingMessage = `Approving "${eventLabel}"...`;
+    if (fromModal) updateModalStatus(loadingMessage, 'loading');
+    else pinRuntimeDetails(loadingMessage, 'loading');
+
+    uiCommandInFlight = true;
+    refreshApiActionButtons();
+    try {
+        const result = await sendScoutsCommand(payload);
+        await pollQueueDepthSnapshots();
+        applyLocalApprovalState(entry, true);
+        updateEventsCount(
+            uniqueEventEntries.length,
+            eventsData.length,
+            uniqueEventEntries.filter((candidate) => isEntryHidden(candidate)).length,
+            uniqueEventEntries.filter((candidate) => isEntryComplete(candidate)).length,
+        );
+        updateSidebarUi();
+        renderEvents();
+        if (fromModal) {
+            updateModalContent(currentEventIndex);
+        }
+        const backendMessage = typeof result?.message === 'string' && result.message.trim()
+            ? ` ${result.message.trim()}`
+            : '';
+        const successMessage = `Approve request queued for "${eventLabel}".${backendMessage}`;
+        if (fromModal) updateModalStatus(successMessage, 'success');
+        pinRuntimeDetails(successMessage, 'success');
+    } catch (error) {
+        console.error('Error approving event:', error);
+        const failureMessage = `Failed to approve event: ${error.message}`;
+        if (fromModal) updateModalStatus(failureMessage, 'error');
+        else pinRuntimeDetails(failureMessage, 'error');
+    } finally {
+        uiCommandInFlight = false;
+        refreshApiActionButtons();
+    }
+}
+
+function approveCurrentEvent(action = 'approve') {
+    if (currentEventIndex === null) {
+        updateModalStatus('Open an event first before approving.', 'error');
+        return;
+    }
+    approveEvent(currentEventIndex, true, action);
 }
 
 async function requeueEvent(eventIndex, fromModal = false, action = 'requeue') {
