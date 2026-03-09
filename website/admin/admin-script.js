@@ -14,6 +14,8 @@ let latestQueuedSnapshot = null;
 let latestProcessingSnapshot = null;
 let latestCompletedSnapshot = null;
 let pinnedRuntimeDetails = null;
+let lastLoadedEventsSummary = null;
+let adminNotificationTimer = null;
 const MIN_RUNTIME_DETAILS_VISIBLE_MS = 5000;
 const DEFAULT_STATUS_POLL_INTERVAL_MS = 5000;
 const DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS = 20000;
@@ -21,7 +23,6 @@ const HEX_NOT_FOUND_BACKOFF_MS = 30000;
 const COMPLETED_REQUEST_HIDE_AFTER_MS = 10 * 60 * 1000;
 const AUTO_LAMBDA_PREF_KEY = 'scouts_admin_auto_lambda_enabled';
 const AUTO_LAMBDA_INTERVAL_PREF_KEY = 'scouts_admin_auto_lambda_interval_ms';
-const AGENDA_AUTO_REFRESH_PREF_KEY = 'scouts_admin_agenda_auto_refresh_enabled';
 const AGENDA_URL = '/agenda.json';
 const FALLBACK_AGENDA_URL = 'https://2ndtolworth.s3.eu-west-2.amazonaws.com/agenda.json';
 const STATUS_POLL_PREF_KEY = 'scouts_admin_status_poll_enabled';
@@ -37,7 +38,6 @@ let autoLambdaInvokeInFlight = false;
 let autoLambdaInvokeEnabled = true;
 let autoLambdaInvokeIntervalMs = DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS;
 let autoLambdaInvokeTimer = null;
-let agendaAutoRefreshEnabled = true;
 let statusPollingEnabled = true;
 let statusPollingIntervalMs = DEFAULT_STATUS_POLL_INTERVAL_MS;
 let statusPollingTimer = null;
@@ -90,7 +90,32 @@ function updateEventsCount(uniqueCount, rawCount = uniqueCount, hiddenCount = 0,
     const countElement = document.getElementById('events-count');
     const hiddenSuffix = hiddenCount > 0 ? `, ${hiddenCount} hidden` : '';
     const completeSuffix = completeCount > 0 ? `, ${completeCount} complete` : '';
-    countElement.textContent = `${uniqueCount} unique (${rawCount} raw${hiddenSuffix}${completeSuffix})`;
+    if (countElement) {
+        countElement.textContent = `${uniqueCount} unique (${rawCount} raw${hiddenSuffix}${completeSuffix})`;
+    }
+    lastLoadedEventsSummary = {
+        uniqueCount,
+        rawCount,
+        hiddenCount,
+        completeCount,
+        label: `${uniqueCount} unique (${rawCount} raw${hiddenSuffix}${completeSuffix})`,
+    };
+}
+
+function showAdminNotification(message, tone = 'info', durationMs = 5000) {
+    const notificationEl = document.getElementById('admin-notification');
+    if (!notificationEl) return;
+
+    notificationEl.textContent = message;
+    notificationEl.dataset.tone = tone;
+    notificationEl.hidden = false;
+
+    if (adminNotificationTimer) {
+        clearTimeout(adminNotificationTimer);
+    }
+    adminNotificationTimer = setTimeout(() => {
+        notificationEl.hidden = true;
+    }, Math.max(1000, durationMs));
 }
 
 function applyRuntimeDetailsNow(message, type = 'info') {
@@ -752,12 +777,6 @@ function readAutoLambdaIntervalPreference() {
     }
 }
 
-function readAgendaAutoRefreshPreference() {
-    const stored = readCookie(AGENDA_AUTO_REFRESH_PREF_KEY);
-    if (stored === null) return true;
-    return stored === '1' || stored.toLowerCase() === 'true';
-}
-
 function readStatusPollingPreference() {
     const stored = readCookie(STATUS_POLL_PREF_KEY);
     if (stored === null) return true;
@@ -801,10 +820,6 @@ function persistAutoLambdaIntervalPreference(intervalMs) {
         AUTO_LAMBDA_INTERVAL_PREF_KEY,
         String(Math.max(5, Math.round(intervalMs / 1000))),
     );
-}
-
-function persistAgendaAutoRefreshPreference(enabled) {
-    writeCookie(AGENDA_AUTO_REFRESH_PREF_KEY, enabled ? '1' : '0');
 }
 
 function persistStatusPollingPreference(enabled) {
@@ -887,17 +902,6 @@ function updateAutoLambdaInvocationUi() {
     }
 }
 
-function updateAgendaAutoRefreshUi() {
-    const toggle = document.getElementById('agenda-auto-refresh-toggle');
-    const statusElement = document.getElementById('agenda-auto-refresh-status');
-    if (toggle) {
-        toggle.checked = agendaAutoRefreshEnabled;
-    }
-    if (statusElement) {
-        statusElement.textContent = `Agenda refresh: ${agendaAutoRefreshEnabled ? 'after lambda completion' : 'disabled'}`;
-    }
-}
-
 function updateStatusPollingUi() {
     const toggle = document.getElementById('status-polling-toggle');
     const intervalInput = document.getElementById('status-polling-interval-seconds');
@@ -923,20 +927,8 @@ function setAutoLambdaInvocationEnabled(enabled, persist = true) {
     updateAutoLambdaInvocationUi();
 }
 
-function setAgendaAutoRefreshEnabled(enabled, persist = true) {
-    agendaAutoRefreshEnabled = Boolean(enabled);
-    if (persist) {
-        persistAgendaAutoRefreshPreference(agendaAutoRefreshEnabled);
-    }
-    updateAgendaAutoRefreshUi();
-}
-
 function toggleAutoLambdaInvocation(enabled) {
     setAutoLambdaInvocationEnabled(enabled, true);
-}
-
-function toggleAgendaAutoRefresh(enabled) {
-    setAgendaAutoRefreshEnabled(enabled, true);
 }
 
 function setStatusPollingEnabled(enabled, persist = true) {
@@ -1017,11 +1009,10 @@ function maybeRefreshAgendaAfterRuntimeCompletion(runtime, wasRunning = false) {
     const isNewCompletion = completedAt !== lastObservedRuntimeCompletedAt;
     lastObservedRuntimeCompletedAt = completedAt;
 
-    if (!agendaAutoRefreshEnabled) return;
     if (runtime?.status === 'running') return;
     if (!isNewCompletion && !wasRunning) return;
 
-    loadEvents({ silent: true });
+    loadEvents({ silent: true, notifyOnCountChange: true, notificationSource: 'Lambda refresh' });
 }
 
 function refreshApiActionButtons() {
@@ -1154,13 +1145,14 @@ async function fetchAgendaJson() {
 
 // Load events from the current site's agenda feed
 async function loadEvents(options = {}) {
-    const { silent = false } = options;
+    const { silent = false, notifyOnCountChange = false, notificationSource = 'Lambda refresh' } = options;
     if (agendaLoadInFlight) {
         return;
     }
 
     agendaLoadInFlight = true;
     try {
+        const previousSummary = lastLoadedEventsSummary;
         const data = await fetchAgendaJson();
         const rawEvents = Array.isArray(data.events) ? data.events : [];
         eventsData = rawEvents.map((event) => normaliseEventTaglineFields(cloneEventRecord(event)));
@@ -1178,6 +1170,20 @@ async function loadEvents(options = {}) {
             uniqueEventEntries.filter((entry) => isEntryHidden(entry)).length,
             uniqueEventEntries.filter((entry) => isEntryComplete(entry)).length,
         );
+        if (
+            notifyOnCountChange
+            && previousSummary
+            && Number.isFinite(previousSummary.uniqueCount)
+            && previousSummary.uniqueCount !== uniqueEventEntries.length
+        ) {
+            const delta = uniqueEventEntries.length - previousSummary.uniqueCount;
+            const deltaLabel = delta > 0 ? `+${delta}` : `${delta}`;
+            showAdminNotification(
+                `${notificationSource}: events loaded changed from ${previousSummary.uniqueCount} to ${uniqueEventEntries.length} (${deltaLabel})`,
+                'success',
+                5000,
+            );
+        }
         updateSidebarUi();
         renderEvents();
         renderAgendaViewerContent();
@@ -2528,12 +2534,6 @@ async function refreshLambda(action = 'refreshAgenda') {
             updateRuntimeDetails(`Modified events: ${preview}${modifiedEvents.length > 5 ? ' ...' : ''}`, 'success');
         }
 
-        // Optionally reload events after a short delay
-        setTimeout(() => {
-            loadEvents();
-            statusElement.textContent = 'Events reloaded';
-        }, 2000);
-
     } catch (error) {
         console.error('Error triggering Lambda:', error);
         const errorMessage = error instanceof TypeError
@@ -2581,10 +2581,6 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
         const countSuffix = count !== null ? ` (${count} events in agenda)` : '';
         const timeSuffix = generatedAt ? ` at ${generatedAt}` : '';
         updateGlobalRefreshStatus(`Refresh complete for ${label}${countSuffix}${timeSuffix}`, 'success');
-
-        setTimeout(() => {
-            loadEvents();
-        }, 1200);
     } catch (error) {
         console.error(`Error refreshing ${label}:`, error);
         updateGlobalRefreshStatus(`Failed to refresh ${label}: ${error.message}`, 'error');
@@ -3381,7 +3377,6 @@ document.addEventListener('DOMContentLoaded', () => {
     hexPreviewAutoRefreshEnabled = readHexPreviewAutoRefreshPreference();
     hexPreviewIntervalMs = readHexPreviewIntervalPreference();
     setAutoLambdaInvocationEnabled(readAutoLambdaInvocationPreference(), false);
-    setAgendaAutoRefreshEnabled(readAgendaAutoRefreshPreference(), false);
     setStatusPollingEnabled(readStatusPollingPreference(), false);
     persistAutoLambdaInvocationPreference(autoLambdaInvokeEnabled);
     persistAutoLambdaIntervalPreference(autoLambdaInvokeIntervalMs);

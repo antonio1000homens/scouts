@@ -12,6 +12,7 @@
     <!-- <script src="https://sdk.amazonaws.com/js/aws-sdk-2.1234.0.min.js"></script> -->
 </head>
 <body>
+    <div id="admin-notification" class="admin-notification" role="status" aria-live="polite" hidden></div>
     <nav class="admin-top-nav">
         <div class="admin-top-nav-inner">
             <div class="admin-top-nav-primary">
@@ -63,16 +64,6 @@
                     title="Auto invoke interval in seconds"
                 >
                 <span id="auto-lambda-status" class="auto-invoke-header-status">On</span>
-                <label class="auto-invoke-header-label" for="agenda-auto-refresh-toggle">
-                    <input
-                        type="checkbox"
-                        id="agenda-auto-refresh-toggle"
-                        checked
-                        onchange="toggleAgendaAutoRefresh(this.checked)"
-                    >
-                    Agenda
-                </label>
-                <span id="agenda-auto-refresh-status" class="auto-invoke-header-status">On</span>
                 <label class="auto-invoke-header-label" for="status-polling-toggle">
                     <input
                         type="checkbox"
@@ -111,11 +102,6 @@
                         <button class="btn btn-secondary requires-api" value="refreshBeaversProgramme" onclick="refreshSelectedCalendar('beavers-programme', 'Beavers Programme', this.value)">Beavers Programme</button>
                     </div>
                     <p id="global-refresh-status" class="refresh-status">No global refresh triggered yet.</p>
-                    <div class="section-status-group">
-                        <h4>Events Loaded</h4>
-                        <p id="events-count" class="status-text">-</p>
-                    </div>
-                    <p class="refresh-status">The events list is generated from loaded agenda items and HEX identifiers.</p>
                 </div>
                 <div class="global-card">
                     <h3>Events</h3>
