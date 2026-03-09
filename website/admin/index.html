@@ -15,7 +15,7 @@
     <nav class="admin-top-nav">
         <div class="admin-top-nav-inner">
             <div class="admin-top-nav-primary">
-                <a href="/index.html" class="nav-link">Website Home</a>
+                <a href="/index.html" class="nav-link">Home</a>
                 <a href="/website/admin/index.html" class="nav-link active">Admin</a>
                 <div class="viewer-menu-shell">
                     <button
@@ -35,14 +35,14 @@
                         Files
                     </button>
                     <div id="viewer-menu" class="viewer-menu-dropdown">
-                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showAgendaViewer()">Agenda JSON</button>
-                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showEventsJsonViewer()">events/*.json</button>
-                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showScoutsConfigViewer()">scouts.conf</button>
+                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showAgendaViewer()">Agenda</button>
+                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showEventsJsonViewer()">Events</button>
+                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showScoutsConfigViewer()">Config</button>
                     </div>
                 </div>
             </div>
             <div class="admin-top-status">
-                <span id="api-ready-indicator" class="api-ready-pill api-loading" title="Checking Cloudflare admin API...">API Checking</span>
+                <span id="api-ready-indicator" class="api-ready-pill api-loading" title="Checking Cloudflare admin API...">API</span>
                 <label class="auto-invoke-header-label" for="auto-lambda-toggle">
                     <input
                         type="checkbox"
@@ -50,7 +50,7 @@
                         checked
                         onchange="toggleAutoLambdaInvocation(this.checked)"
                     >
-                    Auto invoke lambda
+                    Auto lambda
                 </label>
                 <input
                     type="number"
@@ -62,7 +62,7 @@
                     onchange="updateAutoLambdaInvocationInterval(this.value)"
                     title="Auto invoke interval in seconds"
                 >
-                <span id="auto-lambda-status" class="auto-invoke-header-status">Auto invocation: enabled</span>
+                <span id="auto-lambda-status" class="auto-invoke-header-status">On</span>
                 <label class="auto-invoke-header-label" for="agenda-auto-refresh-toggle">
                     <input
                         type="checkbox"
@@ -70,9 +70,9 @@
                         checked
                         onchange="toggleAgendaAutoRefresh(this.checked)"
                     >
-                    Auto refresh agenda
+                    Agenda
                 </label>
-                <span id="agenda-auto-refresh-status" class="auto-invoke-header-status">Agenda refresh: after lambda completion</span>
+                <span id="agenda-auto-refresh-status" class="auto-invoke-header-status">On</span>
                 <label class="auto-invoke-header-label" for="status-polling-toggle">
                     <input
                         type="checkbox"
@@ -80,7 +80,7 @@
                         checked
                         onchange="toggleStatusPolling(this.checked)"
                     >
-                    Polling job
+                    Polling
                 </label>
                 <input
                     type="number"
