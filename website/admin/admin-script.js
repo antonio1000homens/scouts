@@ -889,16 +889,11 @@ function restartStatusPollingTimer() {
 function updateAutoLambdaInvocationUi() {
     const toggle = document.getElementById('auto-lambda-toggle');
     const intervalInput = document.getElementById('auto-lambda-interval-seconds');
-    const statusElement = document.getElementById('auto-lambda-status');
     if (toggle) {
         toggle.checked = autoLambdaInvokeEnabled;
     }
     if (intervalInput) {
         intervalInput.value = String(Math.max(5, Math.round(autoLambdaInvokeIntervalMs / 1000)));
-    }
-    if (statusElement) {
-        const seconds = Math.max(5, Math.round(autoLambdaInvokeIntervalMs / 1000));
-        statusElement.textContent = `Auto invocation: ${autoLambdaInvokeEnabled ? `enabled every ${seconds}s` : 'disabled'}`;
     }
 }
 
@@ -2410,11 +2405,14 @@ function openUploadModal(index) {
     const currentImage = getImageUrl(event);
     const currentImageTheme = getImageTheme(event);
     const imgElement = document.getElementById('modal-current-image');
+    const imgFrame = document.getElementById('modal-image-frame');
     if (currentImage) {
         imgElement.src = currentImage;
         imgElement.style.display = 'block';
+        if (imgFrame) imgFrame.style.display = 'flex';
     } else {
         imgElement.style.display = 'none';
+        if (imgFrame) imgFrame.style.display = 'none';
     }
     
     const imageUrlText = document.getElementById('modal-image-url');
@@ -2688,12 +2686,15 @@ function refreshModalCurrentMetadata(event) {
     if (taglineText) taglineText.textContent = getAIPrompt(event) || 'Not set';
 
     const imgElement = document.getElementById('modal-current-image');
+    const imgFrame = document.getElementById('modal-image-frame');
     if (imgElement) {
         if (currentImage) {
             imgElement.src = currentImage;
             imgElement.style.display = 'block';
+            if (imgFrame) imgFrame.style.display = 'flex';
         } else {
             imgElement.style.display = 'none';
+            if (imgFrame) imgFrame.style.display = 'none';
         }
     }
 }

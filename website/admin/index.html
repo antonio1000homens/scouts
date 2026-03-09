@@ -60,7 +60,6 @@
                 onchange="updateAutoLambdaInvocationInterval(this.value)"
                 title="Auto invoke interval in seconds"
             >
-            <span id="auto-lambda-status" class="auto-invoke-header-status">On</span>
             <label class="auto-invoke-header-label" for="status-polling-toggle">
                 <input
                     type="checkbox"
@@ -208,7 +207,9 @@
                     <p><strong>Event:</strong> <span id="modal-event-name"></span></p>
                     <p><strong>HEX:</strong> <span id="modal-event-hex"></span></p>
                     <p><strong>Current Image:</strong></p>
-                    <img id="modal-current-image" src="" alt="Current image" style="max-width: 100%; margin: 1rem 0;">
+                    <div id="modal-image-frame" class="modal-image-frame">
+                        <img id="modal-current-image" src="" alt="Current image">
+                    </div>
                     <div class="form-group">
                         <label>Current Metadata</label>
                         <p><strong>Image URL:</strong> <span id="modal-image-url"></span></p>
