@@ -729,6 +729,7 @@ body {
 .event-badge.cubs { color: #23a950; }
 .event-badge.scouts { color: #004851; }
 .event-badge.hidden { color: #b54708; }
+.event-badge.approval { color: #155eef; }
 .event-badge.runtime-queued {
     color: #155eef;
 }
