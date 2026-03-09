@@ -66,21 +66,13 @@ body {
     margin: 0 auto;
     padding: 0.75rem 2rem;
     display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.75rem;
-}
-
-.admin-top-nav-primary {
-    display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.6rem 0.75rem;
     flex-wrap: wrap;
 }
 
 .viewer-menu-shell {
     position: relative;
-    margin-left: auto;
 }
 
 .viewer-menu-button {
@@ -196,12 +188,8 @@ body {
     font-size: 1.1rem;
 }
 
-.admin-top-status {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    flex-wrap: wrap;
-    padding-bottom: 0.1rem;
+.admin-top-nav-inner .api-ready-pill {
+    margin-left: auto;
 }
 
 .auto-invoke-header-label {
@@ -272,7 +260,14 @@ body {
     padding: 1.25rem;
     border-radius: 8px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    margin-bottom: 1.5rem;
+}
+
+.admin-overview-inline {
+    display: grid;
+    grid-template-columns: minmax(0, 2.2fr) minmax(320px, 1fr);
+    gap: 1rem;
+    align-items: start;
+    margin-bottom: 2rem;
 }
 
 .global-controls-header h2 {
@@ -333,9 +328,8 @@ body {
 
 .admin-info {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    grid-template-columns: 1fr;
     gap: 1rem;
-    margin-bottom: 2rem;
 }
 
 .info-card {
@@ -1230,14 +1224,11 @@ body {
 @media (max-width: 768px) {
     .admin-top-nav-inner {
         padding: 0.75rem 1rem;
-    }
-
-    .admin-top-nav-primary {
         align-items: stretch;
     }
 
     .viewer-menu-shell {
-        margin-left: 0;
+        width: 100%;
     }
 
     .viewer-menu-button {
@@ -1251,12 +1242,16 @@ body {
         min-width: 0;
     }
 
-    .admin-top-status {
-        gap: 0.45rem 0.6rem;
+    .admin-top-nav-inner .api-ready-pill {
+        margin-left: 0;
     }
 
     .admin-container {
         padding: 1rem;
+    }
+
+    .admin-overview-inline {
+        grid-template-columns: 1fr;
     }
 
     .admin-header h1 {

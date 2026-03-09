@@ -15,140 +15,138 @@
     <div id="admin-notification" class="admin-notification" role="status" aria-live="polite" hidden></div>
     <nav class="admin-top-nav">
         <div class="admin-top-nav-inner">
-            <div class="admin-top-nav-primary">
-                <a href="/index.html" class="nav-link">Home</a>
-                <a href="/website/admin/index.html" class="nav-link active">Admin</a>
-                <div class="viewer-menu-shell">
-                    <button
-                        id="viewer-menu-button"
-                        class="viewer-menu-button"
-                        type="button"
-                        aria-expanded="false"
-                        aria-controls="viewer-menu"
-                        aria-label="Open file viewers menu"
-                        onclick="toggleViewerMenu(event)"
-                    >
-                        <span class="viewer-menu-icon" aria-hidden="true">
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                        </span>
-                        Files
-                    </button>
-                    <div id="viewer-menu" class="viewer-menu-dropdown">
-                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showAgendaViewer()">Agenda</button>
-                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showEventsJsonViewer()">Events</button>
-                        <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showScoutsConfigViewer()">Config</button>
-                    </div>
+            <a href="/index.html" class="nav-link">Home</a>
+            <a href="/website/admin/index.html" class="nav-link active">Admin</a>
+            <div class="viewer-menu-shell">
+                <button
+                    id="viewer-menu-button"
+                    class="viewer-menu-button"
+                    type="button"
+                    aria-expanded="false"
+                    aria-controls="viewer-menu"
+                    aria-label="Open file viewers menu"
+                    onclick="toggleViewerMenu(event)"
+                >
+                    <span class="viewer-menu-icon" aria-hidden="true">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </span>
+                    Files
+                </button>
+                <div id="viewer-menu" class="viewer-menu-dropdown">
+                    <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showAgendaViewer()">Agenda</button>
+                    <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showEventsJsonViewer()">Events</button>
+                    <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showScoutsConfigViewer()">Config</button>
                 </div>
             </div>
-            <div class="admin-top-status">
-                <span id="api-ready-indicator" class="api-ready-pill api-loading" title="Checking Cloudflare admin API...">API</span>
-                <label class="auto-invoke-header-label" for="auto-lambda-toggle">
-                    <input
-                        type="checkbox"
-                        id="auto-lambda-toggle"
-                        checked
-                        onchange="toggleAutoLambdaInvocation(this.checked)"
-                    >
-                    Auto lambda
-                </label>
+            <span id="api-ready-indicator" class="api-ready-pill api-loading" title="Checking Cloudflare admin API...">API</span>
+            <label class="auto-invoke-header-label" for="auto-lambda-toggle">
                 <input
-                    type="number"
-                    id="auto-lambda-interval-seconds"
-                    class="refresh-input auto-invoke-header-interval"
-                    min="5"
-                    step="1"
-                    value="20"
-                    onchange="updateAutoLambdaInvocationInterval(this.value)"
-                    title="Auto invoke interval in seconds"
+                    type="checkbox"
+                    id="auto-lambda-toggle"
+                    checked
+                    onchange="toggleAutoLambdaInvocation(this.checked)"
                 >
-                <span id="auto-lambda-status" class="auto-invoke-header-status">On</span>
-                <label class="auto-invoke-header-label" for="status-polling-toggle">
-                    <input
-                        type="checkbox"
-                        id="status-polling-toggle"
-                        checked
-                        onchange="toggleStatusPolling(this.checked)"
-                    >
-                    Polling
-                </label>
+                Auto lambda
+            </label>
+            <input
+                type="number"
+                id="auto-lambda-interval-seconds"
+                class="refresh-input auto-invoke-header-interval"
+                min="5"
+                step="1"
+                value="20"
+                onchange="updateAutoLambdaInvocationInterval(this.value)"
+                title="Auto invoke interval in seconds"
+            >
+            <span id="auto-lambda-status" class="auto-invoke-header-status">On</span>
+            <label class="auto-invoke-header-label" for="status-polling-toggle">
                 <input
-                    type="number"
-                    id="status-polling-interval-seconds"
-                    class="refresh-input auto-invoke-header-interval"
-                    min="5"
-                    step="1"
-                    value="5"
-                    onchange="updateStatusPollingInterval(this.value)"
-                    title="Polling job interval in seconds"
+                    type="checkbox"
+                    id="status-polling-toggle"
+                    checked
+                    onchange="toggleStatusPolling(this.checked)"
                 >
-                <span id="status-polling-status" class="auto-invoke-header-status">Polling: enabled every 5s</span>
-            </div>
+                Polling
+            </label>
+            <input
+                type="number"
+                id="status-polling-interval-seconds"
+                class="refresh-input auto-invoke-header-interval"
+                min="5"
+                step="1"
+                value="5"
+                onchange="updateStatusPollingInterval(this.value)"
+                title="Polling job interval in seconds"
+            >
+            <span id="status-polling-status" class="auto-invoke-header-status">Polling: enabled every 5s</span>
         </div>
     </nav>
     <div class="admin-container">
-        <section class="global-controls">
-            <div class="global-controls-grid">
-                <div class="global-card">
-                    <h3>Calendar</h3>
-                    <div class="calendar-refresh-grid">
-                        <button class="btn btn-primary requires-api" value="refreshAllCalendars" onclick="refreshSelectedCalendar('all', 'All Calendars', this.value)">Refresh All Calendars</button>
-                        <button class="btn btn-secondary requires-api" value="refreshCubsEvents" onclick="refreshSelectedCalendar('cubs-events', 'Cubs Events', this.value)">Cubs Events</button>
-                        <button class="btn btn-secondary requires-api" value="refreshCubsProgramme" onclick="refreshSelectedCalendar('cubs-programme', 'Cubs Programme', this.value)">Cubs Programme</button>
-                        <button class="btn btn-secondary requires-api" value="refreshScoutsEvents" onclick="refreshSelectedCalendar('scouts-events', 'Scouts Events', this.value)">Scouts Events</button>
-                        <button class="btn btn-secondary requires-api" value="refreshScoutsProgramme" onclick="refreshSelectedCalendar('scouts-programme', 'Scouts Programme', this.value)">Scouts Programme</button>
-                        <button class="btn btn-secondary requires-api" value="refreshBeaversEvents" onclick="refreshSelectedCalendar('beavers-events', 'Beavers Events', this.value)">Beavers Events</button>
-                        <button class="btn btn-secondary requires-api" value="refreshBeaversProgramme" onclick="refreshSelectedCalendar('beavers-programme', 'Beavers Programme', this.value)">Beavers Programme</button>
+        <div class="admin-overview-inline">
+            <section class="global-controls">
+                <div class="global-controls-grid">
+                    <div class="global-card">
+                        <h3>Calendar</h3>
+                        <div class="calendar-refresh-grid">
+                            <button class="btn btn-primary requires-api" value="refreshAllCalendars" onclick="refreshSelectedCalendar('all', 'All Calendars', this.value)">Refresh All Calendars</button>
+                            <button class="btn btn-secondary requires-api" value="refreshCubsEvents" onclick="refreshSelectedCalendar('cubs-events', 'Cubs Events', this.value)">Cubs Events</button>
+                            <button class="btn btn-secondary requires-api" value="refreshCubsProgramme" onclick="refreshSelectedCalendar('cubs-programme', 'Cubs Programme', this.value)">Cubs Programme</button>
+                            <button class="btn btn-secondary requires-api" value="refreshScoutsEvents" onclick="refreshSelectedCalendar('scouts-events', 'Scouts Events', this.value)">Scouts Events</button>
+                            <button class="btn btn-secondary requires-api" value="refreshScoutsProgramme" onclick="refreshSelectedCalendar('scouts-programme', 'Scouts Programme', this.value)">Scouts Programme</button>
+                            <button class="btn btn-secondary requires-api" value="refreshBeaversEvents" onclick="refreshSelectedCalendar('beavers-events', 'Beavers Events', this.value)">Beavers Events</button>
+                            <button class="btn btn-secondary requires-api" value="refreshBeaversProgramme" onclick="refreshSelectedCalendar('beavers-programme', 'Beavers Programme', this.value)">Beavers Programme</button>
+                        </div>
+                        <p id="global-refresh-status" class="refresh-status">No global refresh triggered yet.</p>
                     </div>
-                    <p id="global-refresh-status" class="refresh-status">No global refresh triggered yet.</p>
+                    <div class="global-card">
+                        <h3>Events</h3>
+                        <div class="refresh-controls">
+                            <input
+                                type="number"
+                                id="refresh-action"
+                                placeholder="Events to enrich (e.g. 5)"
+                                class="refresh-input"
+                                min="0"
+                                step="1"
+                                title="Number of scoutsRequest queue notifications Lambda may publish this run. 0 = no new queue notifications; it still enriches and updates agenda/HEX data."
+                            >
+                            <button
+                                id="refresh-button"
+                                class="btn btn-primary requires-api"
+                                value="refreshAgenda"
+                                onclick="refreshLambda(this.value)"
+                                title="Runs agenda enrichment with the integer as max queue publish count. This does not do a full calendar feed refresh."
+                            >Refresh Agenda events</button>
+                        </div>
+                        <p id="refresh-status" class="refresh-status"></p>
+                        <div class="global-actions">
+                            <button
+                                class="btn btn-primary"
+                                onclick="loadEvents()"
+                                title="Reloads the S3 agenda.json feed into the admin UI and rerenders the current events/views. No Lambda call and no queue writes."
+                            >Reload Agenda From S3</button>
+                        </div>
+                    </div>
                 </div>
-                <div class="global-card">
-                    <h3>Events</h3>
-                    <div class="refresh-controls">
-                        <input
-                            type="number"
-                            id="refresh-action"
-                            placeholder="Events to enrich (e.g. 5)"
-                            class="refresh-input"
-                            min="0"
-                            step="1"
-                            title="Number of scoutsRequest queue notifications Lambda may publish this run. 0 = no new queue notifications; it still enriches and updates agenda/HEX data."
-                        >
-                        <button
-                            id="refresh-button"
-                            class="btn btn-primary requires-api"
-                            value="refreshAgenda"
-                            onclick="refreshLambda(this.value)"
-                            title="Runs agenda enrichment with the integer as max queue publish count. This does not do a full calendar feed refresh."
-                        >Refresh Agenda events</button>
-                    </div>
-                    <p id="refresh-status" class="refresh-status"></p>
-                    <div class="global-actions">
-                        <button
-                            class="btn btn-primary"
-                            onclick="loadEvents()"
-                            title="Reloads the S3 agenda.json feed into the admin UI and rerenders the current events/views. No Lambda call and no queue writes."
-                        >Reload Agenda From S3</button>
-                    </div>
-                </div>
-            </div>
-        </section>
+            </section>
 
-        <div class="admin-info">
-            <div class="info-card">
-                <h3>Backend Status</h3>
-                <p id="runtime-state-status" class="status-text">Checking runtime state...</p>
-                <p id="runtime-state-details" class="refresh-status">No lambda commands yet.</p>
-                <p id="queue-depth-updated" class="refresh-status">Last update: n/a</p>
-                <p id="queue-depth-checked" class="refresh-status">Last checked: n/a</p>
-            </div>
-            <div class="info-card">
-                <h3>Requests</h3>
-                <p id="completed-requests-summary" class="status-text status-info">Waiting for refresh...</p>
-                <p id="completed-requests-updated" class="refresh-status">Last refresh: n/a</p>
-                <div id="completed-requests-list" class="request-list">
-                    <p class="refresh-status">No requests yet.</p>
+            <div class="admin-info">
+                <div class="info-card">
+                    <h3>Backend Status</h3>
+                    <p id="runtime-state-status" class="status-text">Checking runtime state...</p>
+                    <p id="runtime-state-details" class="refresh-status">No lambda commands yet.</p>
+                    <p id="queue-depth-updated" class="refresh-status">Last update: n/a</p>
+                    <p id="queue-depth-checked" class="refresh-status">Last checked: n/a</p>
+                </div>
+                <div class="info-card">
+                    <h3>Requests</h3>
+                    <p id="completed-requests-summary" class="status-text status-info">Waiting for refresh...</p>
+                    <p id="completed-requests-updated" class="refresh-status">Last refresh: n/a</p>
+                    <div id="completed-requests-list" class="request-list">
+                        <p class="refresh-status">No requests yet.</p>
+                    </div>
                 </div>
             </div>
         </div>
