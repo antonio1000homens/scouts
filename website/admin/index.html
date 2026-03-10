@@ -40,6 +40,37 @@
                     <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showScoutsConfigViewer()">Config</button>
                 </div>
             </div>
+            <div class="header-control-group" aria-label="Calendar refresh controls">
+                <span class="header-control-label">Calendar</span>
+                <div class="header-control-actions">
+                    <button class="btn btn-primary btn-header requires-api" value="refreshAllCalendars" onclick="refreshSelectedCalendar('all', 'All Calendars', this.value)">All Calendars</button>
+                    <button class="btn btn-secondary btn-header requires-api" value="refreshCubsEvents" onclick="refreshSelectedCalendar('cubs-events', 'Cubs Events', this.value)">Cubs Events</button>
+                    <button class="btn btn-secondary btn-header requires-api" value="refreshCubsProgramme" onclick="refreshSelectedCalendar('cubs-programme', 'Cubs Programme', this.value)">Cubs Programme</button>
+                </div>
+            </div>
+            <div class="header-control-group" aria-label="Agenda refresh controls">
+                <span class="header-control-label">Agenda</span>
+                <div class="header-control-actions header-control-actions-agenda">
+                    <input
+                        type="number"
+                        id="refresh-action"
+                        placeholder="5"
+                        class="refresh-input refresh-input-header"
+                        min="0"
+                        step="1"
+                        inputmode="numeric"
+                        aria-label="Events to enrich"
+                        title="Number of scoutsRequest queue notifications Lambda may publish this run. 0 = no new queue notifications; it still enriches and updates agenda/HEX data."
+                    >
+                    <button
+                        id="refresh-button"
+                        class="btn btn-primary btn-header requires-api"
+                        value="refreshAgenda"
+                        onclick="refreshLambda(this.value)"
+                        title="Runs agenda enrichment with the integer as max queue publish count. This does not do a full calendar feed refresh."
+                    >Refresh Agenda</button>
+                </div>
+            </div>
             <span id="api-ready-indicator" class="api-ready-pill api-loading" title="Checking Cloudflare admin API...">API</span>
             <label class="auto-invoke-header-label" for="auto-lambda-toggle">
                 <input
@@ -80,51 +111,50 @@
                 title="Polling job interval in seconds"
             >
             <span id="status-polling-status" class="auto-invoke-header-status">Polling: enabled every 5s</span>
+            <div class="admin-top-nav-status-row">
+                <p id="global-refresh-status" class="refresh-status">No global refresh triggered yet.</p>
+                <p id="refresh-status" class="refresh-status">No agenda refresh triggered yet.</p>
+            </div>
         </div>
     </nav>
     <div class="admin-container">
         <div class="admin-overview-inline">
-            <section class="global-card overview-card">
-                <h3>Calendar</h3>
-                <div class="calendar-refresh-grid">
-                    <button class="btn btn-primary requires-api" value="refreshAllCalendars" onclick="refreshSelectedCalendar('all', 'All Calendars', this.value)">Refresh All Calendars</button>
-                    <button class="btn btn-secondary requires-api" value="refreshCubsEvents" onclick="refreshSelectedCalendar('cubs-events', 'Cubs Events', this.value)">Cubs Events</button>
-                    <button class="btn btn-secondary requires-api" value="refreshCubsProgramme" onclick="refreshSelectedCalendar('cubs-programme', 'Cubs Programme', this.value)">Cubs Programme</button>
+            <section class="info-card overview-card requests-overview-card">
+                <div class="requests-overview-header">
+                    <div>
+                        <h3>Requests</h3>
+                        <p id="completed-requests-summary" class="status-text status-info requests-overview-summary">Waiting for refresh...</p>
+                    </div>
+                    <p id="completed-requests-updated" class="refresh-status requests-overview-updated">Last refresh: n/a</p>
                 </div>
-                <p id="global-refresh-status" class="refresh-status">No global refresh triggered yet.</p>
-            </section>
-
-            <section class="global-card overview-card">
-                <h3>Events</h3>
-                <div class="refresh-controls refresh-controls-compact">
-                    <input
-                        type="number"
-                        id="refresh-action"
-                        placeholder="5"
-                        class="refresh-input refresh-input-compact"
-                        min="0"
-                        step="1"
-                        inputmode="numeric"
-                        aria-label="Events to enrich"
-                        title="Number of scoutsRequest queue notifications Lambda may publish this run. 0 = no new queue notifications; it still enriches and updates agenda/HEX data."
-                    >
-                    <button
-                        id="refresh-button"
-                        class="btn btn-primary requires-api"
-                        value="refreshAgenda"
-                        onclick="refreshLambda(this.value)"
-                        title="Runs agenda enrichment with the integer as max queue publish count. This does not do a full calendar feed refresh."
-                    >Refresh Agenda events</button>
-                </div>
-                <p id="refresh-status" class="refresh-status"></p>
-            </section>
-
-            <section class="info-card overview-card">
-                <h3>Requests</h3>
-                <p id="completed-requests-summary" class="status-text status-info">Waiting for refresh...</p>
-                <p id="completed-requests-updated" class="refresh-status">Last refresh: n/a</p>
-                <div id="completed-requests-list" class="request-list">
-                    <p class="refresh-status">No requests yet.</p>
+                <div class="request-section-stack">
+                    <section class="request-section">
+                        <div class="request-section-header">
+                            <h4>Queued</h4>
+                            <span id="requests-queued-count" class="request-section-count">0 requests</span>
+                        </div>
+                        <div id="requests-queued-list" class="request-list">
+                            <p class="refresh-status">No queued requests.</p>
+                        </div>
+                    </section>
+                    <section class="request-section">
+                        <div class="request-section-header">
+                            <h4>Processing</h4>
+                            <span id="requests-processing-count" class="request-section-count">0 requests</span>
+                        </div>
+                        <div id="requests-processing-list" class="request-list">
+                            <p class="refresh-status">No processing requests.</p>
+                        </div>
+                    </section>
+                    <section class="request-section">
+                        <div class="request-section-header">
+                            <h4>Completed</h4>
+                            <span id="requests-completed-count" class="request-section-count">0 requests</span>
+                        </div>
+                        <div id="requests-completed-list" class="request-list">
+                            <p class="refresh-status">No completed requests.</p>
+                        </div>
+                    </section>
                 </div>
             </section>
         </div>

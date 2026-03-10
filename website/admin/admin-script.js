@@ -522,6 +522,9 @@ function formatCompletedRequestOperation(value) {
 
 function formatRequestStageLabel(value, fallback = 'Unknown') {
     if (!hasText(value)) return fallback;
+    const normalized = String(value).trim().toLowerCase();
+    if (normalized === 'processing-stall') return 'Processing Stall';
+    if (normalized === 'completed-archive') return 'Completed Archive';
     return formatCompletedRequestOperation(value);
 }
 
@@ -530,8 +533,10 @@ function formatRequestBadgeClass(value) {
     const normalized = String(value).trim().toLowerCase();
     if (normalized === 'queued') return 'badge-queued';
     if (normalized === 'processing') return 'badge-processing';
+    if (normalized === 'processing-stall') return 'badge-processing-stall';
     if (normalized === 'processing-complete') return 'badge-processing-complete';
     if (normalized === 'completed') return 'badge-completed';
+    if (normalized === 'completed-archive') return 'badge-completed-archive';
     if (normalized === 'persist') return 'badge-persist';
     if (normalized === 'hidden') return 'badge-hidden';
     if (normalized === 'imageurl') return 'badge-image-url';
@@ -546,8 +551,10 @@ function formatRequestBadgeLabel(value, fallback = 'Unknown') {
     const normalized = String(value).trim().toLowerCase();
     if (normalized === 'queued') return 'Q Queued';
     if (normalized === 'processing') return 'P Processing';
+    if (normalized === 'processing-stall') return 'STALL Processing';
     if (normalized === 'processing-complete') return 'DONE Processing';
     if (normalized === 'completed') return 'OK Completed';
+    if (normalized === 'completed-archive') return 'ARCH Completed';
     if (normalized === 'persist') return 'SAVE Persist';
     if (normalized === 'hidden') return 'OFF Hidden';
     if (normalized === 'imageurl') return 'IMG Image URL';
@@ -577,7 +584,10 @@ function normaliseRequestCardEntry(entry, options = {}) {
         : (hasText(entry?.messageId) ? entry.messageId.trim() : '');
     const messageId = hasText(entry?.messageId) ? entry.messageId.trim() : '';
     const rawAction = entry?.operation ?? entry?.status ?? options.defaultAction ?? '';
-    const action = formatRequestStageLabel(rawAction, formatRequestStageLabel(options.defaultAction, 'Unknown'));
+    const stageKey = hasText(rawAction)
+        ? String(rawAction).trim().toLowerCase()
+        : (hasText(options.defaultAction) ? String(options.defaultAction).trim().toLowerCase() : '');
+    const action = formatRequestStageLabel(stageKey, formatRequestStageLabel(options.defaultAction, 'Unknown'));
     const timestamp = hasText(entry?.processedAt)
         ? entry.processedAt
         : (hasText(entry?.requestTime)
@@ -594,10 +604,11 @@ function normaliseRequestCardEntry(entry, options = {}) {
         hex,
         requestId,
         messageId,
+        stageKey,
         operation: action,
-        badgeLabel: formatRequestBadgeLabel(rawAction || options.defaultAction || '', action),
+        badgeLabel: formatRequestBadgeLabel(stageKey, action),
         processedAt: timestamp,
-        badgeClass: formatRequestBadgeClass(rawAction || options.defaultAction || ''),
+        badgeClass: formatRequestBadgeClass(stageKey),
         subtitle: subtitleParts.join(' • '),
     };
 }
@@ -665,6 +676,12 @@ function deduplicateRequestsByRequestId(normalizedEntries) {
             byRequestId.set(requestId, entry);
             return;
         }
+        const existingPriority = getRequestStagePriority(existing?.stageKey);
+        const entryPriority = getRequestStagePriority(entry?.stageKey);
+        if (entryPriority > existingPriority) {
+            byRequestId.set(requestId, entry);
+            return;
+        }
         const existingTime = existing.processedAt ? new Date(existing.processedAt).getTime() : -1;
         const entryTime = entry.processedAt ? new Date(entry.processedAt).getTime() : -1;
         if (entryTime >= existingTime) {
@@ -672,6 +689,24 @@ function deduplicateRequestsByRequestId(normalizedEntries) {
         }
     });
     return [...byRequestId.values(), ...noRequestId];
+}
+
+function getRequestStagePriority(stageKey) {
+    const normalized = hasText(stageKey) ? String(stageKey).trim().toLowerCase() : '';
+    if (normalized === 'completed') return 5;
+    if (normalized === 'completed-archive') return 4;
+    if (normalized === 'processing') return 3;
+    if (normalized === 'processing-stall') return 2;
+    if (normalized === 'queued') return 1;
+    return 0;
+}
+
+function sortRequestEntriesByTimestamp(entries) {
+    return [...entries].sort((left, right) => {
+        const leftTime = new Date(left?.processedAt ?? left?.requestTime ?? 0).getTime();
+        const rightTime = new Date(right?.processedAt ?? right?.requestTime ?? 0).getTime();
+        return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+    });
 }
 
 function setRequests(entries, updatedAt = null) {
@@ -682,7 +717,7 @@ function setRequests(entries, updatedAt = null) {
             }))
             .filter(Boolean)
         : [];
-    latestCompletedRequests = deduplicateRequestsByRequestId(normalized);
+    latestCompletedRequests = sortRequestEntriesByTimestamp(deduplicateRequestsByRequestId(normalized));
     latestCompletedRequestsUpdatedAt = hasText(updatedAt) ? updatedAt : null;
     renderCompletedRequests();
 }
@@ -692,11 +727,43 @@ function setCompletedRequests(entries, updatedAt = null) {
         ? entries
             .map((entry) => normaliseCompletedRequestEntry(entry))
             .filter(Boolean)
-            .filter((entry) => !shouldHideCompletedRequestEntry(entry))
         : [];
-    latestCompletedRequests = deduplicateRequestsByRequestId(normalized);
+    latestCompletedRequests = sortRequestEntriesByTimestamp(deduplicateRequestsByRequestId(normalized));
     latestCompletedRequestsUpdatedAt = hasText(updatedAt) ? updatedAt : null;
     renderCompletedRequests();
+}
+
+function groupRuntimeRequestsBySection(entries) {
+    const groups = {
+        queued: [],
+        processing: [],
+        completed: [],
+    };
+
+    (entries || []).forEach((entry) => {
+        const stageKey = hasText(entry?.stageKey) ? entry.stageKey.trim().toLowerCase() : '';
+        if (stageKey === 'queued') {
+            groups.queued.push(entry);
+            return;
+        }
+        if (stageKey === 'processing' || stageKey === 'processing-stall') {
+            groups.processing.push(entry);
+            return;
+        }
+        if (stageKey === 'completed' || stageKey === 'completed-archive') {
+            groups.completed.push(entry);
+        }
+    });
+
+    return {
+        queued: sortRequestEntriesByTimestamp(groups.queued),
+        processing: sortRequestEntriesByTimestamp(groups.processing),
+        completed: sortRequestEntriesByTimestamp(groups.completed),
+    };
+}
+
+function formatRequestSectionCount(count) {
+    return `${count} request${count === 1 ? '' : 's'}`;
 }
 
 function shouldHideCompletedRequestEntry(entry) {
@@ -723,11 +790,17 @@ function shouldHideCompletedRequestEntry(entry) {
 function renderCompletedRequests() {
     const summaryEl = document.getElementById('completed-requests-summary');
     const updatedEl = document.getElementById('completed-requests-updated');
-    const listEl = document.getElementById('completed-requests-list');
-    if (!summaryEl || !updatedEl || !listEl) return;
+    const queuedListEl = document.getElementById('requests-queued-list');
+    const processingListEl = document.getElementById('requests-processing-list');
+    const completedListEl = document.getElementById('requests-completed-list');
+    const queuedCountEl = document.getElementById('requests-queued-count');
+    const processingCountEl = document.getElementById('requests-processing-count');
+    const completedCountEl = document.getElementById('requests-completed-count');
+    if (!summaryEl || !updatedEl || !queuedListEl || !processingListEl || !completedListEl) return;
 
-    const total = Array.isArray(latestCompletedRequests) ? latestCompletedRequests.length : 0;
-    summaryEl.textContent = total > 0 ? `${total} requests` : 'No active requests';
+    const totalEntries = Array.isArray(latestCompletedRequests) ? latestCompletedRequests : [];
+    const total = totalEntries.length;
+    summaryEl.textContent = total > 0 ? `${total} tracked requests` : 'No tracked requests';
     summaryEl.className = `status-text ${total > 0 ? 'status-success' : 'status-info'}`;
 
     if (latestCompletedRequestsUpdatedAt) {
@@ -737,17 +810,14 @@ function renderCompletedRequests() {
         updatedEl.textContent = 'Last refresh: n/a';
     }
 
-    if (total === 0) {
-        listEl.innerHTML = '<p class="refresh-status">No requests in the latest refresh.</p>';
-        return;
-    }
+    const grouped = groupRuntimeRequestsBySection(totalEntries);
+    if (queuedCountEl) queuedCountEl.textContent = formatRequestSectionCount(grouped.queued.length);
+    if (processingCountEl) processingCountEl.textContent = formatRequestSectionCount(grouped.processing.length);
+    if (completedCountEl) completedCountEl.textContent = formatRequestSectionCount(grouped.completed.length);
 
-    renderRequestCards(
-        listEl,
-        latestCompletedRequests,
-        'No requests in the latest refresh.',
-        {},
-    );
+    renderRequestCards(queuedListEl, grouped.queued, 'No queued requests.', {});
+    renderRequestCards(processingListEl, grouped.processing, 'No processing requests.', {});
+    renderRequestCards(completedListEl, grouped.completed, 'No completed requests.', {});
 }
 
 function updateCompletedRequestsFromResult(result) {
@@ -1309,29 +1379,20 @@ function getAggregateRuntimeRequests(queuedSnapshot, processingSnapshot, complet
         const processing = processingMap.get(key) || null;
         const completed = completedMap.get(key) || null;
 
-        if (processing && completed) {
-            return;
-        }
+        const status = classifyAggregateRuntimeRequestStatus({
+            hasQueued: Boolean(queued),
+            hasProcessing: Boolean(processing),
+            hasCompleted: Boolean(completed),
+        });
+        if (!status) return;
 
-        if (queued && completed && !processing) {
-            const entry = mergeRuntimeRequestEntries(completed, queued);
-            entry.status = 'processing-complete';
-            merged.push(entry);
-            return;
-        }
-
-        if (processing) {
-            const entry = mergeRuntimeRequestEntries(processing, queued);
-            entry.status = 'processing';
-            merged.push(entry);
-            return;
-        }
-
-        if (queued) {
-            const entry = mergeRuntimeRequestEntries(queued, completed);
-            entry.status = 'queued';
-            merged.push(entry);
-        }
+        let entry = {};
+        [queued, processing, completed].forEach((source) => {
+            if (!source) return;
+            entry = mergeRuntimeRequestEntries(source, entry);
+        });
+        entry.status = status;
+        merged.push(entry);
     });
 
     return merged.sort((left, right) => {
@@ -1339,6 +1400,15 @@ function getAggregateRuntimeRequests(queuedSnapshot, processingSnapshot, complet
         const rightTime = new Date(right?.processedAt ?? right?.requestTime ?? 0).getTime();
         return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
     });
+}
+
+function classifyAggregateRuntimeRequestStatus({ hasQueued = false, hasProcessing = false, hasCompleted = false } = {}) {
+    if (hasCompleted && (hasQueued || hasProcessing)) return 'completed';
+    if (hasProcessing && hasQueued) return 'processing';
+    if (hasProcessing) return 'processing-stall';
+    if (hasCompleted) return 'completed-archive';
+    if (hasQueued) return 'queued';
+    return '';
 }
 
 function formatRuntimeBadgeRequestId(requestId) {
