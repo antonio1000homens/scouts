@@ -270,11 +270,17 @@ function getPinnedRuntimeDetails() {
 }
 
 function isCompleteEvent(event) {
-    return hasText(getAIPrompt(event)) && hasText(getImageGenerationPrompt(event)) && hasText(getImageUrl(event));
+    return hasText(getAIPrompt(event))
+        && hasText(getImageThemeOrLegacyPrompt(event))
+        && hasRelativeImageUrl(event)
+        && isEventApproved(event)
+        && !isHiddenEvent(event);
 }
 
 function isNewEvent(event) {
-    return !hasText(getAIPrompt(event)) && !hasText(getImageGenerationPrompt(event)) && !hasText(getImageUrl(event));
+    return !hasText(getAIPrompt(event))
+        && !hasText(getImageThemeOrLegacyPrompt(event))
+        && !hasRelativeImageUrl(event);
 }
 
 function isEntryMissingMetadata(entry) {
@@ -2341,6 +2347,11 @@ function getImageUrl(event) {
     return normaliseImagePath(candidate);
 }
 
+function hasRelativeImageUrl(event) {
+    const url = getImageUrl(event);
+    return hasText(url) && !/^https?:\/\//i.test(url);
+}
+
 // Get tagline from event data (prioritise `tagline`, fallback to legacy `AI`)
 function getAIPrompt(event) {
     if (!event || typeof event !== 'object') return null;
@@ -2358,6 +2369,20 @@ function getImageTheme(event) {
     return null;
 }
 
+function getImageThemeOrLegacyPrompt(event) {
+    if (!event || typeof event !== 'object') return null;
+    const image = getMetadataData(event)?.image ?? event.image;
+    if (image && typeof image === 'object') {
+        if (typeof image.theme === 'string' && image.theme.trim()) {
+            return image.theme.trim();
+        }
+        if (typeof image.prompt === 'string' && image.prompt.trim()) {
+            return image.prompt.trim();
+        }
+    }
+    return null;
+}
+
 function buildImagePromptSpecificationsText(specifications) {
     if (!Array.isArray(specifications) || specifications.length === 0) return '';
     const cleaned = specifications
@@ -2369,10 +2394,6 @@ function buildImagePromptSpecificationsText(specifications) {
 function buildImageGenerationPromptFromTheme(theme, config = null) {
     if (!hasText(theme)) return null;
     const normalizedTheme = String(theme).trim();
-    const lower = normalizedTheme.toLowerCase();
-    if (lower.startsWith('create a cartoonish image of ') || lower.startsWith('cartoonish image of scouts')) {
-        return normalizedTheme;
-    }
     const resolvedConfig = config && typeof config === 'object'
         ? config
         : cachedScoutsConfig;
@@ -2409,11 +2430,17 @@ function getMissingMetadataFields(event) {
     if (!hasText(getAIPrompt(event))) {
         missing.push('Tagline');
     }
-    if (!hasText(getImageTheme(event))) {
+    if (!hasText(getImageThemeOrLegacyPrompt(event))) {
         missing.push('Image Theme');
     }
-    if (!hasText(getImageUrl(event))) {
+    if (!hasRelativeImageUrl(event)) {
         missing.push('Image URL');
+    }
+    if (!isEventApproved(event)) {
+        missing.push('Approval');
+    }
+    if (isHiddenEvent(event)) {
+        missing.push('Visibility');
     }
     return missing;
 }
