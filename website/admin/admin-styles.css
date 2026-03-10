@@ -265,10 +265,14 @@ body {
 
 .admin-overview-inline {
     display: grid;
-    grid-template-columns: minmax(0, 2.2fr) minmax(320px, 1fr);
+    grid-template-columns: minmax(280px, 1.45fr) minmax(250px, 0.95fr) minmax(320px, 1.1fr);
     gap: 1rem;
     align-items: start;
     margin-bottom: 2rem;
+}
+
+.overview-card {
+    min-width: 0;
 }
 
 .global-controls-header h2 {
@@ -382,6 +386,16 @@ body {
     border: 1px solid var(--border-color);
     border-radius: 4px;
     font-size: 1rem;
+}
+
+.refresh-controls-compact {
+    grid-template-columns: auto minmax(0, 1fr);
+    justify-content: start;
+}
+
+.refresh-input-compact {
+    width: 5.5rem;
+    max-width: 100%;
 }
 
 .refresh-status {
@@ -686,8 +700,9 @@ body {
 
 .admin-runtime-footer-status.status-text {
     margin: 0;
-    font-size: 0.9rem;
+    font-size: 0.82rem;
     font-weight: 700;
+    line-height: 1.15;
     white-space: nowrap;
 }
 
