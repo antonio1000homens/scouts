@@ -984,17 +984,12 @@ function shouldHideCompletedRequestEntry(entry) {
 }
 
 function renderCompletedRequests() {
-    const summaryEl = document.getElementById('completed-requests-summary');
     const updatedEl = document.getElementById('completed-requests-updated');
     const requestsListEl = document.getElementById('requests-list');
     const requestsCountEl = document.getElementById('requests-count');
-    if (!summaryEl || !updatedEl || !requestsListEl || !requestsCountEl) return;
+    if (!updatedEl || !requestsListEl || !requestsCountEl) return;
 
     const totalEntries = Array.isArray(latestCompletedRequests) ? latestCompletedRequests : [];
-    const total = totalEntries.length;
-    summaryEl.textContent = total > 0 ? `${total} tracked requests` : 'No tracked requests';
-    summaryEl.className = `status-text ${total > 0 ? 'status-success' : 'status-info'}`;
-
     if (latestCompletedRequestsUpdatedAt) {
         const parsed = new Date(latestCompletedRequestsUpdatedAt);
         updatedEl.textContent = `Last refresh: ${Number.isNaN(parsed.getTime()) ? latestCompletedRequestsUpdatedAt : parsed.toLocaleString('en-GB')}`;
@@ -2036,6 +2031,7 @@ async function pollQueueDepthSnapshots() {
         return;
     }
 
+    checkedEl.title = 'Last checked is when this admin page last polled S3 for the runtime request snapshot files.';
     checkedEl.textContent = `Last checked: ${new Date().toLocaleString('en-GB')}`;
 
     const [queuedSnapshot, processingSnapshot, completedSnapshot] = await Promise.all([
@@ -2058,8 +2054,10 @@ async function pollQueueDepthSnapshots() {
     setRequests(aggregateRequests, mostRecentTimestamp);
 
     if (timestamps.length > 0) {
+        updatedEl.title = 'Last update is the newest timestamp reported by the runtime request snapshot files fetched from S3.';
         updatedEl.textContent = `Last update: ${new Date(mostRecentTimestamp).toLocaleString('en-GB')}`;
     } else {
+        updatedEl.title = 'Last update is the newest timestamp reported by the runtime request snapshot files fetched from S3.';
         updatedEl.textContent = 'Last update: n/a';
     }
 
