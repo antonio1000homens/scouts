@@ -187,15 +187,9 @@
                 <p class="loading">Loading events...</p>
             </div>
             <aside class="requests-sidebar info-card">
-                <div class="requests-sidebar-header">
-                    <div>
-                        <h3>Requests</h3>
-                        <p id="completed-requests-summary" class="status-text status-info requests-overview-summary">Waiting for refresh...</p>
-                    </div>
-                    <p id="completed-requests-updated" class="refresh-status requests-overview-updated">Last refresh: n/a</p>
-                </div>
                 <div class="requests-sidebar-toolbar">
                     <span id="requests-count" class="request-section-count">0 requests</span>
+                    <p id="completed-requests-updated" class="refresh-status requests-overview-updated">Last refresh: n/a</p>
                     <label class="request-archive-toggle" for="requests-show-archived-toggle">
                         <input
                             type="checkbox"
@@ -217,8 +211,10 @@
                 <p id="runtime-state-status" class="status-text admin-runtime-footer-status">Checking runtime state...</p>
                 <p id="runtime-state-details" class="refresh-status admin-runtime-footer-details">No lambda commands yet.</p>
                 <p id="runtime-state-request-id" class="refresh-status admin-runtime-footer-meta">Latest request ID: n/a</p>
-                <p id="queue-depth-updated" class="refresh-status admin-runtime-footer-meta">Last update: n/a</p>
-                <p id="queue-depth-checked" class="refresh-status admin-runtime-footer-meta">Last checked: n/a</p>
+                <div class="admin-runtime-footer-timestamps">
+                    <p id="queue-depth-updated" class="refresh-status admin-runtime-footer-meta" title="Last update is the newest timestamp reported by the runtime request snapshot files fetched from S3.">Last update: n/a</p>
+                    <p id="queue-depth-checked" class="refresh-status admin-runtime-footer-meta" title="Last checked is when this admin page last polled S3 for the runtime request snapshot files.">Last checked: n/a</p>
+                </div>
             </div>
         </footer>
 
