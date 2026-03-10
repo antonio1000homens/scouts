@@ -1705,3 +1705,9 @@ body {
         width: 95%;
     }
 }
+
+/* Runtime request error styling */
+.runtime-request-error {
+    color: #dc3545;
+    font-weight: 600;
+}
