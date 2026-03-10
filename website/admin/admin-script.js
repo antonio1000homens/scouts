@@ -168,9 +168,23 @@ function updateRuntimeRequestId(requestId, label = 'Latest request ID') {
     const normalizedRequestId = hasText(requestId) ? String(requestId).trim() : '';
     latestBackendRequestId = normalizedRequestId;
     requestIdElement.textContent = `${label}: ${normalizedRequestId || 'n/a'}`;
+    requestIdElement.className = 'runtime-request-id';
+}
+
+function updateRuntimeRealmError(realmError, realmErrorDetail) {
+    const requestIdElement = document.getElementById('runtime-state-request-id');
+    if (!requestIdElement) return;
+
+    const errorRealm = hasText(realmError) ? String(realmError).trim() : 'validation';
+    const errorDetail = hasText(realmErrorDetail) ? String(realmErrorDetail).trim() : 'Request validation failed';
+    requestIdElement.textContent = `${errorRealm} error: ${errorDetail}`;
+    requestIdElement.className = 'runtime-request-id runtime-request-error';
 }
 
 function extractBackendRequestId(result) {
+    if (result?.realmError) {
+        return null;
+    }
     const candidates = [
         result?.queuedMessage?.messageId,
         result?.queuedMessage?.requestId,
@@ -183,7 +197,23 @@ function extractBackendRequestId(result) {
     return '';
 }
 
+function extractBackendRealmError(result) {
+    if (!result || typeof result !== 'object') return null;
+    const realmError = hasText(result.realmError) ? String(result.realmError).trim() : null;
+    const realmErrorDetail = hasText(result.realmErrorDetail) ? String(result.realmErrorDetail).trim() : null;
+    return realmError ? { realmError, realmErrorDetail } : null;
+}
+
 function appendBackendRequestIdMessage(message, result, options = {}) {
+    const realmError = extractBackendRealmError(result);
+    if (realmError) {
+        if (options.updateFooter !== false) {
+            updateRuntimeRealmError(realmError.realmError, realmError.realmErrorDetail);
+        }
+        const baseMessage = typeof message === 'string' ? message.trim() : String(message ?? '').trim();
+        return baseMessage || realmError.realmErrorDetail || 'Request validation failed';
+    }
+
     const requestId = extractBackendRequestId(result);
     if (!requestId) {
         return typeof message === 'string' ? message : String(message ?? '');
