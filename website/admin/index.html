@@ -198,6 +198,14 @@
                         >
                         Show archived jobs
                     </label>
+                    <label class="request-archive-toggle" for="requests-show-stalled-toggle">
+                        <input
+                            type="checkbox"
+                            id="requests-show-stalled-toggle"
+                            onchange="toggleStalledRequests(this.checked)"
+                        >
+                        Show stalled
+                    </label>
                 </div>
                 <div id="requests-list" class="request-list request-list-scrollable request-sidebar-scrollable">
                     <p class="refresh-status">No active requests.</p>

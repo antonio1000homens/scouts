@@ -48,6 +48,7 @@ let lastObservedRuntimeCompletedAt = '';
 let latestCompletedRequests = [];
 let latestCompletedRequestsUpdatedAt = null;
 let showArchivedRequests = false;
+let showStalledRequests = false;
 let cachedScoutsConfig = null;
 let cachedScoutsConfigLoadedAt = 0;
 let scoutsConfigLoadPromise = null;
@@ -1015,6 +1016,11 @@ function toggleArchivedRequests(enabled) {
     renderCompletedRequests();
 }
 
+function toggleStalledRequests(enabled) {
+    showStalledRequests = Boolean(enabled);
+    renderCompletedRequests();
+}
+
 function shouldHideCompletedRequestEntry(entry) {
     const requestId = hasText(entry?.requestId) ? entry.requestId.trim() : '';
     if (!requestId) return false;
@@ -1050,17 +1056,24 @@ function renderCompletedRequests() {
         updatedEl.textContent = 'Last refresh: n/a';
     }
 
-    const visibleEntries = showArchivedRequests
-        ? totalEntries
-        : totalEntries.filter((entry) => String(entry?.stageKey || '').trim().toLowerCase() !== 'completed-archive');
+    const visibleEntries = totalEntries.filter((entry) => {
+        const stageKey = String(entry?.stageKey || '').trim().toLowerCase();
+        if (!showArchivedRequests && stageKey === 'completed-archive') {
+            return false;
+        }
+        if (!showStalledRequests && (stageKey === 'queued-stalled' || stageKey === 'processing-stall')) {
+            return false;
+        }
+        return true;
+    });
     requestsCountEl.textContent = formatRequestSectionCount(visibleEntries.length);
 
     renderRequestCards(
         requestsListEl,
         visibleEntries,
-        showArchivedRequests
+        (showArchivedRequests || showStalledRequests)
             ? 'No requests found.'
-            : 'No active requests. Enable archived jobs to show completed-only history.',
+            : 'No active requests. Enable archived jobs or stalled requests to show hidden history.',
         {},
     );
 }
@@ -1674,6 +1687,17 @@ function classifyAggregateRuntimeRequestStatus({ hasQueued = false, hasProcessin
     return '';
 }
 
+function mapAggregateStatusToEventBadge(status) {
+    const normalized = hasText(status) ? String(status).trim().toLowerCase() : '';
+    if (normalized === 'queued') return { kind: 'queued', label: 'Queued' };
+    if (normalized === 'queued-stalled') return { kind: 'queued-stalled', label: 'Queued Stalled' };
+    if (normalized === 'processing') return { kind: 'processing', label: 'Processing' };
+    if (normalized === 'processing-stall') return { kind: 'processing-stall', label: 'Processing Stalled' };
+    if (normalized === 'completed') return { kind: 'completed', label: 'Complete' };
+    if (normalized === 'completed-archive') return { kind: 'completed-archive', label: 'Complete' };
+    return null;
+}
+
 function formatRuntimeBadgeRequestId(requestId) {
     if (!hasText(requestId)) return '';
     const normalized = String(requestId).trim();
@@ -1684,30 +1708,11 @@ function deriveEventRuntimeBadges(event) {
     const hex = hasText(event?.hex) ? String(event.hex).trim().toLowerCase() : '';
     if (!hex) return [];
     const appliedRequestIds = getAppliedRequestIdSet(event);
-
-    const queuedRequests = getSnapshotRequests(latestQueuedSnapshot)
-        .filter((request) => getSnapshotRequestHex(request) === hex);
-    const processingRequests = getSnapshotRequests(latestProcessingSnapshot)
-        .filter((request) => getSnapshotRequestHex(request) === hex);
-    const processingKeys = new Set(
-        processingRequests
-            .map((request) => getSnapshotRequestKey(request))
-            .filter(Boolean),
-    );
-    const completedKeys = new Set(
-        getSnapshotRequests(latestCompletedSnapshot)
-            .map((request) => getSnapshotRequestKey(request))
-            .filter(Boolean),
-    );
-    const completedPairs = new Set(
-        getSnapshotRequests(latestCompletedSnapshot)
-            .map((request) => {
-                const requestHex = getSnapshotRequestHex(request);
-                const requestId = getSnapshotRequestId(request);
-                return requestHex && requestId ? `${requestHex}|${requestId}` : '';
-            })
-            .filter(Boolean),
-    );
+    const aggregateRequests = getAggregateRuntimeRequests(
+        latestQueuedSnapshot,
+        latestProcessingSnapshot,
+        latestCompletedSnapshot,
+    ).filter((request) => getSnapshotRequestHex(request) === hex);
 
     const badges = [];
     const seen = new Set();
@@ -1723,29 +1728,14 @@ function deriveEventRuntimeBadges(event) {
         });
     };
 
-    queuedRequests.forEach((request) => {
-        const requestId = getSnapshotRequestId(request);
-        const requestKey = getSnapshotRequestKey(request);
-        if (requestId && appliedRequestIds.has(requestId)) {
-            return;
-        }
-        if (requestId && completedPairs.has(`${hex}|${requestId}`)) {
-            pushBadge('updated', 'Updated', requestId);
-            return;
-        }
-        if (requestKey && !processingKeys.has(requestKey) && !completedKeys.has(requestKey) && isQueuedRequestStalled(request)) {
-            pushBadge('queued-stalled', 'Queued Stalled', requestId);
-            return;
-        }
-        pushBadge('queued', 'Queued', requestId);
-    });
-
-    processingRequests.forEach((request) => {
+    aggregateRequests.forEach((request) => {
         const requestId = getSnapshotRequestId(request);
         if (requestId && appliedRequestIds.has(requestId)) {
             return;
         }
-        pushBadge('processing', 'Processing', requestId);
+        const badge = mapAggregateStatusToEventBadge(request?.status);
+        if (!badge) return;
+        pushBadge(badge.kind, badge.label, requestId);
     });
 
     return badges;
