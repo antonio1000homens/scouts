@@ -183,6 +183,26 @@ function extractBackendRequestId(result) {
     return '';
 }
 
+function appendBackendRequestIdMessage(message, result, options = {}) {
+    const requestId = extractBackendRequestId(result);
+    if (!requestId) {
+        return typeof message === 'string' ? message : String(message ?? '');
+    }
+
+    if (options.updateFooter !== false) {
+        updateRuntimeRequestId(requestId);
+    }
+
+    const baseMessage = typeof message === 'string' ? message.trim() : String(message ?? '').trim();
+    if (!baseMessage) {
+        return `Request ID: ${requestId}.`;
+    }
+    if (baseMessage.includes(`Request ID: ${requestId}`)) {
+        return baseMessage;
+    }
+    return `${baseMessage} Request ID: ${requestId}.`;
+}
+
 function pinRuntimeDetails(message, type = 'info', ttlMs = 45000) {
     const effectiveTtl = Number.isFinite(ttlMs) ? Math.max(1000, ttlMs) : 45000;
     pinnedRuntimeDetails = {
@@ -1284,6 +1304,10 @@ async function sendScoutsCommand(payload) {
         const parsed = await response.json();
         if (parsed && typeof parsed === 'object') {
             parsed._httpStatus = response.status;
+            const requestId = extractBackendRequestId(parsed);
+            if (requestId) {
+                updateRuntimeRequestId(requestId);
+            }
             return parsed;
         }
         return { value: parsed, _httpStatus: response.status };
@@ -3172,7 +3196,10 @@ async function persistCurrentField(field, action = 'persist') {
             ? ` ${result.message.trim()}`
             : '';
         const queueAcceptedSuffix = result?.queueAccepted === true ? ' Queue accepted.' : '';
-        const successMessage = `${config.label} ${action} queued for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
+        const successMessage = appendBackendRequestIdMessage(
+            `${config.label} ${action} queued for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`,
+            result,
+        );
         updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
 
@@ -3239,7 +3266,10 @@ async function requestGeneratedField(field, action = 'generate') {
             ? ` ${result.message.trim()}`
             : '';
         const queueAcceptedSuffix = result?.queueAccepted === true ? ' Queue accepted.' : '';
-        const successMessage = `${config.queueLabel} ${action} queued for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
+        const successMessage = appendBackendRequestIdMessage(
+            `${config.queueLabel} ${action} queued for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`,
+            result,
+        );
         updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
         await pollQueueDepthSnapshots();
@@ -3336,7 +3366,10 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide') {
         const backendMessage = typeof result?.message === 'string' && result.message.trim()
             ? ` ${result.message.trim()}`
             : '';
-        const successMessage = `Hide request queued for "${eventLabel}".${backendMessage}`;
+        const successMessage = appendBackendRequestIdMessage(
+            `Hide request queued for "${eventLabel}".${backendMessage}`,
+            result,
+        );
         if (fromModal) updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
     } catch (error) {
@@ -3427,7 +3460,10 @@ async function unhideEvent(eventIndex, fromModal = false, action = 'unhide') {
         const backendMessage = typeof result?.message === 'string' && result.message.trim()
             ? ` ${result.message.trim()}`
             : '';
-        const successMessage = `Unhide request queued for "${eventLabel}".${backendMessage}`;
+        const successMessage = appendBackendRequestIdMessage(
+            `Unhide request queued for "${eventLabel}".${backendMessage}`,
+            result,
+        );
         if (fromModal) updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
     } catch (error) {
@@ -3552,9 +3588,12 @@ async function approveEvent(eventIndex, fromModal = false, action = 'approve') {
         const backendMessage = typeof result?.message === 'string' && result.message.trim()
             ? ` ${result.message.trim()}`
             : '';
-        const requestIdSuffix = requestId ? ` Request ID: ${requestId}.` : '';
         updateRuntimeRequestId(requestId || latestBackendRequestId);
-        const successMessage = `Approve request queued for "${eventLabel}".${backendMessage}${requestIdSuffix}`;
+        const successMessage = appendBackendRequestIdMessage(
+            `Approve request queued for "${eventLabel}".${backendMessage}`,
+            result,
+            { updateFooter: false },
+        );
         if (fromModal) updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
     } catch (error) {
@@ -3652,7 +3691,10 @@ async function requeueEvent(eventIndex, fromModal = false, action = 'requeue') {
         const backendMessage = typeof result?.message === 'string' && result.message.trim()
             ? ` ${result.message.trim()}`
             : '';
-        const successMessage = `Requeue request submitted for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`;
+        const successMessage = appendBackendRequestIdMessage(
+            `Requeue request submitted for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`,
+            result,
+        );
         if (fromModal) updateModalStatus(successMessage, 'success');
         else pinRuntimeDetails(successMessage, 'success');
     } catch (error) {
