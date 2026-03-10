@@ -452,6 +452,21 @@ function updateRuntimeStatus(message, type = 'info') {
     statusElement.className = 'status-text status-' + type;
 }
 
+function formatRuntimeStatusCompletedAt(isoString) {
+    if (!hasText(isoString)) return '';
+    const parsed = new Date(isoString);
+    if (Number.isNaN(parsed.getTime())) return '';
+
+    const now = new Date();
+    const isToday = parsed.getFullYear() === now.getFullYear()
+        && parsed.getMonth() === now.getMonth()
+        && parsed.getDate() === now.getDate();
+
+    return parsed.toLocaleString('en-GB', isToday
+        ? { hour: '2-digit', minute: '2-digit' }
+        : { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
 function formatRuntimeCommand(command) {
     if (!command || typeof command !== 'object') return 'No command context';
     const realm = command.realm ?? 'unknown';
@@ -1072,12 +1087,15 @@ async function pollLambdaRuntimeStatus(silent = false) {
             updateRuntimeStatus(`Running (${subject}) since ${startedAt}.`, 'loading');
             updateRuntimeDetails(formatRuntimeCommand(runtime?.command), 'loading');
         } else {
-            const completedAt = runtime?.lastCompletedAt
-                ? new Date(runtime.lastCompletedAt).toLocaleString('en-GB')
-                : null;
+            const completedAt = formatRuntimeStatusCompletedAt(runtime?.lastCompletedAt);
             const outcome = runtime?.lastOutcome || 'idle';
-            const suffix = completedAt ? ` Last ${outcome} at ${completedAt}.` : '';
-            updateRuntimeStatus(`Idle.${suffix}`, 'success');
+            const compactOutcome = outcome === 'success'
+                ? 'Success'
+                : outcome === 'error'
+                    ? 'Error'
+                    : 'Idle';
+            const suffix = completedAt ? ` ${compactOutcome} ${completedAt}` : '';
+            updateRuntimeStatus(`Idle${suffix}`, 'success');
             const pinned = getPinnedRuntimeDetails();
             if (pinned) {
                 updateRuntimeDetails(pinned.message, pinned.type);
