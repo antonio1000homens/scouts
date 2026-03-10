@@ -1079,6 +1079,13 @@ body {
 .event-badge.runtime-processing {
     color: #6d28d9;
 }
+.event-badge.runtime-processing-stall {
+    color: #c2410c;
+}
+.event-badge.runtime-completed,
+.event-badge.runtime-completed-archive {
+    color: #166534;
+}
 .event-badge.runtime-updated {
     color: #b54708;
 }
