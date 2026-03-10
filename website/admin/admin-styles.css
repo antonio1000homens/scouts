@@ -76,6 +76,55 @@ body {
     position: relative;
 }
 
+.header-control-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+.header-control-label {
+    font-size: 0.76rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #cbd5e1;
+    white-space: nowrap;
+}
+
+.header-control-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.header-control-actions-agenda {
+    flex-wrap: nowrap;
+}
+
+.admin-top-nav-status-row {
+    flex: 1 0 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem 1rem;
+}
+
+.admin-top-nav .refresh-status {
+    margin: 0;
+    min-height: 0;
+    font-size: 0.76rem;
+    color: #cbd5e1;
+}
+
+.admin-top-nav .refresh-status.success {
+    color: #86efac;
+}
+
+.admin-top-nav .refresh-status.error {
+    color: #fca5a5;
+}
+
 .viewer-menu-button {
     display: inline-flex;
     align-items: center;
@@ -265,7 +314,7 @@ body {
 
 .admin-overview-inline {
     display: grid;
-    grid-template-columns: minmax(280px, 1.45fr) minmax(250px, 0.95fr) minmax(320px, 1.1fr);
+    grid-template-columns: 1fr;
     gap: 1rem;
     align-items: start;
     margin-bottom: 2rem;
@@ -388,6 +437,13 @@ body {
     font-size: 1rem;
 }
 
+.refresh-input-header {
+    width: 4.25rem;
+    padding: 0.32rem 0.45rem;
+    font-size: 0.82rem;
+    border-color: #cbd5e1;
+}
+
 .refresh-controls-compact {
     grid-template-columns: auto minmax(0, 1fr);
     justify-content: start;
@@ -445,6 +501,64 @@ body {
     margin-top: 0.5rem;
     display: grid;
     gap: 0.45rem;
+}
+
+.requests-overview-card {
+    width: 100%;
+}
+
+.requests-overview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.requests-overview-summary.status-text {
+    font-size: 1.05rem;
+    line-height: 1.2;
+    margin-top: 0.2rem;
+}
+
+.requests-overview-updated {
+    margin-top: 0;
+    text-align: right;
+}
+
+.request-section-stack {
+    margin-top: 1rem;
+    display: grid;
+    gap: 1rem;
+}
+
+.request-section {
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 0.95rem 1rem;
+    background: #f8fafc;
+}
+
+.request-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.75rem;
+}
+
+.request-section-header h4 {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #334155;
+}
+
+.request-section-count {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #64748b;
+    white-space: nowrap;
 }
 
 .request-card {
@@ -513,6 +627,11 @@ body {
     color: #1d4ed8;
 }
 
+.request-card-badge.badge-processing-stall {
+    background: #ffedd5;
+    color: #c2410c;
+}
+
 .request-card-badge.badge-processing-complete {
     background: #e9d5ff;
     color: #7c3aed;
@@ -521,6 +640,11 @@ body {
 .request-card-badge.badge-completed {
     background: #dcfce7;
     color: #166534;
+}
+
+.request-card-badge.badge-completed-archive {
+    background: #e2e8f0;
+    color: #475569;
 }
 
 .request-card-badge.badge-persist {
@@ -1073,6 +1197,13 @@ body {
     text-align: center;
 }
 
+.btn-header {
+    padding: 0.34rem 0.68rem;
+    font-size: 0.78rem;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
 .btn:hover {
     transform: translateY(-1px);
 }
@@ -1324,6 +1455,21 @@ body {
         align-items: stretch;
     }
 
+    .header-control-group,
+    .header-control-actions,
+    .header-control-actions-agenda {
+        width: 100%;
+    }
+
+    .header-control-group {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .admin-top-nav-status-row {
+        grid-template-columns: 1fr;
+    }
+
     .viewer-menu-shell {
         width: 100%;
     }
@@ -1349,6 +1495,16 @@ body {
 
     .admin-overview-inline {
         grid-template-columns: 1fr;
+    }
+
+    .requests-overview-header,
+    .request-section-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .requests-overview-updated {
+        text-align: left;
     }
 
     .admin-runtime-footer-inner {
