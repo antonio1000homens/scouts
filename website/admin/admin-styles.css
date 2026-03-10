@@ -1044,6 +1044,7 @@ body {
     object-fit: contain;
     object-position: center;
     background: transparent;
+    cursor: zoom-in;
 }
 
 .event-badge-stack {
@@ -1461,6 +1462,34 @@ body {
     object-fit: contain;
     object-position: center;
     display: block;
+    cursor: zoom-in;
+}
+
+.image-viewer-panel {
+    width: min(1280px, 100%);
+    max-height: calc(100vh - 3rem);
+}
+
+.image-viewer-body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: 0.5rem 0;
+}
+
+.image-viewer-body img {
+    display: block;
+    max-width: 100%;
+    max-height: calc(100vh - 9rem);
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: 10px;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.28);
+    background: #0f172a;
 }
 
 .modal-body {
