@@ -161,6 +161,18 @@
             </div>
         </section>
 
+        <section id="image-viewer" class="agenda-viewer image-viewer" style="display: none;" onclick="handleViewerBackdropClick(event)">
+            <div class="agenda-viewer-panel image-viewer-panel">
+                <div class="agenda-viewer-header">
+                    <h2 id="image-viewer-title">Event Image</h2>
+                    <button class="btn btn-secondary" onclick="toggleImageViewer()">Close</button>
+                </div>
+                <div class="image-viewer-body">
+                    <img id="image-viewer-image" src="" alt="Full size event image">
+                </div>
+            </div>
+        </section>
+
         <div class="events-layout">
             <aside class="events-sidebar">
                 <h3 class="sidebar-title">Filter Events</h3>
@@ -238,7 +250,7 @@
                     <p><strong>HEX:</strong> <span id="modal-event-hex"></span></p>
                     <p><strong>Current Image:</strong></p>
                     <div id="modal-image-frame" class="modal-image-frame">
-                        <img id="modal-current-image" src="" alt="Current image">
+                        <img id="modal-current-image" src="" alt="Current image" onclick="openImageViewer(this.src, this.alt || 'Current image')">
                     </div>
                     <div class="form-group">
                         <label>Current Metadata</label>
