@@ -226,6 +226,9 @@ function appendBackendRequestIdMessage(message, result, options = {}) {
     }
 
     const baseMessage = typeof message === 'string' ? message.trim() : String(message ?? '').trim();
+    if (options.includeInMessage === false) {
+        return baseMessage;
+    }
     if (!baseMessage) {
         return `Request ID: ${requestId}.`;
     }
@@ -233,6 +236,18 @@ function appendBackendRequestIdMessage(message, result, options = {}) {
         return baseMessage;
     }
     return `${baseMessage} Request ID: ${requestId}.`;
+}
+
+function formatRuntimeSummary(command, result) {
+    const realm = hasText(command?.realm) ? String(command.realm).trim().toLowerCase() : '';
+    const subject = hasText(command?.subject) ? String(command.subject).trim().toLowerCase() : '';
+    const status = hasText(result?.status) ? String(result.status).trim().toLowerCase() : '';
+
+    if (realm === 'scouts' && subject === 'agenda' && status) {
+        return `Refresh status ${status}`;
+    }
+
+    return '';
 }
 
 function pinRuntimeDetails(message, type = 'info', ttlMs = 45000) {
@@ -1430,10 +1445,15 @@ async function pollLambdaRuntimeStatus(silent = false) {
             const lastCommand = runtime?.lastCommand || null;
             const lastResult = runtime?.lastResult || null;
             if (lastCommand || lastResult) {
-                const pieces = [];
-                if (lastCommand) pieces.push(formatRuntimeCommand(lastCommand));
-                if (lastResult) pieces.push(formatRuntimeResult(lastResult));
-                updateRuntimeDetails(pieces.join(' | '), outcome === 'error' ? 'error' : 'success');
+                const summary = formatRuntimeSummary(lastCommand, lastResult);
+                if (summary) {
+                    updateRuntimeDetails(summary, outcome === 'error' ? 'error' : 'success');
+                } else {
+                    const pieces = [];
+                    if (lastCommand) pieces.push(formatRuntimeCommand(lastCommand));
+                    if (lastResult) pieces.push(formatRuntimeResult(lastResult));
+                    updateRuntimeDetails(pieces.join(' | '), outcome === 'error' ? 'error' : 'success');
+                }
             } else {
                 updateRuntimeDetails('No lambda commands recorded yet.', 'info');
             }
@@ -3650,7 +3670,7 @@ async function approveEvent(eventIndex, fromModal = false, action = 'approve') {
         const successMessage = appendBackendRequestIdMessage(
             `Approve request queued for "${eventLabel}".${backendMessage}`,
             result,
-            { updateFooter: false },
+            { updateFooter: false, includeInMessage: false },
         );
         if (fromModal) updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
