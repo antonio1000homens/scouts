@@ -23,7 +23,10 @@
                 "cloudfront:CreateInvalidation",
                 "cloudfront:GetInvalidation",
                 "cloudfront:ListInvalidations",
-                "cloudfront:GetDistribution"
+                "cloudfront:GetDistribution",
+                "cloudfront:ListDistributions",
+                "cloudfront:GetDistributionConfig",
+                "cloudfront:UpdateDistribution"
             ],
             "Resource": "arn:aws:cloudfront::243857182133:distribution/*"
         }

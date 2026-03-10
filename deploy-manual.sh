@@ -82,7 +82,7 @@ if [ -n "${CLOUDFRONT_DISTRIBUTION_ID:-}" ]; then
   echo "Creating CloudFront invalidation for ${CLOUDFRONT_DISTRIBUTION_ID}..."
   aws cloudfront create-invalidation \
     --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
-    --paths "/index.html" "/scouts.conf" "/website/*" >/dev/null
+    --paths "/index.html" "/scouts.conf" "/website/*" "/agenda.json" "/runtime/*" "/events/*" >/dev/null
   echo "CloudFront invalidation submitted."
 else
   echo "Skipping CloudFront invalidation (set CLOUDFRONT_DISTRIBUTION_ID to enable)."
