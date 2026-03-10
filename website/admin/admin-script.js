@@ -2633,6 +2633,10 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+function escapeHtmlAttribute(value) {
+    return escapeHtml(value).replace(/`/g, '&#96;');
+}
+
 function formatTrackerTimestamp(isoString) {
     if (!isoString) return 'n/a';
     const parsed = new Date(isoString);
