@@ -1,0 +1,9 @@
+[
+  {
+    "ResourceType": "AWS::CloudFront::Distribution",
+    "LogicalResourceId": "CloudFrontDistribution",
+    "ResourceIdentifier": {
+      "Id": "E3I6EACBCFE736"
+    }
+  }
+]

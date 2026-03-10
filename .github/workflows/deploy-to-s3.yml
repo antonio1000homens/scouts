@@ -106,9 +106,11 @@ jobs:
         CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets['CLOUDFRONT_DISTRIBUTION_ID'] }}
       run: |
         if [ -n "${CLOUDFRONT_DISTRIBUTION_ID}" ]; then
+          echo "Invalidating CloudFront distribution ${CLOUDFRONT_DISTRIBUTION_ID}..."
           aws cloudfront create-invalidation \
             --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
-            --paths "/index.html" "/scouts.conf" "/website/*"
+            --paths "/index.html" "/scouts.conf" "/website/*" "/agenda.json" "/runtime/*" "/events/*"
+          echo "CloudFront invalidation submitted."
         else
           echo "No CLOUDFRONT_DISTRIBUTION_ID secret set; skipping invalidation."
         fi

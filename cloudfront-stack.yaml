@@ -1,0 +1,61 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFront distribution for 2ndtolworth.org.uk
+
+Parameters:
+  CertificateArn:
+    Type: String
+    Default: arn:aws:acm:us-east-1:243857182133:certificate/dfb5270b-cc04-4747-8831-3c0e7c347212
+
+Resources:
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Aliases:
+          - 2ndtolworth.org.uk
+        Origins:
+          - Id: 2ndtolworth-s3-website
+            DomainName: 2ndtolworth.s3-website.eu-west-2.amazonaws.com
+            CustomOriginConfig:
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginProtocolPolicy: http-only
+        DefaultCacheBehavior:
+          TargetOriginId: 2ndtolworth-s3-website
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+        CacheBehaviors:
+          - PathPattern: /agenda.json
+            TargetOriginId: 2ndtolworth-s3-website
+            ViewerProtocolPolicy: redirect-to-https
+            Compress: true
+            CachePolicyId: f6072fdc-ae27-4d49-a206-4f2a80c82fbe
+          - PathPattern: /runtime/*
+            TargetOriginId: 2ndtolworth-s3-website
+            ViewerProtocolPolicy: redirect-to-https
+            Compress: true
+            CachePolicyId: f6072fdc-ae27-4d49-a206-4f2a80c82fbe
+          - PathPattern: /events/*
+            TargetOriginId: 2ndtolworth-s3-website
+            ViewerProtocolPolicy: redirect-to-https
+            Compress: true
+            CachePolicyId: f6072fdc-ae27-4d49-a206-4f2a80c82fbe
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: whitelist
+            Locations:
+              - GB
+        HttpVersion: http2
+        IPV6Enabled: true
+
+Outputs:
+  DistributionId:
+    Value: !Ref CloudFrontDistribution
+  DistributionDomainName:
+    Value: !GetAtt CloudFrontDistribution.DomainName
