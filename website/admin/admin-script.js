@@ -63,6 +63,7 @@ const COMPLETED_REQUESTS_RUNTIME_URL = '../../runtime/scoutsComplete.json';
 const SCOUTS_CONFIG_URL = window.SCOUTS_CONFIG_URL || '../../scouts.conf';
 const SCOUTS_CONFIG_CACHE_MS = 5 * 60 * 1000;
 const HEX_PREVIEW_POLL_INTERVAL_MS = 5000;
+const QUEUED_STALLED_THRESHOLD_MS = 60 * 1000;
 let activeHexPreviewCardIndex = null;
 let activeHexPreviewHex = null;
 let activeHexPreviewPollTimer = null;
@@ -685,6 +686,7 @@ function formatRequestBadgeClass(value) {
     if (!hasText(value)) return 'badge-unknown';
     const normalized = String(value).trim().toLowerCase();
     if (normalized === 'queued') return 'badge-queued';
+    if (normalized === 'queued-stalled') return 'badge-queued-stalled';
     if (normalized === 'processing') return 'badge-processing';
     if (normalized === 'processing-stall') return 'badge-processing-stall';
     if (normalized === 'processing-complete') return 'badge-processing-complete';
@@ -703,6 +705,7 @@ function formatRequestBadgeLabel(value, fallback = 'Unknown') {
     if (!hasText(value)) return fallback;
     const normalized = String(value).trim().toLowerCase();
     if (normalized === 'queued') return 'Q Queued';
+    if (normalized === 'queued-stalled') return 'STALL Queued';
     if (normalized === 'processing') return 'P Processing';
     if (normalized === 'processing-stall') return 'STALL Processing';
     if (normalized === 'processing-complete') return 'DONE Processing';
@@ -1575,6 +1578,24 @@ function getSnapshotRequestKey(request) {
     return [hex, title].filter(Boolean).join('|');
 }
 
+function getSnapshotRequestTimestampMs(request) {
+    const candidate = hasText(request?.requestTime)
+        ? request.requestTime.trim()
+        : (hasText(request?.processedAt)
+            ? request.processedAt.trim()
+            : (hasText(request?.completedAt)
+                ? request.completedAt.trim()
+                : ''));
+    if (!candidate) return 0;
+    const parsed = Date.parse(candidate);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isQueuedRequestStalled(request, nowMs = Date.now()) {
+    const timestampMs = getSnapshotRequestTimestampMs(request);
+    return timestampMs > 0 && (nowMs - timestampMs) > QUEUED_STALLED_THRESHOLD_MS;
+}
+
 function mergeRuntimeRequestEntries(primary, secondary) {
     return {
         ...(secondary && typeof secondary === 'object' ? secondary : {}),
@@ -1623,6 +1644,7 @@ function getAggregateRuntimeRequests(queuedSnapshot, processingSnapshot, complet
             hasQueued: Boolean(queued),
             hasProcessing: Boolean(processing),
             hasCompleted: Boolean(completed),
+            queuedEntry: queued,
         });
         if (!status) return;
 
@@ -1642,11 +1664,12 @@ function getAggregateRuntimeRequests(queuedSnapshot, processingSnapshot, complet
     });
 }
 
-function classifyAggregateRuntimeRequestStatus({ hasQueued = false, hasProcessing = false, hasCompleted = false } = {}) {
+function classifyAggregateRuntimeRequestStatus({ hasQueued = false, hasProcessing = false, hasCompleted = false, queuedEntry = null } = {}) {
     if (hasCompleted && (hasQueued || hasProcessing)) return 'completed';
     if (hasProcessing && hasQueued) return 'processing';
     if (hasProcessing) return 'processing-stall';
     if (hasCompleted) return 'completed-archive';
+    if (hasQueued && isQueuedRequestStalled(queuedEntry)) return 'queued-stalled';
     if (hasQueued) return 'queued';
     return '';
 }
@@ -1666,6 +1689,16 @@ function deriveEventRuntimeBadges(event) {
         .filter((request) => getSnapshotRequestHex(request) === hex);
     const processingRequests = getSnapshotRequests(latestProcessingSnapshot)
         .filter((request) => getSnapshotRequestHex(request) === hex);
+    const processingKeys = new Set(
+        processingRequests
+            .map((request) => getSnapshotRequestKey(request))
+            .filter(Boolean),
+    );
+    const completedKeys = new Set(
+        getSnapshotRequests(latestCompletedSnapshot)
+            .map((request) => getSnapshotRequestKey(request))
+            .filter(Boolean),
+    );
     const completedPairs = new Set(
         getSnapshotRequests(latestCompletedSnapshot)
             .map((request) => {
@@ -1692,11 +1725,16 @@ function deriveEventRuntimeBadges(event) {
 
     queuedRequests.forEach((request) => {
         const requestId = getSnapshotRequestId(request);
+        const requestKey = getSnapshotRequestKey(request);
         if (requestId && appliedRequestIds.has(requestId)) {
             return;
         }
         if (requestId && completedPairs.has(`${hex}|${requestId}`)) {
             pushBadge('updated', 'Updated', requestId);
+            return;
+        }
+        if (requestKey && !processingKeys.has(requestKey) && !completedKeys.has(requestKey) && isQueuedRequestStalled(request)) {
+            pushBadge('queued-stalled', 'Queued Stalled', requestId);
             return;
         }
         pushBadge('queued', 'Queued', requestId);

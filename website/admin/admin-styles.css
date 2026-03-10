@@ -719,6 +719,11 @@ body {
     color: #6d28d9;
 }
 
+.request-card-badge.badge-queued-stalled {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
 .request-card-badge.badge-processing {
     background: #dbeafe;
     color: #1d4ed8;
@@ -1067,6 +1072,9 @@ body {
 .event-badge.approval { color: #155eef; }
 .event-badge.runtime-queued {
     color: #155eef;
+}
+.event-badge.runtime-queued-stalled {
+    color: #b42318;
 }
 .event-badge.runtime-processing {
     color: #6d28d9;
