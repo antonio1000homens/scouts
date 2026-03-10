@@ -13,6 +13,7 @@ let agendaLoadInFlight = false;
 let latestQueuedSnapshot = null;
 let latestProcessingSnapshot = null;
 let latestCompletedSnapshot = null;
+let activeRuntimeViewerKey = '';
 let pinnedRuntimeDetails = null;
 let lastLoadedEventsSummary = null;
 let adminNotificationTimer = null;
@@ -56,8 +57,8 @@ const localVisibilityOverrides = new Map();
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
 const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
 const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
-const QUEUED_REQUESTS_RUNTIME_URL = '../../runtime/scoutsqueued.json';
-const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/scoutsprocessing.json';
+const QUEUED_REQUESTS_RUNTIME_URL = '../../runtime/queuedrequests.json';
+const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/processingrequests.json';
 const COMPLETED_REQUESTS_RUNTIME_URL = '../../runtime/scoutscompleted.json';
 const SCOUTS_CONFIG_URL = window.SCOUTS_CONFIG_URL || '../../scouts.conf';
 const SCOUTS_CONFIG_CACHE_MS = 5 * 60 * 1000;
@@ -286,7 +287,7 @@ function setViewerOpen(viewerId, shouldShow) {
 }
 
 function closeAllViewers(exceptViewerId = '') {
-    ['agenda-viewer', 'events-json-viewer', 'ai-config-viewer'].forEach((viewerId) => {
+    ['agenda-viewer', 'events-json-viewer', 'scouts-config-viewer', 'runtime-json-viewer', 'ai-config-viewer'].forEach((viewerId) => {
         if (viewerId === exceptViewerId) return;
         setViewerOpen(viewerId, false);
     });
@@ -400,6 +401,94 @@ function toggleScoutsConfigViewer() {
         return;
     }
     showScoutsConfigViewer();
+}
+
+function getRuntimeSnapshotViewerConfig(snapshotKey) {
+    if (snapshotKey === 'queued') {
+        return {
+            key: 'queued',
+            title: 'Runtime Queued Snapshot',
+            url: QUEUED_REQUESTS_RUNTIME_URL,
+            getSnapshot: () => latestQueuedSnapshot,
+            setSnapshot: (snapshot) => {
+                latestQueuedSnapshot = snapshot;
+            },
+        };
+    }
+    if (snapshotKey === 'processing') {
+        return {
+            key: 'processing',
+            title: 'Runtime Processing Snapshot',
+            url: PROCESSING_REQUESTS_RUNTIME_URL,
+            getSnapshot: () => latestProcessingSnapshot,
+            setSnapshot: (snapshot) => {
+                latestProcessingSnapshot = snapshot;
+            },
+        };
+    }
+    if (snapshotKey === 'completed') {
+        return {
+            key: 'completed',
+            title: 'Runtime Completed Snapshot',
+            url: COMPLETED_REQUESTS_RUNTIME_URL,
+            getSnapshot: () => latestCompletedSnapshot,
+            setSnapshot: (snapshot) => {
+                latestCompletedSnapshot = snapshot;
+            },
+        };
+    }
+    return null;
+}
+
+async function renderRuntimeSnapshotViewerContent(snapshotKey, force = false) {
+    const config = getRuntimeSnapshotViewerConfig(snapshotKey);
+    const titleEl = document.getElementById('runtime-json-title');
+    const contentEl = document.getElementById('runtime-json-content');
+    if (!config || !titleEl || !contentEl) return;
+
+    titleEl.textContent = config.title;
+    contentEl.textContent = 'Loading runtime snapshot...';
+
+    let snapshot = !force ? config.getSnapshot() : null;
+    if (!snapshot) {
+        snapshot = await fetchQueueSnapshot(config.url);
+        config.setSnapshot(snapshot);
+    }
+
+    if (!snapshot) {
+        contentEl.textContent = 'Runtime snapshot not available.';
+        return;
+    }
+
+    contentEl.textContent = JSON.stringify(snapshot, null, 2);
+}
+
+function showRuntimeSnapshotViewer(snapshotKey = 'queued') {
+    const config = getRuntimeSnapshotViewerConfig(snapshotKey);
+    if (!config) return;
+
+    activeRuntimeViewerKey = config.key;
+    closeAllViewers('runtime-json-viewer');
+    const viewer = setViewerOpen('runtime-json-viewer', true);
+    if (!viewer) return;
+    renderRuntimeSnapshotViewerContent(config.key, true).catch((error) => {
+        const contentEl = document.getElementById('runtime-json-content');
+        if (contentEl) {
+            contentEl.textContent = `Failed to load runtime snapshot: ${error.message}`;
+        }
+    });
+}
+
+function toggleRuntimeSnapshotViewer(snapshotKey = activeRuntimeViewerKey || 'queued') {
+    const viewer = document.getElementById('runtime-json-viewer');
+    if (!viewer) return;
+
+    const shouldShow = viewer.style.display === 'none' || viewer.style.display === '';
+    if (!shouldShow) {
+        setViewerOpen('runtime-json-viewer', false);
+        return;
+    }
+    showRuntimeSnapshotViewer(snapshotKey);
 }
 
 function closeViewerMenu() {
