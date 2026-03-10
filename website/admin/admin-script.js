@@ -325,7 +325,7 @@ function getFilterCounts() {
 }
 
 function getDefaultFilterForCounts(counts) {
-    const priority = ['new', 'approval', 'missing', 'hidden', 'complete', 'all'];
+    const priority = ['new', 'approval', 'missing', 'complete', 'hidden', 'all'];
     for (const filter of priority) {
         if ((counts?.[filter] ?? 0) > 0) {
             return filter;
