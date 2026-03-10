@@ -128,30 +128,42 @@
                     <p id="completed-requests-updated" class="refresh-status requests-overview-updated">Last refresh: n/a</p>
                 </div>
                 <div class="request-section-stack">
-                    <section class="request-section">
+                    <div class="request-section-column">
+                        <section class="request-section">
+                            <div class="request-section-header">
+                                <h4>Queued</h4>
+                                <span id="requests-queued-count" class="request-section-count">0 requests</span>
+                            </div>
+                            <div id="requests-queued-list" class="request-list request-list-scrollable">
+                                <p class="refresh-status">No queued requests.</p>
+                            </div>
+                        </section>
+                        <section class="request-section">
+                            <div class="request-section-header">
+                                <h4>Processing</h4>
+                                <span id="requests-processing-count" class="request-section-count">0 requests</span>
+                            </div>
+                            <div id="requests-processing-list" class="request-list request-list-scrollable">
+                                <p class="refresh-status">No processing requests.</p>
+                            </div>
+                        </section>
+                    </div>
+                    <section class="request-section request-section-completed">
                         <div class="request-section-header">
-                            <h4>Queued</h4>
-                            <span id="requests-queued-count" class="request-section-count">0 requests</span>
+                            <div class="request-section-header-main">
+                                <h4>Completed</h4>
+                                <span id="requests-completed-count" class="request-section-count">0 requests</span>
+                            </div>
+                            <label class="request-archive-toggle" for="requests-show-archived-toggle">
+                                <input
+                                    type="checkbox"
+                                    id="requests-show-archived-toggle"
+                                    onchange="toggleArchivedRequests(this.checked)"
+                                >
+                                Show archived jobs
+                            </label>
                         </div>
-                        <div id="requests-queued-list" class="request-list">
-                            <p class="refresh-status">No queued requests.</p>
-                        </div>
-                    </section>
-                    <section class="request-section">
-                        <div class="request-section-header">
-                            <h4>Processing</h4>
-                            <span id="requests-processing-count" class="request-section-count">0 requests</span>
-                        </div>
-                        <div id="requests-processing-list" class="request-list">
-                            <p class="refresh-status">No processing requests.</p>
-                        </div>
-                    </section>
-                    <section class="request-section">
-                        <div class="request-section-header">
-                            <h4>Completed</h4>
-                            <span id="requests-completed-count" class="request-section-count">0 requests</span>
-                        </div>
-                        <div id="requests-completed-list" class="request-list">
+                        <div id="requests-completed-list" class="request-list request-list-scrollable">
                             <p class="refresh-status">No completed requests.</p>
                         </div>
                     </section>

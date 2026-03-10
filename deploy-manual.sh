@@ -70,12 +70,8 @@ if [ -f "lambdas/scouts/sqs/sqs2scouts/scouts.conf" ]; then
   echo "Uploading lambdas/scouts/sqs/sqs2scouts/scouts.conf to s3://2ndtolworth/scouts.conf..."
   aws s3 cp lambdas/scouts/sqs/sqs2scouts/scouts.conf s3://2ndtolworth/scouts.conf \
     --cache-control "max-age=0, no-cache, no-store, must-revalidate"
-elif [ -f "scouts.conf" ]; then
-  echo "Uploading scouts.conf to s3://2ndtolworth/scouts.conf..."
-  aws s3 cp scouts.conf s3://2ndtolworth/scouts.conf \
-    --cache-control "max-age=0, no-cache, no-store, must-revalidate"
 else
-  echo "No scouts.conf found locally, skipping upload."
+  echo "No lambdas/scouts/sqs/sqs2scouts/scouts.conf found locally, skipping upload."
 fi
 
 echo ""

@@ -528,7 +528,10 @@ body {
 .request-section-stack {
     margin-top: 1rem;
     display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 1rem;
+    height: 36rem;
+    min-height: 36rem;
 }
 
 .request-section {
@@ -536,6 +539,20 @@ body {
     border-radius: 12px;
     padding: 0.95rem 1rem;
     background: #f8fafc;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.request-section-column {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+    min-height: 0;
+}
+
+.request-section-completed {
+    height: 100%;
 }
 
 .request-section-header {
@@ -543,6 +560,13 @@ body {
     justify-content: space-between;
     align-items: baseline;
     gap: 0.75rem;
+}
+
+.request-section-header-main {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    min-width: 0;
 }
 
 .request-section-header h4 {
@@ -559,6 +583,27 @@ body {
     font-weight: 700;
     color: #64748b;
     white-space: nowrap;
+}
+
+.request-archive-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #475569;
+    white-space: nowrap;
+}
+
+.request-archive-toggle input {
+    margin: 0;
+}
+
+.request-list-scrollable {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding-right: 0.2rem;
 }
 
 .request-card {
@@ -1501,6 +1546,20 @@ body {
     .request-section-header {
         flex-direction: column;
         align-items: flex-start;
+    }
+
+    .request-section-stack {
+        grid-template-columns: 1fr;
+        height: auto;
+        min-height: 0;
+    }
+
+    .request-section-column {
+        grid-template-rows: auto auto;
+    }
+
+    .request-list-scrollable {
+        max-height: 20rem;
     }
 
     .requests-overview-updated {

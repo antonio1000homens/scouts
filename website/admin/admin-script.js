@@ -46,6 +46,7 @@ let statusPollingInFlight = false;
 let lastObservedRuntimeCompletedAt = '';
 let latestCompletedRequests = [];
 let latestCompletedRequestsUpdatedAt = null;
+let showArchivedRequests = false;
 let cachedScoutsConfig = null;
 let cachedScoutsConfigLoadedAt = 0;
 let scoutsConfigLoadPromise = null;
@@ -564,6 +565,32 @@ function formatRequestBadgeLabel(value, fallback = 'Unknown') {
     return formatRequestStageLabel(value, fallback);
 }
 
+function extractRequestQueueAction(entry) {
+    const candidates = [
+        entry?.action,
+        entry?.command?.action,
+        entry?.message?.action,
+        entry?.payload?.action,
+        entry?.rawPayload?.action,
+        entry?.body?.action,
+        entry?.request?.action,
+        entry?.operation,
+    ];
+
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim()) {
+            return candidate.trim();
+        }
+    }
+
+    return '';
+}
+
+function formatRequestQueueActionLabel(value) {
+    if (!hasText(value)) return 'n/a';
+    return String(value).trim();
+}
+
 function normaliseRequestCardEntry(entry, options = {}) {
     if (!entry || typeof entry !== 'object') return null;
 
@@ -595,6 +622,7 @@ function normaliseRequestCardEntry(entry, options = {}) {
             : (hasText(entry?.completedAt)
                 ? entry.completedAt
                 : (hasText(entry?.updatedAt) ? entry.updatedAt : '')));
+    const queueAction = extractRequestQueueAction(entry);
     const subtitleParts = [];
     if (hex) subtitleParts.push(`HEX ${hex}`);
     if (hasText(options.sourceLabel)) subtitleParts.push(options.sourceLabel);
@@ -606,6 +634,7 @@ function normaliseRequestCardEntry(entry, options = {}) {
         messageId,
         stageKey,
         operation: action,
+        queueAction,
         badgeLabel: formatRequestBadgeLabel(stageKey, action),
         processedAt: timestamp,
         badgeClass: formatRequestBadgeClass(stageKey),
@@ -627,9 +656,10 @@ function renderRequestCards(listEl, entries, emptyMessage, options = {}) {
             ['Request ID', normalized.requestId],
             ['Message ID', normalized.messageId],
             ['HEX', normalized.hex],
-            ['Action', normalized.operation],
+            ['Stage', normalized.operation],
+            ['Queue action', formatRequestQueueActionLabel(normalized.queueAction)],
             ['Timestamp', normalized.processedAt],
-        ].filter(([, value]) => hasText(value));
+        ].filter(([, value]) => value !== null && value !== undefined && String(value).trim().length > 0);
         const metadataRows = metadata.map(([label, value]) => `
             <div class="request-card-meta-row">
                 <div class="request-card-meta-label">${escapeHtml(label)}</div>
@@ -766,6 +796,11 @@ function formatRequestSectionCount(count) {
     return `${count} request${count === 1 ? '' : 's'}`;
 }
 
+function toggleArchivedRequests(enabled) {
+    showArchivedRequests = Boolean(enabled);
+    renderCompletedRequests();
+}
+
 function shouldHideCompletedRequestEntry(entry) {
     const requestId = hasText(entry?.requestId) ? entry.requestId.trim() : '';
     if (!requestId) return false;
@@ -811,13 +846,23 @@ function renderCompletedRequests() {
     }
 
     const grouped = groupRuntimeRequestsBySection(totalEntries);
+    const visibleCompleted = showArchivedRequests
+        ? grouped.completed
+        : grouped.completed.filter((entry) => String(entry?.stageKey || '').trim().toLowerCase() !== 'completed-archive');
     if (queuedCountEl) queuedCountEl.textContent = formatRequestSectionCount(grouped.queued.length);
     if (processingCountEl) processingCountEl.textContent = formatRequestSectionCount(grouped.processing.length);
-    if (completedCountEl) completedCountEl.textContent = formatRequestSectionCount(grouped.completed.length);
+    if (completedCountEl) completedCountEl.textContent = formatRequestSectionCount(visibleCompleted.length);
 
     renderRequestCards(queuedListEl, grouped.queued, 'No queued requests.', {});
     renderRequestCards(processingListEl, grouped.processing, 'No processing requests.', {});
-    renderRequestCards(completedListEl, grouped.completed, 'No completed requests.', {});
+    renderRequestCards(
+        completedListEl,
+        visibleCompleted,
+        showArchivedRequests
+            ? 'No completed requests.'
+            : 'No completed requests. Enable archived jobs to show completed-only history.',
+        {},
+    );
 }
 
 function updateCompletedRequestsFromResult(result) {
