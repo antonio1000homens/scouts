@@ -7,7 +7,7 @@ let currentEventIndex = null;
 let apiAuthReady = false;
 let lambdaRuntimeRunning = false;
 let uiCommandInFlight = false;
-let activeFilter = 'all';
+let activeFilter = '';
 let agendaPayload = null;
 let agendaLoadInFlight = false;
 let latestQueuedSnapshot = null;
@@ -57,9 +57,9 @@ const localVisibilityOverrides = new Map();
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
 const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
 const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
-const QUEUED_REQUESTS_RUNTIME_URL = '../../runtime/queuedrequests.json';
-const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/processingrequests.json';
-const COMPLETED_REQUESTS_RUNTIME_URL = '../../runtime/scoutscompleted.json';
+const QUEUED_REQUESTS_RUNTIME_URL = '../../runtime/scoutsQueued.json';
+const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/scoutsProcessing.json';
+const COMPLETED_REQUESTS_RUNTIME_URL = '../../runtime/scoutsComplete.json';
 const SCOUTS_CONFIG_URL = window.SCOUTS_CONFIG_URL || '../../scouts.conf';
 const SCOUTS_CONFIG_CACHE_MS = 5 * 60 * 1000;
 const HEX_PREVIEW_POLL_INTERVAL_MS = 5000;
@@ -251,9 +251,22 @@ function getFilterCounts() {
     };
 }
 
+function getDefaultFilterForCounts(counts) {
+    const priority = ['new', 'approval', 'missing', 'hidden', 'complete', 'all'];
+    for (const filter of priority) {
+        if ((counts?.[filter] ?? 0) > 0) {
+            return filter;
+        }
+    }
+    return 'all';
+}
+
 function updateSidebarUi() {
     const counts = getFilterCounts();
-    const filters = ['new', 'all', 'missing', 'hidden', 'complete', 'approval'];
+    if (!hasText(activeFilter) || !(activeFilter in counts)) {
+        activeFilter = getDefaultFilterForCounts(counts);
+    }
+    const filters = ['new', 'approval', 'missing', 'hidden', 'complete', 'all'];
     filters.forEach((filter) => {
         const btn = document.getElementById(`filter-btn-${filter}`);
         if (!btn) return;
@@ -680,21 +693,51 @@ function formatRequestQueueActionLabel(value) {
     return String(value).trim();
 }
 
-function normaliseRequestCardEntry(entry, options = {}) {
-    if (!entry || typeof entry !== 'object') return null;
+function resolveRequestSubject(entry) {
+    if (!entry || typeof entry !== 'object') return '';
 
-    const title = hasText(entry?.title)
-        ? entry.title.trim()
-        : (hasText(entry?.summary)
-            ? entry.summary.trim()
-            : (hasText(entry?.hex)
-                ? entry.hex.trim()
-                : (hasText(entry?.hexId)
-                    ? entry.hexId.trim()
-                    : (hasText(entry?.requestId) ? entry.requestId.trim() : 'Unknown'))));
+    if (hasText(entry?.subject)) {
+        return entry.subject.trim();
+    }
+
+    if (entry?.subject && typeof entry.subject === 'object') {
+        const subjectTitle = entry.subject.title ?? entry.subject.summary ?? entry.subject.name ?? entry.subject.value ?? null;
+        if (hasText(subjectTitle)) {
+            return subjectTitle.trim();
+        }
+    }
+
+    const directTitle = entry?.title ?? entry?.summary ?? entry?.name ?? null;
+    if (hasText(directTitle)) {
+        return directTitle.trim();
+    }
+
     const hex = hasText(entry?.hex)
         ? entry.hex.trim()
         : (hasText(entry?.hexId) ? entry.hexId.trim() : '');
+    const knownTitle = resolveEventTitleByHex(hex);
+    if (hasText(knownTitle)) {
+        return knownTitle.trim();
+    }
+
+    const decodedHex = decodeHexToText(hex);
+    if (hasText(decodedHex)) {
+        return decodedHex.trim();
+    }
+
+    return '';
+}
+
+function normaliseRequestCardEntry(entry, options = {}) {
+    if (!entry || typeof entry !== 'object') return null;
+
+    const subject = resolveRequestSubject(entry);
+    const hex = hasText(entry?.hex)
+        ? entry.hex.trim()
+        : (hasText(entry?.hexId) ? entry.hexId.trim() : '');
+    const title = hasText(subject)
+        ? subject
+        : (hex || (hasText(entry?.requestId) ? entry.requestId.trim() : 'Unknown'));
     const requestId = hasText(entry?.requestId)
         ? entry.requestId.trim()
         : (hasText(entry?.messageId) ? entry.messageId.trim() : '');
@@ -712,18 +755,21 @@ function normaliseRequestCardEntry(entry, options = {}) {
                 ? entry.completedAt
                 : (hasText(entry?.updatedAt) ? entry.updatedAt : '')));
     const queueAction = extractRequestQueueAction(entry);
+    const realm = hasText(entry?.realm) ? entry.realm.trim() : '';
     const subtitleParts = [];
-    if (hex) subtitleParts.push(`HEX ${hex}`);
     if (hasText(options.sourceLabel)) subtitleParts.push(options.sourceLabel);
 
     return {
         title,
+        subject,
         hex,
+        realm,
         requestId,
         messageId,
         stageKey,
         operation: action,
         queueAction,
+        headerAction: formatRequestQueueActionLabel(queueAction),
         badgeLabel: formatRequestBadgeLabel(stageKey, action),
         processedAt: timestamp,
         badgeClass: formatRequestBadgeClass(stageKey),
@@ -742,25 +788,33 @@ function renderRequestCards(listEl, entries, emptyMessage, options = {}) {
         const normalized = normaliseRequestCardEntry(entry, options);
         if (!normalized) return '';
         const metadata = [
+            ['Realm', normalized.realm],
+            ['Subject', normalized.subject],
+            ['Action', formatRequestQueueActionLabel(normalized.queueAction)],
             ['Request ID', normalized.requestId],
             ['Message ID', normalized.messageId],
             ['HEX', normalized.hex],
             ['Stage', normalized.operation],
-            ['Queue action', formatRequestQueueActionLabel(normalized.queueAction)],
             ['Timestamp', normalized.processedAt],
         ].filter(([, value]) => value !== null && value !== undefined && String(value).trim().length > 0);
-        const metadataRows = metadata.map(([label, value]) => `
-            <div class="request-card-meta-row">
+        const metadataRows = metadata.map(([label, value]) => {
+            const rowClass = label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+            return `
+            <div class="request-card-meta-row request-card-meta-row-${escapeHtml(rowClass)}">
                 <div class="request-card-meta-label">${escapeHtml(label)}</div>
                 <div class="request-card-meta-value">${escapeHtml(String(value).trim())}</div>
             </div>
-        `).join('');
+        `;
+        }).join('');
         return `
             <article class="request-card">
                 <div class="request-card-header">
                     <div class="request-card-lead">
                         <div class="request-card-time"${hasText(normalized.processedAt) ? ` title="${escapeHtml(normalized.processedAt)}"` : ''}>${escapeHtml(formatTrackerTimestamp(normalized.processedAt))}</div>
-                        <div class="request-card-title">${escapeHtml(normalized.title)}</div>
+                        <div class="request-card-title">
+                            <span class="request-card-title-text">${escapeHtml(normalized.title)}</span>
+                            ${hasText(normalized.queueAction) ? `<span class="request-card-title-action">${escapeHtml(normalized.headerAction)}</span>` : ''}
+                        </div>
                         ${normalized.subtitle ? `<div class="request-card-subtitle">${escapeHtml(normalized.subtitle)}</div>` : ''}
                     </div>
                     <span class="request-card-badge ${escapeHtml(normalized.badgeClass)}">${escapeHtml(normalized.badgeLabel)}</span>
@@ -801,8 +855,8 @@ function deduplicateRequestsByRequestId(normalizedEntries) {
             byRequestId.set(requestId, entry);
             return;
         }
-        const existingTime = existing.processedAt ? new Date(existing.processedAt).getTime() : -1;
-        const entryTime = entry.processedAt ? new Date(entry.processedAt).getTime() : -1;
+        const existingTime = getRequestTimestampValue(existing);
+        const entryTime = getRequestTimestampValue(entry);
         if (entryTime >= existingTime) {
             byRequestId.set(requestId, entry);
         }
@@ -820,11 +874,29 @@ function getRequestStagePriority(stageKey) {
     return 0;
 }
 
+function getRequestTimestampValue(entry) {
+    const candidates = [
+        entry?.processedAt,
+        entry?.completedAt,
+        entry?.requestTime,
+        entry?.updatedAt,
+        entry?.timestamp,
+    ];
+
+    for (const candidate of candidates) {
+        if (!hasText(candidate)) continue;
+        const parsed = new Date(candidate).getTime();
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+
+    return 0;
+}
+
 function sortRequestEntriesByTimestamp(entries) {
     return [...entries].sort((left, right) => {
-        const leftTime = new Date(left?.processedAt ?? left?.requestTime ?? 0).getTime();
-        const rightTime = new Date(right?.processedAt ?? right?.requestTime ?? 0).getTime();
-        return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+        return getRequestTimestampValue(right) - getRequestTimestampValue(left);
     });
 }
 
@@ -914,13 +986,9 @@ function shouldHideCompletedRequestEntry(entry) {
 function renderCompletedRequests() {
     const summaryEl = document.getElementById('completed-requests-summary');
     const updatedEl = document.getElementById('completed-requests-updated');
-    const queuedListEl = document.getElementById('requests-queued-list');
-    const processingListEl = document.getElementById('requests-processing-list');
-    const completedListEl = document.getElementById('requests-completed-list');
-    const queuedCountEl = document.getElementById('requests-queued-count');
-    const processingCountEl = document.getElementById('requests-processing-count');
-    const completedCountEl = document.getElementById('requests-completed-count');
-    if (!summaryEl || !updatedEl || !queuedListEl || !processingListEl || !completedListEl) return;
+    const requestsListEl = document.getElementById('requests-list');
+    const requestsCountEl = document.getElementById('requests-count');
+    if (!summaryEl || !updatedEl || !requestsListEl || !requestsCountEl) return;
 
     const totalEntries = Array.isArray(latestCompletedRequests) ? latestCompletedRequests : [];
     const total = totalEntries.length;
@@ -934,22 +1002,17 @@ function renderCompletedRequests() {
         updatedEl.textContent = 'Last refresh: n/a';
     }
 
-    const grouped = groupRuntimeRequestsBySection(totalEntries);
-    const visibleCompleted = showArchivedRequests
-        ? grouped.completed
-        : grouped.completed.filter((entry) => String(entry?.stageKey || '').trim().toLowerCase() !== 'completed-archive');
-    if (queuedCountEl) queuedCountEl.textContent = formatRequestSectionCount(grouped.queued.length);
-    if (processingCountEl) processingCountEl.textContent = formatRequestSectionCount(grouped.processing.length);
-    if (completedCountEl) completedCountEl.textContent = formatRequestSectionCount(visibleCompleted.length);
+    const visibleEntries = showArchivedRequests
+        ? totalEntries
+        : totalEntries.filter((entry) => String(entry?.stageKey || '').trim().toLowerCase() !== 'completed-archive');
+    requestsCountEl.textContent = formatRequestSectionCount(visibleEntries.length);
 
-    renderRequestCards(queuedListEl, grouped.queued, 'No queued requests.', {});
-    renderRequestCards(processingListEl, grouped.processing, 'No processing requests.', {});
     renderRequestCards(
-        completedListEl,
-        visibleCompleted,
+        requestsListEl,
+        visibleEntries,
         showArchivedRequests
-            ? 'No completed requests.'
-            : 'No completed requests. Enable archived jobs to show completed-only history.',
+            ? 'No requests found.'
+            : 'No active requests. Enable archived jobs to show completed-only history.',
         {},
     );
 }
@@ -1291,15 +1354,9 @@ async function pollLambdaRuntimeStatus(silent = false) {
             updateRuntimeStatus(`Running (${subject}) since ${startedAt}.`, 'loading');
             updateRuntimeDetails(formatRuntimeCommand(runtime?.command), 'loading');
         } else {
-            const completedAt = formatRuntimeStatusCompletedAt(runtime?.lastCompletedAt);
             const outcome = runtime?.lastOutcome || 'idle';
-            const compactOutcome = outcome === 'success'
-                ? 'Success'
-                : outcome === 'error'
-                    ? 'Error'
-                    : 'Idle';
-            const suffix = completedAt ? ` ${compactOutcome} ${completedAt}` : '';
-            updateRuntimeStatus(`Idle${suffix}`, 'success');
+            const statusLabel = outcome === 'error' ? 'Idle Error' : 'Idle';
+            updateRuntimeStatus(statusLabel, outcome === 'error' ? 'error' : 'success');
             const pinned = getPinnedRuntimeDetails();
             if (pinned) {
                 updateRuntimeDetails(pinned.message, pinned.type);
