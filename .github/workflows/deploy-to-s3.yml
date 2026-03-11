@@ -6,9 +6,17 @@ on:
       - master
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      AWS_REGION: eu-west-2
+      # Set in GitHub Actions repository variables.
+      AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
 
     steps:
     - name: Checkout repository
@@ -17,9 +25,9 @@ jobs:
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v5
       with:
-        aws-access-key-id: ${{ secrets['AWS_ACCESS_KEY_ID'] }}
-        aws-secret-access-key: ${{ secrets['AWS_SECRET_ACCESS_KEY'] }}
-        aws-region: eu-west-2
+        aws-region: ${{ env.AWS_REGION }}
+        role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+        role-session-name: github-actions-scouts-deploy
 
     - name: Configure S3 bucket for static website hosting
       run: |
@@ -50,7 +58,6 @@ jobs:
         ADMIN_API_BASE: ${{ vars['ADMIN_API_BASE'] }}
         SCOUTS_AUTH_STATUS_URL: ${{ vars['SCOUTS_AUTH_STATUS_URL'] }}
         SCOUTS_REFRESH_URL: ${{ vars['SCOUTS_REFRESH_URL'] }}
-        SCOUTS2SQS_URL: ${{ vars['SCOUTS2SQS_URL'] }}
         SCOUTS_CONFIG_URL: ${{ vars['SCOUTS_CONFIG_URL'] }}
       run: |
         ADMIN_API_BASE_VALUE="${ADMIN_API_BASE:-/admin-api}"
@@ -62,9 +69,6 @@ jobs:
           fi
           if [ -n "${SCOUTS_REFRESH_URL:-}" ]; then
             echo "window.SCOUTS_REFRESH_URL = '${SCOUTS_REFRESH_URL}';"
-          fi
-          if [ -n "${SCOUTS2SQS_URL:-}" ]; then
-            echo "window.SCOUTS2SQS_URL = '${SCOUTS2SQS_URL}';"
           fi
           if [ -n "${SCOUTS_CONFIG_URL:-}" ]; then
             echo "window.SCOUTS_CONFIG_URL = '${SCOUTS_CONFIG_URL}';"

@@ -38,7 +38,6 @@ Optional browser overrides:
 
 - `window.SCOUTS_AUTH_STATUS_URL`
 - `window.SCOUTS_REFRESH_URL`
-- `window.SCOUTS2SQS_URL`
 
 Security model:
 

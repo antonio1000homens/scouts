@@ -34,19 +34,20 @@ The website uses the same S3 bucket (`2ndtolworth`) that stores the calendar JSO
 
 ### Method 1: GitHub Actions (Automated)
 
-The website automatically deploys when you push to the `main` branch.
+The website automatically deploys when you push to the `master` branch.
 
-**Setup GitHub Secrets:**
+**Setup GitHub OIDC and repository configuration:**
 1. Go to your GitHub repository: `antonio1000homens/nfc`
-2. Navigate to Settings → Secrets and variables → Actions
-3. Add these secrets:
-   - `AWS_ACCESS_KEY_ID`: Your vsstudio access key ID
-   - `AWS_SECRET_ACCESS_KEY`: Your vsstudio secret access key
+2. Navigate to Settings → Secrets and variables → Actions → Variables
+3. Add `AWS_ROLE_TO_ASSUME` with the IAM role ARN GitHub should assume for deployment
+4. Ensure the IAM role trust policy allows GitHub OIDC (`token.actions.githubusercontent.com`) for this repository
+5. Keep `CLOUDFRONT_DISTRIBUTION_ID` as a repository secret if you want automatic invalidation
 
 **Workflow File:** `.github/workflows/deploy-to-s3.yml`
 
 The workflow:
-- Triggers on push to `main` branch or manual dispatch
+- Triggers on push to `master` branch or manual dispatch
+- Assumes an AWS IAM role via GitHub OIDC
 - Configures S3 bucket for static website hosting
 - Sets bucket policy for public read access
 - Syncs HTML, CSS, JS, fonts, images to S3
@@ -120,7 +121,7 @@ This means browsers will cache files for 1 hour. To invalidate cache, users can 
 ## Updating the Website
 
 1. **Make changes** to HTML, CSS, or JS files in the `scouts` directory
-2. **Commit and push** to the `main` branch:
+2. **Commit and push** to the `master` branch:
    ```bash
    git add .
    git commit -m "Update website content"
@@ -180,7 +181,7 @@ Expected monthly cost: < $1 for this small website.
 ## Next Steps
 
 1. Run the one-time setup: `./setup-website-hosting.sh`
-2. Set up GitHub secrets for automated deployment
+2. Set up the GitHub OIDC role and `AWS_ROLE_TO_ASSUME` repository variable for automated deployment
 3. Test deployment: `./deploy-website.sh`
 4. Verify website loads at the S3 website URL
 5. Consider setting up a custom domain with Route 53 (optional)
