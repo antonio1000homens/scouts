@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>2nd Tolworth Cub Booklet</title>
 <link rel="stylesheet" href="../fonts/fonts.css">
+<link rel="stylesheet" href="../styles.css?v=20260308-1">
 <style>
 body { 
     font-family: 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -41,25 +42,25 @@ body {
     font-weight: 700;
     margin-bottom: 2rem;
 }
-ul { 
+.content ul { 
     list-style: none; 
     padding: 0;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
     gap: 1.5rem;
 }
-li { 
+.content li { 
     margin: 0;
     background: white;
     border-radius: 12px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.08);
     transition: transform 0.3s, box-shadow 0.3s;
 }
-li:hover {
+.content li:hover {
     transform: translateY(-4px);
     box-shadow: 0 8px 20px rgba(0,0,0,0.15);
 }
-a { 
+.content ul a { 
     color: #23a950;
     text-decoration: none;
     display: block;
@@ -67,7 +68,7 @@ a {
     font-weight: 700;
     font-size: 1.1rem;
 }
-a:hover { 
+.content ul a:hover { 
     color: #1d8e42;
 }
 .back-link {
@@ -103,6 +104,8 @@ a:hover {
 <li><a href="page9.html">Page 9 →</a></li>
 </ul>
 </div>
+<div id="footer-placeholder" data-footer-type="detailed"></div>
 <script src="/website/scripts/header-loader.js"></script>
+<script src="/website/scripts/footer-loader.js"></script>
 </body>
 </html>
