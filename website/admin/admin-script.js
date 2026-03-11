@@ -5,7 +5,6 @@ let uniqueEventEntries = [];
 let visibleEventEntries = [];
 let currentEventIndex = null;
 let apiAuthReady = false;
-let lambdaRuntimeRunning = false;
 let uiCommandInFlight = false;
 let activeFilter = '';
 let agendaPayload = null;
@@ -44,7 +43,6 @@ let statusPollingEnabled = true;
 let statusPollingIntervalMs = DEFAULT_STATUS_POLL_INTERVAL_MS;
 let statusPollingTimer = null;
 let statusPollingInFlight = false;
-let lastObservedRuntimeCompletedAt = '';
 let latestCompletedRequests = [];
 let latestCompletedRequestsUpdatedAt = null;
 let showArchivedRequests = false;
@@ -1278,10 +1276,7 @@ function restartAutoLambdaInvokeTimer() {
 function runStatusPollingJob() {
     if (statusPollingInFlight) return;
     statusPollingInFlight = true;
-    Promise.all([
-        pollLambdaRuntimeStatus(true),
-        pollQueueDepthSnapshots(),
-    ]).finally(() => {
+    Promise.resolve(pollQueueDepthSnapshots()).finally(() => {
         statusPollingInFlight = false;
     });
 }
@@ -1414,90 +1409,13 @@ function setApiActionState(enabled) {
     refreshApiActionButtons();
 }
 
-function maybeRefreshAgendaAfterRuntimeCompletion(runtime, wasRunning = false) {
-    const completedAt = hasText(runtime?.lastCompletedAt) ? runtime.lastCompletedAt.trim() : '';
-    if (!completedAt) return;
-
-    const isNewCompletion = completedAt !== lastObservedRuntimeCompletedAt;
-    lastObservedRuntimeCompletedAt = completedAt;
-
-    if (runtime?.status === 'running') return;
-    if (!isNewCompletion && !wasRunning) return;
-
-    loadEvents({ silent: true, notifyOnCountChange: true, notificationSource: 'Lambda refresh' });
-}
-
 function refreshApiActionButtons() {
-    const enabled = apiAuthReady && !lambdaRuntimeRunning && !uiCommandInFlight;
+    const enabled = apiAuthReady && !uiCommandInFlight;
     const actionButtons = document.querySelectorAll('.requires-api');
     actionButtons.forEach((button) => {
         button.disabled = !enabled;
         button.classList.toggle('btn-disabled', !enabled);
     });
-}
-
-async function pollLambdaRuntimeStatus(silent = false) {
-    if (!apiAuthReady) {
-        lambdaRuntimeRunning = false;
-        refreshApiActionButtons();
-        if (!silent) {
-            updateRuntimeStatus('Runtime status unavailable (API auth not ready).', 'error');
-            updateRuntimeDetails('Cloudflare auth is not ready.', 'error');
-        }
-        return;
-    }
-
-    try {
-        const wasRunning = lambdaRuntimeRunning;
-        const result = await sendScoutsCommand({
-            realm: 'scouts',
-            subject: 'status',
-            action: 'runtime',
-        });
-        const runtime = result?.runtime || {};
-        lambdaRuntimeRunning = runtime?.status === 'running';
-        refreshApiActionButtons();
-        maybeRefreshAgendaAfterRuntimeCompletion(runtime, wasRunning);
-
-        if (lambdaRuntimeRunning) {
-            pinnedRuntimeDetails = null;
-            const startedAt = runtime?.startedAt ? new Date(runtime.startedAt).toLocaleString('en-GB') : 'unknown';
-            const subject = runtime?.command?.subject || 'unknown';
-            updateRuntimeStatus(`Running (${subject}) since ${startedAt}.`, 'loading');
-            updateRuntimeDetails(formatRuntimeCommand(runtime?.command), 'loading');
-        } else {
-            const outcome = runtime?.lastOutcome || 'idle';
-            const statusLabel = outcome === 'error' ? 'Idle Error' : 'Idle';
-            updateRuntimeStatus(statusLabel, outcome === 'error' ? 'error' : 'success');
-            const pinned = getPinnedRuntimeDetails();
-            if (pinned) {
-                updateRuntimeDetails(pinned.message, pinned.type);
-                return;
-            }
-            const lastCommand = runtime?.lastCommand || null;
-            const lastResult = runtime?.lastResult || null;
-            if (lastCommand || lastResult) {
-                const summary = formatRuntimeSummary(lastCommand, lastResult);
-                if (summary) {
-                    updateRuntimeDetails(summary, outcome === 'error' ? 'error' : 'success');
-                } else {
-                    const pieces = [];
-                    if (lastCommand) pieces.push(formatRuntimeCommand(lastCommand));
-                    if (lastResult) pieces.push(formatRuntimeResult(lastResult));
-                    updateRuntimeDetails(pieces.join(' | '), outcome === 'error' ? 'error' : 'success');
-                }
-            } else {
-                updateRuntimeDetails('No lambda commands recorded yet.', 'info');
-            }
-        }
-    } catch (error) {
-        lambdaRuntimeRunning = false;
-        refreshApiActionButtons();
-        if (!silent) {
-            updateRuntimeStatus(`Runtime status check failed: ${error.message}`, 'error');
-            updateRuntimeDetails('Unable to fetch runtime details.', 'error');
-        }
-    }
 }
 
 async function checkApiAuthStatus() {
@@ -1525,7 +1443,7 @@ async function checkApiAuthStatus() {
             : '';
         updateApiAuthStatus(`Ready - Cloudflare API proxy authenticated${keySuffix}`, 'success');
         setApiActionState(true);
-        await pollLambdaRuntimeStatus(true);
+        await pollQueueDepthSnapshots();
     } catch (error) {
         console.error('Error checking admin API auth status:', error);
         updateApiAuthStatus(
@@ -2187,12 +2105,23 @@ async function pollQueueDepthSnapshots() {
         : (completedSnapshot?.updatedAt ?? null);
     setRequests(aggregateRequests, mostRecentTimestamp);
 
-    if (timestamps.length > 0) {
-        updatedEl.title = 'Last update is the newest timestamp reported by the runtime request snapshot files fetched from S3.';
-        updatedEl.textContent = `Last update: ${new Date(mostRecentTimestamp).toLocaleString('en-GB')}`;
+    const queuedUpdatedAt = hasText(queuedSnapshot?.updatedAt) ? String(queuedSnapshot.updatedAt).trim() : '';
+    const parsedQueuedUpdatedAt = queuedUpdatedAt ? new Date(queuedUpdatedAt) : null;
+    if (parsedQueuedUpdatedAt && !Number.isNaN(parsedQueuedUpdatedAt.getTime())) {
+        updatedEl.title = 'Last update is the updatedAt timestamp from runtime/scoutsQueued.json fetched from S3.';
+        updatedEl.textContent = `Last update: ${parsedQueuedUpdatedAt.toLocaleString('en-GB')}`;
+        updateRuntimeStatus('Runtime request snapshots ready.', 'success');
     } else {
-        updatedEl.title = 'Last update is the newest timestamp reported by the runtime request snapshot files fetched from S3.';
+        updatedEl.title = 'Last update is the updatedAt timestamp from runtime/scoutsQueued.json fetched from S3.';
         updatedEl.textContent = 'Last update: n/a';
+        updateRuntimeStatus('Runtime request snapshots unavailable.', 'error');
+    }
+
+    if (!getPinnedRuntimeDetails()) {
+        const queuedCount = Array.isArray(queuedSnapshot?.requests) ? queuedSnapshot.requests.length : 0;
+        const processingCount = Array.isArray(processingSnapshot?.requests) ? processingSnapshot.requests.length : 0;
+        const completedCount = Array.isArray(completedSnapshot?.requests) ? completedSnapshot.requests.length : 0;
+        updateRuntimeDetails(`Queued ${queuedCount} | Processing ${processingCount} | Completed ${completedCount}`, 'info');
     }
 
     if (uniqueEventEntries.length > 0) {
@@ -2950,8 +2879,8 @@ async function refreshLambda(action = 'refreshAgenda') {
     const actionInput = document.getElementById('refresh-action');
     const statusElement = document.getElementById('refresh-status');
     const requestedCount = actionInput.value;
-    if (lambdaRuntimeRunning || uiCommandInFlight) {
-        statusElement.textContent = 'Lambda currently running. Wait for completion.';
+    if (uiCommandInFlight) {
+        statusElement.textContent = 'Another admin request is already in flight. Wait for completion.';
         statusElement.className = 'refresh-status error';
         return;
     }
@@ -2972,17 +2901,18 @@ async function refreshLambda(action = 'refreshAgenda') {
     refreshApiActionButtons();
     try {
         const result = await sendScoutsCommand(payload);
-        await pollLambdaRuntimeStatus(true);
         await pollQueueDepthSnapshots();
         updateCompletedRequestsFromResult(result);
 
-        const resultText = result?.status || result?.message || 'ok';
         const modifiedEvents = Array.isArray(result?.modifiedEvents) ? result.modifiedEvents : [];
         const modifiedCount = Number.isFinite(result?.modifiedEventsCount)
             ? result.modifiedEventsCount
             : modifiedEvents.length;
+        const generatedAt = result?.generatedAt ? new Date(result.generatedAt).toLocaleString('en-GB') : null;
         const modifiedSuffix = modifiedCount > 0 ? ` (${modifiedCount} events modified)` : ' (no event metadata changes)';
-        statusElement.textContent = `Agenda events refresh completed: ${resultText}${modifiedSuffix}`;
+        statusElement.textContent = generatedAt
+            ? `Agenda events refresh completed: ${generatedAt}${modifiedSuffix}`
+            : `Agenda events refresh completed${modifiedSuffix}`;
         statusElement.className = 'refresh-status success';
         if (modifiedEvents.length > 0) {
             const preview = modifiedEvents
@@ -3014,8 +2944,8 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
         updateGlobalRefreshStatus('Admin API auth not ready', 'error');
         return;
     }
-    if (lambdaRuntimeRunning || uiCommandInFlight) {
-        updateGlobalRefreshStatus('Lambda currently running. Wait for completion.', 'error');
+    if (uiCommandInFlight) {
+        updateGlobalRefreshStatus('Another admin request is already in flight. Wait for completion.', 'error');
         return;
     }
 
@@ -3031,14 +2961,17 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
     refreshApiActionButtons();
     try {
         const result = await sendScoutsCommand(payload);
-        await pollLambdaRuntimeStatus(true);
         await pollQueueDepthSnapshots();
         updateCompletedRequestsFromResult(result);
         const count = Number.isFinite(result?.eventsCount) ? result.eventsCount : null;
         const generatedAt = result?.generatedAt ? new Date(result.generatedAt).toLocaleString('en-GB') : null;
         const countSuffix = count !== null ? ` (${count} events in agenda)` : '';
-        const timeSuffix = generatedAt ? ` at ${generatedAt}` : '';
-        updateGlobalRefreshStatus(`Refresh complete for ${label}${countSuffix}${timeSuffix}`, 'success');
+        updateGlobalRefreshStatus(
+            generatedAt
+                ? `Refresh complete for ${label}: ${generatedAt}${countSuffix}`
+                : `Refresh complete for ${label}${countSuffix}`,
+            'success',
+        );
     } catch (error) {
         console.error(`Error refreshing ${label}:`, error);
         updateGlobalRefreshStatus(`Failed to refresh ${label}: ${error.message}`, 'error');
@@ -3052,7 +2985,7 @@ async function invokeLambdaHeartbeat() {
     if (!apiAuthReady) return;
     if (!autoLambdaInvokeEnabled) return;
     if (autoLambdaInvokeInFlight) return;
-    if (uiCommandInFlight || lambdaRuntimeRunning) return;
+    if (uiCommandInFlight) return;
 
     autoLambdaInvokeInFlight = true;
     try {
@@ -3062,7 +2995,6 @@ async function invokeLambdaHeartbeat() {
             action: 0,
         };
         const result = await sendScoutsCommand(payload);
-        await pollLambdaRuntimeStatus(true);
         await pollQueueDepthSnapshots();
         updateCompletedRequestsFromResult(result);
     } catch (error) {
@@ -3282,8 +3214,8 @@ async function persistCurrentField(field, action = 'persist') {
         updateModalStatus('Admin API auth not ready.', 'error');
         return;
     }
-    if (lambdaRuntimeRunning || uiCommandInFlight) {
-        updateModalStatus('Lambda currently running. Wait for completion before persisting.', 'error');
+    if (uiCommandInFlight) {
+        updateModalStatus('Another admin request is already in flight. Wait for completion before persisting.', 'error');
         return;
     }
 
@@ -3365,8 +3297,8 @@ async function requestGeneratedField(field, action = 'generate') {
         updateModalStatus('Admin API auth not ready.', 'error');
         return;
     }
-    if (lambdaRuntimeRunning || uiCommandInFlight) {
-        updateModalStatus('Lambda currently running. Wait for completion before queueing generation.', 'error');
+    if (uiCommandInFlight) {
+        updateModalStatus('Another admin request is already in flight. Wait for completion before queueing generation.', 'error');
         return;
     }
 
@@ -3432,8 +3364,8 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide') {
         else updateRuntimeDetails('Admin API auth not ready.', 'error');
         return;
     }
-    if (lambdaRuntimeRunning || uiCommandInFlight) {
-        const message = 'Lambda currently running. Wait for completion before hiding.';
+    if (uiCommandInFlight) {
+        const message = 'Another admin request is already in flight. Wait for completion before hiding.';
         if (fromModal) updateModalStatus(message, 'error');
         else updateRuntimeDetails(message, 'error');
         return;
@@ -3528,8 +3460,8 @@ async function unhideEvent(eventIndex, fromModal = false, action = 'unhide') {
         else updateRuntimeDetails('Admin API auth not ready.', 'error');
         return;
     }
-    if (lambdaRuntimeRunning || uiCommandInFlight) {
-        const message = 'Lambda currently running. Wait for completion before unhiding.';
+    if (uiCommandInFlight) {
+        const message = 'Another admin request is already in flight. Wait for completion before unhiding.';
         if (fromModal) updateModalStatus(message, 'error');
         else updateRuntimeDetails(message, 'error');
         return;
@@ -3657,8 +3589,8 @@ async function approveEvent(eventIndex, fromModal = false, action = 'approve') {
         else updateRuntimeDetails('Admin API auth not ready.', 'error');
         return;
     }
-    if (lambdaRuntimeRunning || uiCommandInFlight) {
-        const message = 'Lambda currently running. Wait for completion before approving.';
+    if (uiCommandInFlight) {
+        const message = 'Another admin request is already in flight. Wait for completion before approving.';
         if (fromModal) updateModalStatus(message, 'error');
         else updateRuntimeDetails(message, 'error');
         return;
@@ -3759,8 +3691,8 @@ async function requeueEvent(eventIndex, fromModal = false, action = 'requeue') {
         if (fromModal) updateModalStatus('Admin API auth not ready.', 'error');
         return;
     }
-    if (lambdaRuntimeRunning || uiCommandInFlight) {
-        const message = 'Lambda currently running. Wait for completion before queueing.';
+    if (uiCommandInFlight) {
+        const message = 'Another admin request is already in flight. Wait for completion before queueing.';
         if (fromModal) updateModalStatus(message, 'error');
         else updateRuntimeDetails(message, 'error');
         return;
