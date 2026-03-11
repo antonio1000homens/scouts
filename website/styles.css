@@ -25,6 +25,30 @@ body {
     color: #ffffff;
 }
 
+.den-page .about.about-detail {
+    background:
+        linear-gradient(rgba(12, 16, 28, 0.58), rgba(12, 16, 28, 0.58)),
+        url('images/photos/disco-hire.jpeg') center 52%/cover no-repeat;
+}
+
+.den-page .about.about-detail .container {
+    max-width: 840px;
+}
+
+.den-page .about.about-detail p {
+    margin-bottom: 2.25rem;
+}
+
+.den-hire-highlights .activity-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+}
+
+.den-hire-highlights .activity-link {
+    margin-top: auto;
+}
+
 .home-page #header-placeholder {
     position: relative;
     z-index: 2;
