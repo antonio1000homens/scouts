@@ -20,7 +20,7 @@ document.addEventListener("DOMContentLoaded", function() {
     
     if (footerPlaceholder) {
         // Determine which footer to load based on data attribute
-        const footerType = footerPlaceholder.getAttribute('data-footer-type') || 'simple';
+        const footerType = footerPlaceholder.getAttribute('data-footer-type') || 'detailed';
         const footerFile = footerType === 'detailed'
             ? new URL('shared/footer-detailed.html', FOOTER_WEBSITE_BASE_URL).href
             : new URL('shared/footer-simple.html', FOOTER_WEBSITE_BASE_URL).href;
@@ -55,7 +55,10 @@ document.addEventListener("DOMContentLoaded", function() {
                 footerPlaceholder.innerHTML = `
                     <footer>
                         <div class="container">
-                            <p>&copy; ${new Date().getFullYear()} 2nd Tolworth Scout Group. All rights reserved.</p>
+                            <div class="footer-bottom">
+                                <p>&copy; ${new Date().getFullYear()} 2nd Tolworth Scout Group. Part of The Scout Association.</p>
+                                <p>Registered Charity. Charity numbers: 306101 (England and Wales) and SC038437 (Scotland).</p>
+                            </div>
                         </div>
                     </footer>
                 `;
