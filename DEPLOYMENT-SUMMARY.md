@@ -6,7 +6,7 @@
 - **File**: `.github/workflows/deploy-to-s3.yml`
 - **Status**: Updated and ready
 - **Features**:
-  - Deploys on push to `main` branch
+  - Deploys on push to `master` branch
   - Manual trigger available (workflow_dispatch)
   - Configures S3 bucket for static website hosting
   - Sets public read permissions
@@ -66,17 +66,16 @@ cd /home/windsor/github/scouts
 
 This configures the S3 bucket for static website hosting.
 
-### Step 3: Set GitHub Secrets
+### Step 3: Configure GitHub OIDC
 
-Add AWS credentials to GitHub repository:
+Configure the repository to assume an AWS IAM role:
 
 1. Go to: https://github.com/antonio1000homens/nfc/settings/secrets/actions
-2. Click "New repository secret"
-3. Add two secrets:
-   - Name: `AWS_ACCESS_KEY_ID`
-     Value: [your vsstudio access key ID]
-   - Name: `AWS_SECRET_ACCESS_KEY`
-     Value: [your vsstudio secret access key]
+2. Add a repository variable:
+   - Name: `AWS_ROLE_TO_ASSUME`
+   - Value: [your deployment role ARN]
+3. Keep `CLOUDFRONT_DISTRIBUTION_ID` as a secret if you want invalidations
+4. Ensure the IAM role trust policy allows GitHub OIDC for this repository
 
 ### Step 4: Test Deployment
 
@@ -188,7 +187,7 @@ Expected monthly AWS costs:
 
 - ✅ Bucket allows public read for website files
 - ✅ Lambda has write permissions via IAM role
-- ✅ GitHub Actions uses IAM user credentials
+- ✅ GitHub Actions uses OIDC role assumption
 - ✅ No sensitive data exposed (all scout info is public)
 - ✅ Bucket policy restricts to read-only access
 

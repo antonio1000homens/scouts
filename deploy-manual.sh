@@ -45,9 +45,6 @@ ADMIN_API_BASE_VALUE="${ADMIN_API_BASE:-/admin-api}"
   if [ -n "${SCOUTS_REFRESH_URL:-}" ]; then
     echo "window.SCOUTS_REFRESH_URL = '${SCOUTS_REFRESH_URL}';"
   fi
-  if [ -n "${SCOUTS2SQS_URL:-}" ]; then
-    echo "window.SCOUTS2SQS_URL = '${SCOUTS2SQS_URL}';"
-  fi
   if [ -n "${SCOUTS_CONFIG_URL:-}" ]; then
     echo "window.SCOUTS_CONFIG_URL = '${SCOUTS_CONFIG_URL}';"
   fi
