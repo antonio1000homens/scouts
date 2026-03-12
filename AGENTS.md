@@ -5,7 +5,13 @@
 - `scouts.conf` lives in the lambdas repo at:
   `/Users/antoniofreire/storage/github/lambdas/scouts/sqs/sqs2scouts/scouts.conf`
 - That file is the source of truth for Scouts prompt configuration.
-- It is deployed to S3 as `s3://2ndtolworth/scouts.conf`.
+- It is deployed to S3 as `s3://scouts-2ndtolworth-prod-553490163883/scouts.conf`.
+
+## AWS Profiles
+
+- Use `AWS_PROFILE=scouts` for Scouts AWS account `553490163883`.
+- Use `AWS_PROFILE=windsor` for Windsor AWS account `243857182133`.
+- Do not rely on the default AWS profile for work in this repo.
 
 ## Who Uses `scouts.conf`
 
@@ -33,6 +39,6 @@
 ## Deployment Notes
 
 - `lambdas/scouts/sqs/sqs2scouts/deploy.sh` uploads `scouts.conf` to S3 during lambda deploys.
-- `scouts/.github/workflows/deploy-to-s3.yml` uploads `lambdas/scouts/sqs/sqs2scouts/scouts.conf` to `s3://2ndtolworth/scouts.conf` during website deploys.
-- `scouts/deploy-manual.sh` also uploads `lambdas/scouts/sqs/sqs2scouts/scouts.conf` to `s3://2ndtolworth/scouts.conf`.
+- `scouts/.github/workflows/deploy-to-s3.yml` uploads `lambdas/scouts/sqs/sqs2scouts/scouts.conf` to `s3://scouts-2ndtolworth-prod-553490163883/scouts.conf` during website deploys.
+- `scouts/deploy-manual.sh` also uploads `lambdas/scouts/sqs/sqs2scouts/scouts.conf` to `s3://scouts-2ndtolworth-prod-553490163883/scouts.conf`.
 - GitHub Actions automatically invalidates CloudFront cache after S3 deployment.
