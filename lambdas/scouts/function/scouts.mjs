@@ -2580,6 +2580,13 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
           const existingHexStatus = getEventStatusObject(existingHexFile);
           if (existingHexStatus) {
             baseEvent.status = existingHexStatus;
+            baseEvent.metadata = baseEvent.metadata && typeof baseEvent.metadata === 'object'
+              ? baseEvent.metadata
+              : {};
+            baseEvent.metadata.status = {
+              isHidden: existingHexStatus.isHidden === true,
+              isApproved: existingHexStatus.isApproved === true,
+            };
           } else if (existingHexFile.status) {
             baseEvent.status = existingHexFile.status;
           }
