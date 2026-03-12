@@ -155,6 +155,7 @@ Resources:
                   - lambda:DeleteLayerVersion
                   - lambda:GetFunction
                   - lambda:GetFunctionConfiguration
+                  - lambda:GetEventSourceMapping
                   - lambda:GetFunctionUrlConfig
                   - lambda:GetLayerVersion
                   - lambda:ListLayerVersions
