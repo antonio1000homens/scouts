@@ -86,28 +86,6 @@ cleanup_failed_stack() {
   fi
 }
 
-cleanup_existing_mapping() {
-  local existing_uuid
-
-  existing_uuid="$(aws lambda list-event-source-mappings \
-    --region "${REGION}" \
-    --function-name "${FUNCTION_NAME}" \
-    --event-source-arn "${QUEUE_ARN}" \
-    --query 'EventSourceMappings[0].UUID' \
-    --output text 2>/dev/null || true)"
-
-  if [ -n "${existing_uuid}" ] && [ "${existing_uuid}" != "None" ] && [ "${existing_uuid}" != "null" ]; then
-    echo -e "${YELLOW}Deleting existing event source mapping ${existing_uuid} before redeploy.${NC}"
-    aws lambda delete-event-source-mapping --region "${REGION}" --uuid "${existing_uuid}" >/dev/null
-    for _ in $(seq 1 30); do
-      if ! aws lambda get-event-source-mapping --region "${REGION}" --uuid "${existing_uuid}" >/dev/null 2>&1; then
-        break
-      fi
-      sleep 2
-    done
-  fi
-}
-
 for cmd in aws npm zip; do
   if ! command -v "${cmd}" >/dev/null 2>&1; then
     echo -e "${RED}Missing required command: ${cmd}${NC}"
@@ -228,7 +206,6 @@ fi
 
 echo -e "\n${YELLOW}Step 4: Deploy CloudFormation stack...${NC}"
 cleanup_failed_stack
-cleanup_existing_mapping
 CFN_DEPLOY_ARGS=(
   --region "${REGION}"
   --stack-name "${STACK_NAME}"
