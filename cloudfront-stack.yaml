@@ -15,30 +15,30 @@ Resources:
         Aliases:
           - 2ndtolworth.org.uk
         Origins:
-          - Id: 2ndtolworth-s3-website
-            DomainName: 2ndtolworth.s3-website.eu-west-2.amazonaws.com
+          - Id: scouts-2ndtolworth-prod-s3-origin
+            DomainName: scouts-2ndtolworth-prod-553490163883.s3-website.eu-west-2.amazonaws.com
             CustomOriginConfig:
               HTTPPort: 80
               HTTPSPort: 443
               OriginProtocolPolicy: http-only
         DefaultCacheBehavior:
-          TargetOriginId: 2ndtolworth-s3-website
+          TargetOriginId: scouts-2ndtolworth-prod-s3-origin
           ViewerProtocolPolicy: redirect-to-https
           Compress: true
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
         CacheBehaviors:
           - PathPattern: /agenda.json
-            TargetOriginId: 2ndtolworth-s3-website
+            TargetOriginId: scouts-2ndtolworth-prod-s3-origin
             ViewerProtocolPolicy: redirect-to-https
             Compress: true
             CachePolicyId: f6072fdc-ae27-4d49-a206-4f2a80c82fbe
           - PathPattern: /runtime/*
-            TargetOriginId: 2ndtolworth-s3-website
+            TargetOriginId: scouts-2ndtolworth-prod-s3-origin
             ViewerProtocolPolicy: redirect-to-https
             Compress: true
             CachePolicyId: f6072fdc-ae27-4d49-a206-4f2a80c82fbe
           - PathPattern: /events/*
-            TargetOriginId: 2ndtolworth-s3-website
+            TargetOriginId: scouts-2ndtolworth-prod-s3-origin
             ViewerProtocolPolicy: redirect-to-https
             Compress: true
             CachePolicyId: f6072fdc-ae27-4d49-a206-4f2a80c82fbe

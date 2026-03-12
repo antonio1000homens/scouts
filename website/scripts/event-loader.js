@@ -8,9 +8,9 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
 });
 
 const AGENDA_URL = '/agenda.json';
-const FALLBACK_AGENDA_URL = 'https://2ndtolworth.s3.eu-west-2.amazonaws.com/agenda.json';
-const LEGACY_S3_SITE_ORIGIN = 'http://2ndtolworth.s3-website.eu-west-2.amazonaws.com';
-const S3_OBJECT_BASE_URL = 'https://2ndtolworth.s3.eu-west-2.amazonaws.com';
+const FALLBACK_AGENDA_URL = 'https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com/agenda.json';
+const LEGACY_S3_SITE_ORIGIN = 'https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com';
+const S3_OBJECT_BASE_URL = 'https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com';
 const EVENT_LOADER_SCRIPT_URL = new URL(
     document.currentScript?.src || 'event-loader.js',
     window.location.href

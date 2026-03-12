@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       AWS_REGION: eu-west-2
+      WEBSITE_BUCKET: scouts-2ndtolworth-prod-553490163883
       # Set in GitHub Actions repository variables.
       AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
 
@@ -31,7 +32,7 @@ jobs:
 
     - name: Configure S3 bucket for static website hosting
       run: |
-        aws s3 website s3://2ndtolworth/ \
+        aws s3 website "s3://${WEBSITE_BUCKET}/" \
           --index-document index.html \
           --error-document index.html
 
@@ -46,12 +47,13 @@ jobs:
               "Effect": "Allow",
               "Principal": "*",
               "Action": "s3:GetObject",
-              "Resource": "arn:aws:s3:::2ndtolworth/*"
+              "Resource": "arn:aws:s3:::WEBSITE_BUCKET_PLACEHOLDER/*"
             }
           ]
         }
         EOF
-        aws s3api put-bucket-policy --bucket 2ndtolworth --policy file://bucket-policy.json
+        sed "s/WEBSITE_BUCKET_PLACEHOLDER/${WEBSITE_BUCKET}/g" bucket-policy.json > bucket-policy.rendered.json
+        aws s3api put-bucket-policy --bucket "${WEBSITE_BUCKET}" --policy file://bucket-policy.rendered.json
 
     - name: Generate admin runtime config for Cloudflare proxy
       env:
@@ -79,26 +81,26 @@ jobs:
       run: |
         legacy_dirs=(beavers badges contact cubs fonts hiringtheden images history location scouts-page volunteering welcome)
         for dir in "${legacy_dirs[@]}"; do
-          echo "Removing legacy path s3://2ndtolworth/${dir} (if any)"
-          aws s3 rm "s3://2ndtolworth/${dir}" --recursive --quiet >/dev/null 2>&1 || true
+          echo "Removing legacy path s3://${WEBSITE_BUCKET}/${dir} (if any)"
+          aws s3 rm "s3://${WEBSITE_BUCKET}/${dir}" --recursive --quiet >/dev/null 2>&1 || true
         done
-        aws s3 sync . s3://2ndtolworth/ --exclude "*" --include "index.html" \
+        aws s3 sync . "s3://${WEBSITE_BUCKET}/" --exclude "*" --include "index.html" \
           --cache-control "max-age=0, no-cache, no-store, must-revalidate"
-        aws s3 sync website/ s3://2ndtolworth/website/ \
+        aws s3 sync website/ "s3://${WEBSITE_BUCKET}/website/" \
           --delete \
           --exclude "eventImages/*" \
           --exclude "eventImages/**" \
           --cache-control "max-age=0, no-cache, no-store, must-revalidate"
         if [ -d website/eventImages ]; then
-          aws s3 sync website/eventImages/ s3://2ndtolworth/website/eventImages/ \
+          aws s3 sync website/eventImages/ "s3://${WEBSITE_BUCKET}/website/eventImages/" \
             --cache-control "max-age=0, no-cache, no-store, must-revalidate"
         fi
 
     - name: Upload scouts.conf to S3 root (if present)
       run: |
         if [ -f lambdas/scouts/sqs/sqs2scouts/scouts.conf ]; then
-          echo "Uploading lambdas/scouts/sqs/sqs2scouts/scouts.conf to s3://2ndtolworth/scouts.conf"
-          aws s3 cp lambdas/scouts/sqs/sqs2scouts/scouts.conf s3://2ndtolworth/scouts.conf \
+          echo "Uploading lambdas/scouts/sqs/sqs2scouts/scouts.conf to s3://${WEBSITE_BUCKET}/scouts.conf"
+          aws s3 cp lambdas/scouts/sqs/sqs2scouts/scouts.conf "s3://${WEBSITE_BUCKET}/scouts.conf" \
             --acl private \
             --cache-control "max-age=0, no-cache, no-store, must-revalidate"
         else
@@ -122,4 +124,4 @@ jobs:
     - name: Deployment complete
       run: |
         echo "Website deployed successfully!"
-        echo "Website URL: http://2ndtolworth.s3-website.eu-west-2.amazonaws.com"
+        echo "Website URL: https://${WEBSITE_BUCKET}.s3.eu-west-2.amazonaws.com"
