@@ -1,135 +1,421 @@
-name: Deploy Website to S3
+name: Deploy Scouts
 
 on:
   push:
     branches:
       - master
+      - main
   workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: Deploy target (changed, all, or a specific Scouts component)
+        required: false
+        default: changed
+        type: choice
+        options:
+          - changed
+          - all
+          - website
+          - scouts-queues
+          - scouts-function
+          - scouts2sqs
+          - sqs2scouts
+          - scouts-slack-handler
+      deploy_all:
+        description: Deploy all Scouts jobs regardless of change detection
+        required: false
+        default: 'false'
 
 permissions:
   contents: read
   id-token: write
 
+env:
+  AWS_REGION: eu-west-2
+  EXPECTED_AWS_ACCOUNT: "553490163883"
+  WEBSITE_BUCKET: scouts-2ndtolworth-prod-553490163883
+  AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+  CLOUDFORMATION_ROLE_ARN: ${{ vars.CLOUDFORMATION_ROLE_ARN }}
+  CODE_BUCKET: ${{ vars.CODE_BUCKET || 'aws2022-lambda-code-eu-west-2-553490163883' }}
+
 jobs:
-  deploy:
+  detect-changes:
     runs-on: ubuntu-latest
-    env:
-      AWS_REGION: eu-west-2
-      WEBSITE_BUCKET: scouts-2ndtolworth-prod-553490163883
-      # Set in GitHub Actions repository variables.
-      AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
-
+    outputs:
+      website: "${{ steps.changes.outputs.website }}"
+      scouts_queues: "${{ steps.changes.outputs['scouts-queues'] }}"
+      scouts_function: "${{ steps.changes.outputs['scouts-function'] }}"
+      scouts2sqs: "${{ steps.changes.outputs.scouts2sqs }}"
+      sqs2scouts: "${{ steps.changes.outputs.sqs2scouts }}"
+      scouts_slack_handler: "${{ steps.changes.outputs['scouts-slack-handler'] }}"
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v6
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          list-files: shell
+          filters: |
+            website:
+              - 'index.html'
+              - 'website/**'
+              - 'deploy-manual.sh'
+              - '.github/workflows/deploy-to-s3.yml'
+              - 'lambdas/sqs2scouts/scouts.conf'
+            scouts-function:
+              - 'lambdas/scouts/**'
+              - 'lambdas/tools/**'
+              - 'lambdas/shared-layer/**'
+              - 'lambdas/cloudformation/templates/scouts.yaml'
+            scouts-queues:
+              - 'lambdas/scouts-queues/**'
+              - 'lambdas/cloudformation/templates/scouts-queues.yaml'
+            scouts2sqs:
+              - 'lambdas/scouts2sqs/**'
+              - 'lambdas/tools/**'
+              - 'lambdas/shared-layer/**'
+              - 'lambdas/cloudformation/templates/scouts2sqs.yaml'
+            sqs2scouts:
+              - 'lambdas/sqs2scouts/**'
+              - 'lambdas/tools/**'
+              - 'lambdas/shared-layer/**'
+              - 'lambdas/cloudformation/templates/sqs2scouts.yaml'
+            scouts-slack-handler:
+              - 'lambdas/scouts-slack-handler/**'
+              - 'lambdas/shared-layer/**'
+              - 'lambdas/cloudformation/templates/slack-handler.yaml'
+      - name: Debug detected changes
+        run: |
+          echo "website=${{ steps.changes.outputs.website }} files=${{ steps.changes.outputs.website_files }}"
+          echo "scouts-queues=${{ steps.changes.outputs['scouts-queues'] }} files=${{ steps.changes.outputs['scouts-queues_files'] }}"
+          echo "scouts-function=${{ steps.changes.outputs['scouts-function'] }} files=${{ steps.changes.outputs['scouts-function_files'] }}"
+          echo "scouts2sqs=${{ steps.changes.outputs.scouts2sqs }} files=${{ steps.changes.outputs.scouts2sqs_files }}"
+          echo "sqs2scouts=${{ steps.changes.outputs.sqs2scouts }} files=${{ steps.changes.outputs.sqs2scouts_files }}"
+          echo "scouts-slack-handler=${{ steps.changes.outputs['scouts-slack-handler'] }} files=${{ steps.changes.outputs['scouts-slack-handler_files'] }}"
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v5
-      with:
-        aws-region: ${{ env.AWS_REGION }}
-        role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
-        role-session-name: github-actions-scouts-deploy
-
-    - name: Configure S3 bucket for static website hosting
-      run: |
-        aws s3 website "s3://${WEBSITE_BUCKET}/" \
-          --index-document index.html \
-          --error-document index.html
-        aws s3api put-public-access-block \
-          --bucket "${WEBSITE_BUCKET}" \
-          --public-access-block-configuration \
-            BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false
-
-    - name: Set S3 bucket policy for public read access
-      run: |
-        cat > bucket-policy.json << 'EOF'
-        {
-          "Version": "2012-10-17",
-          "Statement": [
-            {
-              "Sid": "PublicReadGetObject",
-              "Effect": "Allow",
-              "Principal": "*",
-              "Action": "s3:GetObject",
-              "Resource": "arn:aws:s3:::WEBSITE_BUCKET_PLACEHOLDER/*"
-            }
-          ]
-        }
-        EOF
-        sed "s/WEBSITE_BUCKET_PLACEHOLDER/${WEBSITE_BUCKET}/g" bucket-policy.json > bucket-policy.rendered.json
-        aws s3api put-bucket-policy --bucket "${WEBSITE_BUCKET}" --policy file://bucket-policy.rendered.json
-
-    - name: Generate admin runtime config for Cloudflare proxy
-      env:
-        ADMIN_API_BASE: ${{ vars['ADMIN_API_BASE'] }}
-        SCOUTS_AUTH_STATUS_URL: ${{ vars['SCOUTS_AUTH_STATUS_URL'] }}
-        SCOUTS_REFRESH_URL: ${{ vars['SCOUTS_REFRESH_URL'] }}
-        SCOUTS_CONFIG_URL: ${{ vars['SCOUTS_CONFIG_URL'] }}
-      run: |
-        ADMIN_API_BASE_VALUE="${ADMIN_API_BASE:-/admin-api}"
-        {
-          echo "// Generated during CI deploy for Cloudflare Worker proxy mode."
-          echo "window.ADMIN_API_BASE = '${ADMIN_API_BASE_VALUE}';"
-          if [ -n "${SCOUTS_AUTH_STATUS_URL:-}" ]; then
-            echo "window.SCOUTS_AUTH_STATUS_URL = '${SCOUTS_AUTH_STATUS_URL}';"
-          fi
-          if [ -n "${SCOUTS_REFRESH_URL:-}" ]; then
-            echo "window.SCOUTS_REFRESH_URL = '${SCOUTS_REFRESH_URL}';"
-          fi
-          if [ -n "${SCOUTS_CONFIG_URL:-}" ]; then
-            echo "window.SCOUTS_CONFIG_URL = '${SCOUTS_CONFIG_URL}';"
-          fi
-        } > website/admin/admin-config.js
-
-    - name: Deploy website to S3
-      run: |
-        legacy_dirs=(beavers badges contact cubs fonts hiringtheden images history location scouts-page volunteering welcome)
-        for dir in "${legacy_dirs[@]}"; do
-          echo "Removing legacy path s3://${WEBSITE_BUCKET}/${dir} (if any)"
-          aws s3 rm "s3://${WEBSITE_BUCKET}/${dir}" --recursive --quiet >/dev/null 2>&1 || true
-        done
-        aws s3 sync . "s3://${WEBSITE_BUCKET}/" --exclude "*" --include "index.html" \
-          --cache-control "max-age=0, no-cache, no-store, must-revalidate"
-        aws s3 sync website/ "s3://${WEBSITE_BUCKET}/website/" \
-          --delete \
-          --exclude "eventImages/*" \
-          --exclude "eventImages/**" \
-          --cache-control "max-age=0, no-cache, no-store, must-revalidate"
-        if [ -d website/eventImages ]; then
-          aws s3 sync website/eventImages/ "s3://${WEBSITE_BUCKET}/website/eventImages/" \
+  deploy-website:
+    needs: detect-changes
+    if: |
+      (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.website == 'true') ||
+      (github.event_name == 'workflow_dispatch' && (
+        github.event.inputs.deploy_all == 'true' ||
+        github.event.inputs.deploy_target == 'all' ||
+        github.event.inputs.deploy_target == 'website' ||
+        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.website == 'true')
+      ))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: github-actions-scouts-deploy
+      - name: Configure S3 bucket for static website hosting
+        run: |
+          aws s3 website "s3://${WEBSITE_BUCKET}/" \
+            --index-document index.html \
+            --error-document index.html
+          aws s3api put-public-access-block \
+            --bucket "${WEBSITE_BUCKET}" \
+            --public-access-block-configuration \
+              BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false
+      - name: Set S3 bucket policy for public read access
+        run: |
+          cat > bucket-policy.json << 'EOF'
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "PublicReadGetObject",
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "s3:GetObject",
+                "Resource": "arn:aws:s3:::WEBSITE_BUCKET_PLACEHOLDER/*"
+              }
+            ]
+          }
+          EOF
+          sed "s/WEBSITE_BUCKET_PLACEHOLDER/${WEBSITE_BUCKET}/g" bucket-policy.json > bucket-policy.rendered.json
+          aws s3api put-bucket-policy --bucket "${WEBSITE_BUCKET}" --policy file://bucket-policy.rendered.json
+      - name: Generate admin runtime config for Cloudflare proxy
+        env:
+          ADMIN_API_BASE: ${{ vars.ADMIN_API_BASE }}
+          SCOUTS_AUTH_STATUS_URL: ${{ vars['SCOUTS_AUTH_STATUS_URL'] }}
+          SCOUTS_REFRESH_URL: ${{ vars['SCOUTS_REFRESH_URL'] }}
+          SCOUTS_CONFIG_URL: ${{ vars['SCOUTS_CONFIG_URL'] }}
+        run: |
+          ADMIN_API_BASE_VALUE="${ADMIN_API_BASE:-/admin-api}"
+          {
+            echo "// Generated during CI deploy for Cloudflare proxy mode."
+            echo "window.ADMIN_API_BASE = '${ADMIN_API_BASE_VALUE}';"
+            if [ -n "${SCOUTS_AUTH_STATUS_URL:-}" ]; then
+              echo "window.SCOUTS_AUTH_STATUS_URL = '${SCOUTS_AUTH_STATUS_URL}';"
+            fi
+            if [ -n "${SCOUTS_REFRESH_URL:-}" ]; then
+              echo "window.SCOUTS_REFRESH_URL = '${SCOUTS_REFRESH_URL}';"
+            fi
+            if [ -n "${SCOUTS_CONFIG_URL:-}" ]; then
+              echo "window.SCOUTS_CONFIG_URL = '${SCOUTS_CONFIG_URL}';"
+            fi
+          } > website/admin/admin-config.js
+      - name: Deploy website to S3
+        run: |
+          legacy_dirs=(beavers badges contact cubs fonts hiringtheden images history location scouts-page volunteering welcome)
+          for dir in "${legacy_dirs[@]}"; do
+            echo "Removing legacy path s3://${WEBSITE_BUCKET}/${dir} (if any)"
+            aws s3 rm "s3://${WEBSITE_BUCKET}/${dir}" --recursive --quiet >/dev/null 2>&1 || true
+          done
+          aws s3 sync . "s3://${WEBSITE_BUCKET}/" --exclude "*" --include "index.html" \
             --cache-control "max-age=0, no-cache, no-store, must-revalidate"
-        fi
-
-    - name: Upload scouts.conf to S3 root (if present)
-      run: |
-        if [ -f lambdas/scouts/sqs/sqs2scouts/scouts.conf ]; then
-          echo "Uploading lambdas/scouts/sqs/sqs2scouts/scouts.conf to s3://${WEBSITE_BUCKET}/scouts.conf"
-          aws s3 cp lambdas/scouts/sqs/sqs2scouts/scouts.conf "s3://${WEBSITE_BUCKET}/scouts.conf" \
-            --acl private \
+          aws s3 sync website/ "s3://${WEBSITE_BUCKET}/website/" \
+            --delete \
+            --exclude "eventImages/*" \
+            --exclude "eventImages/**" \
             --cache-control "max-age=0, no-cache, no-store, must-revalidate"
-        else
-          echo "No scouts.conf found in lambdas/scouts/sqs/sqs2scouts/, skipping"
-        fi
-
-    - name: Invalidate CloudFront cache
-      env:
-        CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets['CLOUDFRONT_DISTRIBUTION_ID'] }}
-      run: |
-        if [ -n "${CLOUDFRONT_DISTRIBUTION_ID}" ]; then
-          if aws cloudfront get-distribution --id "${CLOUDFRONT_DISTRIBUTION_ID}" >/dev/null 2>&1; then
-            echo "Invalidating CloudFront distribution ${CLOUDFRONT_DISTRIBUTION_ID}..."
-            aws cloudfront create-invalidation \
-              --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
-              --paths "/index.html" "/scouts.conf" "/website/*" "/agenda.json" "/runtime/*" "/events/*"
-            echo "CloudFront invalidation submitted."
+          if [ -d website/eventImages ]; then
+            aws s3 sync website/eventImages/ "s3://${WEBSITE_BUCKET}/website/eventImages/" \
+              --cache-control "max-age=0, no-cache, no-store, must-revalidate"
+          fi
+      - name: Upload scouts.conf to S3 root
+        run: |
+          if [ -f lambdas/sqs2scouts/scouts.conf ]; then
+            echo "Uploading lambdas/sqs2scouts/scouts.conf to s3://${WEBSITE_BUCKET}/scouts.conf"
+            aws s3 cp lambdas/sqs2scouts/scouts.conf "s3://${WEBSITE_BUCKET}/scouts.conf" \
+              --cache-control "max-age=0, no-cache, no-store, must-revalidate"
           else
-            echo "CloudFront distribution ${CLOUDFRONT_DISTRIBUTION_ID} not found in this account; skipping invalidation."
+            echo "No scouts.conf found in lambdas/sqs2scouts/, skipping"
           fi
-        else
-          echo "No CLOUDFRONT_DISTRIBUTION_ID secret set; skipping invalidation."
-        fi
+      - name: Invalidate CloudFront cache
+        env:
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets['CLOUDFRONT_DISTRIBUTION_ID'] }}
+        run: |
+          if [ -n "${CLOUDFRONT_DISTRIBUTION_ID}" ]; then
+            if aws cloudfront get-distribution --id "${CLOUDFRONT_DISTRIBUTION_ID}" >/dev/null 2>&1; then
+              echo "Invalidating CloudFront distribution ${CLOUDFRONT_DISTRIBUTION_ID}..."
+              aws cloudfront create-invalidation \
+                --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+                --paths "/index.html" "/scouts.conf" "/website/*" "/agenda.json" "/runtime/*" "/events/*"
+            else
+              echo "CloudFront distribution ${CLOUDFRONT_DISTRIBUTION_ID} not found in this account; skipping invalidation."
+            fi
+          else
+            echo "No CLOUDFRONT_DISTRIBUTION_ID secret set; skipping invalidation."
+          fi
 
-    - name: Deployment complete
-      run: |
-        echo "Website deployed successfully!"
-        echo "Website URL: https://${WEBSITE_BUCKET}.s3.eu-west-2.amazonaws.com"
+  deploy-scouts-queues:
+    needs: detect-changes
+    if: |
+      (github.event_name != 'workflow_dispatch' && (
+        needs.detect-changes.outputs.scouts_queues == 'true' ||
+        needs.detect-changes.outputs.scouts_function == 'true' ||
+        needs.detect-changes.outputs.scouts2sqs == 'true' ||
+        needs.detect-changes.outputs.sqs2scouts == 'true' ||
+        needs.detect-changes.outputs.scouts_slack_handler == 'true'
+      )) ||
+      (github.event_name == 'workflow_dispatch' && (
+        github.event.inputs.deploy_all == 'true' ||
+        github.event.inputs.deploy_target == 'all' ||
+        github.event.inputs.deploy_target == 'scouts-queues' ||
+        github.event.inputs.deploy_target == 'scouts-function' ||
+        github.event.inputs.deploy_target == 'scouts2sqs' ||
+        github.event.inputs.deploy_target == 'sqs2scouts' ||
+        github.event.inputs.deploy_target == 'scouts-slack-handler' ||
+        (github.event.inputs.deploy_target == 'changed' && (
+          needs.detect-changes.outputs.scouts_queues == 'true' ||
+          needs.detect-changes.outputs.scouts_function == 'true' ||
+          needs.detect-changes.outputs.scouts2sqs == 'true' ||
+          needs.detect-changes.outputs.sqs2scouts == 'true' ||
+          needs.detect-changes.outputs.scouts_slack_handler == 'true'
+        ))
+      ))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: scouts-queues-stack-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: github-actions-scouts-deploy
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Deploy scouts queues
+        env:
+          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
+          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
+        run: cd lambdas/scouts-queues && bash ./deploy.sh
+
+  deploy-scouts-function:
+    needs: [detect-changes, deploy-scouts-queues]
+    if: |
+      (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.scouts_function == 'true') ||
+      (github.event_name == 'workflow_dispatch' && (
+        github.event.inputs.deploy_all == 'true' ||
+        github.event.inputs.deploy_target == 'all' ||
+        github.event.inputs.deploy_target == 'scouts-function' ||
+        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.scouts_function == 'true')
+      ))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: scouts-function-stack-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: github-actions-scouts-deploy
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Deploy scouts function
+        env:
+          CODE_BUCKET: ${{ env.CODE_BUCKET }}
+          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
+          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
+          DATA_BUCKET_NAME: scouts-2ndtolworth-prod-553490163883
+          CREATE_DATA_BUCKET: 'true'
+          SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
+          SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+          SCOUTS_REQUIRED_API_KEY: ${{ secrets.SCOUTS_REQUIRED_API_KEY }}
+          CUBS_EVENTS_CALENDAR_URL: ${{ secrets.CUBS_EVENTS_CALENDAR_URL }}
+          CUBS_PROGRAMME_CALENDAR_URL: ${{ secrets.CUBS_PROGRAMME_CALENDAR_URL }}
+          CUBS_PROGRAME_CALENDAR_URL: ${{ secrets.CUBS_PROGRAME_CALENDAR_URL }}
+          SCOUTS_EVENTS_CALENDAR_URL: ${{ secrets.SCOUTS_EVENTS_CALENDAR_URL }}
+          SCOUTS_PROGRAMME_CALENDAR_URL: ${{ secrets.SCOUTS_PROGRAMME_CALENDAR_URL }}
+          BEAVERS_EVENTS_CALENDAR_URL: ${{ secrets.BEAVERS_EVENTS_CALENDAR_URL }}
+          BEAVERS_PROGRAMME_CALENDAR_URL: ${{ secrets.BEAVERS_PROGRAMME_CALENDAR_URL }}
+        run: cd lambdas/scouts && bash ./deploy.sh
+
+  deploy-scouts2sqs:
+    needs: [detect-changes, deploy-scouts-queues]
+    if: |
+      (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.scouts2sqs == 'true') ||
+      (github.event_name == 'workflow_dispatch' && (
+        github.event.inputs.deploy_all == 'true' ||
+        github.event.inputs.deploy_target == 'all' ||
+        github.event.inputs.deploy_target == 'scouts2sqs' ||
+        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.scouts2sqs == 'true')
+      ))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: scouts2sqs-stack-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: github-actions-scouts-deploy
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Deploy scouts2sqs
+        env:
+          CODE_BUCKET: ${{ env.CODE_BUCKET }}
+          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
+          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
+          TARGET_BUCKET: scouts-2ndtolworth-prod-553490163883
+          QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing
+          QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
+          DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
+          SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
+          SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+          SCOUTS_REQUIRED_API_KEY: ${{ secrets.SCOUTS_REQUIRED_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
+        run: cd lambdas/scouts2sqs && bash ./deploy.sh
+
+  deploy-sqs2scouts:
+    needs: [detect-changes, deploy-scouts-queues]
+    if: |
+      (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.sqs2scouts == 'true') ||
+      (github.event_name == 'workflow_dispatch' && (
+        github.event.inputs.deploy_all == 'true' ||
+        github.event.inputs.deploy_target == 'all' ||
+        github.event.inputs.deploy_target == 'sqs2scouts' ||
+        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.sqs2scouts == 'true')
+      ))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: sqs2scouts-stack-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: github-actions-scouts-deploy
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Deploy sqs2scouts
+        env:
+          CODE_BUCKET: ${{ env.CODE_BUCKET }}
+          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
+          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
+          TARGET_BUCKET: scouts-2ndtolworth-prod-553490163883
+          QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing
+          QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
+          SCOUTS_DECISION_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsDecision
+          SCOUTS_DECISION_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsDecision
+          DLQ_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessingDLQ
+          DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
+          S3_WEBSITE_BASE_URL: https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_IMAGE_MODEL: ${{ vars.GEMINI_IMAGE_MODEL }}
+          GEMINI_TEXT_MODEL: ${{ vars.GEMINI_TEXT_MODEL }}
+          REQUIRE_GEMINI_API_KEY: 'true'
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
+        run: cd lambdas/sqs2scouts && bash ./deploy.sh
+      - name: Verify sqs2scouts GEMINI_API_KEY
+        run: |
+          VALUE="$(aws lambda get-function-configuration \
+            --function-name sqs2scouts \
+            --region "${AWS_REGION}" \
+            --query 'Environment.Variables.GEMINI_API_KEY' \
+            --output text)"
+          if [ -z "$VALUE" ] || [ "$VALUE" = "None" ] || [ "$VALUE" = "null" ]; then
+            echo "GEMINI_API_KEY is not set on sqs2scouts after deploy"
+            exit 1
+          fi
+          echo "GEMINI_API_KEY is set on sqs2scouts"
+
+  deploy-scouts-slack-handler:
+    needs: [detect-changes, deploy-scouts-queues]
+    if: |
+      (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.scouts_slack_handler == 'true') ||
+      (github.event_name == 'workflow_dispatch' && (
+        github.event.inputs.deploy_all == 'true' ||
+        github.event.inputs.deploy_target == 'all' ||
+        github.event.inputs.deploy_target == 'scouts-slack-handler' ||
+        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.scouts_slack_handler == 'true')
+      ))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: scouts-slack-handler-stack-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: github-actions-scouts-deploy
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Deploy scouts Slack handler
+        env:
+          CODE_BUCKET: ${{ env.CODE_BUCKET }}
+          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
+          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
+          REQUIRED_API_KEY: ${{ secrets.SCOUTS_REQUIRED_API_KEY }}
+          SCOUTS_REQUEST_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+          SCOUTS_REQUEST_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
+          NFC_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+          NFC_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
+          TARGET_BUCKET: scouts-2ndtolworth-prod-553490163883
+        run: cd lambdas/scouts-slack-handler && bash ./deploy.sh

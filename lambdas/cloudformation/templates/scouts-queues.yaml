@@ -1,0 +1,75 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Scouts SQS queues for the dedicated Scouts AWS account.
+
+Parameters:
+  RequestsQueueName:
+    Type: String
+    Default: scoutsRequests
+  ProcessingQueueName:
+    Type: String
+    Default: scoutsProcessing
+  DecisionQueueName:
+    Type: String
+    Default: scoutsDecision
+  ProcessingDlqName:
+    Type: String
+    Default: scoutsProcessingDLQ
+  VisibilityTimeout:
+    Type: Number
+    Default: 180
+  MessageRetentionSeconds:
+    Type: Number
+    Default: 1209600
+  MaxReceiveCount:
+    Type: Number
+    Default: 5
+
+Resources:
+  ScoutsProcessingDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref ProcessingDlqName
+      VisibilityTimeout: !Ref VisibilityTimeout
+      MessageRetentionPeriod: !Ref MessageRetentionSeconds
+
+  ScoutsRequestsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref RequestsQueueName
+      VisibilityTimeout: !Ref VisibilityTimeout
+      MessageRetentionPeriod: !Ref MessageRetentionSeconds
+
+  ScoutsDecisionQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref DecisionQueueName
+      VisibilityTimeout: !Ref VisibilityTimeout
+      MessageRetentionPeriod: !Ref MessageRetentionSeconds
+
+  ScoutsProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref ProcessingQueueName
+      VisibilityTimeout: !Ref VisibilityTimeout
+      MessageRetentionPeriod: !Ref MessageRetentionSeconds
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt ScoutsProcessingDlq.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+
+Outputs:
+  ScoutsRequestsQueueArn:
+    Value: !GetAtt ScoutsRequestsQueue.Arn
+  ScoutsRequestsQueueUrl:
+    Value: !Ref ScoutsRequestsQueue
+  ScoutsProcessingQueueArn:
+    Value: !GetAtt ScoutsProcessingQueue.Arn
+  ScoutsProcessingQueueUrl:
+    Value: !Ref ScoutsProcessingQueue
+  ScoutsDecisionQueueArn:
+    Value: !GetAtt ScoutsDecisionQueue.Arn
+  ScoutsDecisionQueueUrl:
+    Value: !Ref ScoutsDecisionQueue
+  ScoutsProcessingDlqArn:
+    Value: !GetAtt ScoutsProcessingDlq.Arn
+  ScoutsProcessingDlqUrl:
+    Value: !Ref ScoutsProcessingDlq

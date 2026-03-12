@@ -67,12 +67,12 @@ if [ -d "website/eventImages" ]; then
     --cache-control "max-age=0, no-cache, no-store, must-revalidate"
 fi
 
-if [ -f "lambdas/scouts/sqs/sqs2scouts/scouts.conf" ]; then
-  echo "Uploading lambdas/scouts/sqs/sqs2scouts/scouts.conf to s3://${WEBSITE_BUCKET}/scouts.conf..."
-  AWS_PROFILE="${AWS_PROFILE_NAME}" aws s3 cp lambdas/scouts/sqs/sqs2scouts/scouts.conf "s3://${WEBSITE_BUCKET}/scouts.conf" \
+if [ -f "lambdas/sqs2scouts/scouts.conf" ]; then
+  echo "Uploading lambdas/sqs2scouts/scouts.conf to s3://${WEBSITE_BUCKET}/scouts.conf..."
+  AWS_PROFILE="${AWS_PROFILE_NAME}" aws s3 cp lambdas/sqs2scouts/scouts.conf "s3://${WEBSITE_BUCKET}/scouts.conf" \
     --cache-control "max-age=0, no-cache, no-store, must-revalidate"
 else
-  echo "No lambdas/scouts/sqs/sqs2scouts/scouts.conf found locally, skipping upload."
+  echo "No lambdas/sqs2scouts/scouts.conf found locally, skipping upload."
 fi
 
 echo ""
