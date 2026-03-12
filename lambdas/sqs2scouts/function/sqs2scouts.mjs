@@ -812,7 +812,7 @@ function getStatusObject(event) {
     if (!event || typeof event !== 'object') return null;
     const metadataStatus = getMetadataObject(event)?.status;
     if (metadataStatus && typeof metadataStatus === 'object') return metadataStatus;
-    return event.status && typeof event.status === 'object' ? event.status : null;
+    return null;
 }
 
 function normalizeBooleanLike(value) {
@@ -833,39 +833,94 @@ function firstDefinedBoolean(...values) {
     return null;
 }
 
+function normalizeLegacyText(value) {
+    if (value === undefined || value === null) return null;
+    const text = String(value).trim();
+    return text ? text : null;
+}
+
+function ensureRuntimeMetadata(event, fallbackHex = null) {
+    if (!event || typeof event !== 'object') return event;
+
+    const metadata = getMetadataObject(event) || {};
+    if (!event.metadata || typeof event.metadata !== 'object') {
+        event.metadata = metadata;
+    }
+
+    const hexValue = normalizeLegacyText(
+        event.hex
+        ?? metadata.hex
+        ?? metadata.hexId
+        ?? event.hexId
+        ?? fallbackHex
+    );
+    if (hexValue) {
+        const normalizedHex = hexValue.toLowerCase();
+        event.hex = normalizedHex;
+        metadata.hex = normalizedHex;
+    }
+    if ('hexId' in metadata) {
+        delete metadata.hexId;
+    }
+
+    const tagline = normalizeLegacyText(metadata.tagline ?? event.tagline ?? event.AI ?? event.ai);
+    metadata.tagline = tagline;
+    event.tagline = tagline;
+
+    const legacyImage = event.image && typeof event.image === 'object' ? event.image : {};
+    const metadataImage = metadata.image && typeof metadata.image === 'object' ? metadata.image : {};
+    const imageTheme = normalizeLegacyText(
+        metadataImage.theme
+        ?? metadataImage.prompt
+        ?? legacyImage.theme
+        ?? legacyImage.prompt
+    );
+    const imageUrl = normalizeLegacyText(metadataImage.url ?? legacyImage.url);
+    event.image = ensureImageContainer({
+        theme: imageTheme,
+        url: imageUrl,
+    });
+    metadata.image = {
+        theme: imageTheme,
+        url: imageUrl,
+    };
+
+    const legacyStatusObject = event.status && typeof event.status === 'object' ? event.status : null;
+    const metadataStatus = metadata.status && typeof metadata.status === 'object' ? metadata.status : {};
+    const statusStringHidden = typeof event.status === 'string' && event.status.trim().toLowerCase() === 'hidden';
+    const isApproved = firstDefinedBoolean(
+        metadataStatus.isApproved,
+        legacyStatusObject?.isApproved,
+        event.isApproved,
+        event.approved
+    ) ?? false;
+    const isHidden = firstDefinedBoolean(
+        metadataStatus.isHidden,
+        legacyStatusObject?.isHidden,
+        event.isHidden,
+        event.hidden,
+        statusStringHidden ? true : null,
+        event.hiddenAt ? true : null
+    ) ?? false;
+
+    metadata.status = {
+        isApproved,
+        isHidden,
+    };
+    event.metadata = metadata;
+    return event;
+}
+
 function getImageThemeValue(event) {
-    if (!event || typeof event !== 'object') return null;
     const metadataImage = getMetadataObject(event)?.image;
-    const topLevelImage = event.image && typeof event.image === 'object' ? event.image : null;
-
-    const metadataTheme = (metadataImage && typeof metadataImage === 'object')
-        ? (typeof metadataImage.theme === 'string' && metadataImage.theme.trim()
-            ? metadataImage.theme.trim()
-            : (typeof metadataImage.prompt === 'string' && metadataImage.prompt.trim() ? metadataImage.prompt.trim() : null))
-        : null;
-    if (metadataTheme) return metadataTheme;
-
-    if (!topLevelImage) return null;
-    const topLevelTheme = typeof topLevelImage.theme === 'string' && topLevelImage.theme.trim()
-        ? topLevelImage.theme.trim()
-        : (typeof topLevelImage.prompt === 'string' && topLevelImage.prompt.trim() ? topLevelImage.prompt.trim() : null);
-    return topLevelTheme || null;
+    if (!metadataImage || typeof metadataImage !== 'object') return null;
+    return normalizeLegacyText(metadataImage.theme ?? metadataImage.prompt);
 }
 
 function getImageUrlValue(event) {
-    if (!event || typeof event !== 'object') return null;
     const metadataImage = getMetadataObject(event)?.image;
-    const topLevelImage = event.image && typeof event.image === 'object' ? event.image : null;
-
-    const metadataUrl = (metadataImage && typeof metadataImage === 'object' && typeof metadataImage.url === 'string' && metadataImage.url.trim())
-        ? metadataImage.url.trim()
-        : null;
-    if (metadataUrl) return metadataUrl;
-
-    const topLevelUrl = (topLevelImage && typeof topLevelImage.url === 'string' && topLevelImage.url.trim())
-        ? topLevelImage.url.trim()
-        : null;
-    return topLevelUrl || null;
+    if (!metadataImage || typeof metadataImage !== 'object') return null;
+    return normalizeLegacyText(metadataImage.url);
 }
 
 function removeTopLevelFieldsDuplicatedByMetadata(event) {
@@ -887,6 +942,7 @@ function removeTopLevelFieldsDuplicatedByMetadata(event) {
         delete event.approved;
         delete event.isApproved;
         delete event.isHidden;
+        delete event.hidden;
         delete event.hiddenAt;
     }
 
@@ -897,114 +953,36 @@ function removeTopLevelFieldsDuplicatedByMetadata(event) {
 
 function normalizeHexEventShape(eventData, fallbackHex = null) {
     if (!eventData || typeof eventData !== 'object') return eventData;
-    const normalized = eventData;
-    const metadata = getMetadataObject(normalized) || {};
-    if (!normalized.metadata || typeof normalized.metadata !== 'object') {
-        normalized.metadata = metadata;
-    }
-
-    const hexCandidate = (typeof normalized.hex === 'string' && normalized.hex.trim())
-        ? normalized.hex.trim().toLowerCase()
-        : (typeof metadata.hex === 'string' && metadata.hex.trim()
-            ? metadata.hex.trim().toLowerCase()
-            : (typeof metadata.hexId === 'string' && metadata.hexId.trim()
-                ? metadata.hexId.trim().toLowerCase()
-                : (typeof fallbackHex === 'string' && fallbackHex.trim() ? fallbackHex.trim().toLowerCase() : null)));
-    if (hexCandidate) {
-        normalized.hex = hexCandidate;
-        metadata.hex = hexCandidate;
-    }
-    if ('hexId' in metadata) {
-        delete metadata.hexId;
-    }
-
-    const tagline = (() => {
-        if (typeof metadata.tagline === 'string' && metadata.tagline.trim()) return metadata.tagline.trim();
-        if (typeof normalized.tagline === 'string' && normalized.tagline.trim()) return normalized.tagline.trim();
-        if (typeof normalized.AI === 'string' && normalized.AI.trim()) return normalized.AI.trim();
-        return null;
-    })();
-    normalized.tagline = tagline;
-    metadata.tagline = tagline;
+    const normalized = ensureRuntimeMetadata(eventData, fallbackHex);
     if ('AI' in normalized) delete normalized.AI;
-
-    const theme = getImageThemeValue(normalized);
-    const url = getImageUrlValue(normalized);
-    normalized.image = ensureImageContainer(normalized.image);
-    normalized.image.theme = theme;
-    normalized.image.url = url;
-    if ('prompt' in normalized.image) {
-        delete normalized.image.prompt;
-    }
-    metadata.image = {
-        theme,
-        url,
-    };
-
-    const metadataStatus = metadata.status && typeof metadata.status === 'object' ? metadata.status : {};
-    const topLevelStatusObject = normalized.status && typeof normalized.status === 'object' ? normalized.status : null;
-    const statusStringHidden = typeof normalized.status === 'string' && normalized.status.trim().toLowerCase() === 'hidden';
-    const isApproved = firstDefinedBoolean(
-        metadataStatus.isApproved,
-        topLevelStatusObject?.isApproved,
-        normalized.isApproved,
-        normalized.approved
-    ) ?? false;
-    const isHidden = firstDefinedBoolean(
-        metadataStatus.isHidden,
-        topLevelStatusObject?.isHidden,
-        normalized.isHidden,
-        statusStringHidden ? true : null,
-        normalized.hiddenAt ? true : null
-    ) ?? false;
-    normalized.status = {
-        isApproved,
-        isHidden,
-    };
-    normalized.approved = isApproved;
-    metadata.status = {
-        isApproved,
-        isHidden,
-    };
-
-    normalized.metadata = metadata;
+    if ('ai' in normalized) delete normalized.ai;
     return normalized;
 }
 
 function getTagline(event) {
-    if (!event || typeof event !== 'object') return null;
-    const metadata = getMetadataObject(event);
-    const source = typeof metadata?.tagline === 'string' && metadata.tagline.trim()
-        ? metadata.tagline
-        : (typeof event.tagline === 'string' && event.tagline.trim()
-            ? event.tagline
-            : event.AI);
-    if (typeof source !== 'string') return null;
-    const trimmed = source.trim();
-    return trimmed.length > 0 ? trimmed : null;
+    return normalizeLegacyText(getMetadataObject(event)?.tagline);
 }
 
 function setTagline(event, value) {
     if (!event || typeof event !== 'object') return;
-    const normalized = typeof value === 'string' ? value.trim() : null;
-    const finalValue = normalized && normalized.length > 0 ? normalized : null;
-    event.tagline = finalValue;
+    const finalValue = normalizeLegacyText(value);
     if (!event.metadata || typeof event.metadata !== 'object') {
         event.metadata = {};
     }
     event.metadata.tagline = finalValue;
+    event.tagline = finalValue;
     if ('AI' in event) {
         delete event.AI;
+    }
+    if ('ai' in event) {
+        delete event.ai;
     }
 }
 
 function setImageApprovalState(event, isApproved) {
     if (!event || typeof event !== 'object') return;
     const approved = isApproved === true;
-    event.approved = approved;
-    event.isApproved = approved;
-    event.image = ensureImageContainer(event.image);
-    event.image.isApproved = approved;
+    ensureRuntimeMetadata(event);
     if (!event.metadata || typeof event.metadata !== 'object') {
         event.metadata = {};
     }
@@ -1802,6 +1780,8 @@ async function storeApprovalMessageReference(event, realm, slackResponse, additi
     }
 
     const clonedEvent = JSON.parse(JSON.stringify(event));
+    normalizeHexEventShape(clonedEvent, clonedEvent.hex ?? event.hex ?? null);
+    removeTopLevelFieldsDuplicatedByMetadata(clonedEvent);
 
     const metadata = {
         realm,
@@ -2083,7 +2063,9 @@ function ensureObjectSubject(subject) {
         const seemsJson = trimmed.startsWith('{') || trimmed.startsWith('[');
         if (seemsJson) {
             try {
-                return JSON.parse(trimmed);
+                const parsed = JSON.parse(trimmed);
+                ensureRuntimeMetadata(parsed);
+                return parsed;
             } catch (error) {
                 console.warn('Failed to parse JSON subject string, falling back to raw value:', error.message);
             }
@@ -2096,6 +2078,7 @@ function ensureObjectSubject(subject) {
         return { value: trimmed };
     }
 
+    ensureRuntimeMetadata(subject);
     return subject;
 }
 
@@ -2142,6 +2125,7 @@ export function buildPersistEventPayload(existingEvent, rawSubject, action) {
         mergePersistPatch(baseEvent, subjectObject);
     }
 
+    ensureRuntimeMetadata(baseEvent);
     applySanitizedUidToEvent(baseEvent);
     return baseEvent;
 }
@@ -3080,37 +3064,22 @@ export async function lambdaHandler(event) {
             const event = buildPersistEventPayload(existingEvent, rawSubject, action);
             event.hex = hexValue;
             normalizeHexEventShape(event, hexValue);
+            ensureRuntimeMetadata(event, hexValue);
             
             // Decide whether to download an external image into the website bucket.
             // If this persist is the result of a 'hidden' action we skip downloading images.
             const normalizedAction = (typeof action === 'string' ? action : String(action ?? '')).toLowerCase();
-            const eventStatusObject = event.status && typeof event.status === 'object' ? event.status : null;
             event.metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
-            const metadataStatus = event.metadata.status && typeof event.metadata.status === 'object'
-                ? event.metadata.status
-                : {};
-            const statusIsHidden = (
-                (typeof event.status === 'string' && event.status.toLowerCase() === 'hidden')
-                || eventStatusObject?.isHidden === true
-                || metadataStatus.isHidden === true
-            );
+            const metadataStatus = getStatusObject(event) ?? {};
+            const statusIsHidden = metadataStatus.isHidden === true;
             const actionIsHidden = normalizedAction === 'hidden';
             event.metadata.status = {
-                isApproved: firstDefinedBoolean(
-                    metadataStatus.isApproved,
-                    eventStatusObject?.isApproved,
-                    event.isApproved,
-                    event.approved
-                ) ?? false,
+                isApproved: metadataStatus.isApproved === true,
                 isHidden: (actionIsHidden || statusIsHidden)
                     ? true
-                    : (firstDefinedBoolean(
-                        metadataStatus.isHidden,
-                        eventStatusObject?.isHidden,
-                        event.isHidden,
-                        event.hiddenAt ? true : null
-                    ) ?? false),
+                    : metadataStatus.isHidden === true,
             };
+            ensureRuntimeMetadata(event, hexValue);
 
             if (actionIsHidden || statusIsHidden) {
                 console.log('[Persist] Detected hidden action/status - skipping image download');
@@ -3163,11 +3132,6 @@ export async function lambdaHandler(event) {
 
             if (!actionIsHidden && !statusIsHidden) {
                 setImageApprovalState(event, true);
-            }
-            
-            // Preserve status field if present
-            if (event.status) {
-                console.log(`[Persist] Preserving status: ${event.status}`);
             }
 
             // Replace the hex file content with the subject content
