@@ -37,6 +37,7 @@ env:
   AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
   CLOUDFORMATION_ROLE_ARN: ${{ vars.CLOUDFORMATION_ROLE_ARN }}
   CODE_BUCKET: ${{ vars.CODE_BUCKET || 'aws2022-lambda-code-eu-west-2-553490163883' }}
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   detect-changes:
