@@ -49,7 +49,7 @@ Gemini response is expected as strict JSON and normalized to `image.prompt` usin
 ### Where this is configured
 
 Prompt template/guideline configuration is loaded at runtime from S3:
-- Bucket: `TARGET_BUCKET` (env var, defaults to `2ndtolworth`)
+- Bucket: `TARGET_BUCKET` (env var, defaults to `scouts-2ndtolworth-prod-553490163883`)
 - Key: `SCOUTS_CONFIG_KEY` (env var, defaults to `scouts.conf`)
 - Cache TTL: `SCOUTS_CONFIG_TTL_MS` (env var, defaults to 5 minutes)
 
@@ -65,8 +65,8 @@ Repository source of truth:
 That file is the only repository copy that should be edited.
 
 Deployment paths:
-- `sqs2scouts/deploy.sh` uploads it to `s3://2ndtolworth/scouts.conf` during lambda deploys.
-- `scouts/.github/workflows/deploy-to-s3.yml` uploads the same file to `s3://2ndtolworth/scouts.conf` during website deploys.
+- `sqs2scouts/deploy.sh` uploads it to `s3://scouts-2ndtolworth-prod-553490163883/scouts.conf` during lambda deploys.
+- `scouts/.github/workflows/deploy-to-s3.yml` uploads the same file to `s3://scouts-2ndtolworth-prod-553490163883/scouts.conf` during website deploys.
 - `scouts/deploy-manual.sh` uploads the same file for manual website deploys.
 
 Related Gemini env vars:

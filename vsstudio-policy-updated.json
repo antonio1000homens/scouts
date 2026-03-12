@@ -100,9 +100,13 @@
             "Effect": "Allow",
             "Action": [
                 "s3:ListBucket",
-                "s3:GetBucketLocation"
+                "s3:GetBucketLocation",
+                "s3:GetBucketPolicy"
             ],
-            "Resource": "arn:aws:s3:::2ndtolworth"
+            "Resource": [
+                "arn:aws:s3:::2ndtolworth",
+                "arn:aws:s3:::scouts-2ndtolworth-prod-553490163883"
+            ]
         },
         {
             "Sid": "S3ObjectWriteAccess",
@@ -116,7 +120,9 @@
             ],
             "Resource": [
                 "arn:aws:s3:::2ndtolworth",
-                "arn:aws:s3:::2ndtolworth/*"
+                "arn:aws:s3:::2ndtolworth/*",
+                "arn:aws:s3:::scouts-2ndtolworth-prod-553490163883",
+                "arn:aws:s3:::scouts-2ndtolworth-prod-553490163883/*"
             ]
         },
         {
@@ -139,7 +145,10 @@
                 "s3:PutBucketPublicAccessBlock",
                 "s3:PutBucketVersioning"
             ],
-            "Resource": "arn:aws:s3:::2ndtolworth"
+            "Resource": [
+                "arn:aws:s3:::2ndtolworth",
+                "arn:aws:s3:::scouts-2ndtolworth-prod-553490163883"
+            ]
         },
         {
             "Sid": "AllowReadOnlyIAMAndSTS",

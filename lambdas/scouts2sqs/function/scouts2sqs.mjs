@@ -513,6 +513,7 @@ function applySanitizedUidToSubject(subject) {
 
 function ensureObjectSubject(subject) {
     if (subject && typeof subject === 'object') {
+        ensureRuntimeMetadata(subject);
         return subject;
     }
 
@@ -554,6 +555,11 @@ function ensureImageContainer(image = {}) {
     };
 }
 
+function getMetadataObject(event) {
+    if (!event || typeof event !== 'object') return null;
+    return event.metadata && typeof event.metadata === 'object' ? event.metadata : null;
+}
+
 function normalizeNullableText(value) {
     if (value === undefined || value === null) return null;
     const text = String(value).trim();
@@ -573,30 +579,104 @@ function normalizeOptionalBoolean(value) {
 }
 
 function getTagline(event) {
-    if (!event || typeof event !== 'object') return null;
-    const source = typeof event.tagline === 'string' && event.tagline.trim()
-        ? event.tagline
-        : event.AI;
-    if (typeof source !== 'string') return null;
-    const trimmed = source.trim();
-    return trimmed.length > 0 ? trimmed : null;
+    const metadata = getMetadataObject(event);
+    return normalizeNullableText(metadata?.tagline);
+}
+
+function getImageThemeValue(event) {
+    const metadataImage = getMetadataObject(event)?.image;
+    if (!metadataImage || typeof metadataImage !== 'object') return null;
+    return normalizeNullableText(metadataImage.theme ?? metadataImage.prompt);
+}
+
+function getImageUrlValue(event) {
+    const metadataImage = getMetadataObject(event)?.image;
+    if (!metadataImage || typeof metadataImage !== 'object') return null;
+    return normalizeNullableText(metadataImage.url);
+}
+
+function ensureRuntimeMetadata(event, fallbackHex = null) {
+    if (!event || typeof event !== 'object') return event;
+
+    const metadata = getMetadataObject(event) || {};
+    if (!event.metadata || typeof event.metadata !== 'object') {
+        event.metadata = metadata;
+    }
+
+    const hexValue = normalizeNullableText(
+        event.hex
+        ?? metadata.hex
+        ?? event.hexId
+        ?? metadata.hexId
+        ?? fallbackHex
+    );
+    if (hexValue) {
+        const normalizedHex = hexValue.toLowerCase();
+        event.hex = normalizedHex;
+        metadata.hex = normalizedHex;
+    }
+    if ('hexId' in metadata) {
+        delete metadata.hexId;
+    }
+
+    const tagline = normalizeNullableText(metadata.tagline ?? event.tagline ?? event.AI ?? event.ai);
+    metadata.tagline = tagline;
+    event.tagline = tagline;
+    if ('AI' in event) delete event.AI;
+    if ('ai' in event) delete event.ai;
+
+    const legacyImage = event.image && typeof event.image === 'object' ? event.image : {};
+    const metadataImage = metadata.image && typeof metadata.image === 'object' ? metadata.image : {};
+    const imageTheme = normalizeNullableText(
+        metadataImage.theme
+        ?? metadataImage.prompt
+        ?? legacyImage.theme
+        ?? legacyImage.prompt
+    );
+    const imageUrl = normalizeNullableText(metadataImage.url ?? legacyImage.url);
+    metadata.image = {
+        theme: imageTheme,
+        url: imageUrl,
+    };
+    event.image = ensureImageContainer({
+        theme: imageTheme,
+        url: imageUrl,
+    });
+
+    const legacyStatus = event.status && typeof event.status === 'object' ? event.status : {};
+    const metadataStatus = metadata.status && typeof metadata.status === 'object' ? metadata.status : {};
+    const statusStringHidden = typeof event.status === 'string' && event.status.trim().toLowerCase() === 'hidden';
+    metadata.status = {
+        isApproved: normalizeOptionalBoolean(
+            metadataStatus.isApproved ?? legacyStatus.isApproved ?? event.isApproved ?? event.approved
+        ) ?? false,
+        isHidden: normalizeOptionalBoolean(
+            metadataStatus.isHidden ?? legacyStatus.isHidden ?? event.isHidden ?? event.hidden ?? (statusStringHidden ? true : null) ?? (event.hiddenAt ? true : null)
+        ) ?? false,
+    };
+
+    event.metadata = metadata;
+    return event;
 }
 
 function setTagline(event, value) {
     if (!event || typeof event !== 'object') return;
     const normalized = typeof value === 'string' ? value.trim() : null;
     const finalValue = normalized && normalized.length > 0 ? normalized : null;
+    event.metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+    event.metadata.tagline = finalValue;
     event.tagline = finalValue;
-    event.AI = finalValue;
+    if ('AI' in event) delete event.AI;
+    if ('ai' in event) delete event.ai;
 }
 
 function hasCompleteApprovalData(event) {
     if (!event || typeof event !== 'object') {
         return false;
     }
-    const normalizedImage = ensureImageContainer(event.image);
+    ensureRuntimeMetadata(event);
     const hasTagline = typeof getTagline(event) === 'string';
-    const hasTheme = typeof normalizedImage.theme === 'string' && normalizedImage.theme.trim().length > 0;
+    const hasTheme = typeof getImageThemeValue(event) === 'string';
     return hasTagline && hasTheme;
 }
 
@@ -631,6 +711,7 @@ function formatDetailLine(label, value, fallback = '_not provided_') {
 }
 
 function buildEventDetailsSection(event, actionLabel, realm = null) {
+    ensureRuntimeMetadata(event);
     applySanitizedUidToEvent(event);
     
     const lines = [];
@@ -641,20 +722,23 @@ function buildEventDetailsSection(event, actionLabel, realm = null) {
         if (tagline) {
             lines.push(formatDetailLine('Tagline', tagline));
         }
-        if (event.image?.theme) {
-            lines.push(formatDetailLine('Image Theme', event.image.theme));
+        const imageTheme = getImageThemeValue(event);
+        if (imageTheme) {
+            lines.push(formatDetailLine('Image Theme', imageTheme));
         }
     }
     // For imageTheme realm: show image theme
     else if (realm === 'imageTheme' || realm === 'imagePrompt') {
-        if (event.image?.theme) {
-            lines.push(formatDetailLine('Image Theme', event.image.theme));
+        const imageTheme = getImageThemeValue(event);
+        if (imageTheme) {
+            lines.push(formatDetailLine('Image Theme', imageTheme));
         }
     }
     // For image/imageUrl realms: show image link only if assigned
     else if (realm === 'image' || realm === 'imageUrl') {
-        if (event.image?.url) {
-            lines.push(formatDetailLine('Image Link', event.image.url));
+        const imageUrl = getImageUrlValue(event);
+        if (imageUrl) {
+            lines.push(formatDetailLine('Image Link', imageUrl));
         }
     }
     // For other realms, show all details (legacy behavior)
@@ -662,14 +746,15 @@ function buildEventDetailsSection(event, actionLabel, realm = null) {
         lines.push(formatDetailLine('Action', actionLabel ?? 'unknown'));
         lines.push(formatDetailLine('Tagline', getTagline(event)));
         lines.push(formatDetailLine('Title', event.title ?? event.summary ?? event.name));
-        lines.push(formatDetailLine('Image Theme', event.image?.theme));
-        lines.push(formatDetailLine('Image URL', event.image?.url));
+        lines.push(formatDetailLine('Image Theme', getImageThemeValue(event)));
+        lines.push(formatDetailLine('Image URL', getImageUrlValue(event)));
     }
 
     return lines.length > 0 ? lines.join('\n') : '_No additional details available._';
 }
 
 function buildApprovalBlocks(event, actionLabel, options = {}) {
+    ensureRuntimeMetadata(event);
     const {
         realm = 'scouts',
         approveAction = actionLabel,
@@ -754,10 +839,11 @@ function buildApprovalBlocks(event, actionLabel, options = {}) {
             text: detailsText,
         },
     });
-    if (event.image?.url) {
+    const imageUrl = getImageUrlValue(event);
+    if (imageUrl) {
         blocks.push({
             type: 'image',
-            image_url: event.image.url,
+            image_url: imageUrl,
             alt_text: `Image for ${headerTitle}`,
         });
     }
@@ -869,6 +955,9 @@ async function loadApprovalMessageMetadata(subject, realm) {
             const response = await s3Client.send(command);
             const bodyString = await response.Body.transformToString();
             const metadata = JSON.parse(bodyString);
+            if (metadata.event && typeof metadata.event === 'object') {
+                ensureRuntimeMetadata(metadata.event);
+            }
             metadata.identifiers = identifiers;
             return metadata;
         } catch (error) {
@@ -912,6 +1001,7 @@ async function persistApprovalMetadata(metadata, overrides = {}) {
 
     if (merged.event) {
         merged.event = JSON.parse(JSON.stringify(merged.event));
+        ensureRuntimeMetadata(merged.event);
     }
     merged.identifiers = identifiers;
 
@@ -983,7 +1073,7 @@ async function refreshApprovalMessage(metadata, event, realm, { previewText = nu
         throw new Error('Cannot refresh Slack message without channel and ts');
     }
     const eventClone = cloneEvent(event);
-    eventClone.image = ensureImageContainer(eventClone.image);
+    ensureRuntimeMetadata(eventClone);
     applySanitizedUidToEvent(eventClone);
 
     const blocks = buildApprovalBlocks(eventClone, `Review ${realm}`, {
@@ -1017,6 +1107,7 @@ async function refreshApprovalMessage(metadata, event, realm, { previewText = nu
 }
 
 function buildEditModal(event, realm, metadata = {}, previewText = null) {
+    ensureRuntimeMetadata(event);
     const identifiers = Array.isArray(metadata.identifiers) && metadata.identifiers.length > 0
         ? metadata.identifiers
         : deriveApprovalIdentifiers(event);
@@ -1088,7 +1179,7 @@ function buildEditModal(event, realm, metadata = {}, previewText = null) {
                 element: {
                     type: 'plain_text_input',
                     action_id: 'image_prompt_input',
-                    initial_value: event.image?.theme ?? '',
+                    initial_value: getImageThemeValue(event) ?? '',
                 },
             },
             {
@@ -1099,7 +1190,7 @@ function buildEditModal(event, realm, metadata = {}, previewText = null) {
                 element: {
                     type: 'plain_text_input',
                     action_id: 'image_url_input',
-                    initial_value: event.image?.url ?? '',
+                    initial_value: getImageUrlValue(event) ?? '',
                 },
             },
         ],
@@ -1129,16 +1220,19 @@ async function openEditModal(triggerId, event, realm, metadata = {}) {
 
 function buildDecisionSummaryBlocks(subject, realm, decisionLabel, messageText) {
     const obj = ensureObjectSubject(subject);
+    ensureRuntimeMetadata(obj);
     const details = [];
     const tagline = getTagline(obj);
     if (tagline) {
         details.push(`*Tagline:* ${tagline}`);
     }
-    if (obj.image?.theme) {
-        details.push(`*Image Theme:* ${obj.image.theme}`);
+    const imageTheme = getImageThemeValue(obj);
+    if (imageTheme) {
+        details.push(`*Image Theme:* ${imageTheme}`);
     }
-    if (obj.image?.url) {
-        details.push(formatDetailLine('Image URL', obj.image.url));
+    const imageUrl = getImageUrlValue(obj);
+    if (imageUrl) {
+        details.push(formatDetailLine('Image URL', imageUrl));
     }
     if (obj.title ?? obj.summary ?? obj.name) {
         details.push(`*Title:* ${obj.title ?? obj.summary ?? obj.name}`);
@@ -1338,7 +1432,7 @@ async function handleSlackBlockActions(parsedPayload) {
 
     const originalSubject = context.subject ?? {};
     const eventData = cloneEvent(ensureObjectSubject(originalSubject));
-    eventData.image = ensureImageContainer(eventData.image);
+    ensureRuntimeMetadata(eventData);
     applySanitizedUidToEvent(eventData);
 
     const channel = parsedPayload.container?.channel_id ?? parsedPayload.message?.channel ?? null;
@@ -1454,7 +1548,7 @@ async function handleSlackViewSubmission(parsedPayload) {
     const urlValue = normaliseInput(values.image_url_block?.image_url_input?.value);
 
     const updatedEvent = cloneEvent(metadata.event ?? baseEvent);
-    updatedEvent.image = ensureImageContainer(updatedEvent.image);
+    ensureRuntimeMetadata(updatedEvent);
     if (titleValue !== null) {
         updatedEvent.title = titleValue;
     }
@@ -1465,12 +1559,23 @@ async function handleSlackViewSubmission(parsedPayload) {
     // Allow clearing/nulling image prompt field
     if (values.image_prompt_block?.image_prompt_input !== undefined) {
         updatedEvent.image.theme = promptValue;
+        updatedEvent.metadata = updatedEvent.metadata && typeof updatedEvent.metadata === 'object' ? updatedEvent.metadata : {};
+        updatedEvent.metadata.image = updatedEvent.metadata.image && typeof updatedEvent.metadata.image === 'object'
+            ? updatedEvent.metadata.image
+            : {};
+        updatedEvent.metadata.image.theme = promptValue;
         if ('prompt' in updatedEvent.image) delete updatedEvent.image.prompt;
     }
     // Allow clearing/nulling image URL field
     if (values.image_url_block?.image_url_input !== undefined) {
         updatedEvent.image.url = urlValue;
+        updatedEvent.metadata = updatedEvent.metadata && typeof updatedEvent.metadata === 'object' ? updatedEvent.metadata : {};
+        updatedEvent.metadata.image = updatedEvent.metadata.image && typeof updatedEvent.metadata.image === 'object'
+            ? updatedEvent.metadata.image
+            : {};
+        updatedEvent.metadata.image.url = urlValue;
     }
+    ensureRuntimeMetadata(updatedEvent);
     applySanitizedUidToEvent(updatedEvent);
 
     const combinedIdentifiers = Array.from(
@@ -1555,13 +1660,16 @@ function parseJsonSubject(subject) {
         const trimmed = subject.trim();
         if (!trimmed) return null;
         try {
-            return JSON.parse(trimmed);
+            const parsed = JSON.parse(trimmed);
+            ensureRuntimeMetadata(parsed);
+            return parsed;
         } catch (error) {
             console.warn('[Payload] Failed to parse subject JSON string:', error.message);
             return null;
         }
     }
     if (typeof subject === 'object' && subject !== null) {
+        ensureRuntimeMetadata(subject);
         return subject;
     }
     return null;
@@ -1582,6 +1690,7 @@ async function getHexFileFromS3(hexValue) {
             const response = await s3Client.send(command);
             const bodyString = await response.Body.transformToString();
             const data = JSON.parse(bodyString);
+            ensureRuntimeMetadata(data, hexValue);
             console.log(`[HEX] Retrieved HEX file from s3://${bucket}/${key}`);
             return data;
         } catch (error) {
@@ -1609,31 +1718,50 @@ function buildPersistPatchForProcessing(rawSubject) {
     }
 
     const patch = {};
+    ensureRuntimeMetadata(compactSubject, hexValue);
 
-    if (Object.prototype.hasOwnProperty.call(compactSubject, 'tagline')) {
+    if (
+        Object.prototype.hasOwnProperty.call(compactSubject, 'tagline')
+        || Object.prototype.hasOwnProperty.call(compactSubject, 'AI')
+        || Object.prototype.hasOwnProperty.call(compactSubject, 'ai')
+        || Object.prototype.hasOwnProperty.call(compactSubject.metadata ?? {}, 'tagline')
+    ) {
         patch.metadata = patch.metadata && typeof patch.metadata === 'object' ? patch.metadata : {};
-        patch.metadata.tagline = normalizeNullableText(compactSubject.tagline);
+        patch.metadata.tagline = normalizeNullableText(compactSubject.metadata?.tagline);
     }
 
     if (
         Object.prototype.hasOwnProperty.call(compactSubject, 'imageTheme')
         || Object.prototype.hasOwnProperty.call(compactSubject, 'imagePrompt')
+        || Object.prototype.hasOwnProperty.call(compactSubject, 'image')
+        || Object.prototype.hasOwnProperty.call(compactSubject.metadata ?? {}, 'image')
     ) {
         patch.metadata = patch.metadata && typeof patch.metadata === 'object' ? patch.metadata : {};
         patch.metadata.image = patch.metadata.image && typeof patch.metadata.image === 'object'
             ? patch.metadata.image
             : {};
-        patch.metadata.image.theme = normalizeNullableText(compactSubject.imageTheme ?? compactSubject.imagePrompt);
+        patch.metadata.image.theme = normalizeNullableText(
+            compactSubject.metadata?.image?.theme
+            ?? compactSubject.imageTheme
+            ?? compactSubject.imagePrompt
+        );
     }
-    if (Object.prototype.hasOwnProperty.call(compactSubject, 'imageUrl')) {
+    if (
+        Object.prototype.hasOwnProperty.call(compactSubject, 'imageUrl')
+        || Object.prototype.hasOwnProperty.call(compactSubject, 'image')
+        || Object.prototype.hasOwnProperty.call(compactSubject.metadata ?? {}, 'image')
+    ) {
         patch.metadata = patch.metadata && typeof patch.metadata === 'object' ? patch.metadata : {};
         patch.metadata.image = patch.metadata.image && typeof patch.metadata.image === 'object'
             ? patch.metadata.image
             : {};
-        patch.metadata.image.url = normalizeNullableText(compactSubject.imageUrl);
+        patch.metadata.image.url = normalizeNullableText(
+            compactSubject.metadata?.image?.url
+            ?? compactSubject.imageUrl
+        );
     }
 
-    const isHidden = normalizeOptionalBoolean(compactSubject.isHidden);
+    const isHidden = normalizeOptionalBoolean(compactSubject.metadata?.status?.isHidden ?? compactSubject.isHidden);
     if (isHidden !== null) {
         patch.metadata = patch.metadata && typeof patch.metadata === 'object' ? patch.metadata : {};
         patch.metadata.status = patch.metadata.status && typeof patch.metadata.status === 'object'
@@ -1642,7 +1770,7 @@ function buildPersistPatchForProcessing(rawSubject) {
         patch.metadata.status.isHidden = isHidden;
     }
 
-    const isApproved = normalizeOptionalBoolean(compactSubject.isApproved);
+    const isApproved = normalizeOptionalBoolean(compactSubject.metadata?.status?.isApproved ?? compactSubject.isApproved);
     if (isApproved !== null) {
         patch.metadata = patch.metadata && typeof patch.metadata === 'object' ? patch.metadata : {};
         patch.metadata.status = patch.metadata.status && typeof patch.metadata.status === 'object'
@@ -1671,6 +1799,7 @@ async function processScoutsRequest(hexValue, action) {
             console.warn(`[scoutsRequest] HEX ${hexValue} not found`);
             return { status: 'missing', hex: hexValue };
         }
+        ensureRuntimeMetadata(hexData, hexValue);
         
         // Determine what field needs populating
         let realm = null;
@@ -1681,7 +1810,7 @@ async function processScoutsRequest(hexValue, action) {
             realm = 'tagline';
             subject = hexValue;
             sqsAction = hexData.title;
-        } else if (!hexData.image?.theme) {
+        } else if (!getImageThemeValue(hexData)) {
             realm = 'imageTheme';
             subject = hexValue;
             sqsAction = hexData.title;
@@ -1907,6 +2036,7 @@ export async function lambdaHandler(event) {
                         console.log('[SlackRelay] Handling Slack-origin message');
 
                         const eventSubject = ensureObjectSubject(rawSubject);
+                        ensureRuntimeMetadata(eventSubject);
                         const hexValue = typeof eventSubject.hex === 'string' ? eventSubject.hex.trim() : '';
                         if (!hexValue) {
                             console.error('[SlackRelay] Missing hex identifier in Slack payload');
@@ -1914,7 +2044,7 @@ export async function lambdaHandler(event) {
                         }
 
                         const normalizedImage = ensureImageContainer(eventSubject.image);
-                        const hasFullApprovalPayload = hasCompleteApprovalData({ ...eventSubject, image: normalizedImage });
+                        const hasFullApprovalPayload = hasCompleteApprovalData(eventSubject);
 
                         if (!hasFullApprovalPayload) {
                             const requeuePayload = {
@@ -1941,7 +2071,13 @@ export async function lambdaHandler(event) {
                         const persistSubject = isHiddenAction
                             ? {
                                 ...eventSubject,
-                                status: eventSubject.status ?? 'hidden',
+                                metadata: {
+                                    ...(eventSubject.metadata && typeof eventSubject.metadata === 'object' ? eventSubject.metadata : {}),
+                                    status: {
+                                        ...((eventSubject.metadata?.status && typeof eventSubject.metadata.status === 'object') ? eventSubject.metadata.status : {}),
+                                        isHidden: true,
+                                    },
+                                },
                             }
                             : eventSubject;
 
@@ -1978,6 +2114,7 @@ export async function lambdaHandler(event) {
                     // Process scoutsRequest messages
                     if (rawRealm === 'scoutsRequest' && (rawAction === 'retry' || rawAction === 'new' || rawAction === 'repair')) {
                         console.log(`[scoutsRequest] Processing ${rawAction} action for:`, rawSubject.title || 'unknown');
+                        ensureRuntimeMetadata(rawSubject);
                         
                         const hexValue = rawSubject.hex;
                         if (!hexValue) {
@@ -1994,12 +2131,12 @@ export async function lambdaHandler(event) {
                             targetRealm = 'tagline';
                             targetAction = 'request';
                             console.log(`[scoutsRequest] Tagline needed for hex: ${hexValue}`);
-                        } else if (!rawSubject.image?.theme) {
+                        } else if (!getImageThemeValue(rawSubject)) {
                             // Need image prompt generation
                             targetRealm = 'imageTheme';
                             targetAction = 'request';
                             console.log(`[scoutsRequest] Image prompt needed for hex: ${hexValue}`);
-                        } else if (!rawSubject.image?.url) {
+                        } else if (!getImageUrlValue(rawSubject)) {
                             // Need AI-generated event image
                             targetRealm = 'image';
                             targetAction = 'request';

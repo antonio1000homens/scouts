@@ -12,6 +12,7 @@
 - Use `AWS_PROFILE=scouts` for Scouts AWS account `553490163883`.
 - Use `AWS_PROFILE=windsor` for Windsor AWS account `243857182133`.
 - Do not rely on the default AWS profile for work in this repo.
+- Do not rely on the default AWS profile for work in this repo.
 
 ## Who Uses `scouts.conf`
 

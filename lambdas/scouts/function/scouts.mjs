@@ -196,19 +196,94 @@ function getEventMetadata(event) {
   return event.metadata && typeof event.metadata === 'object' ? event.metadata : null;
 }
 
+function normaliseBooleanLike(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'n', 'off'].includes(normalized)) return false;
+  }
+  return null;
+}
+
+function firstDefinedBoolean(...values) {
+  for (const value of values) {
+    const normalized = normaliseBooleanLike(value);
+    if (normalized !== null) return normalized;
+  }
+  return null;
+}
+
+function normaliseLegacyText(value) {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  return text.length > 0 ? text : null;
+}
+
+function ensureRuntimeMetadata(event) {
+  if (!event || typeof event !== 'object') return event;
+
+  const metadata = getEventMetadata(event) && typeof event.metadata === 'object'
+    ? event.metadata
+    : {};
+  const metadataImage = metadata.image && typeof metadata.image === 'object'
+    ? metadata.image
+    : {};
+  const metadataStatus = metadata.status && typeof metadata.status === 'object'
+    ? metadata.status
+    : {};
+  const topLevelImage = event.image && typeof event.image === 'object' ? event.image : {};
+  const topLevelStatus = event.status && typeof event.status === 'object' ? event.status : {};
+  const statusStringHidden = typeof event.status === 'string' && event.status.trim().toLowerCase() === 'hidden';
+
+  const hex = normaliseLegacyText(event.hex ?? metadata.hex ?? metadata.hexId ?? event.hexId);
+  const tagline = normaliseLegacyText(metadata.tagline ?? event.tagline ?? event.AI ?? event.ai);
+  const imageTheme = normaliseLegacyText(metadataImage.theme ?? topLevelImage.theme ?? topLevelImage.prompt);
+  const imageUrl = normaliseLegacyText(metadataImage.url ?? topLevelImage.url ?? topLevelImage.src ?? topLevelImage.href);
+  const isApproved = firstDefinedBoolean(
+    metadataStatus.isApproved,
+    topLevelStatus.isApproved,
+    event.isApproved,
+    event.approved
+  ) ?? false;
+  const isHidden = firstDefinedBoolean(
+    metadataStatus.isHidden,
+    topLevelStatus.isHidden,
+    event.isHidden,
+    event.hidden,
+    statusStringHidden ? true : null,
+    event.hiddenAt ? true : null
+  ) ?? false;
+
+  metadata.hex = hex ? hex.toLowerCase() : null;
+  if ('hexId' in metadata) delete metadata.hexId;
+  metadata.tagline = tagline;
+  metadata.image = {
+    theme: imageTheme,
+    prompt: null,
+    url: imageUrl,
+  };
+  metadata.status = {
+    isHidden,
+    isApproved,
+  };
+
+  event.metadata = metadata;
+  return event;
+}
+
 function getEventImageContainer(event) {
   if (!event || typeof event !== 'object') return null;
   const metadataImage = getEventMetadata(event)?.image;
-  if (metadataImage && typeof metadataImage === 'object') {
-    return metadataImage;
-  }
-  return event.image && typeof event.image === 'object' ? event.image : null;
+  return metadataImage && typeof metadataImage === 'object' ? metadataImage : null;
 }
 
 function getEventImageTheme(event) {
   const image = getEventImageContainer(event);
   if (!image) return null;
-  const candidate = image.theme ?? image.prompt ?? null;
+  const candidate = image.theme ?? null;
   if (typeof candidate !== 'string') return null;
   const trimmed = candidate.trim();
   return trimmed || null;
@@ -217,7 +292,7 @@ function getEventImageTheme(event) {
 function getEventImageUrl(event) {
   const image = getEventImageContainer(event);
   if (!image) return null;
-  const candidate = image.url ?? image.src ?? image.href ?? null;
+  const candidate = image.url ?? null;
   if (typeof candidate !== 'string') return null;
   const trimmed = candidate.trim();
   return trimmed || null;
@@ -226,23 +301,19 @@ function getEventImageUrl(event) {
 function getEventStatusObject(event) {
   if (!event || typeof event !== 'object') return null;
   const metadataStatus = getEventMetadata(event)?.status;
-  if (metadataStatus && typeof metadataStatus === 'object') {
-    return metadataStatus;
-  }
-  return event.status && typeof event.status === 'object' ? event.status : null;
+  return metadataStatus && typeof metadataStatus === 'object' ? metadataStatus : null;
 }
 
 function isEventApproved(event) {
   if (!event || typeof event !== 'object') return false;
   const status = getEventStatusObject(event);
-  if (status?.isApproved === true) return true;
-  return event.approved === true;
+  return status?.isApproved === true;
 }
 
 function buildStatusForStorage(event) {
   const status = getEventStatusObject(event);
-  const isHidden = status?.isHidden === true || isEventHidden(event);
-  const isApproved = status?.isApproved === true || isEventApproved(event);
+  const isHidden = status?.isHidden === true;
+  const isApproved = status?.isApproved === true;
   return {
     isHidden,
     isApproved,
@@ -251,6 +322,7 @@ function buildStatusForStorage(event) {
 
 function buildAgendaMetadata(event) {
   if (!event || typeof event !== 'object') return null;
+  ensureRuntimeMetadata(event);
   const sourceMetadata = getEventMetadata(event);
   const metadata = sourceMetadata && typeof sourceMetadata === 'object'
     ? JSON.parse(JSON.stringify(sourceMetadata))
@@ -341,16 +413,20 @@ function normalizeHexEventToMetadata(eventData) {
     changed = true;
   }
 
-  const tagline = getEventTagline(normalized);
+  const metadataTagline = normaliseLegacyText(metadata.tagline);
+  const legacyTagline = normaliseLegacyText(normalized.tagline ?? normalized.AI ?? normalized.ai);
+  const tagline = metadataTagline ?? legacyTagline;
   if (metadata.tagline !== tagline) {
     metadata.tagline = tagline;
     changed = true;
   }
 
+  const metadataImage = metadata.image && typeof metadata.image === 'object' ? metadata.image : {};
+  const topLevelImage = normalized.image && typeof normalized.image === 'object' ? normalized.image : {};
   const image = {
-    theme: getEventImageTheme(normalized),
+    theme: normaliseLegacyText(metadataImage.theme ?? topLevelImage.theme ?? topLevelImage.prompt),
     prompt: null,
-    url: getEventImageUrl(normalized),
+    url: normaliseLegacyText(metadataImage.url ?? topLevelImage.url ?? topLevelImage.src ?? topLevelImage.href),
   };
   const existingImage = metadata.image && typeof metadata.image === 'object' ? metadata.image : null;
   if (!existingImage
@@ -361,7 +437,25 @@ function normalizeHexEventToMetadata(eventData) {
     changed = true;
   }
 
-  const status = buildStatusForStorage(normalized);
+  const metadataStatus = metadata.status && typeof metadata.status === 'object' ? metadata.status : {};
+  const topLevelStatus = normalized.status && typeof normalized.status === 'object' ? normalized.status : {};
+  const statusStringHidden = typeof normalized.status === 'string' && normalized.status.trim().toLowerCase() === 'hidden';
+  const status = {
+    isHidden: firstDefinedBoolean(
+      metadataStatus.isHidden,
+      topLevelStatus.isHidden,
+      normalized.isHidden,
+      normalized.hidden,
+      statusStringHidden ? true : null,
+      normalized.hiddenAt ? true : null
+    ) ?? false,
+    isApproved: firstDefinedBoolean(
+      metadataStatus.isApproved,
+      topLevelStatus.isApproved,
+      normalized.isApproved,
+      normalized.approved
+    ) ?? false,
+  };
   const existingStatus = metadata.status && typeof metadata.status === 'object' ? metadata.status : null;
   if (!existingStatus
     || existingStatus.isHidden !== status.isHidden
@@ -370,10 +464,20 @@ function normalizeHexEventToMetadata(eventData) {
     changed = true;
   }
 
-  if (normalized.status !== undefined || normalized.approved !== undefined || normalized.hiddenAt !== undefined) {
+  if (
+    normalized.status !== undefined
+    || normalized.approved !== undefined
+    || normalized.isApproved !== undefined
+    || normalized.isHidden !== undefined
+    || normalized.hidden !== undefined
+    || normalized.hiddenAt !== undefined
+  ) {
     // Removed after migration to metadata.status
     delete normalized.status;
     delete normalized.approved;
+    delete normalized.isApproved;
+    delete normalized.isHidden;
+    delete normalized.hidden;
     delete normalized.hiddenAt;
     changed = true;
   }
@@ -710,6 +814,18 @@ function removeTopLevelFieldsDuplicatedByMetadata(event) {
     }
     if ('approved' in event) {
       delete event.approved;
+      changed = true;
+    }
+    if ('isApproved' in event) {
+      delete event.isApproved;
+      changed = true;
+    }
+    if ('isHidden' in event) {
+      delete event.isHidden;
+      changed = true;
+    }
+    if ('hidden' in event) {
+      delete event.hidden;
       changed = true;
     }
     if ('hiddenAt' in event) {
@@ -1114,14 +1230,17 @@ async function fetchCalendar(url, label) {
 
 
 async function putJsonToS3(bucket, key, payload, label, suppressLog = false) {
+  const isEventKey = typeof key === 'string' && key.startsWith('events/');
   const isAgendaKey = typeof key === 'string' && /(^|\/)agenda\.json$/i.test(key);
   // For event files under the 'events/' prefix, ensure we don't persist a top-level `uid` field.
-  const toStore = (typeof key === 'string' && (key.startsWith('events/') || isAgendaKey))
+  const toStore = (isEventKey || isAgendaKey)
     ? (function () {
         try {
-          const clone = JSON.parse(JSON.stringify(payload));
+          let clone = JSON.parse(JSON.stringify(payload));
           if (clone && typeof clone === 'object') {
-            if (key.startsWith('events/')) {
+            if (isEventKey) {
+              const normalizedHexResult = normalizeHexEventToMetadata(clone);
+              clone = normalizedHexResult?.normalized ?? clone;
               if ('uid' in clone) delete clone.uid;
               if ('originalUid' in clone) delete clone.originalUid;
               removeTopLevelFieldsDuplicatedByMetadata(clone);
@@ -1626,10 +1745,7 @@ function getEventTagline(event) {
       return trimmedMetadataTagline;
     }
   }
-  const source = event.tagline ?? event.AI ?? event.ai ?? null;
-  if (typeof source !== 'string') return null;
-  const trimmed = source.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  return null;
 }
 
 function deriveProcessingRealmFromEvent(event, isEligibleForImageProcessing = true) {
@@ -1752,6 +1868,7 @@ function hydrateStoredDataset(dataset) {
   const hydratedEvents = [];
   for (const event of dataset.events) {
     if (!event) continue;
+    ensureRuntimeMetadata(event);
 
     const sanitizedUid = applySanitizedUidToEvent(event);
     if (!sanitizedUid) continue;
@@ -1790,14 +1907,13 @@ function hydrateStoredDataset(dataset) {
       lastModified,
       sortKey: start.sortKey,
       tagline: getEventTagline(event),
-      hex: event.hex ?? event.metadata?.hexId ?? null,
+      hex: event.hex ?? event.metadata?.hex ?? null,
       image: {
         theme: getEventImageTheme(event),
         prompt: null,
         url: getEventImageUrl(event),
       },
       processing: normaliseProcessingList(event.processing),
-      ...(isEventApproved(event) ? { approved: true } : {}),
       section,
       icsType: event.icsType ?? null,
     });
@@ -1816,6 +1932,7 @@ function hydrateStoredDataset(dataset) {
  * isn't provided by the ICS feed.
  */
 function prepareEventForStorage(event) {
+  ensureRuntimeMetadata(event);
   const summary = event.summary ?? event.title ?? null;
   const dtstart = event.start?.raw ?? event.dtstart ?? null;
   const lastModifiedRaw = event.lastModified?.raw
@@ -1839,35 +1956,7 @@ function isEventHidden(candidate) {
   if (!candidate || typeof candidate !== 'object') {
     return false;
   }
-
-  const { hidden, status, hiddenAt } = candidate;
-
-  if (typeof hidden === 'boolean') {
-    if (hidden) return true;
-  } else if (typeof hidden === 'string') {
-    const hiddenText = hidden.trim().toLowerCase();
-    if (hiddenText === 'true' || hiddenText === '1' || hiddenText === 'yes') {
-      return true;
-    }
-  }
-
-  if (hiddenAt) {
-    return true;
-  }
-
-  if (typeof status === 'string' && status.trim().toLowerCase() === 'hidden') {
-    return true;
-  }
-
-  if (status && typeof status === 'object' && status.isHidden === true) {
-    return true;
-  }
-
-  if (status === true) {
-    return true;
-  }
-
-  return false;
+  return getEventStatusObject(candidate)?.isHidden === true;
 }
 
 
@@ -2433,6 +2522,7 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
       ...event,
       image: ensureImageContainer(event.image),
     };
+    ensureRuntimeMetadata(baseEvent);
     let isHidden = isEventHidden(baseEvent);
 
     const sanitizedUid = applySanitizedUidToEvent(baseEvent);
@@ -2459,6 +2549,16 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
         hexLabel = `hex:${eventTitle}`;
         existingHexFile = await getJsonFromS3(bucketName, hexKey, hexLabel);
         if (existingHexFile) {
+          const normalizedHexResult = normalizeHexEventToMetadata(existingHexFile);
+          existingHexFile = normalizedHexResult?.normalized ?? existingHexFile;
+          if (normalizedHexResult?.changed) {
+            try {
+              await putJsonToS3(bucketName, hexKey, existingHexFile, hexLabel, true);
+              console.log(`[HEX] Normalized existing HEX metadata for ${titleHex}`);
+            } catch (persistError) {
+              console.warn(`[HEX] Failed to normalize HEX metadata for ${titleHex}:`, persistError.message);
+            }
+          }
           hadPersistedHex = true;
           baseEvent.hex = existingHexFile.hex || titleHex;
           // Hex file is canonical source - always use its values when present
@@ -2487,6 +2587,7 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
           if (!isHidden && isEventHidden(existingHexFile)) {
             isHidden = true;
           }
+          ensureRuntimeMetadata(baseEvent);
         } else {
           // No HEX file exists, populate it with event data if available
           const baseTagline = getEventTagline(baseEvent);
@@ -2521,6 +2622,7 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
     }
 
     if (!isHidden) {
+      ensureRuntimeMetadata(baseEvent);
       isHidden = isEventHidden(baseEvent);
     }
 
@@ -4341,4 +4443,4 @@ export async function lambdaHandler(event = {}) {
 export const handler = lambdaHandler;
 
 // Named exports for testing
-export { prepareEventForStorage };
+export { normalizeHexEventToMetadata, prepareEventForStorage };
