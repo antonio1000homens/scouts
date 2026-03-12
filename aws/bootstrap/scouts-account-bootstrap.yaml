@@ -1,0 +1,456 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Bootstrap IAM, GitHub OIDC, and artifact storage for the Scouts AWS account.
+
+Parameters:
+  BootstrapPrincipalArn:
+    Type: String
+    Description: ARN of the admin principal allowed to assume the temporary bootstrap role.
+  ArtifactBucketName:
+    Type: String
+    Default: aws2022-lambda-code-eu-west-2-553490163883
+  ScoutsRepoOwner:
+    Type: String
+    Default: antonio1000homens
+  ScoutsRepoName:
+    Type: String
+    Default: scouts
+  LambdasRepoName:
+    Type: String
+    Default: lambdas
+  ScoutsBranch:
+    Type: String
+    Default: master
+  LambdasPrimaryBranch:
+    Type: String
+    Default: main
+  LambdasSecondaryBranch:
+    Type: String
+    Default: master
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - ffffffffffffffffffffffffffffffffffffffff
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref ArtifactBucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  ArtifactBucketLifecycle:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnforceTlsOnly
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !Sub arn:aws:s3:::${ArtifactBucket}
+              - !Sub arn:aws:s3:::${ArtifactBucket}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  ScoutsBootstrapAdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ScoutsBootstrapAdminRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Ref BootstrapPrincipalArn
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Description: Temporary bootstrap role for initial Scouts account setup.
+      MaxSessionDuration: 43200
+
+  CloudFormationExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CloudFormationExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ScoutsCloudFormationExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: RuntimeRoleManagement
+                Effect: Allow
+                Action:
+                  - iam:AttachRolePolicy
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:DetachRolePolicy
+                  - iam:GetRole
+                  - iam:ListRolePolicies
+                  - iam:TagRole
+                  - iam:UntagRole
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-lambda-role
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-lambda-role
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-lambda-role
+              - Sid: RuntimeRoleInlinePolicyManagement
+                Effect: Allow
+                Action:
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:PutRolePolicy
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-lambda-role
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-lambda-role
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-lambda-role
+              - Sid: RuntimeRolePass
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-lambda-role
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-lambda-role
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-lambda-role
+              - Sid: LambdaCreateAndList
+                Effect: Allow
+                Action:
+                  - lambda:CreateFunction
+                  - lambda:CreateEventSourceMapping
+                  - lambda:ListEventSourceMappings
+                  - lambda:PublishLayerVersion
+                Resource: '*'
+              - Sid: LambdaManagement
+                Effect: Allow
+                Action:
+                  - lambda:DeleteFunction
+                  - lambda:AddPermission
+                  - lambda:CreateFunctionUrlConfig
+                  - lambda:DeleteEventSourceMapping
+                  - lambda:DeleteFunctionUrlConfig
+                  - lambda:DeleteLayerVersion
+                  - lambda:GetFunction
+                  - lambda:GetFunctionConfiguration
+                  - lambda:GetFunctionUrlConfig
+                  - lambda:GetLayerVersion
+                  - lambda:ListLayerVersions
+                  - lambda:ListTags
+                  - lambda:RemovePermission
+                  - lambda:TagResource
+                  - lambda:UntagResource
+                  - lambda:UpdateEventSourceMapping
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                Resource:
+                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts
+                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts2sqs
+                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:sqs2scouts
+                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:layer:scouts-shared:*
+                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:layer:scouts2sqs-layer:*
+                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:layer:sqs2scouts-layer:*
+                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:event-source-mapping:*
+              - Sid: QueueManagement
+                Effect: Allow
+                Action:
+                  - sqs:CreateQueue
+                Resource: '*'
+              - Sid: QueueManagementScoped
+                Effect: Allow
+                Action:
+                  - sqs:DeleteQueue
+                  - sqs:GetQueueAttributes
+                  - sqs:SetQueueAttributes
+                  - sqs:TagQueue
+                  - sqs:UntagQueue
+                  - sqs:ListQueueTags
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:ChangeMessageVisibility
+                Resource:
+                  - !Sub arn:aws:sqs:eu-west-2:${AWS::AccountId}:scoutsRequests
+                  - !Sub arn:aws:sqs:eu-west-2:${AWS::AccountId}:scoutsProcessing
+                  - !Sub arn:aws:sqs:eu-west-2:${AWS::AccountId}:scoutsDecision
+                  - !Sub arn:aws:sqs:eu-west-2:${AWS::AccountId}:scoutsProcessingDLQ
+              - Sid: BucketManagement
+                Effect: Allow
+                Action:
+                  - s3:CreateBucket
+                Resource: '*'
+              - Sid: BucketManagementScoped
+                Effect: Allow
+                Action:
+                  - s3:DeleteBucket
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                  - s3:GetBucketPolicy
+                  - s3:PutBucketPolicy
+                  - s3:DeleteBucketPolicy
+                  - s3:GetBucketWebsite
+                  - s3:PutBucketWebsite
+                  - s3:DeleteBucketWebsite
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:GetBucketVersioning
+                  - s3:PutBucketVersioning
+                Resource:
+                  - arn:aws:s3:::2ndtolworth
+                  - !Sub arn:aws:s3:::${ArtifactBucket}
+              - Sid: BucketObjectManagement
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - arn:aws:s3:::2ndtolworth/*
+                  - !Sub arn:aws:s3:::${ArtifactBucket}/*
+              - Sid: LogsManagement
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:PutRetentionPolicy
+                  - logs:DeleteRetentionPolicy
+                  - logs:DescribeLogGroups
+                  - logs:TagResource
+                  - logs:UntagResource
+                Resource:
+                  - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/scouts*
+                  - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/scouts2sqs*
+                  - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/sqs2scouts*
+              - Sid: CloudFrontManagement
+                Effect: Allow
+                Action:
+                  - cloudfront:CreateDistribution
+                  - cloudfront:ListDistributions
+                Resource: '*'
+              - Sid: CloudFrontManagementScoped
+                Effect: Allow
+                Action:
+                  - cloudfront:GetDistribution
+                  - cloudfront:GetDistributionConfig
+                  - cloudfront:UpdateDistribution
+                  - cloudfront:DeleteDistribution
+                  - cloudfront:TagResource
+                  - cloudfront:UntagResource
+                  - cloudfront:CreateInvalidation
+                Resource:
+                  - !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/*
+              - Sid: AcmReadUse
+                Effect: Allow
+                Action:
+                  - acm:AddTagsToCertificate
+                  - acm:DescribeCertificate
+                  - acm:GetCertificate
+                  - acm:ListCertificates
+                  - acm:ListTagsForCertificate
+                  - acm:RemoveTagsFromCertificate
+                  - acm:RequestCertificate
+                Resource: '*'
+              - Sid: CloudFormationInspection
+                Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:GetTemplate
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:ValidateTemplate
+                Resource: '*'
+              - Sid: CallerIdentity
+                Effect: Allow
+                Action: sts:GetCallerIdentity
+                Resource: '*'
+
+  GitHubActionsScoutsDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: GitHubActionsScoutsDeployRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${ScoutsRepoOwner}/${ScoutsRepoName}:ref:refs/heads/${ScoutsBranch}
+      Policies:
+        - PolicyName: ScoutsWebsiteDeploy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CloudFormationDeploy
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStacks
+                  - cloudformation:ExecuteChangeSet
+                Resource:
+                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-cloudfront/*
+                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:changeSet/*/*
+              - Sid: CloudFormationReadGlobal
+                Effect: Allow
+                Action:
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:ValidateTemplate
+                Resource: '*'
+              - Sid: WebsiteBucketAccess
+                Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                  - s3:GetBucketPolicy
+                  - s3:PutBucketPolicy
+                  - s3:GetBucketWebsite
+                  - s3:PutBucketWebsite
+                  - s3:PutBucketPublicAccessBlock
+                Resource: arn:aws:s3:::2ndtolworth
+              - Sid: WebsiteObjectAccess
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: arn:aws:s3:::2ndtolworth/*
+              - Sid: CloudFrontReadInvalidate
+                Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation
+                  - cloudfront:GetDistribution
+                  - cloudfront:GetDistributionConfig
+                Resource:
+                  - !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/*
+              - Sid: CloudFrontListGlobal
+                Effect: Allow
+                Action:
+                  - cloudfront:ListDistributions
+                Resource: '*'
+              - Sid: PassCloudFormationRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt CloudFormationExecutionRole.Arn
+              - Sid: CallerIdentity
+                Effect: Allow
+                Action: sts:GetCallerIdentity
+                Resource: '*'
+
+  GitHubActionsLambdasDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: GitHubActionsLambdasDeployRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${ScoutsRepoOwner}/${LambdasRepoName}:ref:refs/heads/${LambdasPrimaryBranch}
+                  - !Sub repo:${ScoutsRepoOwner}/${LambdasRepoName}:ref:refs/heads/${LambdasSecondaryBranch}
+      Policies:
+        - PolicyName: ScoutsLambdaDeploy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CloudFormationDeploy
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStacks
+                  - cloudformation:ExecuteChangeSet
+                Resource:
+                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-lambda/*
+                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts2sqs-lambda/*
+                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/sqs2scouts-lambda/*
+                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-queues/*
+                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:changeSet/*/*
+              - Sid: CloudFormationReadGlobal
+                Effect: Allow
+                Action:
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:ValidateTemplate
+                Resource: '*'
+              - Sid: ArtifactBucketAccess
+                Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource: !Sub arn:aws:s3:::${ArtifactBucket}
+              - Sid: ArtifactObjectAccess
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub arn:aws:s3:::${ArtifactBucket}/*
+              - Sid: FunctionReadback
+                Effect: Allow
+                Action:
+                  - lambda:GetFunctionConfiguration
+                  - lambda:GetFunctionUrlConfig
+                Resource:
+                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts
+                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts2sqs
+                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:sqs2scouts
+              - Sid: PassCloudFormationRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt CloudFormationExecutionRole.Arn
+              - Sid: CallerIdentity
+                Effect: Allow
+                Action: sts:GetCallerIdentity
+                Resource: '*'
+
+Outputs:
+  ArtifactBucketName:
+    Value: !Ref ArtifactBucket
+  GitHubOidcProviderArn:
+    Value: !Ref GitHubOidcProvider
+  ScoutsBootstrapAdminRoleArn:
+    Value: !GetAtt ScoutsBootstrapAdminRole.Arn
+  GitHubActionsScoutsDeployRoleArn:
+    Value: !GetAtt GitHubActionsScoutsDeployRole.Arn
+  GitHubActionsLambdasDeployRoleArn:
+    Value: !GetAtt GitHubActionsLambdasDeployRole.Arn
+  CloudFormationExecutionRoleArn:
+    Value: !GetAtt CloudFormationExecutionRole.Arn
