@@ -312,6 +312,7 @@ Resources:
                 Effect: Allow
                 Action:
                   - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteStack
                   - cloudformation:DeleteChangeSet
                   - cloudformation:DescribeChangeSet
                   - cloudformation:DescribeStackEvents
