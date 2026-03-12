@@ -3,11 +3,15 @@
 # Manual deployment script for scouts website to S3
 # This syncs the local files to the S3 bucket
 
+AWS_PROFILE_NAME="${AWS_PROFILE_NAME:-${AWS_PROFILE:-scouts}}"
+WEBSITE_BUCKET="${WEBSITE_BUCKET:-scouts-2ndtolworth-prod-553490163883}"
+WEBSITE_URL="${WEBSITE_URL:-https://d1wv092irxi2lt.cloudfront.net}"
+
 echo "Deploying scouts website to S3..."
 
 # Deploy root index.html
 echo "Uploading index.html..."
-aws s3 cp index.html s3://2ndtolworth/ --cache-control "max-age=0, no-cache, no-store, must-revalidate"
+AWS_PROFILE="${AWS_PROFILE_NAME}" aws s3 cp index.html "s3://${WEBSITE_BUCKET}/" --cache-control "max-age=0, no-cache, no-store, must-revalidate"
 
 # Remove legacy top-level directories that are now served from /website/
 LEGACY_DIRS=(
@@ -26,8 +30,8 @@ LEGACY_DIRS=(
 )
 
 for dir in "${LEGACY_DIRS[@]}"; do
-  echo "Removing legacy path s3://2ndtolworth/${dir} (if present)..."
-  aws s3 rm "s3://2ndtolworth/${dir}" --recursive --quiet >/dev/null 2>&1 || true
+  echo "Removing legacy path s3://${WEBSITE_BUCKET}/${dir} (if present)..."
+  AWS_PROFILE="${AWS_PROFILE_NAME}" aws s3 rm "s3://${WEBSITE_BUCKET}/${dir}" --recursive --quiet >/dev/null 2>&1 || true
 done
 
 # Sync website directory excluding generated event images
@@ -50,7 +54,7 @@ ADMIN_API_BASE_VALUE="${ADMIN_API_BASE:-/admin-api}"
   fi
 } > website/admin/admin-config.js
 
-aws s3 sync website/ s3://2ndtolworth/website/ \
+AWS_PROFILE="${AWS_PROFILE_NAME}" aws s3 sync website/ "s3://${WEBSITE_BUCKET}/website/" \
   --delete \
   --exclude "eventImages/*" \
   --exclude "eventImages/**" \
@@ -59,13 +63,13 @@ aws s3 sync website/ s3://2ndtolworth/website/ \
 # Sync website event images without deleting lambda-uploaded assets
 if [ -d "website/eventImages" ]; then
   echo "Syncing website/eventImages without delete..."
-  aws s3 sync website/eventImages/ s3://2ndtolworth/website/eventImages/ \
+  AWS_PROFILE="${AWS_PROFILE_NAME}" aws s3 sync website/eventImages/ "s3://${WEBSITE_BUCKET}/website/eventImages/" \
     --cache-control "max-age=0, no-cache, no-store, must-revalidate"
 fi
 
 if [ -f "lambdas/scouts/sqs/sqs2scouts/scouts.conf" ]; then
-  echo "Uploading lambdas/scouts/sqs/sqs2scouts/scouts.conf to s3://2ndtolworth/scouts.conf..."
-  aws s3 cp lambdas/scouts/sqs/sqs2scouts/scouts.conf s3://2ndtolworth/scouts.conf \
+  echo "Uploading lambdas/scouts/sqs/sqs2scouts/scouts.conf to s3://${WEBSITE_BUCKET}/scouts.conf..."
+  AWS_PROFILE="${AWS_PROFILE_NAME}" aws s3 cp lambdas/scouts/sqs/sqs2scouts/scouts.conf "s3://${WEBSITE_BUCKET}/scouts.conf" \
     --cache-control "max-age=0, no-cache, no-store, must-revalidate"
 else
   echo "No lambdas/scouts/sqs/sqs2scouts/scouts.conf found locally, skipping upload."
@@ -73,11 +77,12 @@ fi
 
 echo ""
 echo "✅ Deployment complete!"
-echo "Website URL: http://2ndtolworth.s3-website.eu-west-2.amazonaws.com"
+echo "Website bucket: s3://${WEBSITE_BUCKET}"
+echo "Website URL: ${WEBSITE_URL}"
 
 if [ -n "${CLOUDFRONT_DISTRIBUTION_ID:-}" ]; then
   echo "Creating CloudFront invalidation for ${CLOUDFRONT_DISTRIBUTION_ID}..."
-  aws cloudfront create-invalidation \
+  AWS_PROFILE="${AWS_PROFILE_NAME}" aws cloudfront create-invalidation \
     --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
     --paths "/index.html" "/scouts.conf" "/website/*" "/agenda.json" "/runtime/*" "/events/*" >/dev/null
   echo "CloudFront invalidation submitted."

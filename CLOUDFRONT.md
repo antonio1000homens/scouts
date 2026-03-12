@@ -5,6 +5,8 @@
 The 2ndtolworth.org.uk CloudFront distribution is managed via CloudFormation.
 
 - **Stack Name**: scouts-cloudfront
+- **Distribution ID**: `E3INLSADL3AN6C`
+- **Distribution Domain**: `d1wv092irxi2lt.cloudfront.net`
 - **Template**: `cloudfront-stack.yaml`
 - **AWS Profile**: `scouts`
 - **Certificate Region**: `us-east-1`
@@ -16,7 +18,7 @@ The distribution has specific no-cache behaviors for:
 - `/runtime/*` - Runtime configuration
 - `/events/*` - Event images and data
 
-These paths use cache policy `f6072fdc-ae27-4d49-a206-4f2a80c82fbe` (no-cache).
+These paths use cache policy `4135ea2d-6df8-44a3-9df3-4b5a84be39ad` (`Managed-CachingDisabled`).
 
 ## First-Time Setup In The Scouts Account
 
@@ -31,10 +33,7 @@ These paths use cache policy `f6072fdc-ae27-4d49-a206-4f2a80c82fbe` (no-cache).
    AWS_PROFILE=scouts CERTIFICATE_ARN=<issued-us-east-1-cert-arn> ENABLE_ALIAS=false bash deploy-cloudfront.sh
    ```
 5. Update the GitHub secret `CLOUDFRONT_DISTRIBUTION_ID` in `antonio1000homens/scouts`.
-6. When you are ready for cutover, remove `2ndtolworth.org.uk` from the old distribution and redeploy with:
-   ```bash
-   AWS_PROFILE=scouts CERTIFICATE_ARN=<issued-us-east-1-cert-arn> ENABLE_ALIAS=true bash deploy-cloudfront.sh
-   ```
+6. Cutover completed on March 12, 2026 by moving `2ndtolworth.org.uk` from the old Windsor distribution to `E3INLSADL3AN6C`.
 
 ## Updating CloudFront
 
