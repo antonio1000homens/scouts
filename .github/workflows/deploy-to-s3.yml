@@ -35,6 +35,10 @@ jobs:
         aws s3 website "s3://${WEBSITE_BUCKET}/" \
           --index-document index.html \
           --error-document index.html
+        aws s3api put-public-access-block \
+          --bucket "${WEBSITE_BUCKET}" \
+          --public-access-block-configuration \
+            BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false
 
     - name: Set S3 bucket policy for public read access
       run: |
