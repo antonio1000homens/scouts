@@ -27,13 +27,14 @@
 
 ## CloudFront Infrastructure
 
-- CloudFront distribution (E3I6EACBCFE736) is managed by CloudFormation stack `scouts-cloudfront`.
+- CloudFront distribution `E3INLSADL3AN6C` is now managed in the Scouts AWS account by CloudFormation stack `scouts-cloudfront`.
+- CloudFront domain: `d1wv092irxi2lt.cloudfront.net`
 - Template: `scouts/cloudfront-stack.yaml`
 - Cache behaviors configured for no-cache on:
   - `/agenda.json`
   - `/runtime/*`
   - `/events/*`
-- To update CloudFront: modify `cloudfront-stack.yaml` and run `aws cloudformation update-stack --stack-name scouts-cloudfront --template-body file://cloudfront-stack.yaml`
+- To update CloudFront: modify `cloudfront-stack.yaml` and use `AWS_PROFILE=scouts`.
 - Do NOT manually update CloudFront distribution via console or CLI - use CloudFormation.
 
 ## Deployment Notes
