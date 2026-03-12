@@ -218,7 +218,7 @@ Resources:
                   - s3:GetBucketVersioning
                   - s3:PutBucketVersioning
                 Resource:
-                  - arn:aws:s3:::2ndtolworth
+                  - arn:aws:s3:::scouts-2ndtolworth-prod-553490163883
                   - !Sub arn:aws:s3:::${ArtifactBucket}
               - Sid: BucketObjectManagement
                 Effect: Allow
@@ -227,7 +227,7 @@ Resources:
                   - s3:PutObject
                   - s3:DeleteObject
                 Resource:
-                  - arn:aws:s3:::2ndtolworth/*
+                  - arn:aws:s3:::scouts-2ndtolworth-prod-553490163883/*
                   - !Sub arn:aws:s3:::${ArtifactBucket}/*
               - Sid: LogsManagement
                 Effect: Allow
@@ -336,14 +336,14 @@ Resources:
                   - s3:GetBucketWebsite
                   - s3:PutBucketWebsite
                   - s3:PutBucketPublicAccessBlock
-                Resource: arn:aws:s3:::2ndtolworth
+                Resource: arn:aws:s3:::scouts-2ndtolworth-prod-553490163883
               - Sid: WebsiteObjectAccess
                 Effect: Allow
                 Action:
                   - s3:GetObject
                   - s3:PutObject
                   - s3:DeleteObject
-                Resource: arn:aws:s3:::2ndtolworth/*
+                Resource: arn:aws:s3:::scouts-2ndtolworth-prod-553490163883/*
               - Sid: CloudFrontReadInvalidate
                 Effect: Allow
                 Action:
