@@ -437,11 +437,17 @@ Resources:
                   - cloudformation:DescribeStacks
                   - cloudformation:ExecuteChangeSet
                 Resource:
+                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/nfc-lambdas/*
+                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/slack-handler-lambda/*
+                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/todoist-webhook-lambda/*
+                  - !Sub arn:aws:cloudformation:eu-west-1:${AWS::AccountId}:stack/alexa-confirmation-lambda/*
+                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/alexa-confirmation-lambda/*
                   - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-lambda/*
                   - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts2sqs-lambda/*
                   - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/sqs2scouts-lambda/*
                   - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-queues/*
                   - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:changeSet/*/*
+                  - !Sub arn:aws:cloudformation:eu-west-1:${AWS::AccountId}:changeSet/*/*
               - Sid: CloudFormationReadGlobal
                 Effect: Allow
                 Action:
