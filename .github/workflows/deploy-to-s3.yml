@@ -51,39 +51,141 @@ jobs:
       scouts_slack_handler: "${{ steps.changes.outputs['scouts-slack-handler'] }}"
     steps:
       - uses: actions/checkout@v5
-      - uses: dorny/paths-filter@v3
-        id: changes
         with:
-          list-files: shell
-          filters: |
-            website:
-              - 'index.html'
-              - 'website/**'
-              - 'deploy-manual.sh'
-              - '.github/workflows/deploy-to-s3.yml'
-              - 'lambdas/sqs2scouts/scouts.conf'
-            scouts-function:
-              - 'lambdas/scouts/**'
-              - 'lambdas/tools/**'
-              - 'lambdas/shared-layer/**'
-              - 'lambdas/cloudformation/templates/scouts.yaml'
-            scouts-queues:
-              - 'lambdas/scouts-queues/**'
-              - 'lambdas/cloudformation/templates/scouts-queues.yaml'
-            scouts2sqs:
-              - 'lambdas/scouts2sqs/**'
-              - 'lambdas/tools/**'
-              - 'lambdas/shared-layer/**'
-              - 'lambdas/cloudformation/templates/scouts2sqs.yaml'
-            sqs2scouts:
-              - 'lambdas/sqs2scouts/**'
-              - 'lambdas/tools/**'
-              - 'lambdas/shared-layer/**'
-              - 'lambdas/cloudformation/templates/sqs2scouts.yaml'
-            scouts-slack-handler:
-              - 'lambdas/scouts-slack-handler/**'
-              - 'lambdas/shared-layer/**'
-              - 'lambdas/cloudformation/templates/slack-handler.yaml'
+          fetch-depth: 0
+      - name: Detect changed targets
+        id: changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_BEFORE: ${{ github.event.before }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          normalize_output_name() {
+            printf '%s' "$1" | tr '-' '_'
+          }
+
+          append_file() {
+            local key="$1"
+            local file="$2"
+            local var_name
+            var_name="$(normalize_output_name "${key}")_files"
+            local current_value="${!var_name:-}"
+            if [ -n "${current_value}" ]; then
+              printf -v "${var_name}" '%s %s' "${current_value}" "${file}"
+            else
+              printf -v "${var_name}" '%s' "${file}"
+            fi
+          }
+
+          mark_changed() {
+            local key="$1"
+            local file="$2"
+            local var_name
+            var_name="$(normalize_output_name "${key}")"
+            printf -v "${var_name}" 'true'
+            append_file "${key}" "${file}"
+          }
+
+          website='false'
+          scouts_queues='false'
+          scouts_function='false'
+          scouts2sqs='false'
+          sqs2scouts='false'
+          scouts_slack_handler='false'
+
+          website_files=''
+          scouts_queues_files=''
+          scouts_function_files=''
+          scouts2sqs_files=''
+          sqs2scouts_files=''
+          scouts_slack_handler_files=''
+
+          base_ref=''
+          changed_files=''
+
+          if [ "${EVENT_NAME}" = 'push' ]; then
+            if [ -n "${EVENT_BEFORE}" ] && [ "${EVENT_BEFORE}" != '0000000000000000000000000000000000000000' ]; then
+              base_ref="${EVENT_BEFORE}"
+              if ! git cat-file -e "${base_ref}^{commit}" 2>/dev/null; then
+                git fetch --no-tags origin "${base_ref}" --depth=1
+              fi
+            elif git rev-parse HEAD^ >/dev/null 2>&1; then
+              base_ref='HEAD^'
+            fi
+          elif git rev-parse HEAD^ >/dev/null 2>&1; then
+            base_ref='HEAD^'
+          fi
+
+          if [ -n "${base_ref}" ]; then
+            changed_files="$(git diff --name-only "${base_ref}" "${EVENT_SHA}")"
+          else
+            changed_files="$(git diff-tree --no-commit-id --name-only -r "${EVENT_SHA}")"
+          fi
+
+          echo "Base ref: ${base_ref:-<none>}"
+          echo "Changed files:"
+          if [ -n "${changed_files}" ]; then
+            printf '%s\n' "${changed_files}"
+          else
+            echo "<none>"
+          fi
+
+          while IFS= read -r file; do
+            [ -n "${file}" ] || continue
+
+            case "${file}" in
+              index.html|deploy-manual.sh|.github/workflows/deploy-to-s3.yml|lambdas/sqs2scouts/scouts.conf|website/*)
+                mark_changed 'website' "${file}"
+                ;;
+            esac
+
+            case "${file}" in
+              lambdas/scouts-queues/*|lambdas/cloudformation/templates/scouts-queues.yaml)
+                mark_changed 'scouts-queues' "${file}"
+                ;;
+            esac
+
+            case "${file}" in
+              lambdas/scouts/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/scouts.yaml)
+                mark_changed 'scouts-function' "${file}"
+                ;;
+            esac
+
+            case "${file}" in
+              lambdas/scouts2sqs/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/scouts2sqs.yaml)
+                mark_changed 'scouts2sqs' "${file}"
+                ;;
+            esac
+
+            case "${file}" in
+              lambdas/sqs2scouts/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/sqs2scouts.yaml)
+                mark_changed 'sqs2scouts' "${file}"
+                ;;
+            esac
+
+            case "${file}" in
+              lambdas/scouts-slack-handler/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/slack-handler.yaml)
+                mark_changed 'scouts-slack-handler' "${file}"
+                ;;
+            esac
+          done <<< "${changed_files}"
+
+          {
+            echo "website=${website}"
+            echo "website_files=${website_files}"
+            echo "scouts-queues=${scouts_queues}"
+            echo "scouts-queues_files=${scouts_queues_files}"
+            echo "scouts-function=${scouts_function}"
+            echo "scouts-function_files=${scouts_function_files}"
+            echo "scouts2sqs=${scouts2sqs}"
+            echo "scouts2sqs_files=${scouts2sqs_files}"
+            echo "sqs2scouts=${sqs2scouts}"
+            echo "sqs2scouts_files=${sqs2scouts_files}"
+            echo "scouts-slack-handler=${scouts_slack_handler}"
+            echo "scouts-slack-handler_files=${scouts_slack_handler_files}"
+          } >> "${GITHUB_OUTPUT}"
       - name: Debug detected changes
         run: |
           echo "website=${{ steps.changes.outputs.website }} files=${{ steps.changes.outputs.website_files }}"
