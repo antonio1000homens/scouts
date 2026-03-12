@@ -41,5 +41,6 @@
 
 - `lambdas/sqs2scouts/deploy.sh` uploads `scouts.conf` to S3 during lambda deploys.
 - `scouts/.github/workflows/deploy-to-s3.yml` uploads `lambdas/sqs2scouts/scouts.conf` to `s3://scouts-2ndtolworth-prod-553490163883/scouts.conf` during website deploys.
-- `scouts/deploy-manual.sh` also uploads `lambdas/sqs2scouts/scouts.conf` to `s3://scouts-2ndtolworth-prod-553490163883/scouts.conf`.
+- `scouts/deploy.sh website` uploads `lambdas/sqs2scouts/scouts.conf` to `s3://scouts-2ndtolworth-prod-553490163883/scouts.conf`.
+- `scouts/deploy-manual.sh` is a compatibility wrapper around `./deploy.sh website`.
 - GitHub Actions in this repo now own Scouts website, queue, Lambda, and Scouts Slack-handler deployments.

@@ -59,10 +59,14 @@ This website has been completely redesigned to match the official Scouts UK bran
 - Multi-column footer
 
 ## Deployment
-
 - Website, Scouts queues, Scouts Lambdas, and the Scouts-specific Slack handler now deploy from this repo.
 - GitHub Actions workflow: `.github/workflows/deploy-to-s3.yml`
 - Lambda deployment code and CloudFormation templates live under `lambdas/`.
+- Local deployment entrypoint: `./deploy.sh`
+- Examples:
+  - `./deploy.sh website`
+  - `./deploy.sh lambdas`
+  - `./deploy.sh all`
 
 ## How to Use
 
