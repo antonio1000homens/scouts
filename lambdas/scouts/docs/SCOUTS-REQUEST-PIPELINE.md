@@ -12,6 +12,8 @@ The current source of truth is the Lambda code, not the older flow notes.
 
 - `scouts` can send to `scoutsRequests`: `lambdas/cloudformation/templates/scouts.yaml`
 - `scouts2sqs` is triggered by `scoutsRequests` and can send to `scoutsProcessing`: `lambdas/cloudformation/templates/scouts2sqs.yaml`
+- `sqs2scouts` is triggered by `scoutsProcessing`: `lambdas/cloudformation/templates/sqs2scouts.yaml`
+- `scoutsDecision` is not a trigger for `scouts`. Keep `scoutsDecision -> scouts` unmapped to avoid feedback loops.
 
 ## Diagram
 
@@ -30,7 +32,7 @@ flowchart LR
     B -->|"admin generate image URL"| Q9["scoutsRequests\n{ realm: pixabay, action: request, subject: hex }"]
     B -->|"reset removed events"| Q10["scoutsRequests\n{ realm: scouts, subject: reset, action: removed-events summary }"]
 
-    C["sqs2scouts -> scouts lambda\naction: persisted"] -->|"HEX still incomplete"| Q11["scoutsRequests\n{ realm: scoutsRequest, action: new, subject: full event object }"]
+    C["sqs2scouts callback path\nno direct SQS trigger into scouts"] -->|"HEX still incomplete"| Q11["scoutsRequests\n{ realm: scoutsRequest, action: new, subject: full event object }"]
 
     subgraph D["scouts2sqs consuming scoutsRequests"]
         Q1 --> E{"subject completeness"}
@@ -89,5 +91,19 @@ flowchart LR
 
 - `lambdas/cloudformation/templates/scouts.yaml`
 - `lambdas/cloudformation/templates/scouts2sqs.yaml`
+- `lambdas/cloudformation/templates/sqs2scouts.yaml`
 - `lambdas/scouts/function/scouts.mjs`
 - `lambdas/scouts/sqs/scouts2sqs/function/scouts2sqs.mjs`
+
+## Guardrail
+
+Never add a Lambda event source mapping from `scoutsDecision` to `scouts`.
+
+Allowed queue triggers:
+- `scoutsRequests -> scouts2sqs`
+- `scoutsProcessing -> sqs2scouts`
+
+Disallowed trigger:
+- `scoutsDecision -> scouts`
+
+`scoutsDecision` may still be used as a notification queue for auditing or external consumers, but not as an automatic input back into `scouts`.
