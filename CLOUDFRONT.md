@@ -28,9 +28,13 @@ These paths use cache policy `f6072fdc-ae27-4d49-a206-4f2a80c82fbe` (no-cache).
 3. Wait for the certificate to reach `ISSUED`.
 4. Deploy CloudFront:
    ```bash
-   AWS_PROFILE=scouts CERTIFICATE_ARN=<issued-us-east-1-cert-arn> bash deploy-cloudfront.sh
+   AWS_PROFILE=scouts CERTIFICATE_ARN=<issued-us-east-1-cert-arn> ENABLE_ALIAS=false bash deploy-cloudfront.sh
    ```
 5. Update the GitHub secret `CLOUDFRONT_DISTRIBUTION_ID` in `antonio1000homens/scouts`.
+6. When you are ready for cutover, remove `2ndtolworth.org.uk` from the old distribution and redeploy with:
+   ```bash
+   AWS_PROFILE=scouts CERTIFICATE_ARN=<issued-us-east-1-cert-arn> ENABLE_ALIAS=true bash deploy-cloudfront.sh
+   ```
 
 ## Updating CloudFront
 

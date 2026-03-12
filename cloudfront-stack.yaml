@@ -5,6 +5,12 @@ Parameters:
   DomainName:
     Type: String
     Default: 2ndtolworth.org.uk
+  EnableAlias:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
   CertificateArn:
     Type: String
     Description: ACM certificate ARN in us-east-1 for the public Scouts hostname.
@@ -12,14 +18,19 @@ Parameters:
     Type: String
     Default: scouts-2ndtolworth-prod-553490163883.s3-website.eu-west-2.amazonaws.com
 
+Conditions:
+  UseAlias: !Equals [!Ref EnableAlias, "true"]
+
 Resources:
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
         Enabled: true
-        Aliases:
-          - !Ref DomainName
+        Aliases: !If
+          - UseAlias
+          - [!Ref DomainName]
+          - !Ref AWS::NoValue
         Origins:
           - Id: scouts-2ndtolworth-prod-s3-origin
             DomainName: !Ref OriginDomainName
