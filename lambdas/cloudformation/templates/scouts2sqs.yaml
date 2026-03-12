@@ -1,0 +1,231 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: scouts2sqs Lambda stack (function + layer + IAM + function URL + SQS event source mapping)
+
+Parameters:
+  CodeBucket:
+    Type: String
+    Description: S3 bucket that stores Lambda artifacts.
+  FunctionCodeKey:
+    Type: String
+    Description: S3 key for function zip.
+  LayerCodeKey:
+    Type: String
+    Description: S3 key for layer zip.
+  FunctionName:
+    Type: String
+    Default: scouts2sqs
+  LayerName:
+    Type: String
+    Default: scouts-shared
+  RoleName:
+    Type: String
+    Default: scouts2sqs-lambda-role
+  Runtime:
+    Type: String
+    Default: nodejs22.x
+  Handler:
+    Type: String
+    Default: scouts2sqs.lambdaHandler
+  Timeout:
+    Type: Number
+    Default: 30
+  MemorySize:
+    Type: Number
+    Default: 256
+  QueueArn:
+    Type: String
+    Description: SQS queue ARN that this function can send to.
+  ScoutsRequestsQueueArn:
+    Type: String
+    Description: SQS queue ARN used as trigger source for scoutsRequest messages.
+    Default: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
+  ScoutsRequestsQueueUrl:
+    Type: String
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+  ProcessingQueueUrl:
+    Type: String
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
+  DlqUrl:
+    Type: String
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
+  BatchSize:
+    Type: Number
+    Default: 1
+  FunctionUrlAuthType:
+    Type: String
+    AllowedValues:
+      - NONE
+      - AWS_IAM
+    Default: NONE
+  FunctionUrlCorsAllowOrigins:
+    Type: CommaDelimitedList
+    Default: https://2ndtolworth.org.uk
+  FunctionUrlCorsAllowMethods:
+    Type: CommaDelimitedList
+    Default: POST
+  FunctionUrlCorsAllowHeaders:
+    Type: CommaDelimitedList
+    Default: content-type,x-api-key,x-requested-with
+  FunctionUrlCorsMaxAge:
+    Type: Number
+    Default: 3600
+  SlackSigningSecret:
+    Type: String
+    Default: ''
+    NoEcho: true
+  SlackBotToken:
+    Type: String
+    Default: ''
+    NoEcho: true
+  ExistingScouts2SqsFunctionUrl:
+    Type: String
+    Default: ''
+  TargetBucket:
+    Type: String
+    Default: scouts-2ndtolworth-prod-553490163883
+  ScoutsConfigKey:
+    Type: String
+    Default: scouts.conf
+  ApprovalMetadataPrefix:
+    Type: String
+    Default: approvals
+  RequiredApiKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+  Scouts2SqsPublishEnabled:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+
+Conditions:
+  IsPublicFunctionUrl: !Equals [!Ref FunctionUrlAuthType, 'NONE']
+
+Resources:
+  Scouts2SqsLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: !Ref LayerName
+      CompatibleRuntimes:
+        - !Ref Runtime
+      Content:
+        S3Bucket: !Ref CodeBucket
+        S3Key: !Ref LayerCodeKey
+
+  Scouts2SqsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: Scouts2SQSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:GetQueueAttributes
+                Resource: !Ref QueueArn
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:ChangeMessageVisibility
+                  - sqs:GetQueueAttributes
+                Resource: !Ref ScoutsRequestsQueueArn
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource: !Sub arn:aws:s3:::${TargetBucket}
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub arn:aws:s3:::${TargetBucket}/*
+
+  Scouts2SqsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref FunctionName
+      Runtime: !Ref Runtime
+      Handler: !Ref Handler
+      Role: !GetAtt Scouts2SqsRole.Arn
+      Timeout: !Ref Timeout
+      MemorySize: !Ref MemorySize
+      Layers:
+        - !Ref Scouts2SqsLayer
+      Environment:
+        Variables:
+          SLACK_SIGNING_SECRET: !Ref SlackSigningSecret
+          SLACK_BOT_TOKEN: !Ref SlackBotToken
+          SCOUTS2SQS_FUNCTION_URL: !Ref ExistingScouts2SqsFunctionUrl
+          REQUIRED_API_KEY: !Ref RequiredApiKey
+          TARGET_BUCKET: !Ref TargetBucket
+          SCOUTS_CONFIG_KEY: !Ref ScoutsConfigKey
+          APPROVAL_METADATA_PREFIX: !Ref ApprovalMetadataPrefix
+          SCOUTS2SQS_PUBLISH_ENABLED: !Ref Scouts2SqsPublishEnabled
+          SCOUTS_REQUESTS_QUEUE_URL: !Ref ScoutsRequestsQueueUrl
+          SQS_QUEUE_URL: !Ref ProcessingQueueUrl
+          DLQ_URL: !Ref DlqUrl
+      Code:
+        S3Bucket: !Ref CodeBucket
+        S3Key: !Ref FunctionCodeKey
+
+  Scouts2SqsFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref Scouts2SqsFunction
+      AuthType: !Ref FunctionUrlAuthType
+      Cors:
+        AllowOrigins: !Ref FunctionUrlCorsAllowOrigins
+        AllowMethods: !Ref FunctionUrlCorsAllowMethods
+        AllowHeaders: !Ref FunctionUrlCorsAllowHeaders
+        MaxAge: !Ref FunctionUrlCorsMaxAge
+
+  Scouts2SqsEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      FunctionName: !Ref Scouts2SqsFunction
+      EventSourceArn: !Ref ScoutsRequestsQueueArn
+      BatchSize: !Ref BatchSize
+      Enabled: true
+
+  Scouts2SqsUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: IsPublicFunctionUrl
+    Properties:
+      FunctionName: !Ref Scouts2SqsFunction
+      Principal: '*'
+      Action: lambda:InvokeFunctionUrl
+      FunctionUrlAuthType: NONE
+
+  Scouts2SqsInvokeFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Condition: IsPublicFunctionUrl
+    Properties:
+      FunctionName: !Ref Scouts2SqsFunction
+      Principal: '*'
+      Action: lambda:InvokeFunction
+      InvokedViaFunctionUrl: true
+
+Outputs:
+  FunctionArn:
+    Value: !GetAtt Scouts2SqsFunction.Arn
+  FunctionUrl:
+    Value: !GetAtt Scouts2SqsFunctionUrl.FunctionUrl
+  LayerVersionArn:
+    Value: !Ref Scouts2SqsLayer
+  EventSourceMappingId:
+    Value: !Ref Scouts2SqsEventSourceMapping

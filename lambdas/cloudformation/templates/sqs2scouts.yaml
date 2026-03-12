@@ -1,0 +1,200 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: sqs2scouts Lambda stack (function + layer + IAM + SQS event source mapping)
+
+Parameters:
+  CodeBucket:
+    Type: String
+    Description: S3 bucket that stores Lambda artifacts.
+  FunctionCodeKey:
+    Type: String
+    Description: S3 key for function zip.
+  LayerCodeKey:
+    Type: String
+    Description: S3 key for layer zip.
+  FunctionName:
+    Type: String
+    Default: sqs2scouts
+  LayerName:
+    Type: String
+    Default: scouts-shared
+  RoleName:
+    Type: String
+    Default: sqs2scouts-lambda-role
+  Runtime:
+    Type: String
+    Default: nodejs22.x
+  Handler:
+    Type: String
+    Default: sqs2scouts.lambdaHandler
+  Timeout:
+    Type: Number
+    Default: 30
+  MemorySize:
+    Type: Number
+    Default: 256
+  QueueArn:
+    Type: String
+    Description: SQS queue ARN used as event source.
+  ScoutsDecisionQueueArn:
+    Type: String
+    Default: arn:aws:sqs:eu-west-2:553490163883:scoutsDecision
+  ScoutsDecisionQueueUrl:
+    Type: String
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsDecision
+  DlqArn:
+    Type: String
+    Default: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessingDLQ
+  DlqUrl:
+    Type: String
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
+  ProcessingQueueUrl:
+    Type: String
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
+  BatchSize:
+    Type: Number
+    Default: 1
+  SlackSigningSecret:
+    Type: String
+    Default: ''
+    NoEcho: true
+  SlackBotToken:
+    Type: String
+    Default: ''
+    NoEcho: true
+  GeminiApiKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+  GeminiApiVersion:
+    Type: String
+    Default: ''
+  GeminiImageApiVersion:
+    Type: String
+    Default: ''
+  GeminiImageModel:
+    Type: String
+    Default: ''
+  GeminiTextModel:
+    Type: String
+    Default: ''
+  SlackWebhookUrl:
+    Type: String
+    Default: https://slack.com/api/chat.postMessage
+  Scouts2SqsFunctionUrl:
+    Type: String
+    Default: ''
+  TargetBucket:
+    Type: String
+    Default: scouts-2ndtolworth-prod-553490163883
+  S3WebsiteBaseUrl:
+    Type: String
+    Default: https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com
+  ScoutsConfigKey:
+    Type: String
+    Default: scouts.conf
+  ApprovalMetadataPrefix:
+    Type: String
+    Default: approvals
+
+Resources:
+  Sqs2ScoutsLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: !Ref LayerName
+      CompatibleRuntimes:
+        - !Ref Runtime
+      Content:
+        S3Bucket: !Ref CodeBucket
+        S3Key: !Ref LayerCodeKey
+
+  Sqs2ScoutsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SQS2ScoutsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:ChangeMessageVisibility
+                  - sqs:GetQueueAttributes
+                Resource: !Ref QueueArn
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource:
+                  - !Ref ScoutsDecisionQueueArn
+                  - !Ref DlqArn
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource: !Sub arn:aws:s3:::${TargetBucket}
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub arn:aws:s3:::${TargetBucket}/*
+
+  Sqs2ScoutsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref FunctionName
+      Runtime: !Ref Runtime
+      Handler: !Ref Handler
+      Role: !GetAtt Sqs2ScoutsRole.Arn
+      Timeout: !Ref Timeout
+      MemorySize: !Ref MemorySize
+      Layers:
+        - !Ref Sqs2ScoutsLayer
+      Environment:
+        Variables:
+          SLACK_SIGNING_SECRET: !Ref SlackSigningSecret
+          SLACK_BOT_TOKEN: !Ref SlackBotToken
+          GEMINI_API_KEY: !Ref GeminiApiKey
+          GEMINI_API_VERSION: !Ref GeminiApiVersion
+          GEMINI_IMAGE_API_VERSION: !Ref GeminiImageApiVersion
+          GEMINI_IMAGE_MODEL: !Ref GeminiImageModel
+          GEMINI_TEXT_MODEL: !Ref GeminiTextModel
+          SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
+          SCOUTS2SQS_FUNCTION_URL: !Ref Scouts2SqsFunctionUrl
+          SCOUTS_DECISION_QUEUE_URL: !Ref ScoutsDecisionQueueUrl
+          SCOUTS_PROCESSING_QUEUE_URL: !Ref ProcessingQueueUrl
+          DLQ_URL: !Ref DlqUrl
+          TARGET_BUCKET: !Ref TargetBucket
+          SCOUTS_CONFIG_KEY: !Ref ScoutsConfigKey
+          APPROVAL_METADATA_PREFIX: !Ref ApprovalMetadataPrefix
+          S3_WEBSITE_BASE_URL: !Ref S3WebsiteBaseUrl
+      Code:
+        S3Bucket: !Ref CodeBucket
+        S3Key: !Ref FunctionCodeKey
+
+  Sqs2ScoutsEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      FunctionName: !Ref Sqs2ScoutsFunction
+      EventSourceArn: !Ref QueueArn
+      BatchSize: !Ref BatchSize
+      Enabled: true
+
+Outputs:
+  FunctionArn:
+    Value: !GetAtt Sqs2ScoutsFunction.Arn
+  LayerVersionArn:
+    Value: !Ref Sqs2ScoutsLayer
+  EventSourceMappingId:
+    Value: !Ref Sqs2ScoutsEventSourceMapping

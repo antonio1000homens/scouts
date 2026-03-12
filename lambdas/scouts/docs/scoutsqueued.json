@@ -1,0 +1,13 @@
+{
+  "source": "scouts",
+  "queue": "scoutsRequests",
+  "updatedAt": "2026-03-06T10:15:00.000Z",
+  "requests": [
+    {
+      "requestTime": "2026-03-06T10:14:58.000Z",
+      "requestId": "234ed75b-41a1-4f33-94dc-70d17374c3f3",
+      "hexId": "6a756d7020696e",
+      "title": "Jump In"
+    }
+  ]
+}

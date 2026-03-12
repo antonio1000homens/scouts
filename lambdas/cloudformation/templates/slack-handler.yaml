@@ -1,0 +1,186 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Slack handler Lambda stack (function + layer + IAM + function URL)
+
+Parameters:
+  CodeBucket:
+    Type: String
+    Description: S3 bucket that stores Lambda artifacts.
+  FunctionCodeKey:
+    Type: String
+    Description: S3 key for function zip.
+  LayerCodeKey:
+    Type: String
+    Description: S3 key for layer zip.
+  FunctionName:
+    Type: String
+    Default: scouts-slack-handler
+  LayerName:
+    Type: String
+    Default: scouts-shared
+  RoleArn:
+    Type: String
+    Default: ''
+    Description: Optional existing IAM role ARN. If blank, a role is created.
+  RoleName:
+    Type: String
+    Default: scouts-slack-handler-lambda-role
+    Description: Role name used only when RoleArn is not provided.
+  Runtime:
+    Type: String
+    Default: nodejs22.x
+  Handler:
+    Type: String
+    Default: slack-handler.lambdaHandler
+  Timeout:
+    Type: Number
+    Default: 30
+  MemorySize:
+    Type: Number
+    Default: 256
+  FunctionUrlAuthType:
+    Type: String
+    AllowedValues:
+      - NONE
+      - AWS_IAM
+    Default: NONE
+  SlackSigningSecret:
+    Type: String
+    Default: ''
+    NoEcho: true
+  SlackBotToken:
+    Type: String
+    Default: ''
+    NoEcho: true
+  RequiredApiKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+  ScoutsRequestQueueUrl:
+    Type: String
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+  ScoutsRequestQueueArn:
+    Type: String
+    Default: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
+  NfcQueueUrl:
+    Type: String
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+  NfcQueueArn:
+    Type: String
+    Default: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
+  TargetBucket:
+    Type: String
+    Default: scouts-2ndtolworth-prod-553490163883
+  ScoutsConfigKey:
+    Type: String
+    Default: scouts.conf
+
+Conditions:
+  UseProvidedRole: !Not [!Equals [!Ref RoleArn, '']]
+  CreateRole: !Equals [!Ref RoleArn, '']
+  IsPublicFunctionUrl: !Equals [!Ref FunctionUrlAuthType, 'NONE']
+
+Resources:
+  SlackHandlerRole:
+    Type: AWS::IAM::Role
+    Condition: CreateRole
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SlackHandlerSqsSendAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource:
+                  - !Ref ScoutsRequestQueueArn
+                  - !Ref NfcQueueArn
+
+  SlackHandlerLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: !Ref LayerName
+      CompatibleRuntimes:
+        - !Ref Runtime
+      Content:
+        S3Bucket: !Ref CodeBucket
+        S3Key: !Ref LayerCodeKey
+
+  SlackHandlerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref FunctionName
+      Runtime: !Ref Runtime
+      Handler: !Ref Handler
+      Role: !If [UseProvidedRole, !Ref RoleArn, !GetAtt SlackHandlerRole.Arn]
+      Timeout: !Ref Timeout
+      MemorySize: !Ref MemorySize
+      Layers:
+        - !Ref SlackHandlerLayer
+      Environment:
+        Variables:
+          SLACK_SIGNING_SECRET: !Ref SlackSigningSecret
+          SLACK_BOT_TOKEN: !Ref SlackBotToken
+          REQUIRED_API_KEY: !Ref RequiredApiKey
+          SCOUTS_REQUEST_QUEUE_URL: !Ref ScoutsRequestQueueUrl
+          NFC_QUEUE_URL: !Ref NfcQueueUrl
+          TARGET_BUCKET: !Ref TargetBucket
+          SCOUTS_CONFIG_KEY: !Ref ScoutsConfigKey
+      Code:
+        S3Bucket: !Ref CodeBucket
+        S3Key: !Ref FunctionCodeKey
+
+  SlackHandlerFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref SlackHandlerFunction
+      AuthType: !Ref FunctionUrlAuthType
+      Cors:
+        AllowCredentials: false
+        AllowHeaders:
+          - '*'
+        AllowMethods:
+          - '*'
+        AllowOrigins:
+          - '*'
+        ExposeHeaders:
+          - '*'
+        MaxAge: 86400
+
+  SlackHandlerUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: IsPublicFunctionUrl
+    Properties:
+      FunctionName: !Ref SlackHandlerFunction
+      Principal: '*'
+      Action: lambda:InvokeFunctionUrl
+      FunctionUrlAuthType: NONE
+
+  SlackHandlerInvokeFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Condition: IsPublicFunctionUrl
+    Properties:
+      FunctionName: !Ref SlackHandlerFunction
+      Principal: '*'
+      Action: lambda:InvokeFunction
+      InvokedViaFunctionUrl: true
+
+Outputs:
+  FunctionArn:
+    Value: !GetAtt SlackHandlerFunction.Arn
+  FunctionUrl:
+    Value: !GetAtt SlackHandlerFunctionUrl.FunctionUrl
+  LayerVersionArn:
+    Value: !Ref SlackHandlerLayer
+  EffectiveRoleArn:
+    Value: !If [UseProvidedRole, !Ref RoleArn, !GetAtt SlackHandlerRole.Arn]

@@ -1,0 +1,604 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Online Scout Manager////EN
+X-WR-CALNAME:Cubs Programme
+X-WR-TIMEZONE:Europe/London
+X-PUBLISHED-TTL:P1D
+BEGIN:VTIMEZONE
+TZID:Europe/London
+X-LIC-LOCATION:Europe/London
+BEGIN:DAYLIGHT
+TZNAME:BST
+TZOFFSETFROM:+0000
+TZOFFSETTO:+0100
+DTSTART:20240331T010000
+END:DAYLIGHT
+BEGIN:DAYLIGHT
+TZNAME:BST
+TZOFFSETFROM:+0000
+TZOFFSETTO:+0100
+DTSTART:20250330T010000
+END:DAYLIGHT
+BEGIN:DAYLIGHT
+TZNAME:BST
+TZOFFSETFROM:+0000
+TZOFFSETTO:+0100
+DTSTART:20260329T010000
+END:DAYLIGHT
+BEGIN:STANDARD
+TZNAME:GMT
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0000
+DTSTART:20241027T010000
+END:STANDARD
+BEGIN:STANDARD
+TZNAME:GMT
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0000
+DTSTART:20251026T010000
+END:STANDARD
+BEGIN:STANDARD
+TZNAME:GMT
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0000
+DTSTART:20261025T010000
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:osm-scouts-programme-8286902-Europe/London
+DTSTART;TZID=Europe/London:20241009T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20241009T200000
+SUMMARY:Painting and Decorating
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-7984856-Europe/London
+DTSTART;TZID=Europe/London:20241016T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20241016T200000
+SUMMARY:Young Minds
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8337580-Europe/London
+DTSTART;TZID=Europe/London:20241023T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20241023T200000
+SUMMARY:Games - Six vs Six
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8337577-Europe/London
+DTSTART;TZID=Europe/London:20241106T184500
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20241106T201500
+SUMMARY:Laser Quest
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-7984854-Europe/London
+DTSTART;TZID=Europe/London:20241113T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20241113T200000
+SUMMARY:Digital Citizen\, Digital Maker & Photography Badges - Revisiting S
+ ummer Hike photos
+CLASS:PUBLIC
+DESCRIPTION:Re-looking at summer hike in Bushey Park to see what is needed 
+ to be completed in order to earn these badges
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8366710-Europe/London
+DTSTART;TZID=Europe/London:20241120T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20241120T200000
+SUMMARY:UK PARLIAMENT WEEK
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-7984863-Europe/London
+DTSTART;TZID=Europe/London:20241127T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20241127T200000
+SUMMARY:Ginger Bread Men
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8367105-Europe/London
+DTSTART;TZID=Europe/London:20241204T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20241204T200000
+SUMMARY:Sandwich Making
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8359455-Europe/London
+DTSTART;TZID=Europe/London:20241211T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20241211T200000
+SUMMARY:Digital Citizen\, Digital Maker & Photography Badges
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8337644-Europe/London
+DTSTART;TZID=Europe/London:20250108T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250108T200000
+SUMMARY:Show and Tell - Bring a toy / favourite thing / Christmas Present
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8337645-Europe/London
+DTSTART;TZID=Europe/London:20250115T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250115T200000
+SUMMARY:Bring a Friend Evening / Cubs Taster Session
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8387813-Europe/London
+DTSTART;TZID=Europe/London:20250122T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250122T200000
+SUMMARY:Hanging out the washing
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8387814-Europe/London
+DTSTART;TZID=Europe/London:20250129T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250129T200000
+SUMMARY:Radio Advert and Poster Campaign
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8387815-Europe/London
+DTSTART;TZID=Europe/London:20250205T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250205T200000
+SUMMARY:Random Acts of Kindness
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8387817-Europe/London
+DTSTART;TZID=Europe/London:20250212T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250212T200000
+SUMMARY:Safer Internet Day
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8387818-Europe/London
+DTSTART;TZID=Europe/London:20250226T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250226T200000
+SUMMARY:Founders Day - Story of Scouting / Cubs Taster Session
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8387823-Europe/London
+DTSTART;TZID=Europe/London:20250312T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250312T200000
+SUMMARY:Marketing Meeting: Poster Campaign
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8387829-Europe/London
+DTSTART;VALUE=DATE:20250319
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;VALUE=DATE:20250320
+SUMMARY:Cubs Taster Session / Games Night
+CLASS:PUBLIC
+DESCRIPTION:No uniform required
+X-MICROSOFT-CDO-ALLDAYEVENT:TRUE
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8694342-Europe/London
+DTSTART;TZID=Europe/London:20250326T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250326T200000
+SUMMARY:Dancing Plants
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8387820-Europe/London
+DTSTART;TZID=Europe/London:20250402T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250402T200000
+SUMMARY:International Children's Book Day / Book Club / Starting Readers Ba
+ dge
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8694323-Europe/London
+DTSTART;VALUE=DATE:20250423
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;VALUE=DATE:20250424
+SUMMARY:No Cubs - Leaders Meeting
+CLASS:PUBLIC
+X-MICROSOFT-CDO-ALLDAYEVENT:TRUE
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8387827-Europe/London
+DTSTART;TZID=Europe/London:20250430T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250430T200000
+SUMMARY:Taskmaster Evening
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8717429-Europe/London
+DTSTART;TZID=Europe/London:20250507T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250507T200000
+SUMMARY:VE Day
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8387830-Europe/London
+DTSTART;TZID=Europe/London:20250514T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250514T203000
+SUMMARY:Leaflet Drop
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8710106-Europe/London
+DTSTART;TZID=Europe/London:20250521T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250521T200000
+SUMMARY:Nature Walk by the Hogsmill
+CLASS:PUBLIC
+DESCRIPTION:Nature Walk on Hogsmill (weather dependent)\nIf bad weather –
+  we will have a games evening at the Den. If bad weather – we will let y
+ ou know that the walk is not happening via the WhatsApp group on the day. 
+ \nMeet 6.30pm \nWhat 3 Words ///cares.nods.hurls\nElmsbridge Meadows Open 
+ Space by roundabout at bottom of Elmbridge Avenue / Raeburn Avenue / Surbi
+ ton Hill Park\nWe will then walk along the Hogsmill and return to same loc
+ ation for pick up at 8pm. \nCubs should wear uniform as normal with t – 
+ shirt underneath. Cubs should wear trousers (due to how close we will be t
+ o nature – stinging nettles / bugs etc. Please make sure footwear is app
+ ropriate – if hot we will ask parents to take jumper home / not bring an
+ d Cubs will only need to wear scarf as uniform during the walk. \nCubs may
+  also need a coat dependent on weather conditions.  \nCubs should bring wa
+ ter bottle with them.\nI will be the leader in charge and if emergency you
+  will be able to contact me on my mobile – 07957 567 603.
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8694340-Europe/London
+DTSTART;TZID=Europe/London:20250604T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250604T200000
+SUMMARY:Book Club: The Bear Grylls Adventures Feedback from Cubs
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8718559-Europe/London
+DTSTART;TZID=Europe/London:20250611T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250611T200000
+SUMMARY:Chef Badge
+CLASS:PUBLIC
+DESCRIPTION:Kitchen Hygiene\, cooking methods\, foods types
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8718578-Europe/London
+DTSTART;TZID=Europe/London:20250618T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250618T200000
+SUMMARY:Chef Badge
+CLASS:PUBLIC
+DESCRIPTION:2 course meal .\nFlat bread/tortilla pizza\nCake in a mug
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8718579-Europe/London
+DTSTART;TZID=Europe/London:20250625T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250625T200000
+SUMMARY:Outdoor Games
+CLASS:PUBLIC
+DESCRIPTION:Outdoor Games / Play\nOur next meeting we planned to do an outd
+ oor games evening at the Den. Sadly\, the lawn will not be cut in time so 
+ we are instead going to Green Lane Recreation Ground for the evening. Plea
+ se meet at the same location as the Hogsmill Nature Walk we did a few week
+ s back. \n\nMeet 6.30pm \nWhat 3 Words ///cares.nods.hurls\nElmsbridge Mea
+ dows Open Space by roundabout at bottom of Elmbridge Avenue / Raeburn Aven
+ ue / Surbiton Hill Park\nPick up at 8pm\, as above.\n\nWe will then make o
+ ur way to Green Lane Recreation Ground - a two minute walk - for an evenin
+ g of games. Cubs will also have the opportunity to try the new upgraded pl
+ ay park.  \n\nCubs do not need to wear uniform. Please make sure footwear 
+ is appropriate – if hot and sunny please make sure sun cream is applied 
+ and a hat or cap is available.   \nCubs MUST bring a drink with them. Make
+  sure they have their water bottle with them.\nI will be the leader in cha
+ rge and if emergency you will be able to contact me on my mobile – 07957
+  567 603.
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8718580-Europe/London
+DTSTART;TZID=Europe/London:20250702T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250702T200000
+SUMMARY:Fire Building / Backwards Cooking
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8845027-Europe/London
+DTSTART;TZID=Europe/London:20250709T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250709T200000
+SUMMARY:Sixers\, Seconders and Cubs over 10 ONLY - evening
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8892483-Europe/London
+DTSTART;TZID=Europe/London:20250910T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250910T200000
+SUMMARY:Welcome Back
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8922632-Europe/London
+DTSTART;TZID=Europe/London:20250917T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250917T200000
+SUMMARY:Hanging Out the Washing
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8923939-Europe/London
+DTSTART;TZID=Europe/London:20250924T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20250924T200000
+SUMMARY:National Fitness Day
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8922815-Europe/London
+DTSTART;TZID=Europe/London:20251008T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20251008T200000
+SUMMARY:Banned Books Week (5 - 11 October)
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8922766-Europe/London
+DTSTART;TZID=Europe/London:20251015T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20251015T200000
+SUMMARY:World Mental Health Day (10 October) / This is me
+CLASS:PUBLIC
+DESCRIPTION:Mini me
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8922765-Europe/London
+DTSTART;TZID=Europe/London:20251022T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20251022T200000
+SUMMARY:Returning to the Hogsmill: Night Hike
+CLASS:PUBLIC
+DESCRIPTION:Night Hike on Hogsmill.\n\nThis walk is the same route as compl
+ eted in daylight\, during the summer.\nUnless particularly bad weather\, w
+ e will do the walk so please make sure Cubs are dressed appropriately for 
+ the weather - dress for cold and / or wet as necessary  - Cubs should wear
+  uniform as normal. Please make sure footwear is appropriate.  Cubs can be
+ ing with them a torch. \n\nMeet 6.30pm \nWhat 3 Words ///cares.nods.hurls\
+ nElmsbridge Meadows Open Space is by roundabout at bottom of Elmbridge Ave
+ nue / Raeburn Avenue / Surbiton Hill Park\n\nWe will then walk along the H
+ ogsmill and return to same location for pick up at 8pm. \nCubs should brin
+ g water bottle with them.\nI will be the leader in charge and if emergency
+  you will be able to contact me on my mobile – 07957 567 603\n\n.We will
+  let you know that the walk is not happening via the WhatsApp group on the
+  day.
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8923938-Europe/London
+DTSTART;VALUE=DATE:20251029
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;VALUE=DATE:20251030
+SUMMARY:No Cubs - Half Term
+CLASS:PUBLIC
+X-MICROSOFT-CDO-ALLDAYEVENT:TRUE
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8922767-Europe/London
+DTSTART;TZID=Europe/London:20251105T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20251105T200000
+SUMMARY:Camp Fire and Sparklers
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8922813-Europe/London
+DTSTART;TZID=Europe/London:20251112T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20251112T200000
+SUMMARY:Remembrance Day
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8922769-Europe/London
+DTSTART;VALUE=DATE:20251119
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;VALUE=DATE:20251120
+SUMMARY:UK Parliament Week
+CLASS:PUBLIC
+X-MICROSOFT-CDO-ALLDAYEVENT:TRUE
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-9240690-Europe/London
+DTSTART;VALUE=DATE:20251126
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;VALUE=DATE:20251127
+SUMMARY:No Cubs due to sleepover
+CLASS:PUBLIC
+X-MICROSOFT-CDO-ALLDAYEVENT:TRUE
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-9243835-Europe/London
+DTSTART;TZID=Europe/London:20251203T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20251203T200000
+SUMMARY:Introduction to Cubs Badges
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8923945-Europe/London
+DTSTART;VALUE=DATE:20251210
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;VALUE=DATE:20251211
+SUMMARY:No Meeting due to Christmas Party
+CLASS:PUBLIC
+X-MICROSOFT-CDO-ALLDAYEVENT:TRUE
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8980142-Europe/London
+DTSTART;TZID=Europe/London:20260107T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20260107T200000
+SUMMARY:Bring a toy / Christmas Present - Show & Tell
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8922798-Europe/London
+DTSTART;TZID=Europe/London:20260114T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20260114T200000
+SUMMARY:Jungle Book
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-9170645-Europe/London
+DTSTART;TZID=Europe/London:20260121T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20260121T200000
+SUMMARY:Potato Evening = Bring a potato
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8922801-Europe/London
+DTSTART;VALUE=DATE:20260128
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;VALUE=DATE:20260129
+SUMMARY:Blue Peter Badge
+CLASS:PUBLIC
+X-MICROSOFT-CDO-ALLDAYEVENT:TRUE
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-9238039-Europe/London
+DTSTART;TZID=Europe/London:20260211T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20260211T200000
+SUMMARY:Random Acts of Kindness - RAOK Day 17th February
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+BEGIN:VEVENT
+UID:osm-scouts-programme-8922654-Europe/London
+DTSTART;TZID=Europe/London:20260304T183000
+SEQUENCE:0
+TRANSP:OPAQUE
+DTEND;TZID=Europe/London:20260304T200000
+SUMMARY:Cluedo - Who done it?
+CLASS:PUBLIC
+DTSTAMP:20251008T111615Z
+END:VEVENT
+END:VCALENDAR

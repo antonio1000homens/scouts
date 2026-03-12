@@ -2,8 +2,8 @@
 
 ## Prompt Configuration Source Of Truth
 
-- `scouts.conf` lives in the lambdas repo at:
-  `/Users/antoniofreire/storage/github/lambdas/scouts/sqs/sqs2scouts/scouts.conf`
+- `scouts.conf` lives in this repo at:
+  `/Users/antoniofreire/storage/github/scouts/lambdas/sqs2scouts/scouts.conf`
 - That file is the source of truth for Scouts prompt configuration.
 - It is deployed to S3 as `s3://scouts-2ndtolworth-prod-553490163883/scouts.conf`.
 
@@ -20,9 +20,9 @@
 
 ## Working Rules
 
-- When changing prompt wording, prompt templates, image prompt specifications, or image theme guidelines, update the lambdas repo copy of `scouts.conf` first.
+- When changing prompt wording, prompt templates, image prompt specifications, or image theme guidelines, update the `scouts` repo copy of `scouts.conf` first.
 - Do not reintroduce hardcoded prompt-template fallbacks in code unless explicitly requested.
-- If prompt behavior differs between the admin UI and `sqs2scouts`, check `scouts.conf` in S3 and the lambdas repo copy before changing code.
+- If prompt behavior differs between the admin UI and `sqs2scouts`, check `scouts.conf` in S3 and the `scouts` repo copy before changing code.
 - Do not recreate a separate root `scouts.conf` in the `scouts` repo.
 
 ## CloudFront Infrastructure
@@ -39,7 +39,7 @@
 
 ## Deployment Notes
 
-- `lambdas/scouts/sqs/sqs2scouts/deploy.sh` uploads `scouts.conf` to S3 during lambda deploys.
-- `scouts/.github/workflows/deploy-to-s3.yml` uploads `lambdas/scouts/sqs/sqs2scouts/scouts.conf` to `s3://scouts-2ndtolworth-prod-553490163883/scouts.conf` during website deploys.
-- `scouts/deploy-manual.sh` also uploads `lambdas/scouts/sqs/sqs2scouts/scouts.conf` to `s3://scouts-2ndtolworth-prod-553490163883/scouts.conf`.
-- GitHub Actions automatically invalidates CloudFront cache after S3 deployment.
+- `lambdas/sqs2scouts/deploy.sh` uploads `scouts.conf` to S3 during lambda deploys.
+- `scouts/.github/workflows/deploy-to-s3.yml` uploads `lambdas/sqs2scouts/scouts.conf` to `s3://scouts-2ndtolworth-prod-553490163883/scouts.conf` during website deploys.
+- `scouts/deploy-manual.sh` also uploads `lambdas/sqs2scouts/scouts.conf` to `s3://scouts-2ndtolworth-prod-553490163883/scouts.conf`.
+- GitHub Actions in this repo now own Scouts website, queue, Lambda, and Scouts Slack-handler deployments.

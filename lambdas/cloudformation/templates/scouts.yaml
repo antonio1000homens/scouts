@@ -1,0 +1,220 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Scouts Lambda stack (function + layer + IAM + optional S3 bucket + function URL)
+
+Parameters:
+  CodeBucket:
+    Type: String
+    Description: S3 bucket that stores Lambda artifacts.
+  FunctionCodeKey:
+    Type: String
+    Description: S3 key for scouts function zip.
+  LayerCodeKey:
+    Type: String
+    Description: S3 key for shared layer zip.
+  FunctionName:
+    Type: String
+    Default: scouts
+  LayerName:
+    Type: String
+    Default: scouts-shared
+  RoleName:
+    Type: String
+    Default: scouts-lambda-role
+  Runtime:
+    Type: String
+    Default: nodejs22.x
+  Handler:
+    Type: String
+    Default: scouts.handler
+  DataBucketName:
+    Type: String
+    Default: scouts-2ndtolworth-prod-553490163883
+  CreateDataBucket:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+  FunctionUrlAuthType:
+    Type: String
+    AllowedValues:
+      - NONE
+      - AWS_IAM
+    Default: NONE
+  FunctionUrlCorsAllowOrigins:
+    Type: CommaDelimitedList
+    Default: https://2ndtolworth.org.uk
+  FunctionUrlCorsAllowMethods:
+    Type: CommaDelimitedList
+    Default: GET,POST
+  FunctionUrlCorsAllowHeaders:
+    Type: CommaDelimitedList
+    Default: content-type,x-api-key,x-requested-with
+  FunctionUrlCorsMaxAge:
+    Type: Number
+    Default: 3600
+  MemorySize:
+    Type: Number
+    Default: 256
+  Timeout:
+    Type: Number
+    Default: 30
+  RequiredApiKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+  CubsEventsCalendarUrl:
+    Type: String
+    Default: ''
+    NoEcho: true
+  CubsProgrammeCalendarUrl:
+    Type: String
+    Default: ''
+    NoEcho: true
+  ScoutsEventsCalendarUrl:
+    Type: String
+    Default: ''
+    NoEcho: true
+  ScoutsProgrammeCalendarUrl:
+    Type: String
+    Default: ''
+    NoEcho: true
+  BeaversEventsCalendarUrl:
+    Type: String
+    Default: ''
+    NoEcho: true
+  BeaversProgrammeCalendarUrl:
+    Type: String
+    Default: ''
+    NoEcho: true
+  ScoutsRequestsQueueArn:
+    Type: String
+    Default: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
+  ScoutsRequestsQueueUrl:
+    Type: String
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+  Scouts2SqsFunctionUrl:
+    Type: String
+    Default: ''
+
+Conditions:
+  ShouldCreateDataBucket: !Equals [!Ref CreateDataBucket, 'true']
+  IsPublicFunctionUrl: !Equals [!Ref FunctionUrlAuthType, 'NONE']
+
+Resources:
+  ScoutsDataBucket:
+    Type: AWS::S3::Bucket
+    Condition: ShouldCreateDataBucket
+    Properties:
+      BucketName: !Ref DataBucketName
+
+  ScoutsSharedLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: !Ref LayerName
+      CompatibleRuntimes:
+        - !Ref Runtime
+      Content:
+        S3Bucket: !Ref CodeBucket
+        S3Key: !Ref LayerCodeKey
+
+  ScoutsLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ScoutsS3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource: !Sub arn:aws:s3:::${DataBucketName}
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:GetObject
+                  - s3:DeleteObject
+                Resource: !Sub arn:aws:s3:::${DataBucketName}/*
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !Ref ScoutsRequestsQueueArn
+
+  ScoutsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref FunctionName
+      Runtime: !Ref Runtime
+      Handler: !Ref Handler
+      Role: !GetAtt ScoutsLambdaRole.Arn
+      Timeout: !Ref Timeout
+      MemorySize: !Ref MemorySize
+      Layers:
+        - !Ref ScoutsSharedLayer
+      Environment:
+        Variables:
+          REQUIRED_API_KEY: !Ref RequiredApiKey
+          CUBS_EVENTS_CALENDAR_URL: !Ref CubsEventsCalendarUrl
+          CUBS_PROGRAMME_CALENDAR_URL: !Ref CubsProgrammeCalendarUrl
+          SCOUTS_EVENTS_CALENDAR_URL: !Ref ScoutsEventsCalendarUrl
+          SCOUTS_PROGRAMME_CALENDAR_URL: !Ref ScoutsProgrammeCalendarUrl
+          BEAVERS_EVENTS_CALENDAR_URL: !Ref BeaversEventsCalendarUrl
+          BEAVERS_PROGRAMME_CALENDAR_URL: !Ref BeaversProgrammeCalendarUrl
+          TARGET_BUCKET: !Ref DataBucketName
+          SCOUTS_REQUESTS_QUEUE_URL: !Ref ScoutsRequestsQueueUrl
+          SCOUTS2SQS_FUNCTION_URL: !Ref Scouts2SqsFunctionUrl
+      Code:
+        S3Bucket: !Ref CodeBucket
+        S3Key: !Ref FunctionCodeKey
+
+  ScoutsFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: !Ref FunctionUrlAuthType
+      TargetFunctionArn: !Ref ScoutsFunction
+      Cors:
+        AllowOrigins: !Ref FunctionUrlCorsAllowOrigins
+        AllowMethods: !Ref FunctionUrlCorsAllowMethods
+        AllowHeaders: !Ref FunctionUrlCorsAllowHeaders
+        MaxAge: !Ref FunctionUrlCorsMaxAge
+
+  ScoutsUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: IsPublicFunctionUrl
+    Properties:
+      FunctionName: !Ref ScoutsFunction
+      Principal: '*'
+      Action: lambda:InvokeFunctionUrl
+      FunctionUrlAuthType: NONE
+
+  ScoutsInvokeFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Condition: IsPublicFunctionUrl
+    Properties:
+      FunctionName: !Ref ScoutsFunction
+      Principal: '*'
+      Action: lambda:InvokeFunction
+      InvokedViaFunctionUrl: true
+
+Outputs:
+  FunctionArn:
+    Value: !GetAtt ScoutsFunction.Arn
+  FunctionUrl:
+    Value: !GetAtt ScoutsFunctionUrl.FunctionUrl
+  LayerVersionArn:
+    Value: !Ref ScoutsSharedLayer
+  DataBucket:
+    Value: !Ref DataBucketName

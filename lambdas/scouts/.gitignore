@@ -1,0 +1,14 @@
+# Ignore log files and outputs for the scouts lambda
+# Explicit output file the script writes to
+output.log
+
+# Any other logs
+*.log
+*.log.json
+.log
+
+# Node / build artifacts
+node_modules/
+
+# Local env files
+.env

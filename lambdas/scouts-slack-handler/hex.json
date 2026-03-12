@@ -1,0 +1,49 @@
+{
+  "type": "block_actions",
+  "api_app_id": "ATEST",
+  "token": "verification-token-not-used",
+  "team": {
+    "id": "TTEST",
+    "domain": "test"
+  },
+  "user": {
+    "id": "UTEST",
+    "username": "testuser",
+    "name": "Test User",
+    "team_id": "TTEST"
+  },
+  "container": {
+    "type": "message",
+    "message_ts": "1719072000.000500",
+    "channel_id": "CTEST",
+    "is_ephemeral": false
+  },
+  "trigger_id": "13345224609.738474920.8088930838d88f008e0",
+  "channel": {
+    "id": "CTEST",
+    "name": "scouts"
+  },
+  "message": {
+    "type": "message",
+    "bot_id": "BTEST",
+    "text": "Scouts Approval Needed: Test Event",
+    "ts": "1719072000.000500",
+    "user": "UTEST",
+    "team": "TTEST"
+  },
+  "actions": [
+    {
+      "type": "button",
+      "action_id": "scouts_request_approve",
+      "block_id": "scouts_request_actions",
+      "text": {
+        "type": "plain_text",
+        "text": "Approve",
+        "emoji": true
+      },
+      "value": "{\"decision\":\"approve\",\"payload\":\"eyJyZWFsbSI6InNjb3V0cyIsImFjdGlvbiI6IkFQUFJPVkUiLCJzdWJqZWN0Ijp7ImhleCI6IjAxMDIwMzA0MDUwNjA3MDgwOSIsInVpZCI6InRlc3QtZXZlbnQiLCJ0aXRsZSI6IlRlc3QgU2xhY2sgQXBwcm92YWwiLCJBSSI6IlRoaXMgaXMgdGhlIEdlbWluaSByZXNwb25zZSBmb3IgYSB3aXR0eSByZXNwb25zZSIsImltYWdlIjp7InByb21wdCI6IlRoaXMgaXMgdGhlIHNlYXJjaCBjcml0ZXJpYSBmb3IgUGl4YWJheSIsInVybCI6Imh0dHBzOi8vb3ltY2RuLmNvLnVrL2V4dC9teW1lci9kYXNoYm9hcmQvaW1hZ2VzL2dsb2JhbC5qcGcifX19\"}",
+      "style": "primary",
+      "action_ts": "1729843269"
+    }
+  ]
+}
