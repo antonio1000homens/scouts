@@ -133,8 +133,8 @@ function buildEventChangeSnapshot(event) {
     tagline: getEventTagline(event),
     imageTheme: image.theme ?? null,
     imageUrl: image.url ?? null,
-    status: event?.status ?? null,
-    hiddenAt: event?.hiddenAt ?? null,
+    status: getEventStatusObject(event) ?? null,
+    hiddenAt: getEventStatusObject(event)?.isHidden === true ? true : null,
   };
 }
 
@@ -1913,6 +1913,8 @@ function hydrateStoredDataset(dataset) {
         prompt: null,
         url: getEventImageUrl(event),
       },
+      metadata: buildAgendaMetadata(event),
+      status: buildStatusForStorage(event),
       processing: normaliseProcessingList(event.processing),
       section,
       icsType: event.icsType ?? null,
