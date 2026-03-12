@@ -457,16 +457,21 @@ Resources:
               - Sid: ArtifactBucketAccess
                 Effect: Allow
                 Action:
+                  - s3:CreateBucket
                   - s3:GetBucketLocation
                   - s3:ListBucket
-                Resource: !Sub arn:aws:s3:::${ArtifactBucket}
+                Resource:
+                  - !Sub arn:aws:s3:::${ArtifactBucket}
+                  - !Sub arn:aws:s3:::aws2022-lambda-code-eu-west-1-${AWS::AccountId}
               - Sid: ArtifactObjectAccess
                 Effect: Allow
                 Action:
                   - s3:GetObject
                   - s3:PutObject
                   - s3:DeleteObject
-                Resource: !Sub arn:aws:s3:::${ArtifactBucket}/*
+                Resource:
+                  - !Sub arn:aws:s3:::${ArtifactBucket}/*
+                  - !Sub arn:aws:s3:::aws2022-lambda-code-eu-west-1-${AWS::AccountId}/*
               - Sid: FunctionReadback
                 Effect: Allow
                 Action:
