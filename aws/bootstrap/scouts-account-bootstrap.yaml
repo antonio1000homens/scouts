@@ -396,6 +396,7 @@ Resources:
                 Action:
                   - cloudformation:CreateChangeSet
                   - cloudformation:DeleteChangeSet
+                  - cloudformation:DeleteStack
                   - cloudformation:DescribeChangeSet
                   - cloudformation:DescribeStackEvents
                   - cloudformation:DescribeStacks
@@ -428,12 +429,17 @@ Resources:
               - Sid: FunctionReadback
                 Effect: Allow
                 Action:
+                  - lambda:ListEventSourceMappings
                   - lambda:GetFunctionConfiguration
+                  - lambda:GetEventSourceMapping
                   - lambda:GetFunctionUrlConfig
+                Resource: '*'
+              - Sid: EventSourceMappingCleanup
+                Effect: Allow
+                Action:
+                  - lambda:DeleteEventSourceMapping
                 Resource:
-                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts
-                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts2sqs
-                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:sqs2scouts
+                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:event-source-mapping:*
               - Sid: PassCloudFormationRole
                 Effect: Allow
                 Action: iam:PassRole
