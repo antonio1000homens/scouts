@@ -37,17 +37,17 @@ Resources:
             TargetOriginId: scouts-2ndtolworth-prod-s3-origin
             ViewerProtocolPolicy: redirect-to-https
             Compress: true
-            CachePolicyId: f6072fdc-ae27-4d49-a206-4f2a80c82fbe
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
           - PathPattern: /runtime/*
             TargetOriginId: scouts-2ndtolworth-prod-s3-origin
             ViewerProtocolPolicy: redirect-to-https
             Compress: true
-            CachePolicyId: f6072fdc-ae27-4d49-a206-4f2a80c82fbe
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
           - PathPattern: /events/*
             TargetOriginId: scouts-2ndtolworth-prod-s3-origin
             ViewerProtocolPolicy: redirect-to-https
             Compress: true
-            CachePolicyId: f6072fdc-ae27-4d49-a206-4f2a80c82fbe
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
         ViewerCertificate:
           AcmCertificateArn: !Ref CertificateArn
           SslSupportMethod: sni-only
