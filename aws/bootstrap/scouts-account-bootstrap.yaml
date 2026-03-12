@@ -249,6 +249,7 @@ Resources:
                 Resource:
                   - arn:aws:s3:::scouts-2ndtolworth-prod-553490163883
                   - !Sub arn:aws:s3:::${ArtifactBucket}
+                  - !Sub arn:aws:s3:::aws2022-lambda-code-eu-west-1-${AWS::AccountId}
               - Sid: BucketObjectManagement
                 Effect: Allow
                 Action:
@@ -258,6 +259,7 @@ Resources:
                 Resource:
                   - arn:aws:s3:::scouts-2ndtolworth-prod-553490163883/*
                   - !Sub arn:aws:s3:::${ArtifactBucket}/*
+                  - !Sub arn:aws:s3:::aws2022-lambda-code-eu-west-1-${AWS::AccountId}/*
               - Sid: LogsManagement
                 Effect: Allow
                 Action:
