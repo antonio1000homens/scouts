@@ -29,6 +29,7 @@ EXPECTED_AWS_ACCOUNT="${EXPECTED_AWS_ACCOUNT:-553490163883}"
 CLOUDFORMATION_ROLE_ARN="${CLOUDFORMATION_ROLE_ARN:-}"
 DEPLOY_ID="${DEPLOY_ID:-$(date -u +%Y%m%d%H%M%S)}"
 S3_PREFIX="${S3_PREFIX:-lambdas/sqs2scouts}"
+NPM_CACHE_DIR="${NPM_CACHE_DIR:-${HOME}/.npm}"
 
 FUNCTION_NAME="${FUNCTION_NAME:-sqs2scouts}"
 LAYER_NAME="${LAYER_NAME:-scouts-shared}"
@@ -175,7 +176,7 @@ fi
 echo -e "\n${YELLOW}Step 1: Build shared Lambda layer...${NC}"
 (
   cd "${SHARED_LAYER_DIR}/nodejs"
-  npm install --production --cache /tmp/.npm
+  npm install --production --cache "${NPM_CACHE_DIR}"
 )
 (
   cd "${SHARED_LAYER_DIR}"

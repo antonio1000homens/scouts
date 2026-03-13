@@ -349,6 +349,11 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v6
+      - name: Restore npm cache for scouts shared layer
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-scouts-shared-layer-${{ hashFiles('lambdas/shared-layer/nodejs/package-lock.json') }}
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
       - uses: aws-actions/configure-aws-credentials@v6
@@ -391,6 +396,11 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v6
+      - name: Restore npm cache for scouts shared layer
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-scouts-shared-layer-${{ hashFiles('lambdas/shared-layer/nodejs/package-lock.json') }}
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
       - uses: aws-actions/configure-aws-credentials@v6
@@ -430,6 +440,11 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v6
+      - name: Restore npm cache for scouts shared layer
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-scouts-shared-layer-${{ hashFiles('lambdas/shared-layer/nodejs/package-lock.json') }}
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
       - uses: aws-actions/configure-aws-credentials@v6
