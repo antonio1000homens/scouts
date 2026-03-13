@@ -18,7 +18,6 @@ Targets:
   scouts
   scouts2sqs
   sqs2scouts
-  scouts-slack-handler
   lambdas
   all
 
@@ -119,15 +118,11 @@ deploy_target() {
     sqs2scouts)
       (cd "${SCRIPT_DIR}/lambdas/sqs2scouts" && bash ./deploy.sh)
       ;;
-    scouts-slack-handler)
-      (cd "${SCRIPT_DIR}/lambdas/scouts-slack-handler" && bash ./deploy.sh)
-      ;;
     lambdas)
       deploy_target queues
       deploy_target scouts
       deploy_target scouts2sqs
       deploy_target sqs2scouts
-      deploy_target scouts-slack-handler
       ;;
     all)
       deploy_target website

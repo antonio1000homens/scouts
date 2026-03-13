@@ -109,7 +109,6 @@ Resources:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-lambda-role
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-slack-handler-lambda-role
               - Sid: RuntimeRoleInlinePolicyManagement
                 Effect: Allow
                 Action:
@@ -120,7 +119,6 @@ Resources:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-lambda-role
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-slack-handler-lambda-role
               - Sid: RuntimeRolePass
                 Effect: Allow
                 Action:
@@ -129,7 +127,6 @@ Resources:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-lambda-role
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-slack-handler-lambda-role
               - Sid: LambdaCreateAndList
                 Effect: Allow
                 Action:
@@ -164,7 +161,6 @@ Resources:
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts2sqs
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:sqs2scouts
-                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts-slack-handler
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:layer:scouts-shared:*
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:event-source-mapping:*
               - Sid: QueueManagement
@@ -237,7 +233,6 @@ Resources:
                   - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/scouts*
                   - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/scouts2sqs*
                   - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/sqs2scouts*
-                  - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/scouts-slack-handler*
               - Sid: CloudFrontManagement
                 Effect: Allow
                 Action:
@@ -318,7 +313,6 @@ Resources:
                   - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-lambda/*
                   - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts2sqs-lambda/*
                   - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/sqs2scouts-lambda/*
-                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-slack-handler-lambda/*
                   - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-queues/*
                   - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:changeSet/*/*
               - Sid: CloudFormationReadGlobal

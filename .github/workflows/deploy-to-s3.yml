@@ -20,7 +20,6 @@ on:
           - scouts-function
           - scouts2sqs
           - sqs2scouts
-          - scouts-slack-handler
       deploy_all:
         description: Deploy all Scouts jobs regardless of change detection
         required: false
@@ -48,7 +47,6 @@ jobs:
       scouts_function: "${{ steps.changes.outputs['scouts-function'] }}"
       scouts2sqs: "${{ steps.changes.outputs.scouts2sqs }}"
       sqs2scouts: "${{ steps.changes.outputs.sqs2scouts }}"
-      scouts_slack_handler: "${{ steps.changes.outputs['scouts-slack-handler'] }}"
     steps:
       - uses: actions/checkout@v6
         with:
@@ -93,14 +91,12 @@ jobs:
           scouts_function='false'
           scouts2sqs='false'
           sqs2scouts='false'
-          scouts_slack_handler='false'
 
           website_files=''
           scouts_queues_files=''
           scouts_function_files=''
           scouts2sqs_files=''
           sqs2scouts_files=''
-          scouts_slack_handler_files=''
 
           base_ref=''
           changed_files=''
@@ -165,11 +161,6 @@ jobs:
                 ;;
             esac
 
-            case "${file}" in
-              lambdas/scouts-slack-handler/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/slack-handler.yaml)
-                mark_changed 'scouts-slack-handler' "${file}"
-                ;;
-            esac
           done <<< "${changed_files}"
 
           {
@@ -183,8 +174,6 @@ jobs:
             echo "scouts2sqs_files=${scouts2sqs_files}"
             echo "sqs2scouts=${sqs2scouts}"
             echo "sqs2scouts_files=${sqs2scouts_files}"
-            echo "scouts-slack-handler=${scouts_slack_handler}"
-            echo "scouts-slack-handler_files=${scouts_slack_handler_files}"
           } >> "${GITHUB_OUTPUT}"
       - name: Debug detected changes
         run: |
@@ -193,7 +182,6 @@ jobs:
           echo "scouts-function=${{ steps.changes.outputs['scouts-function'] }} files=${{ steps.changes.outputs['scouts-function_files'] }}"
           echo "scouts2sqs=${{ steps.changes.outputs.scouts2sqs }} files=${{ steps.changes.outputs.scouts2sqs_files }}"
           echo "sqs2scouts=${{ steps.changes.outputs.sqs2scouts }} files=${{ steps.changes.outputs.sqs2scouts_files }}"
-          echo "scouts-slack-handler=${{ steps.changes.outputs['scouts-slack-handler'] }} files=${{ steps.changes.outputs['scouts-slack-handler_files'] }}"
 
   deploy-website:
     needs: detect-changes
@@ -312,8 +300,7 @@ jobs:
         needs.detect-changes.outputs.scouts_queues == 'true' ||
         needs.detect-changes.outputs.scouts_function == 'true' ||
         needs.detect-changes.outputs.scouts2sqs == 'true' ||
-        needs.detect-changes.outputs.sqs2scouts == 'true' ||
-        needs.detect-changes.outputs.scouts_slack_handler == 'true'
+        needs.detect-changes.outputs.sqs2scouts == 'true'
       )) ||
       (github.event_name == 'workflow_dispatch' && (
         github.event.inputs.deploy_all == 'true' ||
@@ -322,13 +309,11 @@ jobs:
         github.event.inputs.deploy_target == 'scouts-function' ||
         github.event.inputs.deploy_target == 'scouts2sqs' ||
         github.event.inputs.deploy_target == 'sqs2scouts' ||
-        github.event.inputs.deploy_target == 'scouts-slack-handler' ||
         (github.event.inputs.deploy_target == 'changed' && (
           needs.detect-changes.outputs.scouts_queues == 'true' ||
           needs.detect-changes.outputs.scouts_function == 'true' ||
           needs.detect-changes.outputs.scouts2sqs == 'true' ||
-          needs.detect-changes.outputs.sqs2scouts == 'true' ||
-          needs.detect-changes.outputs.scouts_slack_handler == 'true'
+          needs.detect-changes.outputs.sqs2scouts == 'true'
         ))
       ))
     runs-on: ubuntu-latest
@@ -484,41 +469,3 @@ jobs:
             exit 1
           fi
           echo "GEMINI_API_KEY is set on sqs2scouts"
-
-  deploy-scouts-slack-handler:
-    needs: [detect-changes, deploy-scouts-queues]
-    if: |
-      (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.scouts_slack_handler == 'true') ||
-      (github.event_name == 'workflow_dispatch' && (
-        github.event.inputs.deploy_all == 'true' ||
-        github.event.inputs.deploy_target == 'all' ||
-        github.event.inputs.deploy_target == 'scouts-slack-handler' ||
-        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.scouts_slack_handler == 'true')
-      ))
-    runs-on: ubuntu-latest
-    concurrency:
-      group: scouts-slack-handler-stack-${{ github.ref }}
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-      - uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
-          role-session-name: github-actions-scouts-deploy
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Deploy scouts Slack handler
-        env:
-          CODE_BUCKET: ${{ env.CODE_BUCKET }}
-          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
-          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
-          REQUIRED_API_KEY: ${{ secrets.SCOUTS_REQUIRED_API_KEY }}
-          SCOUTS_REQUEST_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
-          SCOUTS_REQUEST_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
-          NFC_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
-          NFC_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
-          TARGET_BUCKET: scouts-2ndtolworth-prod-553490163883
-        run: cd lambdas/scouts-slack-handler && bash ./deploy.sh
