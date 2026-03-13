@@ -16,14 +16,12 @@ Targets:
   website
   queues
   scouts
-  scouts2sqs
-  sqs2scouts
   lambdas
   all
 
 Examples:
   ./deploy.sh website
-  ./deploy.sh queues scouts scouts2sqs
+  ./deploy.sh queues scouts
   ./deploy.sh lambdas
   ./deploy.sh all
 EOF
@@ -78,12 +76,12 @@ deploy_website() {
       --cache-control "max-age=0, no-cache, no-store, must-revalidate"
   fi
 
-  if [ -f "${SCRIPT_DIR}/lambdas/sqs2scouts/scouts.conf" ]; then
-    echo "Uploading lambdas/sqs2scouts/scouts.conf to s3://${WEBSITE_BUCKET}/scouts.conf..."
-    run_aws s3 cp "${SCRIPT_DIR}/lambdas/sqs2scouts/scouts.conf" "s3://${WEBSITE_BUCKET}/scouts.conf" \
+  if [ -f "${SCRIPT_DIR}/lambdas/scouts/scouts.conf" ]; then
+    echo "Uploading lambdas/scouts/scouts.conf to s3://${WEBSITE_BUCKET}/scouts.conf..."
+    run_aws s3 cp "${SCRIPT_DIR}/lambdas/scouts/scouts.conf" "s3://${WEBSITE_BUCKET}/scouts.conf" \
       --cache-control "max-age=0, no-cache, no-store, must-revalidate"
   else
-    echo "No lambdas/sqs2scouts/scouts.conf found locally, skipping upload."
+    echo "No lambdas/scouts/scouts.conf found locally, skipping upload."
   fi
 
   echo "Website bucket: s3://${WEBSITE_BUCKET}"
@@ -112,17 +110,9 @@ deploy_target() {
     scouts)
       (cd "${SCRIPT_DIR}/lambdas/scouts" && bash ./deploy.sh)
       ;;
-    scouts2sqs)
-      (cd "${SCRIPT_DIR}/lambdas/scouts2sqs" && bash ./deploy.sh)
-      ;;
-    sqs2scouts)
-      (cd "${SCRIPT_DIR}/lambdas/sqs2scouts" && bash ./deploy.sh)
-      ;;
     lambdas)
       deploy_target queues
       deploy_target scouts
-      deploy_target scouts2sqs
-      deploy_target sqs2scouts
       ;;
     all)
       deploy_target website
