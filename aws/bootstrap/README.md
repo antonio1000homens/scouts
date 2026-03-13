@@ -5,7 +5,6 @@ This stack bootstraps the new Scouts AWS account `553490163883` with:
 - GitHub OIDC provider for Actions
 - `ScoutsBootstrapAdminRole`
 - `GitHubActionsScoutsDeployRole`
-- `GitHubActionsLambdasDeployRole`
 - `CloudFormationExecutionRole`
 - artifact bucket `aws2022-lambda-code-eu-west-2-553490163883`
 
@@ -25,7 +24,6 @@ If your bootstrap principal is an IAM user or an AWS Identity Center-managed rol
 Use the output role ARNs to set:
 
 - `antonio1000homens/scouts` repository variable `AWS_ROLE_TO_ASSUME`
-- `antonio1000homens/lambdas` repository variable `AWS_ROLE_TO_ASSUME`
-- repository variable `CLOUDFORMATION_ROLE_ARN` in both repos
+- repository variable `CLOUDFORMATION_ROLE_ARN` in the `antonio1000homens/scouts` repo
 
 The artifact bucket output should be used as `CODE_BUCKET` for the Scouts lambda deploy jobs.

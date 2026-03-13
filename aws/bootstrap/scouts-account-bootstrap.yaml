@@ -14,16 +14,7 @@ Parameters:
   ScoutsRepoName:
     Type: String
     Default: scouts
-  LambdasRepoName:
-    Type: String
-    Default: lambdas
   ScoutsBranch:
-    Type: String
-    Default: master
-  LambdasPrimaryBranch:
-    Type: String
-    Default: main
-  LambdasSecondaryBranch:
     Type: String
     Default: master
 
@@ -119,8 +110,6 @@ Resources:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-slack-handler-lambda-role
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/alexa-home-control-confirmation-role-eu-west-1
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/alexa-home-control-confirmation-role-eu-west-2
               - Sid: RuntimeRoleInlinePolicyManagement
                 Effect: Allow
                 Action:
@@ -132,8 +121,6 @@ Resources:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-slack-handler-lambda-role
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/alexa-home-control-confirmation-role-eu-west-1
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/alexa-home-control-confirmation-role-eu-west-2
               - Sid: RuntimeRolePass
                 Effect: Allow
                 Action:
@@ -143,8 +130,6 @@ Resources:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-slack-handler-lambda-role
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/alexa-home-control-confirmation-role-eu-west-1
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/alexa-home-control-confirmation-role-eu-west-2
               - Sid: LambdaCreateAndList
                 Effect: Allow
                 Action:
@@ -180,11 +165,8 @@ Resources:
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts2sqs
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:sqs2scouts
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts-slack-handler
-                  - !Sub arn:aws:lambda:eu-west-1:${AWS::AccountId}:function:alexa-home-control-confirmation
-                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:alexa-home-control-confirmation
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:layer:scouts-shared:*
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:event-source-mapping:*
-                  - !Sub arn:aws:lambda:eu-west-1:${AWS::AccountId}:event-source-mapping:*
               - Sid: QueueManagement
                 Effect: Allow
                 Action:
@@ -232,7 +214,6 @@ Resources:
                 Resource:
                   - arn:aws:s3:::scouts-2ndtolworth-prod-553490163883
                   - !Sub arn:aws:s3:::${ArtifactBucket}
-                  - !Sub arn:aws:s3:::aws2022-lambda-code-eu-west-1-${AWS::AccountId}
               - Sid: BucketObjectManagement
                 Effect: Allow
                 Action:
@@ -242,7 +223,6 @@ Resources:
                 Resource:
                   - arn:aws:s3:::scouts-2ndtolworth-prod-553490163883/*
                   - !Sub arn:aws:s3:::${ArtifactBucket}/*
-                  - !Sub arn:aws:s3:::aws2022-lambda-code-eu-west-1-${AWS::AccountId}/*
               - Sid: LogsManagement
                 Effect: Allow
                 Action:
@@ -258,7 +238,6 @@ Resources:
                   - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/scouts2sqs*
                   - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/sqs2scouts*
                   - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/scouts-slack-handler*
-                  - !Sub arn:aws:logs:eu-west-1:${AWS::AccountId}:log-group:/aws/lambda/alexa-home-control-confirmation*
               - Sid: CloudFrontManagement
                 Effect: Allow
                 Action:
@@ -415,95 +394,6 @@ Resources:
                 Action: sts:GetCallerIdentity
                 Resource: '*'
 
-  GitHubActionsLambdasDeployRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: GitHubActionsLambdasDeployRole
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Federated: !Ref GitHubOidcProvider
-            Action: sts:AssumeRoleWithWebIdentity
-            Condition:
-              StringEquals:
-                token.actions.githubusercontent.com:aud: sts.amazonaws.com
-              StringLike:
-                token.actions.githubusercontent.com:sub:
-                  - !Sub repo:${ScoutsRepoOwner}/${LambdasRepoName}:ref:refs/heads/${LambdasPrimaryBranch}
-                  - !Sub repo:${ScoutsRepoOwner}/${LambdasRepoName}:ref:refs/heads/${LambdasSecondaryBranch}
-      Policies:
-        - PolicyName: ScoutsLambdaDeploy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: CloudFormationDeploy
-                Effect: Allow
-                Action:
-                  - cloudformation:CreateChangeSet
-                  - cloudformation:DeleteChangeSet
-                  - cloudformation:DeleteStack
-                  - cloudformation:DescribeChangeSet
-                  - cloudformation:DescribeStackEvents
-                  - cloudformation:DescribeStacks
-                  - cloudformation:ExecuteChangeSet
-                Resource:
-                  - !Sub arn:aws:cloudformation:eu-west-1:${AWS::AccountId}:stack/alexa-confirmation-lambda/*
-                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/alexa-confirmation-lambda/*
-                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-lambda/*
-                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts2sqs-lambda/*
-                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/sqs2scouts-lambda/*
-                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-queues/*
-                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:changeSet/*/*
-                  - !Sub arn:aws:cloudformation:eu-west-1:${AWS::AccountId}:changeSet/*/*
-              - Sid: CloudFormationReadGlobal
-                Effect: Allow
-                Action:
-                  - cloudformation:GetTemplateSummary
-                  - cloudformation:ValidateTemplate
-                Resource: '*'
-              - Sid: ArtifactBucketAccess
-                Effect: Allow
-                Action:
-                  - s3:CreateBucket
-                  - s3:GetBucketLocation
-                  - s3:ListBucket
-                Resource:
-                  - !Sub arn:aws:s3:::${ArtifactBucket}
-                  - !Sub arn:aws:s3:::aws2022-lambda-code-eu-west-1-${AWS::AccountId}
-              - Sid: ArtifactObjectAccess
-                Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource:
-                  - !Sub arn:aws:s3:::${ArtifactBucket}/*
-                  - !Sub arn:aws:s3:::aws2022-lambda-code-eu-west-1-${AWS::AccountId}/*
-              - Sid: FunctionReadback
-                Effect: Allow
-                Action:
-                  - lambda:ListEventSourceMappings
-                  - lambda:GetFunctionConfiguration
-                  - lambda:GetEventSourceMapping
-                  - lambda:GetFunctionUrlConfig
-                Resource: '*'
-              - Sid: EventSourceMappingCleanup
-                Effect: Allow
-                Action:
-                  - lambda:DeleteEventSourceMapping
-                Resource:
-                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:event-source-mapping:*
-              - Sid: PassCloudFormationRole
-                Effect: Allow
-                Action: iam:PassRole
-                Resource: !GetAtt CloudFormationExecutionRole.Arn
-              - Sid: CallerIdentity
-                Effect: Allow
-                Action: sts:GetCallerIdentity
-                Resource: '*'
-
 Outputs:
   ArtifactBucketName:
     Value: !Ref ArtifactBucket
@@ -513,7 +403,5 @@ Outputs:
     Value: !GetAtt ScoutsBootstrapAdminRole.Arn
   GitHubActionsScoutsDeployRoleArn:
     Value: !GetAtt GitHubActionsScoutsDeployRole.Arn
-  GitHubActionsLambdasDeployRoleArn:
-    Value: !GetAtt GitHubActionsLambdasDeployRole.Arn
   CloudFormationExecutionRoleArn:
     Value: !GetAtt CloudFormationExecutionRole.Arn
