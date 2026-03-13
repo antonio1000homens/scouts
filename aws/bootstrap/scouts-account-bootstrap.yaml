@@ -115,13 +115,10 @@ Resources:
                   - iam:TagRole
                   - iam:UntagRole
                 Resource:
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/nfc-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-slack-handler-lambda-role
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/slack-handler-lambda-role
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/todoist-webhook-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/alexa-home-control-confirmation-role-eu-west-1
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/alexa-home-control-confirmation-role-eu-west-2
               - Sid: RuntimeRoleInlinePolicyManagement
@@ -131,13 +128,10 @@ Resources:
                   - iam:GetRolePolicy
                   - iam:PutRolePolicy
                 Resource:
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/nfc-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-slack-handler-lambda-role
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/slack-handler-lambda-role
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/todoist-webhook-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/alexa-home-control-confirmation-role-eu-west-1
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/alexa-home-control-confirmation-role-eu-west-2
               - Sid: RuntimeRolePass
@@ -145,13 +139,10 @@ Resources:
                 Action:
                   - iam:PassRole
                 Resource:
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/nfc-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-slack-handler-lambda-role
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/slack-handler-lambda-role
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/todoist-webhook-lambda-role
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/alexa-home-control-confirmation-role-eu-west-1
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/alexa-home-control-confirmation-role-eu-west-2
               - Sid: LambdaCreateAndList
@@ -185,20 +176,13 @@ Resources:
                   - lambda:UpdateFunctionCode
                   - lambda:UpdateFunctionConfiguration
                 Resource:
-                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:nfc2sqs
-                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:sqs2nfc
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts2sqs
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:sqs2scouts
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts-slack-handler
-                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:slack-handler
-                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:todoist-webhook
                   - !Sub arn:aws:lambda:eu-west-1:${AWS::AccountId}:function:alexa-home-control-confirmation
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:alexa-home-control-confirmation
-                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:layer:nfc-shared:*
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:layer:scouts-shared:*
-                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:layer:slack-handler-layer:*
-                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:layer:todoist-webhook-layer:*
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:event-source-mapping:*
                   - !Sub arn:aws:lambda:eu-west-1:${AWS::AccountId}:event-source-mapping:*
               - Sid: QueueManagement
@@ -220,7 +204,6 @@ Resources:
                   - sqs:DeleteMessage
                   - sqs:ChangeMessageVisibility
                 Resource:
-                  - !Sub arn:aws:sqs:eu-west-2:${AWS::AccountId}:nfc
                   - !Sub arn:aws:sqs:eu-west-2:${AWS::AccountId}:scoutsRequests
                   - !Sub arn:aws:sqs:eu-west-2:${AWS::AccountId}:scoutsProcessing
                   - !Sub arn:aws:sqs:eu-west-2:${AWS::AccountId}:scoutsDecision
@@ -275,10 +258,6 @@ Resources:
                   - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/scouts2sqs*
                   - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/sqs2scouts*
                   - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/scouts-slack-handler*
-                  - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/nfc2sqs*
-                  - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/sqs2nfc*
-                  - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/slack-handler*
-                  - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/todoist-webhook*
                   - !Sub arn:aws:logs:eu-west-1:${AWS::AccountId}:log-group:/aws/lambda/alexa-home-control-confirmation*
               - Sid: CloudFrontManagement
                 Effect: Allow
@@ -470,9 +449,6 @@ Resources:
                   - cloudformation:DescribeStacks
                   - cloudformation:ExecuteChangeSet
                 Resource:
-                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/nfc-lambdas/*
-                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/slack-handler-lambda/*
-                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/todoist-webhook-lambda/*
                   - !Sub arn:aws:cloudformation:eu-west-1:${AWS::AccountId}:stack/alexa-confirmation-lambda/*
                   - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/alexa-confirmation-lambda/*
                   - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-lambda/*
