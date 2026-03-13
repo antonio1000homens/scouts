@@ -12,10 +12,7 @@ ARTIFACT_BUCKET_NAME="${ARTIFACT_BUCKET_NAME:-aws2022-lambda-code-eu-west-2-5534
 BOOTSTRAP_PRINCIPAL_ARN="${BOOTSTRAP_PRINCIPAL_ARN:-}"
 SCOUTS_REPO_OWNER="${SCOUTS_REPO_OWNER:-antonio1000homens}"
 SCOUTS_REPO_NAME="${SCOUTS_REPO_NAME:-scouts}"
-LAMBDAS_REPO_NAME="${LAMBDAS_REPO_NAME:-lambdas}"
 SCOUTS_BRANCH="${SCOUTS_BRANCH:-master}"
-LAMBDAS_PRIMARY_BRANCH="${LAMBDAS_PRIMARY_BRANCH:-main}"
-LAMBDAS_SECONDARY_BRANCH="${LAMBDAS_SECONDARY_BRANCH:-master}"
 
 if [ -z "${BOOTSTRAP_PRINCIPAL_ARN}" ]; then
   echo "BOOTSTRAP_PRINCIPAL_ARN is required." >&2
@@ -45,10 +42,7 @@ aws cloudformation deploy \
     ArtifactBucketName="${ARTIFACT_BUCKET_NAME}" \
     ScoutsRepoOwner="${SCOUTS_REPO_OWNER}" \
     ScoutsRepoName="${SCOUTS_REPO_NAME}" \
-    LambdasRepoName="${LAMBDAS_REPO_NAME}" \
-    ScoutsBranch="${SCOUTS_BRANCH}" \
-    LambdasPrimaryBranch="${LAMBDAS_PRIMARY_BRANCH}" \
-    LambdasSecondaryBranch="${LAMBDAS_SECONDARY_BRANCH}"
+    ScoutsBranch="${SCOUTS_BRANCH}"
 
 aws cloudformation describe-stacks \
   --region "${REGION}" \

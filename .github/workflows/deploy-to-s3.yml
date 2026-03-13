@@ -34,7 +34,7 @@ env:
   AWS_REGION: eu-west-2
   EXPECTED_AWS_ACCOUNT: "553490163883"
   WEBSITE_BUCKET: scouts-2ndtolworth-prod-553490163883
-  SCOUTS_AWS_ROLE_TO_ASSUME: ${{ vars.SCOUTS_AWS_ROLE_TO_ASSUME }}
+  AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
   CLOUDFORMATION_ROLE_ARN: ${{ vars.CLOUDFORMATION_ROLE_ARN }}
   CODE_BUCKET: ${{ vars.CODE_BUCKET || 'aws2022-lambda-code-eu-west-2-553490163883' }}
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
@@ -211,7 +211,7 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ env.SCOUTS_AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           role-session-name: github-actions-scouts-deploy
       - name: Configure S3 bucket for static website hosting
         run: |
@@ -339,7 +339,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ env.SCOUTS_AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           role-session-name: github-actions-scouts-deploy
           aws-region: ${{ env.AWS_REGION }}
       - name: Deploy scouts queues
@@ -368,7 +368,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq
       - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ env.SCOUTS_AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           role-session-name: github-actions-scouts-deploy
           aws-region: ${{ env.AWS_REGION }}
       - name: Deploy scouts function
@@ -410,7 +410,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq
       - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ env.SCOUTS_AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           role-session-name: github-actions-scouts-deploy
           aws-region: ${{ env.AWS_REGION }}
       - name: Deploy scouts2sqs
@@ -449,7 +449,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq
       - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ env.SCOUTS_AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           role-session-name: github-actions-scouts-deploy
           aws-region: ${{ env.AWS_REGION }}
       - name: Deploy sqs2scouts
@@ -505,7 +505,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq
       - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ env.SCOUTS_AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           role-session-name: github-actions-scouts-deploy
           aws-region: ${{ env.AWS_REGION }}
       - name: Deploy scouts Slack handler
