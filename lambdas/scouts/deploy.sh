@@ -30,6 +30,7 @@ EXPECTED_AWS_ACCOUNT="${EXPECTED_AWS_ACCOUNT:-553490163883}"
 CLOUDFORMATION_ROLE_ARN="${CLOUDFORMATION_ROLE_ARN:-}"
 DEPLOY_ID="${DEPLOY_ID:-$(date -u +%Y%m%d%H%M%S)}"
 S3_PREFIX="${S3_PREFIX:-lambdas/scouts}"
+NPM_CACHE_DIR="${NPM_CACHE_DIR:-${HOME}/.npm}"
 # Artifact rollback window policy: 30 days (enforced by S3 lifecycle rule on lambdas/scouts/).
 ARTIFACT_RETENTION_DAYS="${ARTIFACT_RETENTION_DAYS:-30}"
 
@@ -164,7 +165,7 @@ if [ ! -f package.json ]; then
   echo -e "${RED}Error: ${SHARED_LAYER_DIR}/nodejs/package.json not found${NC}"
   exit 1
 fi
-npm install --production
+npm install --production --cache "${NPM_CACHE_DIR}"
 popd >/dev/null
 
 rm -f "${SHARED_LAYER_ZIP}"
