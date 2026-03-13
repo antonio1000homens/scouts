@@ -10,7 +10,6 @@ QUEUE_URL="${QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsP
 API_KEY_ENV="${REQUIRED_API_KEY:-${SCOUTS_REQUIRED_API_KEY:-}}"
 
 CONFIG_PATHS=(
-  "$SCRIPT_DIR/../scouts2sqs/config.json"
   "$SCRIPT_DIR/../shared-layer/config.json"
   "$SCRIPT_DIR/../shared-layer/nodejs/config.json"
 )
