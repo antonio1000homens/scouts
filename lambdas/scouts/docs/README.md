@@ -32,6 +32,6 @@ Repeat `npm install` inside `lambda-layer/nodejs/` and recreate the zip whenever
 Note: by default the lambda requests calendar ICS feeds without Authorization headers. The default, bundled calendar URLs are public and do not require authentication. If you need to fetch a protected calendar, provide a pre-authorised URL in `EVENTS_CALENDAR_URL` / `PROGRAMME_CALENDAR_URL` or proxy the request through an authenticated service.
 - `GEMINI_API_KEY` *(optional)* – Google Gemini API key for generating AI taglines for new future events. If not provided, events will not have AI-generated content.
 
-> The lambda expects to run on the Node.js 18.x runtime (or newer) so that `fetch` is available without bundling extra dependencies.
+> The lambda expects to run on the Node.js 24.x runtime so that the deployed environment matches the current Lambda configuration.
 
 The existing GitHub workflow that syncs `lambdas/` to S3 already includes this lambda, so no pipeline changes are required.

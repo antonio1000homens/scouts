@@ -53,7 +53,7 @@ zip -r lambda-layer.zip nodejs
 aws lambda publish-layer-version \
     --layer-name scouts-shared \
     --zip-file fileb://lambda-layer/lambda-layer.zip \
-    --compatible-runtimes nodejs18.x \
+    --compatible-runtimes nodejs24.x \
     --region eu-west-2
 ```
 
@@ -134,7 +134,7 @@ Replace `<ACCOUNT_ID>` with your AWS account ID and `<LAYER_VERSION>` with the v
 ```bash
 aws lambda create-function \
     --function-name scouts \
-    --runtime nodejs18.x \
+    --runtime nodejs24.x \
     --role arn:aws:iam::<ACCOUNT_ID>:role/scouts-lambda-role \
     --handler scouts.handler \
     --zip-file fileb://scouts-lambda.zip \
@@ -177,7 +177,7 @@ zip -r lambda-layer.zip nodejs
 aws lambda publish-layer-version \
     --layer-name scouts-shared \
     --zip-file fileb://lambda-layer/lambda-layer.zip \
-    --compatible-runtimes nodejs18.x \
+    --compatible-runtimes nodejs24.x \
     --region eu-west-2
 ```
 

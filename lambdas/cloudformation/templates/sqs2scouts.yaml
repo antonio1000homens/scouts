@@ -22,7 +22,7 @@ Parameters:
     Default: sqs2scouts-lambda-role
   Runtime:
     Type: String
-    Default: nodejs22.x
+    Default: nodejs24.x
   Handler:
     Type: String
     Default: sqs2scouts.lambdaHandler

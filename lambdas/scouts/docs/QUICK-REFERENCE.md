@@ -90,7 +90,7 @@ Default values (can be customized in scripts):
 - **Layer name**: scouts-shared
 - **Bucket name**: 2ndtolworth
 - **Region**: eu-west-2
-- **Runtime**: nodejs18.x
+- **Runtime**: nodejs24.x
 - **Role name**: scouts-lambda-role
 
 ## Files Created
