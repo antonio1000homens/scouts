@@ -27,7 +27,7 @@ Parameters:
     Description: Role name used only when RoleArn is not provided.
   Runtime:
     Type: String
-    Default: nodejs22.x
+    Default: nodejs24.x
   Handler:
     Type: String
     Default: slack-handler.lambdaHandler
