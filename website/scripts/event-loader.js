@@ -289,9 +289,10 @@ function renderNextEventCard(event, container) {
         locationLabel ? `<p><span class="label">Location:</span> ${locationLabel}</p>` : ''
     ].filter(Boolean).join('');
     const image = createEventImageMarkup(event);
+    const hasImage = Boolean(image);
     const sectionKey = resolveEventSection(event);
     const headingMarkup = createEventHeading('h3', event);
-    const frontMarkup = image
+    const frontMarkup = hasImage
         ? `
             <div class="next-event-hero next-event-hero--with-image">
                 <div class="next-event-hero-media">${image}</div>
@@ -309,7 +310,7 @@ function renderNextEventCard(event, container) {
         `;
 
     container.innerHTML = `
-        <div class="event-card flip-card" tabindex="0" data-section="${sectionKey}">
+        <div class="event-card flip-card${hasImage ? ' flip-card--with-image' : ''}" tabindex="0" data-section="${sectionKey}">
             <div class="flip-card-inner">
                 <div class="flip-card-face flip-card-front">
                     ${frontMarkup}
