@@ -74,22 +74,61 @@ function getHexHintFromSubject(subject) {
     return null;
 }
 
+function normaliseRuntimeText(value) {
+    if (value === undefined || value === null) return null;
+    const normalized = String(value)
+        .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+        .trim();
+    return normalized || null;
+}
+
+function getHexHintFromMessageBody(messageBody) {
+    const directHex = normaliseRuntimeText(
+        messageBody?.hexId
+        ?? messageBody?.hex
+        ?? messageBody?.requestHex
+        ?? null
+    );
+    if (directHex && /^[0-9a-f]+$/i.test(directHex)) {
+        return directHex.toLowerCase();
+    }
+    return getHexHintFromSubject(messageBody?.subject);
+}
+
 function getTitleHintFromMessageBody(messageBody) {
     if (!messageBody || typeof messageBody !== 'object') {
         return null;
     }
 
-    const directTitle = messageBody.title ?? messageBody.summary ?? messageBody.name ?? null;
-    if (typeof directTitle === 'string' && directTitle.trim()) {
-        return directTitle.trim();
+    const directTitle = normaliseRuntimeText(messageBody.title ?? messageBody.summary ?? messageBody.name ?? null);
+    if (directTitle) {
+        return directTitle;
     }
 
     const subject = messageBody.subject;
     if (subject && typeof subject === 'object') {
-        const subjectTitle = subject.title ?? subject.summary ?? subject.name ?? null;
-        if (typeof subjectTitle === 'string' && subjectTitle.trim()) {
-            return subjectTitle.trim();
-        }
+        return normaliseRuntimeText(subject.title ?? subject.summary ?? subject.name ?? null);
+    }
+
+    return null;
+}
+
+function getSubjectHintFromMessageBody(messageBody) {
+    if (!messageBody || typeof messageBody !== 'object') {
+        return null;
+    }
+
+    const explicitSubject = normaliseRuntimeText(messageBody.subjectLabel ?? messageBody.requestedField ?? null);
+    if (explicitSubject) {
+        return explicitSubject;
+    }
+
+    if (typeof messageBody.subject === 'string') {
+        return normaliseRuntimeText(messageBody.subject);
+    }
+
+    if (messageBody.subject && typeof messageBody.subject === 'object') {
+        return normaliseRuntimeText(messageBody.subject.value ?? null);
     }
 
     return null;
@@ -146,8 +185,9 @@ function buildRuntimeRequestEntry(record, messageBody, status) {
         requestTime: getRequestTimeHint(record, messageBody),
         requestId: requestId ? String(requestId) : null,
         messageId: messageId ? String(messageId) : null,
-        hexId: getHexHintFromSubject(messageBody?.subject),
+        hexId: getHexHintFromMessageBody(messageBody),
         title: getTitleHintFromMessageBody(messageBody),
+        subject: getSubjectHintFromMessageBody(messageBody),
         realm: typeof messageBody?.realm === 'string' && messageBody.realm.trim() ? messageBody.realm.trim() : null,
         action: normaliseActionHint(messageBody?.action),
         status,
@@ -289,7 +329,7 @@ function collectRequestHints(record, messageBody) {
     }
 
     const requests = [buildRuntimeRequestEntry(record, messageBody, 'processing')]
-        .filter((entry) => entry.requestId || entry.messageId || entry.hexId || entry.title);
+        .filter((entry) => entry.requestId || entry.messageId || entry.hexId || entry.title || entry.subject);
 
     return {
         requestIds: Array.from(requestIds),
@@ -307,7 +347,7 @@ function buildRequestContext(record, messageBody) {
         ?? record?.messageId
         ?? crypto.randomUUID();
     const requestId = String(baseRequestId);
-    const hex = getHexHintFromSubject(messageBody?.subject);
+    const hex = getHexHintFromMessageBody(messageBody);
     return { requestId, hex };
 }
 
@@ -1913,6 +1953,59 @@ function buildQueuePayload(payload) {
     const action = typeof payload.action === 'string' ? payload.action.trim() : payload.action;
     const subject = payload.subject;
 
+    if (realm === 'scoutsRequest') {
+        const requestedField = normaliseRuntimeText(payload.subjectLabel ?? payload.requestedField ?? subject);
+        const hexId = getHexHintFromMessageBody(payload);
+        const title = getTitleHintFromMessageBody(payload);
+
+        if (requestedField !== 'tagline' && requestedField !== 'imageTheme' && requestedField !== 'imageUrl') {
+            throw new Error(`scoutsRequest subject ${requestedField} not supported by this lambda`);
+        }
+        if (!hexId) {
+            throw new Error(`Unable to derive HEX subject for realm=${realm} action=${action}`);
+        }
+
+        if (action === 'request') {
+            return {
+                realm: requestedField === 'tagline' ? 'tagline' : requestedField === 'imageTheme' ? 'imageTheme' : 'image',
+                action: 'request',
+                subject: hexId,
+                requestedField,
+                subjectLabel: requestedField,
+                hexId,
+                ...(title ? { title } : {}),
+            };
+        }
+
+        if (action === 'persist') {
+            const fieldValue = requestedField === 'tagline'
+                ? normaliseRuntimeText(payload.tagline ?? payload.value ?? payload?.subject?.tagline ?? null)
+                : requestedField === 'imageTheme'
+                    ? normaliseRuntimeText(payload.imageTheme ?? payload.imagePrompt ?? payload.value ?? payload?.subject?.imageTheme ?? payload?.subject?.imagePrompt ?? null)
+                    : normaliseRuntimeText(payload.imageUrl ?? payload.value ?? payload?.subject?.imageUrl ?? null);
+            if (!fieldValue) {
+                throw new Error(`${requestedField} persist request missing ${requestedField} value`);
+            }
+            return {
+                realm: 'persist',
+                action: 'persist',
+                subject: {
+                    hexId,
+                    ...(requestedField === 'tagline' ? { tagline: fieldValue } : {}),
+                    ...(requestedField === 'imageTheme' ? { imageTheme: fieldValue } : {}),
+                    ...(requestedField === 'imageUrl' ? { imageUrl: fieldValue } : {}),
+                    ...(title ? { title } : {}),
+                },
+                requestedField,
+                subjectLabel: requestedField,
+                hexId,
+                ...(title ? { title } : {}),
+            };
+        }
+
+        throw new Error(`Action ${action} not supported for realm=${realm} subject=${requestedField}`);
+    }
+
     // Only allow a small set of realms through (include 'persist' so this lambda
     // can publish persist messages created during approval flows)
     const allowedRealms = new Set(['tagline', 'AI', 'imageTheme', 'imagePrompt', 'image', 'persist']);
@@ -2108,6 +2201,18 @@ export async function lambdaHandler(event) {
                             console.error('[SlackRelay] Failed to forward Slack payload:', error.message);
                         }
 
+                        continue;
+                    }
+
+                    if (rawRealm === 'scoutsRequest' && (rawAction === 'request' || rawAction === 'persist')) {
+                        try {
+                            const translatedPayload = withRequestContext(messageBody, requestContext);
+                            console.log('[scoutsRequest] Translating field-level request:', JSON.stringify(translatedPayload));
+                            await sendToSQS(translatedPayload);
+                            console.log(`[scoutsRequest] ${rawAction} field request forwarded successfully`);
+                        } catch (error) {
+                            console.error(`[scoutsRequest] Failed to translate field-level request: ${error.message}`);
+                        }
                         continue;
                     }
 
@@ -2319,3 +2424,5 @@ export async function lambdaHandler(event) {
         return withCors({ statusCode: 500, body: JSON.stringify({ error: error.message }) });
     }
 }
+
+export { buildQueuePayload, buildRuntimeRequestEntry };

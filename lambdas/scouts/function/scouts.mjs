@@ -569,14 +569,52 @@ function getQueuedRuntimeHexFromSubject(subject) {
     : null;
 }
 
-function getQueuedRuntimeTitleFromSubject(subject) {
+function normaliseRuntimeText(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const text = String(value)
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .trim();
+  return text || null;
+}
+
+function getQueuedRuntimeHexFromPayload(payload) {
+  const directHex = normaliseRuntimeText(payload?.hexId ?? payload?.hex ?? payload?.requestHex ?? null);
+  if (directHex && /^[0-9a-f]+$/i.test(directHex)) {
+    return directHex.toLowerCase();
+  }
+  return getQueuedRuntimeHexFromSubject(payload?.subject);
+}
+
+function getQueuedRuntimeTitleFromPayload(payload) {
+  const directTitle = normaliseRuntimeText(payload?.title ?? payload?.summary ?? payload?.name ?? null);
+  if (directTitle) {
+    return directTitle;
+  }
+
+  const subject = payload?.subject;
   if (!subject || typeof subject !== 'object') {
     return null;
   }
-  const candidate = subject.title ?? subject.summary ?? subject.name ?? null;
-  return typeof candidate === 'string' && candidate.trim()
-    ? candidate.trim()
-    : null;
+  return normaliseRuntimeText(subject.title ?? subject.summary ?? subject.name ?? null);
+}
+
+function getQueuedRuntimeSubjectFromPayload(payload) {
+  const explicitSubject = normaliseRuntimeText(payload?.subjectLabel ?? payload?.requestedField ?? null);
+  if (explicitSubject) {
+    return explicitSubject;
+  }
+
+  if (typeof payload?.subject === 'string') {
+    return normaliseRuntimeText(payload.subject);
+  }
+
+  if (payload?.subject && typeof payload.subject === 'object') {
+    return normaliseRuntimeText(payload.subject.value ?? null);
+  }
+
+  return null;
 }
 
 function buildQueuedRuntimeRequestEntry(payload, messageId = null, timestamp = new Date().toISOString()) {
@@ -998,8 +1036,9 @@ async function migrateLegacyImageIfNeeded(bucket, imageUrl) {
     const copyCommand = new CopyObjectCommand({
       Bucket: bucket,
       CopySource: `${bucket}/${details.key}`,
-      Key: destinationKey,
-      MetadataDirective: 'COPY',
+    hexId: getQueuedRuntimeHexFromPayload(payload),
+    title: getQueuedRuntimeTitleFromPayload(payload),
+    subject: getQueuedRuntimeSubjectFromPayload(payload),
     });
     await s3.send(copyCommand);
     console.log(`[Image Migration] Copied ${details.key} -> ${destinationKey}`);
@@ -3449,6 +3488,16 @@ export async function lambdaHandler(event = {}) {
         bodyParams?.ai,
       ),
     );
+    const candidateTitle = normalizeNullableText(
+      firstDefinedValue(
+        subjectObject?.title,
+        subjectObject?.summary,
+        subjectObject?.name,
+        bodyParams?.title,
+        bodyParams?.summary,
+        bodyParams?.name,
+      ),
+    );
     const candidateImageTheme = normalizeNullableText(
       firstDefinedValue(
         subjectObject?.imageTheme,
@@ -3601,12 +3650,33 @@ export async function lambdaHandler(event = {}) {
       };
     }
 
+    const fieldLevelPersistField = (
+      (requiredPersistField === 'tagline' || requiredPersistField === 'imageTheme' || requiredPersistField === 'imageUrl')
+      && persistedFields.length === 1
+      && persistedFields[0] === requiredPersistField
+    ) ? requiredPersistField : null;
+
+    const queuePayload = fieldLevelPersistField
+      ? {
+          realm: 'scoutsRequest',
+          subject: fieldLevelPersistField,
+          subjectLabel: fieldLevelPersistField,
+          requestedField: fieldLevelPersistField,
+          hexId: candidateHex,
+          ...(candidateTitle ? { title: candidateTitle } : {}),
+          ...(fieldLevelPersistField === 'tagline' ? { tagline: candidateTagline } : {}),
+          ...(fieldLevelPersistField === 'imageTheme' ? { imageTheme: candidateImageTheme } : {}),
+          ...(fieldLevelPersistField === 'imageUrl' ? { imageUrl: candidateImageUrl } : {}),
+          action: 'persist',
+        }
+      : {
+          realm: 'persist',
+          subject,
+          action: 'persist',
+        };
+
     const queueResult = await postToScoutsRequestsQueue(
-      {
-        realm: 'persist',
-        subject,
-        action: 'persist',
-      },
+      queuePayload,
       `AdminPersist:${persistedFields.join(',')}`,
     );
 
@@ -3622,9 +3692,11 @@ export async function lambdaHandler(event = {}) {
         requestId: queueResult?.payload?.requestId ?? null,
         queuedMessage: {
           requestId: queueResult?.payload?.requestId ?? null,
-          realm: queueResult?.payload?.realm ?? 'persist',
+          realm: queueResult?.payload?.realm ?? (fieldLevelPersistField ? 'scoutsRequest' : 'persist'),
           action: queueResult?.payload?.action ?? 'persist',
-          subjectHex: queueResult?.payload?.subject?.hexId ?? candidateHex,
+          subjectHex: queueResult?.payload?.hexId ?? queueResult?.payload?.subject?.hexId ?? candidateHex,
+          subjectTitle: queueResult?.payload?.title ?? null,
+          subjectField: typeof queueResult?.payload?.subject === 'string' ? queueResult.payload.subject : null,
           queueUrl: queueResult?.queueUrl ?? SCOUTS_REQUESTS_QUEUE_URL,
           messageId: queueResult?.messageId ?? null,
           md5OfMessageBody: queueResult?.md5OfMessageBody ?? null,
@@ -3769,12 +3841,42 @@ export async function lambdaHandler(event = {}) {
         ? 'imageTheme'
         : 'image';
 
+    const candidateTitle = normalizeNullableText(
+      firstDefinedValue(
+        subjectObject?.title,
+        subjectObject?.summary,
+        subjectObject?.name,
+        eventCandidate?.title,
+        eventCandidate?.summary,
+        eventCandidate?.name,
+        bodyParams?.title,
+        bodyParams?.summary,
+        bodyParams?.name,
+      ),
+    );
+
+    const fieldLevelGenerateField = (metadataGenerateField === 'tagline' || metadataGenerateField === 'imageTheme' || metadataGenerateField === 'imageUrl')
+      ? metadataGenerateField
+      : null;
+
+    const queuePayload = fieldLevelGenerateField
+      ? {
+          realm: 'scoutsRequest',
+          subject: fieldLevelGenerateField,
+          subjectLabel: fieldLevelGenerateField,
+          requestedField: fieldLevelGenerateField,
+          hexId: candidateHex,
+          ...(candidateTitle ? { title: candidateTitle } : {}),
+          action: 'request',
+        }
+      : {
+          realm: targetRealm,
+          subject: candidateHex,
+          action: 'request',
+        };
+
     const queueResult = await postToScoutsRequestsQueue(
-      {
-        realm: targetRealm,
-        subject: candidateHex,
-        action: 'request',
-      },
+      queuePayload,
       `AdminGenerate:${metadataGenerateField}`,
     );
 
@@ -3790,9 +3892,11 @@ export async function lambdaHandler(event = {}) {
         requestId: queueResult?.payload?.requestId ?? null,
         queuedMessage: {
           requestId: queueResult?.payload?.requestId ?? null,
-          realm: queueResult?.payload?.realm ?? targetRealm,
+          realm: queueResult?.payload?.realm ?? (fieldLevelGenerateField ? 'scoutsRequest' : targetRealm),
           action: queueResult?.payload?.action ?? 'request',
-          subjectHex: candidateHex,
+          subjectHex: queueResult?.payload?.hexId ?? candidateHex,
+          subjectTitle: queueResult?.payload?.title ?? null,
+          subjectField: typeof queueResult?.payload?.subject === 'string' ? queueResult.payload.subject : null,
           queueUrl: queueResult?.queueUrl ?? SCOUTS_REQUESTS_QUEUE_URL,
           messageId: queueResult?.messageId ?? null,
           md5OfMessageBody: queueResult?.md5OfMessageBody ?? null,
@@ -4513,4 +4617,9 @@ export async function lambdaHandler(event = {}) {
 export const handler = lambdaHandler;
 
 // Named exports for testing
-export { normalizeHexEventToMetadata, prepareEventForStorage, pruneQueuedRuntimeRequests };
+export {
+  buildQueuedRuntimeRequestEntry,
+  normalizeHexEventToMetadata,
+  prepareEventForStorage,
+  pruneQueuedRuntimeRequests,
+};
