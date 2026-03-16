@@ -2260,6 +2260,10 @@ footer {
     min-height: 240px;
 }
 
+.next-event .flip-card--with-image .flip-card-inner {
+    min-height: clamp(360px, 34vw, 420px);
+}
+
 .next-event .flip-card:hover .flip-card-inner,
 .next-event .flip-card:focus-within .flip-card-inner {
     transform: rotateY(180deg);
@@ -2311,6 +2315,11 @@ footer {
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 100%;
+    max-width: 320px;
+    aspect-ratio: 16 / 10;
+    overflow: hidden;
+    border-radius: 14px;
 }
 
 .next-event .next-event-hero-copy {
@@ -2329,10 +2338,10 @@ footer {
 }
 
 .next-event .flip-card img {
-    max-width: 320px;
     width: 100%;
-    height: auto;
-    border-radius: 14px;
+    height: 100%;
+    object-fit: cover;
+    display: block;
     box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
 }
 
@@ -2428,6 +2437,10 @@ footer {
 @media (max-width: 600px) {
     .event-grid {
         grid-template-columns: 1fr;
+    }
+
+    .next-event .flip-card--with-image .flip-card-inner {
+        min-height: 460px;
     }
 
     .next-event .next-event-hero--with-image {
