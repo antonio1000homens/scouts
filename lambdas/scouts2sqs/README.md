@@ -36,6 +36,8 @@ scouts2sqs/
 ## Expected Behavior
 
 - Accepts POST requests with `realm`, `subject`, `action` parameters
+- Consumes `scoutsRequests` SQS messages and republishes normalized internal jobs to `scoutsProcessing`
+- Translates field-level requests like `realm=scoutsRequest`, `subject=tagline|imageTheme`, `action=request|persist` into the existing internal queue payloads
 - Publishes to SQS queue: `https://sqs.eu-west-2.amazonaws.com/243857182133/scoutsProcessing`
 - Sends notification to Slack channel: `#scouts`
 - Returns 200 on success, 400/500 on errors

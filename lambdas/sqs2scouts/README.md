@@ -112,9 +112,11 @@ Related Gemini env vars:
 
 ```json
 {
-   "realm": "tagline | AI | imagePrompt | imageRequest | persist",
+   "realm": "tagline | AI | imageTheme | imagePrompt | image | persist",
    "action": "string",
    "subject": "string | object",
+   "title": "optional string used for runtime tracking",
+   "requestedField": "optional string such as tagline or imageTheme used for runtime tracking",
    "responseUrl": "optional string",
    "response_url": "optional string",
    "slackMetadata": {
@@ -126,8 +128,9 @@ Related Gemini env vars:
 
 Only these `realm` values are accepted:
 - `tagline` (legacy alias: `AI`)
+- `imageTheme` (preferred)
 - `imagePrompt`
-- `imageRequest`
+- `image`
 - `persist`
 
 Any other `realm` is dropped and sent to DLQ.

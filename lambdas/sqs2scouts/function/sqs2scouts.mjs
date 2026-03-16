@@ -177,22 +177,61 @@ function getHexHintFromSubject(subject) {
     return null;
 }
 
+function normaliseRuntimeText(value) {
+    if (value === undefined || value === null) return null;
+    const normalized = String(value)
+        .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+        .trim();
+    return normalized || null;
+}
+
+function getHexHintFromMessageBody(messageBody) {
+    const directHex = normaliseRuntimeText(
+        messageBody?.hexId
+        ?? messageBody?.hex
+        ?? messageBody?.requestHex
+        ?? null
+    );
+    if (directHex && /^[0-9a-f]+$/i.test(directHex)) {
+        return directHex.toLowerCase();
+    }
+    return getHexHintFromSubject(messageBody?.subject);
+}
+
 function getTitleHintFromMessageBody(messageBody) {
     if (!messageBody || typeof messageBody !== 'object') {
         return null;
     }
 
-    const directTitle = messageBody.title ?? messageBody.summary ?? messageBody.name ?? null;
-    if (typeof directTitle === 'string' && directTitle.trim()) {
-        return directTitle.trim();
+    const directTitle = normaliseRuntimeText(messageBody.title ?? messageBody.summary ?? messageBody.name ?? null);
+    if (directTitle) {
+        return directTitle;
     }
 
     const subject = messageBody.subject;
     if (subject && typeof subject === 'object') {
-        const subjectTitle = subject.title ?? subject.summary ?? subject.name ?? null;
-        if (typeof subjectTitle === 'string' && subjectTitle.trim()) {
-            return subjectTitle.trim();
-        }
+        return normaliseRuntimeText(subject.title ?? subject.summary ?? subject.name ?? null);
+    }
+
+    return null;
+}
+
+function getSubjectHintFromMessageBody(messageBody) {
+    if (!messageBody || typeof messageBody !== 'object') {
+        return null;
+    }
+
+    const explicitSubject = normaliseRuntimeText(messageBody.subjectLabel ?? messageBody.requestedField ?? null);
+    if (explicitSubject) {
+        return explicitSubject;
+    }
+
+    if (typeof messageBody.subject === 'string') {
+        return normaliseRuntimeText(messageBody.subject);
+    }
+
+    if (messageBody.subject && typeof messageBody.subject === 'object') {
+        return normaliseRuntimeText(messageBody.subject.value ?? null);
     }
 
     return null;
@@ -249,8 +288,9 @@ function buildRuntimeRequestEntry(record, messageBody, status) {
         requestTime: getRequestTimeHint(record, messageBody),
         requestId: requestId ? String(requestId) : null,
         messageId: messageId ? String(messageId) : null,
-        hexId: getHexHintFromSubject(messageBody?.subject),
+        hexId: getHexHintFromMessageBody(messageBody),
         title: getTitleHintFromMessageBody(messageBody),
+        subject: getSubjectHintFromMessageBody(messageBody),
         realm: typeof messageBody?.realm === 'string' && messageBody.realm.trim() ? messageBody.realm.trim() : null,
         action: normaliseActionHint(messageBody?.action),
         status,
@@ -331,7 +371,7 @@ function buildRequestContext(record, messageBody) {
         ?? record?.messageId
         ?? crypto.randomUUID();
     const requestId = String(baseRequestId);
-    const hex = getHexHintFromSubject(messageBody?.subject);
+    const hex = getHexHintFromMessageBody(messageBody);
     return { requestId, hex };
 }
 
@@ -3262,3 +3302,5 @@ export async function lambdaHandler(event) {
         await persistCompletedRequestsRuntimeSnapshot(records, observedRequestIds, observedHexIds, observedLinks, observedRequests);
     }
 }
+
+export { buildRuntimeRequestEntry };
