@@ -1,0 +1,12 @@
+{
+  "terminal.integrated.env.windows": {
+    "AWS_PROFILE": "scouts",
+    "AWS_REGION": "eu-west-2",
+    "AWS_DEFAULT_REGION": "eu-west-2"
+  },
+  "terminal.integrated.env.linux": {
+    "AWS_PROFILE": "scouts",
+    "AWS_REGION": "eu-west-2",
+    "AWS_DEFAULT_REGION": "eu-west-2"
+  }
+}
