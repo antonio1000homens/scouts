@@ -658,24 +658,85 @@ function buildRuntimeRequestKeySet(snapshot) {
   );
 }
 
+function getQueuedRuntimeHexSignature(entry) {
+  const hex = getQueuedRuntimeRequestHex(entry);
+  if (!hex) return '';
+  const realm = typeof entry?.realm === 'string' && entry.realm.trim() ? entry.realm.trim() : '';
+  const action = typeof entry?.action === 'string' && entry.action.trim() ? entry.action.trim() : '';
+  const title = typeof entry?.title === 'string' && entry.title.trim() ? entry.title.trim() : '';
+  return [hex, realm, action, title].filter(Boolean).join('|');
+}
+
+function buildRuntimeRequestState(snapshot) {
+  const requestKeys = buildRuntimeRequestKeySet(snapshot);
+  const hexSignatures = new Map();
+
+  for (const entry of getRuntimeSnapshotRequests(snapshot)) {
+    const signature = getQueuedRuntimeHexSignature(entry);
+    if (!signature) continue;
+    const timestampMs = getQueuedRuntimeRequestTimestamp(entry);
+    const existingTimestampMs = hexSignatures.get(signature) ?? 0;
+    if (timestampMs >= existingTimestampMs) {
+      hexSignatures.set(signature, timestampMs);
+    }
+  }
+
+  return { requestKeys, hexSignatures };
+}
+
 function pruneQueuedRuntimeRequests(entries = [], processingSnapshot = null, completedSnapshot = null, nowMs = Date.now()) {
-  const processingKeys = buildRuntimeRequestKeySet(processingSnapshot);
-  const completedKeys = buildRuntimeRequestKeySet(completedSnapshot);
-  const retained = [];
+  const processingState = buildRuntimeRequestState(processingSnapshot);
+  const completedState = buildRuntimeRequestState(completedSnapshot);
+  const latestQueuedByHex = new Map();
+  const retainedWithoutHex = [];
   let removedCount = 0;
 
-  for (const entry of Array.isArray(entries) ? entries : []) {
+  for (const [index, entry] of (Array.isArray(entries) ? entries : []).entries()) {
     const key = getQueuedRuntimeRequestKey(entry);
+    const hexSignature = getQueuedRuntimeHexSignature(entry);
     const timestampMs = getQueuedRuntimeRequestTimestamp(entry);
     const isOlderThanPruneThreshold = timestampMs > 0 && (nowMs - timestampMs) > QUEUED_RUNTIME_STALE_PRUNE_MS;
-    const existsDownstream = (key && processingKeys.has(key)) || (key && completedKeys.has(key));
+    const completedTimestampMs = hexSignature ? (completedState.hexSignatures.get(hexSignature) ?? 0) : 0;
+    const matchesCompletedRequest = (key && completedState.requestKeys.has(key))
+      || (hexSignature && completedState.hexSignatures.has(hexSignature) && (
+        completedTimestampMs === 0 || timestampMs === 0 || completedTimestampMs >= timestampMs
+      ));
+    const existsDownstream = (key && processingState.requestKeys.has(key))
+      || (hexSignature && processingState.hexSignatures.has(hexSignature));
+
+    if (matchesCompletedRequest) {
+      removedCount += 1;
+      continue;
+    }
 
     if (isOlderThanPruneThreshold && !existsDownstream) {
       removedCount += 1;
       continue;
     }
-    retained.push(entry);
+
+    if (!hexSignature) {
+      retainedWithoutHex.push({ entry, index });
+      continue;
+    }
+
+    const existing = latestQueuedByHex.get(hexSignature);
+    if (!existing || timestampMs >= existing.timestampMs) {
+      if (existing) {
+        removedCount += 1;
+      }
+      latestQueuedByHex.set(hexSignature, { entry, index, timestampMs });
+      continue;
+    }
+
+    removedCount += 1;
   }
+
+  const retained = [
+    ...retainedWithoutHex,
+    ...Array.from(latestQueuedByHex.values()),
+  ]
+    .sort((left, right) => left.index - right.index)
+    .map((item) => item.entry);
 
   return {
     requests: deduplicateQueuedRuntimeRequests(retained),
@@ -4452,4 +4513,4 @@ export async function lambdaHandler(event = {}) {
 export const handler = lambdaHandler;
 
 // Named exports for testing
-export { normalizeHexEventToMetadata, prepareEventForStorage };
+export { normalizeHexEventToMetadata, prepareEventForStorage, pruneQueuedRuntimeRequests };

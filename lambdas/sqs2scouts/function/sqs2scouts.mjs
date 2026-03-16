@@ -22,7 +22,7 @@ const TARGET_BUCKET = process.env.TARGET_BUCKET || DEFAULT_BUCKET;
 const EVENT_IMAGE_PREFIX = 'website/eventImages/';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_API_VERSION = (process.env.GEMINI_API_VERSION || 'v1').trim() || 'v1';
-const GEMINI_IMAGE_API_VERSION = (process.env.GEMINI_IMAGE_API_VERSION || GEMINI_API_VERSION || 'v1beta').trim() || 'v1beta';
+const GEMINI_IMAGE_API_VERSION = (process.env.GEMINI_IMAGE_API_VERSION || 'v1beta').trim() || 'v1beta';
 const GEMINI_TEXT_MODEL = (process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash-lite').trim() || 'gemini-2.5-flash-lite';
 const GENERATED_IMAGE_WIDTH = Number.isFinite(Number(process.env.GEMINI_IMAGE_OUTPUT_WIDTH))
     ? Math.max(320, Number(process.env.GEMINI_IMAGE_OUTPUT_WIDTH))

@@ -371,13 +371,13 @@ jobs:
           SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
           SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
           SCOUTS_REQUIRED_API_KEY: ${{ secrets.SCOUTS_REQUIRED_API_KEY }}
-          CUBS_EVENTS_CALENDAR_URL: ${{ secrets.CUBS_EVENTS_CALENDAR_URL }}
-          CUBS_PROGRAMME_CALENDAR_URL: ${{ secrets.CUBS_PROGRAMME_CALENDAR_URL }}
-          CUBS_PROGRAME_CALENDAR_URL: ${{ secrets.CUBS_PROGRAME_CALENDAR_URL }}
-          SCOUTS_EVENTS_CALENDAR_URL: ${{ secrets.SCOUTS_EVENTS_CALENDAR_URL }}
-          SCOUTS_PROGRAMME_CALENDAR_URL: ${{ secrets.SCOUTS_PROGRAMME_CALENDAR_URL }}
-          BEAVERS_EVENTS_CALENDAR_URL: ${{ secrets.BEAVERS_EVENTS_CALENDAR_URL }}
-          BEAVERS_PROGRAMME_CALENDAR_URL: ${{ secrets.BEAVERS_PROGRAMME_CALENDAR_URL }}
+          CUBS_EVENTS_CALENDAR_URL: ${{ vars.CUBS_EVENTS_CALENDAR_URL }}
+          CUBS_PROGRAMME_CALENDAR_URL: ${{ vars.CUBS_PROGRAMME_CALENDAR_URL }}
+          CUBS_PROGRAME_CALENDAR_URL: ${{ vars.CUBS_PROGRAME_CALENDAR_URL }}
+          SCOUTS_EVENTS_CALENDAR_URL: ${{ vars.SCOUTS_EVENTS_CALENDAR_URL }}
+          SCOUTS_PROGRAMME_CALENDAR_URL: ${{ vars.SCOUTS_PROGRAMME_CALENDAR_URL }}
+          BEAVERS_EVENTS_CALENDAR_URL: ${{ vars.BEAVERS_EVENTS_CALENDAR_URL }}
+          BEAVERS_PROGRAMME_CALENDAR_URL: ${{ vars.BEAVERS_PROGRAMME_CALENDAR_URL }}
         run: cd lambdas/scouts && bash ./deploy.sh
 
   deploy-scouts2sqs:
@@ -466,6 +466,8 @@ jobs:
           DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
           S3_WEBSITE_BASE_URL: https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_VERSION: ${{ vars.GEMINI_API_VERSION }}
+          GEMINI_IMAGE_API_VERSION: ${{ vars.GEMINI_IMAGE_API_VERSION }}
           GEMINI_IMAGE_MODEL: ${{ vars.GEMINI_IMAGE_MODEL }}
           GEMINI_TEXT_MODEL: ${{ vars.GEMINI_TEXT_MODEL }}
           REQUIRE_GEMINI_API_KEY: 'true'
