@@ -2315,9 +2315,10 @@ footer {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 100%;
-    max-width: 320px;
-    aspect-ratio: 16 / 10;
+    width: min(100%, 320px);
+    min-width: 320px;
+    height: 240px;
+    aspect-ratio: 4 / 3;
     overflow: hidden;
     border-radius: 14px;
 }
@@ -2447,6 +2448,10 @@ footer {
         grid-template-columns: 1fr;
         gap: 1.25rem;
         text-align: center;
+    }
+
+    .next-event .next-event-hero-media {
+        min-width: 0;
     }
 
     .next-event .next-event-hero-copy {
