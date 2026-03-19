@@ -198,8 +198,6 @@ function keySuffix(value) {
 async function proxyToLambda(request, lambdaBaseUrl, apiKey) {
   const safeApiKey = (apiKey || "").trim();
   const upstreamUrl = new URL(lambdaBaseUrl);
-  upstreamUrl.searchParams.set("apiKey", safeApiKey);
-
   const headers = new Headers(request.headers);
   headers.delete("cookie");
   headers.delete("host");
@@ -207,6 +205,7 @@ async function proxyToLambda(request, lambdaBaseUrl, apiKey) {
   headers.delete("cf-access-authenticated-user-email");
   headers.delete("cf-connecting-ip");
   headers.delete("x-forwarded-for");
+  upstreamUrl.searchParams.set("apiKey", safeApiKey);
   // Support Lambdas expecting either query-string apiKey or x-api-key header.
   headers.set("x-api-key", safeApiKey);
 

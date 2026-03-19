@@ -69,26 +69,12 @@ Parameters:
   FunctionUrlCorsMaxAge:
     Type: Number
     Default: 3600
-  SlackSigningSecret:
-    Type: String
-    Default: ''
-    NoEcho: true
-  SlackBotToken:
-    Type: String
-    Default: ''
-    NoEcho: true
-  ExistingScouts2SqsFunctionUrl:
-    Type: String
-    Default: ''
   TargetBucket:
     Type: String
     Default: scouts-2ndtolworth-prod-553490163883
   ScoutsConfigKey:
     Type: String
     Default: scouts.conf
-  ApprovalMetadataPrefix:
-    Type: String
-    Default: approvals
   RequiredApiKey:
     Type: String
     Default: ''
@@ -168,13 +154,9 @@ Resources:
         - !Ref Scouts2SqsLayer
       Environment:
         Variables:
-          SLACK_SIGNING_SECRET: !Ref SlackSigningSecret
-          SLACK_BOT_TOKEN: !Ref SlackBotToken
-          SCOUTS2SQS_FUNCTION_URL: !Ref ExistingScouts2SqsFunctionUrl
           REQUIRED_API_KEY: !Ref RequiredApiKey
           TARGET_BUCKET: !Ref TargetBucket
           SCOUTS_CONFIG_KEY: !Ref ScoutsConfigKey
-          APPROVAL_METADATA_PREFIX: !Ref ApprovalMetadataPrefix
           SCOUTS2SQS_PUBLISH_ENABLED: !Ref Scouts2SqsPublishEnabled
           SCOUTS_REQUESTS_QUEUE_URL: !Ref ScoutsRequestsQueueUrl
           SQS_QUEUE_URL: !Ref ProcessingQueueUrl
