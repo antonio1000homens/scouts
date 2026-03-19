@@ -81,4 +81,3 @@ Update the admin frontend to call:
 - `/admin-api/persist` (instead of direct `SCOUTS2SQS_URL`)
 - `/admin-api/refresh` (instead of direct `SCOUTS_REFRESH_URL`)
 - `/admin-api/auth-status` on load to drive "ready/missing" UI status
-

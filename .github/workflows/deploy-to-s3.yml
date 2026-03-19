@@ -16,8 +16,10 @@ on:
           - changed
           - all
           - website
+          - cloudflare
           - scouts-queues
           - scouts-function
+          - scouts-slack-handler
           - scouts2sqs
           - sqs2scouts
       deploy_all:
@@ -43,8 +45,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       website: "${{ steps.changes.outputs.website }}"
+      cloudflare: "${{ steps.changes.outputs.cloudflare }}"
       scouts_queues: "${{ steps.changes.outputs['scouts-queues'] }}"
       scouts_function: "${{ steps.changes.outputs['scouts-function'] }}"
+      scouts_slack_handler: "${{ steps.changes.outputs['scouts-slack-handler'] }}"
       scouts2sqs: "${{ steps.changes.outputs.scouts2sqs }}"
       sqs2scouts: "${{ steps.changes.outputs.sqs2scouts }}"
     steps:
@@ -87,14 +91,18 @@ jobs:
           }
 
           website='false'
+          cloudflare='false'
           scouts_queues='false'
           scouts_function='false'
+          scouts_slack_handler='false'
           scouts2sqs='false'
           sqs2scouts='false'
 
           website_files=''
+          cloudflare_files=''
           scouts_queues_files=''
           scouts_function_files=''
+          scouts_slack_handler_files=''
           scouts2sqs_files=''
           sqs2scouts_files=''
 
@@ -138,6 +146,12 @@ jobs:
             esac
 
             case "${file}" in
+              cloudflare/*|.github/workflows/deploy-to-s3.yml)
+                mark_changed 'cloudflare' "${file}"
+                ;;
+            esac
+
+            case "${file}" in
               lambdas/scouts-queues/*|lambdas/cloudformation/templates/scouts-queues.yaml)
                 mark_changed 'scouts-queues' "${file}"
                 ;;
@@ -146,6 +160,12 @@ jobs:
             case "${file}" in
               lambdas/scouts/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/scouts.yaml)
                 mark_changed 'scouts-function' "${file}"
+                ;;
+            esac
+
+            case "${file}" in
+              lambdas/scouts-slack-handler/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/slack-handler.yaml)
+                mark_changed 'scouts-slack-handler' "${file}"
                 ;;
             esac
 
@@ -166,10 +186,14 @@ jobs:
           {
             echo "website=${website}"
             echo "website_files=${website_files}"
+            echo "cloudflare=${cloudflare}"
+            echo "cloudflare_files=${cloudflare_files}"
             echo "scouts-queues=${scouts_queues}"
             echo "scouts-queues_files=${scouts_queues_files}"
             echo "scouts-function=${scouts_function}"
             echo "scouts-function_files=${scouts_function_files}"
+            echo "scouts-slack-handler=${scouts_slack_handler}"
+            echo "scouts-slack-handler_files=${scouts_slack_handler_files}"
             echo "scouts2sqs=${scouts2sqs}"
             echo "scouts2sqs_files=${scouts2sqs_files}"
             echo "sqs2scouts=${sqs2scouts}"
@@ -178,10 +202,48 @@ jobs:
       - name: Debug detected changes
         run: |
           echo "website=${{ steps.changes.outputs.website }} files=${{ steps.changes.outputs.website_files }}"
+          echo "cloudflare=${{ steps.changes.outputs.cloudflare }} files=${{ steps.changes.outputs.cloudflare_files }}"
           echo "scouts-queues=${{ steps.changes.outputs['scouts-queues'] }} files=${{ steps.changes.outputs['scouts-queues_files'] }}"
           echo "scouts-function=${{ steps.changes.outputs['scouts-function'] }} files=${{ steps.changes.outputs['scouts-function_files'] }}"
+          echo "scouts-slack-handler=${{ steps.changes.outputs['scouts-slack-handler'] }} files=${{ steps.changes.outputs['scouts-slack-handler_files'] }}"
           echo "scouts2sqs=${{ steps.changes.outputs.scouts2sqs }} files=${{ steps.changes.outputs.scouts2sqs_files }}"
           echo "sqs2scouts=${{ steps.changes.outputs.sqs2scouts }} files=${{ steps.changes.outputs.sqs2scouts_files }}"
+
+  deploy-cloudflare:
+    needs: detect-changes
+    if: |
+      (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.cloudflare == 'true') ||
+      (github.event_name == 'workflow_dispatch' && (
+        github.event.inputs.deploy_all == 'true' ||
+        github.event.inputs.deploy_target == 'all' ||
+        github.event.inputs.deploy_target == 'cloudflare' ||
+        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.cloudflare == 'true')
+      ))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: scouts-cloudflare-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Get secrets from Bitwarden Secrets Manager
+        uses: bitwarden/sm-action@v2.2.0
+        with:
+          access_token: ${{ secrets.BWS_GITHUB_ACTIONS_SCOUTS_APP }}
+          secrets: |
+            ${{ vars.BW_SECRET_ID_CF_DEPLOY_API_TOKEN }} > CF_DEPLOY_API_TOKEN
+      - name: Install Wrangler
+        run: npm install --global wrangler@4
+      - name: Deploy admin proxy worker
+        run: bash cloudflare/deploy-ci.sh
+      - name: Deploy slack handler worker
+        env:
+          SCOUTS_SLACK_HANDLER_URL: ${{ vars.SCOUTS_SLACK_HANDLER_URL }}
+        run: bash cloudflare/scouts-slack-handler/deploy-ci.sh
 
   deploy-website:
     needs: detect-changes
@@ -380,6 +442,58 @@ jobs:
           BEAVERS_PROGRAMME_CALENDAR_URL: ${{ vars.BEAVERS_PROGRAMME_CALENDAR_URL }}
         run: cd lambdas/scouts && bash ./deploy.sh
 
+  deploy-scouts-slack-handler:
+    needs: detect-changes
+    if: |
+      (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.scouts_slack_handler == 'true') ||
+      (github.event_name == 'workflow_dispatch' && (
+        github.event.inputs.deploy_all == 'true' ||
+        github.event.inputs.deploy_target == 'all' ||
+        github.event.inputs.deploy_target == 'scouts-slack-handler' ||
+        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.scouts_slack_handler == 'true')
+      ))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: scouts-slack-handler-stack-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+      - name: Restore npm cache for scouts shared layer
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-scouts-shared-layer-${{ hashFiles('lambdas/shared-layer/nodejs/package-lock.json') }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: github-actions-scouts-deploy
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Get Slack signing secret from Bitwarden Secrets Manager
+        uses: bitwarden/sm-action@v2.2.0
+        with:
+          access_token: ${{ secrets.BWS_GITHUB_ACTIONS_SCOUTS_APP }}
+          secrets: |
+            ${{ vars.BW_SCOUTS_SLACK_SIGNING_SECRET }} > SLACK_SIGNING_SECRET
+            ${{ vars.BW_SCOUTS_SLACK_BOT_TOKEN }} > SLACK_BOT_TOKEN
+      - name: Deploy scouts slack-handler
+        env:
+          CODE_BUCKET: ${{ env.CODE_BUCKET }}
+          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
+          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
+          REQUIRED_API_KEY: ${{ secrets.SCOUTS_REQUIRED_API_KEY }}
+          SCOUTS_REQUEST_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+          SCOUTS_REQUEST_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
+          NFC_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+          NFC_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
+          TARGET_BUCKET: scouts-2ndtolworth-prod-553490163883
+          SCOUTS_CONFIG_KEY: scouts.conf
+        run: cd lambdas/scouts-slack-handler && bash ./deploy.sh
+
   deploy-scouts2sqs:
     needs: [detect-changes, deploy-scouts-queues]
     if: |
@@ -420,8 +534,6 @@ jobs:
           SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
           SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
           SCOUTS_REQUIRED_API_KEY: ${{ secrets.SCOUTS_REQUIRED_API_KEY }}
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
         run: cd lambdas/scouts2sqs && bash ./deploy.sh
 
   deploy-sqs2scouts:
@@ -452,6 +564,13 @@ jobs:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           role-session-name: github-actions-scouts-deploy
           aws-region: ${{ env.AWS_REGION }}
+      - name: Get Slack secrets from Bitwarden Secrets Manager
+        uses: bitwarden/sm-action@v2.2.0
+        with:
+          access_token: ${{ secrets.BWS_GITHUB_ACTIONS_SCOUTS_APP }}
+          secrets: |
+            ${{ vars.BW_SCOUTS_SLACK_SIGNING_SECRET }} > SLACK_SIGNING_SECRET
+            ${{ vars.BW_SCOUTS_SLACK_BOT_TOKEN }} > SLACK_BOT_TOKEN
       - name: Deploy sqs2scouts
         env:
           CODE_BUCKET: ${{ env.CODE_BUCKET }}
@@ -471,8 +590,6 @@ jobs:
           GEMINI_IMAGE_MODEL: ${{ vars.GEMINI_IMAGE_MODEL }}
           GEMINI_TEXT_MODEL: ${{ vars.GEMINI_TEXT_MODEL }}
           REQUIRE_GEMINI_API_KEY: 'true'
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
         run: cd lambdas/sqs2scouts && bash ./deploy.sh
       - name: Verify sqs2scouts GEMINI_API_KEY
         run: |

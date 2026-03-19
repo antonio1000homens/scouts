@@ -44,12 +44,8 @@ BATCH_SIZE="${BATCH_SIZE:-1}"
 FUNCTION_URL_AUTH_TYPE="${FUNCTION_URL_AUTH_TYPE:-NONE}"
 TIMEOUT="${TIMEOUT:-30}"
 MEMORY_SIZE="${MEMORY_SIZE:-256}"
-SLACK_SIGNING_SECRET="${SLACK_SIGNING_SECRET:-}"
-SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN:-}"
-SCOUTS2SQS_FUNCTION_URL="${SCOUTS2SQS_FUNCTION_URL:-}"
 TARGET_BUCKET="${TARGET_BUCKET:-scouts-2ndtolworth-prod-553490163883}"
 SCOUTS_CONFIG_KEY="${SCOUTS_CONFIG_KEY:-scouts.conf}"
-APPROVAL_METADATA_PREFIX="${APPROVAL_METADATA_PREFIX:-approvals}"
 REQUIRED_API_KEY="${REQUIRED_API_KEY:-${SCOUTS_REQUIRED_API_KEY:-}}"
 SCOUTS2SQS_PUBLISH_ENABLED="${SCOUTS2SQS_PUBLISH_ENABLED:-true}"
 DLQ_URL="${DLQ_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ}"
@@ -102,27 +98,7 @@ echo "Using AWS identity: ${CALLER_ARN}"
 cd "${SCRIPT_DIR}"
 
 if declare -F bws_export_if_unset >/dev/null 2>&1; then
-  bws_export_if_unset "SLACK_SIGNING_SECRET" "${BWS_SLACK_SIGNING_SECRET_SECRET_ID:-}" || true
-  bws_export_if_unset "SLACK_BOT_TOKEN" "${BWS_SLACK_BOT_TOKEN_SECRET_ID:-}" || true
   bws_export_if_unset "REQUIRED_API_KEY" "${BWS_REQUIRED_API_KEY_SECRET_ID:-${BWS_SCOUTS_REQUIRED_API_KEY_SECRET_ID:-}}" || true
-fi
-
-if [ -z "${SCOUTS2SQS_FUNCTION_URL}" ]; then
-  DISCOVERED_URL="$(aws lambda get-function-url-config --function-name "${FUNCTION_NAME}" --region "${REGION}" --query 'FunctionUrl' --output text 2>/dev/null || true)"
-  if [ -n "${DISCOVERED_URL}" ] && [ "${DISCOVERED_URL}" != "None" ] && [ "${DISCOVERED_URL}" != "null" ]; then
-    SCOUTS2SQS_FUNCTION_URL="${DISCOVERED_URL}"
-  fi
-fi
-
-if [ -z "${SLACK_SIGNING_SECRET}" ] || [ -z "${SLACK_BOT_TOKEN}" ]; then
-  CURRENT_SIGNING_SECRET="$(aws lambda get-function-configuration --function-name "${FUNCTION_NAME}" --region "${REGION}" --query 'Environment.Variables.SLACK_SIGNING_SECRET' --output text 2>/dev/null || true)"
-  CURRENT_BOT_TOKEN="$(aws lambda get-function-configuration --function-name "${FUNCTION_NAME}" --region "${REGION}" --query 'Environment.Variables.SLACK_BOT_TOKEN' --output text 2>/dev/null || true)"
-  if [ -z "${SLACK_SIGNING_SECRET}" ] && [ -n "${CURRENT_SIGNING_SECRET}" ] && [ "${CURRENT_SIGNING_SECRET}" != "None" ] && [ "${CURRENT_SIGNING_SECRET}" != "null" ]; then
-    SLACK_SIGNING_SECRET="${CURRENT_SIGNING_SECRET}"
-  fi
-  if [ -z "${SLACK_BOT_TOKEN}" ] && [ -n "${CURRENT_BOT_TOKEN}" ] && [ "${CURRENT_BOT_TOKEN}" != "None" ] && [ "${CURRENT_BOT_TOKEN}" != "null" ]; then
-    SLACK_BOT_TOKEN="${CURRENT_BOT_TOKEN}"
-  fi
 fi
 
 if [ -z "${REQUIRED_API_KEY}" ]; then
@@ -186,14 +162,10 @@ CFN_DEPLOY_ARGS+=(
     FunctionUrlAuthType="${FUNCTION_URL_AUTH_TYPE}"
     Timeout="${TIMEOUT}"
     MemorySize="${MEMORY_SIZE}"
-    SlackSigningSecret="${SLACK_SIGNING_SECRET}"
-    SlackBotToken="${SLACK_BOT_TOKEN}"
-    ExistingScouts2SqsFunctionUrl="${SCOUTS2SQS_FUNCTION_URL}"
     RequiredApiKey="${REQUIRED_API_KEY}"
     Scouts2SqsPublishEnabled="${SCOUTS2SQS_PUBLISH_ENABLED}"
     TargetBucket="${TARGET_BUCKET}"
     ScoutsConfigKey="${SCOUTS_CONFIG_KEY}"
-    ApprovalMetadataPrefix="${APPROVAL_METADATA_PREFIX}"
     ScoutsRequestsQueueUrl="${SCOUTS_REQUESTS_QUEUE_URL}"
     ProcessingQueueUrl="${QUEUE_URL}"
     DlqUrl="${DLQ_URL}"

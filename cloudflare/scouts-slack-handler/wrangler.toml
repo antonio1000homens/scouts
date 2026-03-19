@@ -1,0 +1,9 @@
+name = "scouts-slack-handler"
+main = "worker.js"
+compatibility_date = "2026-03-19"
+account_id = "9a5523112f1460d0f77c9ba239d00029"
+workers_dev = false
+
+routes = [
+  { pattern = "slack.2ndtolworth.org.uk", custom_domain = true }
+]
