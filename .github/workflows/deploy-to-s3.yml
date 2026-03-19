@@ -236,13 +236,12 @@ jobs:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
             ${{ vars.BW_SECRET_ID_CF_DEPLOY_API_TOKEN || vars.BW_SCOUTS_CF_DEPLOY }} > CF_DEPLOY_API_TOKEN
+            ${{ vars.BW_SCOUTS_SLACK_HANDLER_URL }} > SCOUTS_SLACK_HANDLER_URL
       - name: Install Wrangler
         run: npm install --global wrangler@4
       - name: Deploy admin proxy worker
         run: bash cloudflare/deploy-ci.sh
       - name: Deploy slack handler worker
-        env:
-          SCOUTS_SLACK_HANDLER_URL: ${{ vars.SCOUTS_SLACK_HANDLER_URL }}
         run: bash cloudflare/scouts-slack-handler/deploy-ci.sh
 
   deploy-website:
