@@ -74,6 +74,16 @@ The Worker returns:
    - `cd scouts/cloudflare`
    - `wrangler deploy --var SCOUTS2SQS_URL=https://... --var SCOUTS_REFRESH_URL=https://... --var REQUIRE_CF_ACCESS=true --var IFTTT_EVENT_NAME=scouts_contact`
 
+For scripted deploys in this repo, `cloudflare/deploy-ci.sh` also supports resolving the
+deploy token from Bitwarden via the Scouts local env file at
+`lambdas/scouts/.env`. Set one of these secret-ID variables there:
+
+- `BW_SCOUTS_CF_DEPLOY`
+- `BWS_SCOUTS_CF_DEPLOY_SECRET_ID`
+- `BW_SECRET_ID_CF_DEPLOY_API_TOKEN`
+
+Direct `CF_DEPLOY_API_TOKEN` still works as an override.
+
 ## Admin page integration
 
 Update the admin frontend to call:

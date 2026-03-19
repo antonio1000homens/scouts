@@ -235,7 +235,7 @@ jobs:
         with:
           access_token: ${{ secrets.BWS_GITHUB_ACTIONS_SCOUTS_APP }}
           secrets: |
-            ${{ vars.BW_SECRET_ID_CF_DEPLOY_API_TOKEN }} > CF_DEPLOY_API_TOKEN
+            ${{ vars.BW_SECRET_ID_CF_DEPLOY_API_TOKEN || vars.BW_SCOUTS_CF_DEPLOY }} > CF_DEPLOY_API_TOKEN
       - name: Install Wrangler
         run: npm install --global wrangler@4
       - name: Deploy admin proxy worker
