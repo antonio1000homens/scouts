@@ -21,10 +21,13 @@ From the repo root:
 
 ```bash
 cd scouts
-CF_DEPLOY_API_TOKEN=... \
 SCOUTS_SLACK_HANDLER_URL=https://<lambda-url>.lambda-url.eu-west-2.on.aws/ \
 bash cloudflare/scouts-slack-handler/deploy-ci.sh
 ```
+
+`CF_DEPLOY_API_TOKEN` can be exported directly, or the deploy script can resolve it from
+Bitwarden using a secret ID in `lambdas/scouts/.env` via `BW_SCOUTS_CF_DEPLOY`,
+`BWS_SCOUTS_CF_DEPLOY_SECRET_ID`, or `BW_SECRET_ID_CF_DEPLOY_API_TOKEN`.
 
 ## Custom Domain
 
