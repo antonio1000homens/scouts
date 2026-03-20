@@ -35,7 +35,7 @@ flowchart LR
     B -->|"admin persist image URL"| Q14["scoutsRequests\n{ realm: scoutsRequest, action: persist, subject: imageUrl, hexId: <hex>, imageUrl: <value> }"]
     B -->|"reset removed events"| Q10["scoutsRequests\n{ realm: scouts, subject: reset, action: removed-events summary }"]
 
-    C["sqs2scouts callback path\nno direct SQS trigger into scouts"] -->|"HEX still incomplete"| Q11["scoutsRequests\n{ realm: scoutsRequest, action: new, subject: full event object }"]
+    C["sqs2scouts callback path\nno direct SQS trigger into scouts"] -->|"HEX still incomplete"| Q11["no requeue from callback path"]
 
     subgraph D["scouts2sqs consuming scoutsRequests"]
         Q1 --> E{"subject completeness"}
@@ -79,7 +79,7 @@ flowchart LR
 | Admin generate image theme | `realm=scouts`, `action=generate|request`, subject token resolves to `imageTheme` | `{ realm: "scoutsRequest", action: "request", subject: "imageTheme", hexId: <hex> }` |
 | Admin generate image URL | `realm=scouts`, `action=generate|request`, subject token resolves to `imageUrl` | `{ realm: "scoutsRequest", action: "request", subject: "imageUrl", hexId: <hex> }` |
 | Reset cleanup notification | Reset flow removes event files | `{ realm: "scouts", subject: "reset", action: <removed-events summary> }` |
-| `sqs2scouts` callback for incomplete persisted HEX | `realm=sqs2scouts`, `action=persisted`, HEX still incomplete | `{ realm: "scoutsRequest", action: "new", subject: <full event object> }` |
+| `sqs2scouts` callback for incomplete persisted HEX | `realm=sqs2scouts`, `action=persisted`, HEX still incomplete | No requeue from callback path |
 
 ## scouts2sqs mapping from scoutsRequests to scoutsProcessing
 

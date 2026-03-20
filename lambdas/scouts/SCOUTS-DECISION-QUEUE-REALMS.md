@@ -9,7 +9,7 @@ The `scouts.mjs` Lambda function receives messages from the `scoutsDecision` SQS
 **Purpose**: React to persistence outcomes reported by the `sqs2scouts` lambda.
 
 **Actions**:
-- `persisted`: HEX file saved successfully. Scouts lambda checks whether the HEX is complete (AI + image prompt + image URL). If anything is missing it requeues the event via `realm: 'scoutsRequest'` so enrichment can resume; otherwise the agenda entry is updated with the final AI/image data.
+- `persisted`: HEX file saved successfully. Scouts lambda checks whether the HEX is complete (AI + image prompt + image URL). If anything is missing it does not requeue from this callback path; otherwise the agenda entry is updated with the final AI/image data.
 - `hidden`: Event status is `hidden`. Scouts lambda updates `agenda.json` so the event disappears from the public feed.
 
 **Code Location**: `scouts.mjs` around the `structuredCommand.realm === 'sqs2scouts'` branch (~2090 onwards).
@@ -68,7 +68,7 @@ if (event.Records && Array.isArray(event.Records)) {
 
 ### scoutsRequests Queue
 Scouts.mjs sends messages to the `scoutsRequests` queue when:
-- A `persisted` notification arrives but the HEX is still incomplete → the event is requeued as `realm: 'scoutsRequest', action: 'new'`.
+- A `persisted` notification arrives but the HEX is still incomplete → no requeue is performed from this callback path.
 - A reset command removes cached state → follow-up work items are enqueued so enrichment can restart.
 
 ## Summary

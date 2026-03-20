@@ -24,7 +24,7 @@ flowchart LR
   B -->|queue publish| D[scoutsRequests SQS]
   D --> E[scouts2sqs]
   E -->|derived next stage or pass-through| F[scoutsProcessing SQS]
-  G[sqs2scouts persisted callback] -->|incomplete HEX| B
+  G[sqs2scouts persisted callback] -->|incomplete HEX| H[no requeue from callback path]
 ```
 
 ## Admin to `scoutsRequests` to `scouts2sqs`
@@ -54,7 +54,7 @@ These are not sent directly by the admin page, but they affect the real pipeline
 | Enrichment run finds new or stale work | `realm: 'scoutsRequest'`, `action: 'new'`, `subject: <merged event object>` | Derives `tagline/request`, `imageTheme/request`, `image/request`, or no publish | Used by agenda/calendar processing and retry handling. |
 | Broken image repair | `realm: 'scoutsRequest'`, `action: 'repair'`, `subject: <event object>` | Derives `tagline/request`, `imageTheme/request`, `image/request`, or no publish | Repair goes through the same completeness logic in `scouts2sqs`. |
 | Reset cleanup notification | `realm: 'scouts'`, `subject: 'reset'`, `action: <removed-events summary>` | Dropped by `scouts2sqs` | `scouts2sqs` does not support the `scouts` realm on the SQS path. |
-| `sqs2scouts` callback for incomplete persisted HEX | `realm: 'scoutsRequest'`, `action: 'new'`, `subject: <hex data>` | Derives `tagline/request`, `imageTheme/request`, `image/request`, or no publish | This happens when persisted data is still incomplete. |
+| `sqs2scouts` callback for incomplete persisted HEX | No outbound queue message | No downstream queue work is emitted from this callback path | Persisted-but-incomplete HEX is logged and left in place. |
 
 ## Important translations
 
