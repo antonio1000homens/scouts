@@ -3402,6 +3402,7 @@ export async function lambdaHandler(event = {}) {
 
   const mapMetadataFieldFromActionToken = (token) => {
     if (!token) return null;
+    if (token === 'generatefull') return 'all';
     if (token === 'generatetagline') return 'tagline';
     if (token === 'generateimagetheme' || token === 'generateimageprompt') return 'imageTheme';
     if (token === 'generateimage' || token === 'generateimageurl') return 'imageUrl';
@@ -3788,6 +3789,11 @@ export async function lambdaHandler(event = {}) {
     };
   }
 
+  const isMetadataGenerateFullCommand = Boolean(
+    structuredCommand
+    && structuredCommand.realm === 'scouts'
+    && commandActionToken === 'generatefull'
+  );
   const metadataGenerateField = requestedMetadataField === 'all' ? null : requestedMetadataField;
   const isMetadataGenerateCommand = Boolean(
     structuredCommand
@@ -3795,6 +3801,104 @@ export async function lambdaHandler(event = {}) {
     && (commandActionToken?.startsWith('generate') || commandActionToken === 'request')
     && metadataGenerateField !== null
   );
+
+  if (isMetadataGenerateFullCommand) {
+    const normalizeNullableText = (value) => {
+      if (value === undefined || value === null) return null;
+      const text = String(value).trim();
+      return text ? text : null;
+    };
+
+    const eventCandidate =
+      (bodyParams?.event && typeof bodyParams.event === 'object' ? bodyParams.event : null)
+      ?? (bodyParams?.subjectEvent && typeof bodyParams.subjectEvent === 'object' ? bodyParams.subjectEvent : null)
+      ?? (bodyParams?.subject && typeof bodyParams.subject === 'object' ? bodyParams.subject : null)
+      ?? null;
+    const subjectObject =
+      (bodyParams?.subject && typeof bodyParams.subject === 'object' ? bodyParams.subject : null)
+      ?? null;
+
+    const candidateHex =
+      normalizeNullableText(bodyParams?.hex)?.toLowerCase()
+      ?? normalizeNullableText(queryParams?.hex)?.toLowerCase()
+      ?? normalizeNullableText(subjectObject?.hexId)?.toLowerCase()
+      ?? normalizeNullableText(subjectObject?.hex)?.toLowerCase()
+      ?? normalizeNullableText(eventCandidate?.hex)?.toLowerCase()
+      ?? normalizeNullableText(eventCandidate?.hexId)?.toLowerCase()
+      ?? null;
+
+    if (!candidateHex) {
+      return {
+        statusCode: 400,
+        headers: corsHeaders,
+        body: JSON.stringify({ error: 'Missing hex value for full enrichment generation request' }),
+      };
+    }
+
+    if (!/^[0-9a-f]+$/i.test(candidateHex)) {
+      return {
+        statusCode: 400,
+        headers: corsHeaders,
+        body: JSON.stringify({ error: 'Invalid hex value for full enrichment generation request' }),
+      };
+    }
+
+    const candidateTitle = normalizeNullableText(
+      firstDefinedValue(
+        subjectObject?.title,
+        subjectObject?.summary,
+        subjectObject?.name,
+        eventCandidate?.title,
+        eventCandidate?.summary,
+        eventCandidate?.name,
+        bodyParams?.title,
+        bodyParams?.summary,
+        bodyParams?.name,
+      ),
+    );
+
+    const queuePayload = {
+      realm: 'scoutsRequest',
+      action: 'fullEnrich',
+      source: 'scouts',
+      requestMode: 'auto',
+      approvalMode: 'auto',
+      subject: {
+        hex: candidateHex,
+        ...(candidateTitle ? { title: candidateTitle } : {}),
+      },
+      hexId: candidateHex,
+      ...(candidateTitle ? { title: candidateTitle } : {}),
+    };
+
+    const queueResult = await postToScoutsRequestsQueue(
+      queuePayload,
+      'AdminGenerate:full',
+    );
+
+    return {
+      statusCode: 200,
+      headers: corsHeaders,
+      body: JSON.stringify({
+        status: 'ok',
+        message: `Full enrichment request submitted for ${candidateHex}`,
+        queueAccepted: true,
+        queuedHex: candidateHex,
+        requestedField: 'full',
+        requestId: queueResult?.payload?.requestId ?? null,
+        queuedMessage: {
+          requestId: queueResult?.payload?.requestId ?? null,
+          realm: queueResult?.payload?.realm ?? 'scoutsRequest',
+          action: queueResult?.payload?.action ?? 'fullEnrich',
+          subjectHex: queueResult?.payload?.hexId ?? queueResult?.payload?.subject?.hex ?? candidateHex,
+          subjectTitle: queueResult?.payload?.title ?? queueResult?.payload?.subject?.title ?? null,
+          queueUrl: queueResult?.queueUrl ?? SCOUTS_REQUESTS_QUEUE_URL,
+          messageId: queueResult?.messageId ?? null,
+          md5OfMessageBody: queueResult?.md5OfMessageBody ?? null,
+        },
+      }),
+    };
+  }
 
   if (isMetadataGenerateCommand) {
     const normalizeNullableText = (value) => {
