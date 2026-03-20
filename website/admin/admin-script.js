@@ -2885,15 +2885,16 @@ async function refreshLambda(action = 'refreshAgenda') {
         return;
     }
 
+    const actionCount = Number.isFinite(parseInt(requestedCount, 10)) ? parseInt(requestedCount, 10) : 0;
+
     // Show loading state
     statusElement.textContent = 'Sending request...';
     statusElement.className = 'refresh-status loading';
 
-    const actionCount = Number.isFinite(parseInt(requestedCount, 10)) ? parseInt(requestedCount, 10) : 0;
     const payload = {
         realm: 'scouts',
         subject: 'agenda',
-        action,
+        action: actionCount,
         maxEvents: actionCount,
     };
 
@@ -2911,15 +2912,15 @@ async function refreshLambda(action = 'refreshAgenda') {
         const generatedAt = result?.generatedAt ? new Date(result.generatedAt).toLocaleString('en-GB') : null;
         const modifiedSuffix = modifiedCount > 0 ? ` (${modifiedCount} events modified)` : ' (no event metadata changes)';
         statusElement.textContent = generatedAt
-            ? `Agenda events refresh completed: ${generatedAt}${modifiedSuffix}`
-            : `Agenda events refresh completed${modifiedSuffix}`;
+            ? `Agenda-only enrichment completed: ${generatedAt}${modifiedSuffix}`
+            : `Agenda-only enrichment completed${modifiedSuffix}`;
         statusElement.className = 'refresh-status success';
         if (modifiedEvents.length > 0) {
             const preview = modifiedEvents
                 .slice(0, 5)
                 .map((entry) => entry?.title || entry?.hex || entry?.uid || entry?.key || 'unknown')
                 .join(' | ');
-            updateRuntimeDetails(`Modified events: ${preview}${modifiedEvents.length > 5 ? ' ...' : ''}`, 'success');
+            updateRuntimeDetails(`Agenda-only modified events: ${preview}${modifiedEvents.length > 5 ? ' ...' : ''}`, 'success');
         }
 
     } catch (error) {
@@ -3028,6 +3029,14 @@ function getSelectedModalEntry() {
 }
 
 function getFieldOperationConfig(field) {
+    if (field === 'full') {
+        return {
+            subjectKey: 'full',
+            payloadKey: 'full',
+            label: 'Full Enrichment',
+            queueLabel: 'full enrichment',
+        };
+    }
     if (field === 'tagline') {
         return {
             subjectKey: 'tagline',
@@ -3322,7 +3331,8 @@ async function requestGeneratedField(field, action = 'generate') {
         action,
     };
 
-    updateModalStatus(`Queueing ${config.queueLabel} for "${eventLabel}"...`, 'loading');
+    const requestVerb = action === 'generateFull' ? 'requesting' : 'queueing';
+    updateModalStatus(`${requestVerb.charAt(0).toUpperCase()}${requestVerb.slice(1)} ${config.queueLabel} for "${eventLabel}"...`, 'loading');
 
     uiCommandInFlight = true;
     refreshApiActionButtons();
@@ -3333,8 +3343,9 @@ async function requestGeneratedField(field, action = 'generate') {
             ? ` ${result.message.trim()}`
             : '';
         const queueAcceptedSuffix = result?.queueAccepted === true ? ' Queue accepted.' : '';
+        const actionLabel = action === 'generateFull' ? 'requested' : `${action} queued`;
         const successMessage = appendBackendRequestIdMessage(
-            `${config.queueLabel} ${action} queued for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`,
+            `${config.queueLabel} ${actionLabel} for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`,
             result,
         );
         updateModalStatus(successMessage, 'success');

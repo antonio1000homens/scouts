@@ -2,3 +2,5 @@ agenda.json
 cloudflare/.dev.vars
 cloudflare/node_modules
 lambdas/shared-layer/nodejs/node_modules
+lambdas/shared-layer/*.zip
+lambdas/*/function/*.zip
