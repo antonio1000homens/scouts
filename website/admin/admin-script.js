@@ -54,7 +54,7 @@ const missingHexRetryAtByHex = new Map();
 const warnedMissingDtstartIds = new Set();
 const localVisibilityOverrides = new Map();
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
-const SCOUTS_REFRESH_URL = window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
+const SCOUTS_URL = window.SCOUTS_URL || window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
 const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
 const QUEUED_REQUESTS_RUNTIME_URL = '../../runtime/scoutsQueued.json';
 const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/scoutsProcessing.json';
@@ -1375,7 +1375,7 @@ function updateStatusPollingInterval(value, persist = true) {
 }
 
 async function sendScoutsCommand(payload) {
-    const response = await fetch(SCOUTS_REFRESH_URL, {
+    const response = await fetch(SCOUTS_URL, {
         method: 'POST',
         headers: {
             'Content-Type': 'text/plain',

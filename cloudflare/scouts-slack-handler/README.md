@@ -7,6 +7,8 @@ This worker provides a dedicated Cloudflare custom domain for Scouts Slack inter
 It accepts requests only on that host/path and proxies them unchanged to the Scouts AWS
 `scouts-slack-handler` Lambda Function URL.
 
+No other path on `slack.2ndtolworth.org.uk` is served by this worker.
+
 ## Configuration
 
 The worker requires one deploy-time variable:

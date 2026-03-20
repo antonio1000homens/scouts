@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 BWS_HELPER="${REPO_ROOT}/lambdas/tools/bws-env.sh"
 SCOUTS_ENV_FILE="${REPO_ROOT}/lambdas/scouts/.env"
 
@@ -18,7 +18,7 @@ if [ -f "${BWS_HELPER}" ]; then
     source "${BWS_HELPER}"
 fi
 
-CONFIG_PATH="cloudflare/wrangler.toml"
+CONFIG_PATH="cloudflare/scouts-admin-proxy/wrangler.toml"
 
 require_env() {
     local name="$1"

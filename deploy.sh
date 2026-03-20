@@ -55,8 +55,8 @@ deploy_website() {
     if [ -n "${SCOUTS_AUTH_STATUS_URL:-}" ]; then
       echo "window.SCOUTS_AUTH_STATUS_URL = '${SCOUTS_AUTH_STATUS_URL}';"
     fi
-    if [ -n "${SCOUTS_REFRESH_URL:-}" ]; then
-      echo "window.SCOUTS_REFRESH_URL = '${SCOUTS_REFRESH_URL}';"
+    if [ -n "${SCOUTS_URL:-${SCOUTS_REFRESH_URL:-}}" ]; then
+      echo "window.SCOUTS_URL = '${SCOUTS_URL:-${SCOUTS_REFRESH_URL:-}}';"
     fi
     if [ -n "${SCOUTS_CONFIG_URL:-}" ]; then
       echo "window.SCOUTS_CONFIG_URL = '${SCOUTS_CONFIG_URL}';"
