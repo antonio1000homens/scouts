@@ -32,7 +32,7 @@ These paths use cache policy `4135ea2d-6df8-44a3-9df3-4b5a84be39ad` (`Managed-Ca
    ```bash
    AWS_PROFILE=scouts CERTIFICATE_ARN=<issued-us-east-1-cert-arn> ENABLE_ALIAS=false bash deploy-cloudfront.sh
    ```
-5. Update the GitHub secret `CLOUDFRONT_DISTRIBUTION_ID` in `antonio1000homens/scouts`.
+5. Store the CloudFront distribution ID in Bitwarden and set the GitHub Actions variable `BW_CLOUDFRONT_DISTRIBUTION_ID` to that Bitwarden secret ID in `antonio1000homens/scouts`.
 6. Cutover completed on March 12, 2026 by moving `2ndtolworth.org.uk` from the old Windsor distribution to `E3INLSADL3AN6C`.
 
 ## Updating CloudFront
@@ -62,4 +62,4 @@ bash import-cloudfront.sh
 
 ## GitHub Actions Integration
 
-The deploy workflow automatically invalidates CloudFront cache after S3 deployment using the `CLOUDFRONT_DISTRIBUTION_ID` secret.
+The deploy workflow automatically invalidates CloudFront cache after S3 deployment by loading the distribution ID from Bitwarden using `BW_CLOUDFRONT_DISTRIBUTION_ID`.
