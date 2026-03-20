@@ -262,6 +262,12 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           role-session-name: github-actions-scouts-deploy
+      - name: Get CloudFront distribution ID from Bitwarden Secrets Manager
+        uses: bitwarden/sm-action@v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
+            ${{ vars.BW_CLOUDFRONT_DISTRIBUTION_ID }} > CLOUDFRONT_DISTRIBUTION_ID
       - name: Configure S3 bucket for static website hosting
         run: |
           aws s3 website "s3://${WEBSITE_BUCKET}/" \
@@ -338,10 +344,8 @@ jobs:
             echo "No scouts.conf found in lambdas/sqs2scouts/, skipping"
           fi
       - name: Invalidate CloudFront cache
-        env:
-          CLOUDFRONT_DISTRIBUTION_ID: ${{ secrets['CLOUDFRONT_DISTRIBUTION_ID'] }}
         run: |
-          if [ -n "${CLOUDFRONT_DISTRIBUTION_ID}" ]; then
+          if [ -n "${CLOUDFRONT_DISTRIBUTION_ID:-}" ]; then
             if aws cloudfront get-distribution --id "${CLOUDFRONT_DISTRIBUTION_ID}" >/dev/null 2>&1; then
               echo "Invalidating CloudFront distribution ${CLOUDFRONT_DISTRIBUTION_ID}..."
               aws cloudfront create-invalidation \
@@ -351,7 +355,7 @@ jobs:
               echo "CloudFront distribution ${CLOUDFRONT_DISTRIBUTION_ID} not found in this account; skipping invalidation."
             fi
           else
-            echo "No CLOUDFRONT_DISTRIBUTION_ID secret set; skipping invalidation."
+            echo "No CloudFront distribution ID loaded from Bitwarden; skipping invalidation."
           fi
 
   deploy-scouts-queues:

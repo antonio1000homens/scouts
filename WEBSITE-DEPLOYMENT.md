@@ -41,7 +41,7 @@ The website automatically deploys when you push to the `master` branch.
 2. Navigate to Settings → Secrets and variables → Actions → Variables
 3. Add `AWS_ROLE_TO_ASSUME` with the IAM role ARN GitHub should assume for deployment
 4. Ensure the IAM role trust policy allows GitHub OIDC (`token.actions.githubusercontent.com`) for this repository
-5. Keep `CLOUDFRONT_DISTRIBUTION_ID` as a repository secret if you want automatic invalidation
+5. Keep the CloudFront distribution ID in Bitwarden and set `BW_CLOUDFRONT_DISTRIBUTION_ID` as a GitHub Actions variable if you want automatic invalidation
 
 **Workflow File:** `.github/workflows/deploy-to-s3.yml`
 

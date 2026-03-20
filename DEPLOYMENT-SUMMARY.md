@@ -74,7 +74,7 @@ Configure the repository to assume an AWS IAM role:
 2. Add a repository variable:
    - Name: `AWS_ROLE_TO_ASSUME`
    - Value: [your deployment role ARN]
-3. Keep `CLOUDFRONT_DISTRIBUTION_ID` as a secret if you want invalidations
+3. Keep the CloudFront distribution ID in Bitwarden and set `BW_CLOUDFRONT_DISTRIBUTION_ID` as a GitHub Actions variable if you want invalidations
 4. Ensure the IAM role trust policy allows GitHub OIDC for this repository
 
 ### Step 4: Test Deployment
