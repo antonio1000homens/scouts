@@ -2914,7 +2914,9 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
             {
               realm: 'scoutsRequest',
               subject: notificationData.hexData,
-              action: 'new',
+              action: 'fullEnrich',
+              requestMode: 'auto',
+              approvalMode: 'auto',
             },
             'Enrichment:New',
           );

@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildQueuePayload, buildRuntimeRequestEntry } from '../scouts2sqs.mjs';
+import { buildFullEnrichExecutionInput, buildQueuePayload, buildRuntimeRequestEntry } from '../scouts2sqs.mjs';
 
 test('buildQueuePayload translates scoutsRequest tagline request to internal tagline request', () => {
   const payload = buildQueuePayload({
@@ -172,4 +172,34 @@ test('buildQueuePayload translates scoutsRequest imageUrl persist to internal pe
     hexId: '696d61676575726c',
     title: 'River Hike',
   });
+});
+
+test('buildFullEnrichExecutionInput normalizes a new full-enrich request for step functions', () => {
+  const payload = buildFullEnrichExecutionInput({
+    requestId: 'req-full-1',
+    realm: 'scoutsRequest',
+    action: 'fullEnrich',
+    requestMode: 'auto',
+    approvalMode: 'auto',
+    source: 'scouts',
+    subject: {
+      hex: '6e6577686578',
+      title: 'New Hex Event',
+      uid: 'New Hex Event/123',
+    },
+  }, {
+    requestId: 'req-full-1',
+    hex: '6e6577686578',
+  });
+
+  assert.equal(payload.requestId, 'req-full-1');
+  assert.equal(payload.hexId, '6e6577686578');
+  assert.equal(payload.requestHex, '6e6577686578');
+  assert.equal(payload.requestMode, 'auto');
+  assert.equal(payload.approvalMode, 'auto');
+  assert.equal(payload.orchestrationType, 'fullEnrich');
+  assert.equal(payload.source, 'scouts');
+  assert.equal(payload.subject.hex, '6e6577686578');
+  assert.equal(payload.subject.uid, 'New-Hex-Event');
+  assert.equal(payload.subject.originalUid, 'New Hex Event/123');
 });

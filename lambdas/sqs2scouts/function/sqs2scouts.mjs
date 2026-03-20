@@ -83,12 +83,24 @@ let geminiTextRuntimeDisabled = false;
 let geminiImageRuntimeDisabled = false;
 
 function readBundledScoutsConfigSource() {
-    try {
-        const raw = readFileSync(new URL('./scouts.conf', import.meta.url), 'utf8');
-        return JSON.parse(raw);
-    } catch (error) {
-        throw new Error(`[Config] Failed to read bundled scouts.conf: ${error?.message || error}`);
+    const candidateUrls = [
+        new URL('./scouts.conf', import.meta.url),
+        new URL('../scouts.conf', import.meta.url),
+    ];
+
+    for (const candidateUrl of candidateUrls) {
+        try {
+            const raw = readFileSync(candidateUrl, 'utf8');
+            return JSON.parse(raw);
+        } catch (error) {
+            if (error?.code === 'ENOENT') {
+                continue;
+            }
+            throw new Error(`[Config] Failed to read bundled scouts.conf: ${error?.message || error}`);
+        }
     }
+
+    throw new Error('[Config] Failed to read bundled scouts.conf: file not found');
 }
 const BUNDLED_SCOUTS_CONFIG_SOURCE = Object.freeze(readBundledScoutsConfigSource());
 
@@ -373,6 +385,23 @@ function buildRequestContext(record, messageBody) {
     const requestId = String(baseRequestId);
     const hex = getHexHintFromMessageBody(messageBody);
     return { requestId, hex };
+}
+
+function isStepFunctionsInvocation(event) {
+    return !!(
+        event
+        && typeof event === 'object'
+        && !Array.isArray(event)
+        && !Array.isArray(event.Records)
+        && event.invocationType === 'stepFunctions'
+    );
+}
+
+function isAutoApprovalMode(messageBody) {
+    if (messageBody?.autoApprove === true) return true;
+    const approvalMode = typeof messageBody?.approvalMode === 'string' ? messageBody.approvalMode.trim().toLowerCase() : '';
+    const requestMode = typeof messageBody?.requestMode === 'string' ? messageBody.requestMode.trim().toLowerCase() : '';
+    return approvalMode === 'auto' || requestMode === 'auto';
 }
 
 async function fetchQueueDepthSnapshot(queueUrl) {
@@ -2844,28 +2873,37 @@ function mapActionId(actionId) {
 
 export async function lambdaHandler(event) {
     console.log("Lambda function invoked with event:", JSON.stringify(event));
-    const records = event.Records || [];
+    const directInvocation = isStepFunctionsInvocation(event);
+    const records = Array.isArray(event?.Records) ? event.Records : [];
     const observedRequestIds = [];
     const observedHexIds = [];
     const observedLinks = [];
     const observedRequests = [];
     try {
-        for (const record of records) {
-            if (record?.eventSource !== 'aws:sqs') continue;
-            try {
-                const body = typeof record.body === 'string' ? JSON.parse(record.body) : record.body;
-                const hints = collectRequestHints(record, body);
-                observedRequestIds.push(...hints.requestIds);
-                observedHexIds.push(...hints.hexIds);
-                observedLinks.push(...hints.links);
-                observedRequests.push(...hints.requests);
-            } catch {
-                if (record?.messageId) {
-                    observedRequestIds.push(String(record.messageId));
+        if (directInvocation) {
+            const hints = collectRequestHints(null, event);
+            observedRequestIds.push(...hints.requestIds);
+            observedHexIds.push(...hints.hexIds);
+            observedLinks.push(...hints.links);
+            observedRequests.push(...hints.requests);
+        } else {
+            for (const record of records) {
+                if (record?.eventSource !== 'aws:sqs') continue;
+                try {
+                    const body = typeof record.body === 'string' ? JSON.parse(record.body) : record.body;
+                    const hints = collectRequestHints(record, body);
+                    observedRequestIds.push(...hints.requestIds);
+                    observedHexIds.push(...hints.hexIds);
+                    observedLinks.push(...hints.links);
+                    observedRequests.push(...hints.requests);
+                } catch {
+                    if (record?.messageId) {
+                        observedRequestIds.push(String(record.messageId));
+                    }
                 }
             }
         }
-        if (records.length === 0) {
+        if (records.length === 0 && !directInvocation) {
             console.error("No records found in event");
             // Send malformed event to DLQ
             try {
@@ -2876,12 +2914,16 @@ export async function lambdaHandler(event) {
             throw new Error("No records found in event");
         }
 
-        const sqsMessage = records[0];
-        console.log("Raw SQS message:", JSON.stringify(sqsMessage));
+        const sqsMessage = directInvocation ? null : records[0];
+        if (sqsMessage) {
+            console.log("Raw SQS message:", JSON.stringify(sqsMessage));
+        }
 
         let messageBody;
         try {
-            if (typeof sqsMessage.body === 'string') {
+            if (directInvocation) {
+                messageBody = event;
+            } else if (typeof sqsMessage.body === 'string') {
                 messageBody = JSON.parse(sqsMessage.body);
             } else {
                 messageBody = sqsMessage.body;
@@ -2899,6 +2941,7 @@ export async function lambdaHandler(event) {
 
         console.log("Parsed SQS message body:", JSON.stringify(messageBody));
         const requestContext = buildRequestContext(sqsMessage, messageBody);
+        const autoApproval = isAutoApprovalMode(messageBody);
 
         const realm = messageBody.realm || 'unknown';
         let action = messageBody.action || 'Unknown';
@@ -2964,7 +3007,7 @@ export async function lambdaHandler(event) {
             await saveHexEventToS3(hexValue, hexData);
 
             const requiresApproval = hasCompleteApprovalData(hexData);
-            if (!requiresApproval) {
+            if (!requiresApproval || autoApproval) {
                 return {
                     statusCode: 200,
                     body: JSON.stringify({ message: `AI enrichment persisted for HEX ${hexValue}` })
@@ -3006,7 +3049,7 @@ export async function lambdaHandler(event) {
             await saveHexEventToS3(hexValue, hexData);
 
             const requiresApproval = hasCompleteApprovalData(hexData);
-            if (!requiresApproval) {
+            if (!requiresApproval || autoApproval) {
                 return {
                     statusCode: 200,
                     body: JSON.stringify({ message: `Image theme persisted for HEX ${hexValue}` })
@@ -3072,6 +3115,13 @@ export async function lambdaHandler(event) {
             setImageApprovalState(hexData, false);
 
             await saveHexEventToS3(hexValue, hexData);
+
+            if (autoApproval) {
+                return {
+                    statusCode: 200,
+                    body: JSON.stringify({ message: `Image enrichment persisted for HEX ${hexValue}` })
+                };
+            }
 
             const message = await prepareEnrichmentReview('approval', hexData, scoutsConfig);
             const slackResponse = await postSlackMessage(message);
@@ -3293,6 +3343,9 @@ export async function lambdaHandler(event) {
             await sendToDLQ(messageBody, error);
         } catch (dlqError) {
             console.error('[DLQ] Failed to send processing error to DLQ:', dlqError.message);
+        }
+        if (directInvocation) {
+            throw error;
         }
         return {
             statusCode: 500,

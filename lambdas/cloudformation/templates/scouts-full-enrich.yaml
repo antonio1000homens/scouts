@@ -1,0 +1,170 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Scouts full-enrich Step Functions state machine
+
+Parameters:
+  StateMachineName:
+    Type: String
+    Default: scouts-full-enrich
+  Sqs2ScoutsFunctionName:
+    Type: String
+    Default: sqs2scouts
+
+Resources:
+  ScoutsFullEnrichRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${StateMachineName}-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeSqs2ScoutsStages
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${Sqs2ScoutsFunctionName}
+                  - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${Sqs2ScoutsFunctionName}:*
+
+  ScoutsFullEnrichStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Ref StateMachineName
+      RoleArn: !GetAtt ScoutsFullEnrichRole.Arn
+      DefinitionString:
+        !Sub |
+          {
+            "Comment": "Full enrichment workflow for new Scouts HEX records",
+            "StartAt": "GenerateTagline",
+            "States": {
+              "GenerateTagline": {
+                "Type": "Task",
+                "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${Sqs2ScoutsFunctionName}",
+                  "Payload": {
+                    "invocationType": "stepFunctions",
+                    "orchestrationType": "fullEnrich",
+                    "source": "scouts2sqs",
+                    "approvalMode.$": "$.approvalMode",
+                    "requestMode.$": "$.requestMode",
+                    "requestId.$": "$.requestId",
+                    "requestHex.$": "$.hexId",
+                    "realm": "tagline",
+                    "action": "request",
+                    "subject.$": "$.hexId"
+                  }
+                },
+                "ResultPath": "$.stageResults.tagline",
+                "Retry": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 2,
+                    "BackoffRate": 2
+                  }
+                ],
+                "Next": "GenerateImageTheme"
+              },
+              "GenerateImageTheme": {
+                "Type": "Task",
+                "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${Sqs2ScoutsFunctionName}",
+                  "Payload": {
+                    "invocationType": "stepFunctions",
+                    "orchestrationType": "fullEnrich",
+                    "source": "scouts2sqs",
+                    "approvalMode.$": "$.approvalMode",
+                    "requestMode.$": "$.requestMode",
+                    "requestId.$": "$.requestId",
+                    "requestHex.$": "$.hexId",
+                    "realm": "imageTheme",
+                    "action": "request",
+                    "subject.$": "$.hexId"
+                  }
+                },
+                "ResultPath": "$.stageResults.imageTheme",
+                "Retry": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 2,
+                    "BackoffRate": 2
+                  }
+                ],
+                "Next": "GenerateImage"
+              },
+              "GenerateImage": {
+                "Type": "Task",
+                "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${Sqs2ScoutsFunctionName}",
+                  "Payload": {
+                    "invocationType": "stepFunctions",
+                    "orchestrationType": "fullEnrich",
+                    "source": "scouts2sqs",
+                    "approvalMode.$": "$.approvalMode",
+                    "requestMode.$": "$.requestMode",
+                    "requestId.$": "$.requestId",
+                    "requestHex.$": "$.hexId",
+                    "realm": "image",
+                    "action": "request",
+                    "subject.$": "$.hexId"
+                  }
+                },
+                "ResultPath": "$.stageResults.image",
+                "Retry": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 2,
+                    "BackoffRate": 2
+                  }
+                ],
+                "Next": "PersistFinalEvent"
+              },
+              "PersistFinalEvent": {
+                "Type": "Task",
+                "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${Sqs2ScoutsFunctionName}",
+                  "Payload": {
+                    "invocationType": "stepFunctions",
+                    "orchestrationType": "fullEnrich",
+                    "source": "scouts2sqs",
+                    "approvalMode.$": "$.approvalMode",
+                    "requestMode.$": "$.requestMode",
+                    "requestId.$": "$.requestId",
+                    "requestHex.$": "$.hexId",
+                    "realm": "persist",
+                    "action": "persist",
+                    "subject.$": "$.hexId"
+                  }
+                },
+                "ResultPath": "$.stageResults.persist",
+                "Retry": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 2,
+                    "BackoffRate": 2
+                  }
+                ],
+                "End": true
+              }
+            }
+          }
+
+Outputs:
+  StateMachineArn:
+    Value: !Ref ScoutsFullEnrichStateMachine
+  RoleArn:
+    Value: !GetAtt ScoutsFullEnrichRole.Arn
