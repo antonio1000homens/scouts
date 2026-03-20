@@ -311,6 +311,8 @@ Resources:
                   - cloudformation:ExecuteChangeSet
                 Resource:
                   - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-*/*
+                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts2sqs-lambda/*
+                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/sqs2scouts-lambda/*
                   - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:changeSet/*/*
               - Sid: CloudFormationReadGlobal
                 Effect: Allow
