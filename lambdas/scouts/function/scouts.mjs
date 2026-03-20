@@ -8,6 +8,7 @@ import {
   CopyObjectCommand,
 } from '@aws-sdk/client-s3';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
+import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
 import { randomUUID } from 'crypto';
 // Updated: Testing CI deployment mode to bypass environment parsing issues
 
@@ -29,6 +30,7 @@ const DEFAULT_SCOUTS2SQS_URL = '';
 const QUEUED_REQUESTS_RUNTIME_KEY = 'runtime/scoutsQueued.json';
 const PROCESSING_REQUESTS_RUNTIME_KEY = 'runtime/scoutsProcessing.json';
 const COMPLETED_REQUESTS_RUNTIME_KEY = 'runtime/scoutsComplete.json';
+const CALLBACK_REQUESTS_RUNTIME_KEY = 'runtime/scoutsCallbacks.json';
 const QUEUED_RUNTIME_STALE_PRUNE_MS = 24 * 60 * 60 * 1000;
 
 const SECTION_CUBS = 'cubs';
@@ -622,18 +624,24 @@ function buildQueuedRuntimeRequestEntry(payload, messageId = null, timestamp = n
     ? payload.requestId.trim()
     : null;
   const runtimeMessageId = typeof messageId === 'string' && messageId.trim() ? messageId.trim() : null;
-  const hexId = getQueuedRuntimeHexFromSubject(payload?.subject);
+  const hexId = getQueuedRuntimeHexFromPayload(payload);
   const realm = typeof payload?.realm === 'string' && payload.realm.trim() ? payload.realm.trim() : null;
   const action = typeof payload?.action === 'string' && payload.action.trim() ? payload.action.trim() : null;
+  const taskToken = normaliseRuntimeText(payload?.taskToken ?? null);
+  const orchestrationType = normaliseRuntimeText(payload?.orchestrationType ?? null);
+  const orchestrationStep = normaliseRuntimeText(payload?.orchestrationStep ?? null);
 
   return {
     requestTime: timestamp,
     requestId,
     messageId: runtimeMessageId,
     hexId,
-    title: getQueuedRuntimeTitleFromSubject(payload?.subject),
+    title: getQueuedRuntimeTitleFromPayload(payload),
     realm,
     action,
+    taskToken,
+    orchestrationType,
+    orchestrationStep,
     status: 'queued',
   };
 }
@@ -642,14 +650,22 @@ function deduplicateQueuedRuntimeRequests(entries = []) {
   const deduped = new Map();
   for (const entry of Array.isArray(entries) ? entries : []) {
     if (!entry || typeof entry !== 'object') continue;
-    const key = [
-      entry.requestId ?? '',
-      entry.messageId ?? '',
-      entry.hexId ?? '',
-      entry.realm ?? '',
-      entry.action ?? '',
-      entry.status ?? '',
-    ].join('|');
+    const taskToken = normaliseRuntimeText(entry.taskToken ?? null);
+    const key = taskToken
+      ? [
+          'taskToken',
+          taskToken,
+          entry.orchestrationStep ?? '',
+          entry.status ?? '',
+        ].join('|')
+      : [
+          entry.requestId ?? '',
+          entry.messageId ?? '',
+          entry.hexId ?? '',
+          entry.realm ?? '',
+          entry.action ?? '',
+          entry.status ?? '',
+        ].join('|');
     deduped.set(key, entry);
   }
   return Array.from(deduped.values()).slice(0, 200);
@@ -672,6 +688,10 @@ function getQueuedRuntimeRequestHex(entry) {
 }
 
 function getQueuedRuntimeRequestKey(entry) {
+  const taskToken = typeof entry?.taskToken === 'string' && entry.taskToken.trim()
+    ? entry.taskToken.trim()
+    : '';
+  if (taskToken) return `taskToken:${taskToken}`;
   const requestId = getQueuedRuntimeRequestId(entry);
   if (requestId) return requestId;
   const hex = getQueuedRuntimeRequestHex(entry);
@@ -835,6 +855,173 @@ async function touchQueuedRuntimeSnapshot(bucket, existingSnapshot = null) {
   const nextSnapshot = buildQueuedRuntimeSnapshotPayload(requests);
   await putJsonToS3(bucket, QUEUED_REQUESTS_RUNTIME_KEY, nextSnapshot, 'runtime:scoutsQueued', true);
   return nextSnapshot;
+}
+
+function normalizeCallbackRuntimeEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+
+  const taskToken = normaliseRuntimeText(entry.taskToken ?? null);
+  if (!taskToken) return null;
+
+  return {
+    taskToken,
+    status: normaliseRuntimeText(entry.status ?? null)?.toLowerCase() ?? 'completed',
+    requestId: normaliseRuntimeText(entry.requestId ?? null),
+    hexId: normaliseRuntimeText(entry.hexId ?? entry.hex ?? null)?.toLowerCase() ?? null,
+    orchestrationType: normaliseRuntimeText(entry.orchestrationType ?? null),
+    orchestrationStep: normaliseRuntimeText(entry.orchestrationStep ?? null),
+    completedAt: normaliseRuntimeText(entry.completedAt ?? entry.updatedAt ?? entry.requestTime ?? null) ?? new Date().toISOString(),
+  };
+}
+
+function deduplicateCallbackLedgerEntries(entries = []) {
+  const deduped = new Map();
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    if (!entry || typeof entry !== 'object') continue;
+    const taskToken = normaliseRuntimeText(entry.taskToken ?? null);
+    if (!taskToken) continue;
+    deduped.set(taskToken, {
+      taskToken,
+      status: normaliseRuntimeText(entry.status ?? null) ?? 'succeeded',
+      requestId: normaliseRuntimeText(entry.requestId ?? null),
+      hexId: normaliseRuntimeText(entry.hexId ?? null)?.toLowerCase() ?? null,
+      orchestrationType: normaliseRuntimeText(entry.orchestrationType ?? null),
+      orchestrationStep: normaliseRuntimeText(entry.orchestrationStep ?? null),
+      callbackSentAt: normaliseRuntimeText(entry.callbackSentAt ?? null) ?? new Date().toISOString(),
+      error: normaliseRuntimeText(entry.error ?? null),
+    });
+  }
+  return Array.from(deduped.values()).slice(-500);
+}
+
+function buildCallbackLedgerPayload(entries, timestamp = new Date().toISOString()) {
+  const callbacks = deduplicateCallbackLedgerEntries(entries);
+  return {
+    source: 'scouts',
+    queue: 'scoutsCallbacks',
+    updatedAt: timestamp,
+    callbacks,
+    callbackCount: callbacks.length,
+  };
+}
+
+function buildQueuedFullEnrichTaskTokenSet(queuedSnapshot) {
+  const activeTokens = new Set();
+  for (const entry of getRuntimeSnapshotRequests(queuedSnapshot)) {
+    const taskToken = normaliseRuntimeText(entry?.taskToken ?? null);
+    const orchestrationType = normaliseRuntimeText(entry?.orchestrationType ?? null);
+    if (!taskToken || orchestrationType !== 'fullEnrich') {
+      continue;
+    }
+    activeTokens.add(taskToken);
+  }
+  return activeTokens;
+}
+
+async function reconcileStateMachineCallbacks(bucket, queuedSnapshot, completedSnapshot) {
+  const activeQueuedTaskTokens = buildQueuedFullEnrichTaskTokenSet(queuedSnapshot);
+  if (activeQueuedTaskTokens.size === 0) {
+    return { attempted: 0, completed: 0, skipped: 0 };
+  }
+
+  const callbackEntries = getRuntimeSnapshotRequests(completedSnapshot)
+    .map((entry) => normalizeCallbackRuntimeEntry(entry))
+    .filter((entry) => (
+      entry
+      && entry.taskToken
+      && entry.orchestrationType === 'fullEnrich'
+      && activeQueuedTaskTokens.has(entry.taskToken)
+    ));
+
+  if (callbackEntries.length === 0) {
+    return { attempted: 0, completed: 0, skipped: 0 };
+  }
+
+  const existingLedger = await getJsonFromS3(bucket, CALLBACK_REQUESTS_RUNTIME_KEY, 'runtime:scoutsCallbacks');
+  const ledgerEntries = Array.isArray(existingLedger?.callbacks) ? existingLedger.callbacks : [];
+  const seenTokens = new Set(
+    ledgerEntries
+      .map((entry) => normaliseRuntimeText(entry?.taskToken ?? null))
+      .filter(Boolean)
+  );
+  const nextLedgerEntries = [...ledgerEntries];
+  let changed = false;
+  let completed = 0;
+  let skipped = 0;
+
+  for (const callbackEntry of callbackEntries) {
+    if (seenTokens.has(callbackEntry.taskToken)) {
+      skipped += 1;
+      continue;
+    }
+
+    const callbackPayload = {
+      status: callbackEntry.status === 'failed' ? 'failed' : 'completed',
+      requestId: callbackEntry.requestId,
+      hexId: callbackEntry.hexId,
+      orchestrationType: callbackEntry.orchestrationType,
+      orchestrationStep: callbackEntry.orchestrationStep,
+      completedAt: callbackEntry.completedAt,
+    };
+
+    try {
+      if (callbackEntry.status === 'failed') {
+        await sfn.send(new SendTaskFailureCommand({
+          taskToken: callbackEntry.taskToken,
+          error: 'FullEnrichStepFailed',
+          cause: JSON.stringify(callbackPayload),
+        }));
+        nextLedgerEntries.push({
+          ...callbackEntry,
+          status: 'failed',
+          callbackSentAt: new Date().toISOString(),
+        });
+      } else {
+        await sfn.send(new SendTaskSuccessCommand({
+          taskToken: callbackEntry.taskToken,
+          output: JSON.stringify(callbackPayload),
+        }));
+        nextLedgerEntries.push({
+          ...callbackEntry,
+          status: 'succeeded',
+          callbackSentAt: new Date().toISOString(),
+        });
+      }
+      seenTokens.add(callbackEntry.taskToken);
+      completed += 1;
+      changed = true;
+    } catch (error) {
+      const errorName = normaliseRuntimeText(error?.name ?? error?.Code ?? null) ?? 'CallbackError';
+      console.warn('[Callbacks] Failed sending Step Functions callback:', errorName, error?.message || error);
+      if (['TaskTimedOut', 'TaskDoesNotExist', 'InvalidToken'].includes(errorName)) {
+        nextLedgerEntries.push({
+          ...callbackEntry,
+          status: 'expired',
+          callbackSentAt: new Date().toISOString(),
+          error: normaliseRuntimeText(error?.message ?? null) ?? errorName,
+        });
+        seenTokens.add(callbackEntry.taskToken);
+        skipped += 1;
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) {
+    await putJsonToS3(
+      bucket,
+      CALLBACK_REQUESTS_RUNTIME_KEY,
+      buildCallbackLedgerPayload(nextLedgerEntries),
+      'runtime:scoutsCallbacks',
+      true,
+    );
+  }
+
+  return {
+    attempted: callbackEntries.length,
+    completed,
+    skipped,
+  };
 }
 
 function getRequestHistory(eventData) {
@@ -1105,6 +1292,7 @@ function buildSortKey(value) {
 
 const s3 = new S3Client({ region: process.env.AWS_REGION || 'eu-west-2' });
 const sqs = new SQSClient({ region: process.env.AWS_REGION || 'eu-west-2' });
+const sfn = new SFNClient({ region: process.env.AWS_REGION || 'eu-west-2' });
 const SCOUTS_REQUESTS_QUEUE_URL = SCOUTS_REQUESTS_QUEUE_URL_ENV || "https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests";
 
 // Themed icons are configurable via optional S3 configuration; keep an empty default
@@ -4443,6 +4631,18 @@ export async function lambdaHandler(event = {}) {
     }
 
     const runtimeQueueSnapshots = await readRuntimeQueueSnapshots(bucket);
+    try {
+      const callbackSummary = await reconcileStateMachineCallbacks(
+        bucket,
+        runtimeQueueSnapshots.queuedSnapshot,
+        runtimeQueueSnapshots.completedSnapshot,
+      );
+      if (callbackSummary.attempted > 0) {
+        console.log('[Callbacks] Reconciled Step Functions callbacks:', callbackSummary);
+      }
+    } catch (callbackError) {
+      console.warn('[Callbacks] Failed reconciling Step Functions callbacks:', callbackError?.message || callbackError);
+    }
     const existingAgendaRaw = await (resetRequested ? null : getJsonFromS3(bucket, agendaKey, 'agenda'));
     const existingAgenda = hydrateStoredDataset(existingAgendaRaw);
     const mergedAgenda = mergeEvents(existingAgenda, dedupedNewEvents);
