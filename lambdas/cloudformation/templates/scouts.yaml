@@ -152,6 +152,11 @@ Resources:
                 Action:
                   - sqs:SendMessage
                 Resource: !Ref ScoutsRequestsQueueArn
+              - Effect: Allow
+                Action:
+                  - states:SendTaskSuccess
+                  - states:SendTaskFailure
+                Resource: '*'
 
   ScoutsFunction:
     Type: AWS::Lambda::Function

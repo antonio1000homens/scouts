@@ -185,6 +185,9 @@ function buildRuntimeRequestEntry(record, messageBody, status) {
         subject: getSubjectHintFromMessageBody(messageBody),
         realm: typeof messageBody?.realm === 'string' && messageBody.realm.trim() ? messageBody.realm.trim() : null,
         action: normaliseActionHint(messageBody?.action),
+        taskToken: normaliseRuntimeText(messageBody?.taskToken ?? null),
+        orchestrationType: normaliseRuntimeText(messageBody?.orchestrationType ?? null),
+        orchestrationStep: normaliseRuntimeText(messageBody?.orchestrationStep ?? null),
         status,
     };
 }
@@ -194,14 +197,22 @@ function deduplicateRuntimeRequestEntries(entries = []) {
 
     for (const entry of entries) {
         if (!entry || typeof entry !== 'object') continue;
-        const key = [
-            entry.requestId ?? '',
-            entry.messageId ?? '',
-            entry.hexId ?? '',
-            entry.realm ?? '',
-            entry.action ?? '',
-            entry.status ?? '',
-        ].join('|');
+        const taskToken = normaliseRuntimeText(entry.taskToken ?? null);
+        const key = taskToken
+            ? [
+                'taskToken',
+                taskToken,
+                entry.orchestrationStep ?? '',
+                entry.status ?? '',
+            ].join('|')
+            : [
+                entry.requestId ?? '',
+                entry.messageId ?? '',
+                entry.hexId ?? '',
+                entry.realm ?? '',
+                entry.action ?? '',
+                entry.status ?? '',
+            ].join('|');
         deduped.set(key, entry);
     }
 
@@ -355,6 +366,33 @@ function withRequestContext(payload, context) {
         next.requestHex = context.hex;
     }
     return next;
+}
+
+function getOptionalOrchestrationMetadata(payload) {
+    if (!payload || typeof payload !== 'object') {
+        return {};
+    }
+
+    const metadata = {};
+    const textFields = [
+        'requestId',
+        'requestHex',
+        'taskToken',
+        'orchestrationType',
+        'orchestrationStep',
+        'source',
+        'approvalMode',
+        'requestMode',
+    ];
+
+    for (const field of textFields) {
+        const value = normaliseRuntimeText(payload[field]);
+        if (value) {
+            metadata[field] = value;
+        }
+    }
+
+    return metadata;
 }
 
 function isFullEnrichRequest(payload) {
@@ -1006,12 +1044,12 @@ function buildQueuePayload(payload) {
     const action = typeof payload.action === 'string' ? payload.action.trim() : payload.action;
     const subject = payload.subject;
 
-    if (realm === 'scoutsRequest') {
+    if (realm === 'scoutsRequest' || realm === 'stateMachine') {
         const requestedField = normaliseRuntimeText(payload.subjectLabel ?? payload.requestedField ?? subject);
         const hexId = getHexHintFromMessageBody(payload);
         const title = getTitleHintFromMessageBody(payload);
 
-        if (requestedField !== 'tagline' && requestedField !== 'imageTheme' && requestedField !== 'imageUrl') {
+        if (requestedField !== 'tagline' && requestedField !== 'imageTheme' && requestedField !== 'imageUrl' && requestedField !== 'persist') {
             throw new Error(`scoutsRequest subject ${requestedField} not supported by this lambda`);
         }
         if (!hexId) {
@@ -1019,6 +1057,9 @@ function buildQueuePayload(payload) {
         }
 
         if (action === 'request') {
+            if (requestedField === 'persist') {
+                throw new Error(`Action ${action} not supported for realm=${realm} subject=${requestedField}`);
+            }
             return {
                 realm: requestedField === 'tagline' ? 'tagline' : requestedField === 'imageTheme' ? 'imageTheme' : 'image',
                 action: 'request',
@@ -1027,10 +1068,26 @@ function buildQueuePayload(payload) {
                 subjectLabel: requestedField,
                 hexId,
                 ...(title ? { title } : {}),
+                ...getOptionalOrchestrationMetadata(payload),
             };
         }
 
         if (action === 'persist') {
+            if (requestedField === 'persist') {
+                return {
+                    realm: 'persist',
+                    action: 'persist',
+                    subject: {
+                        hexId,
+                        ...(title ? { title } : {}),
+                    },
+                    requestedField,
+                    subjectLabel: requestedField,
+                    hexId,
+                    ...(title ? { title } : {}),
+                    ...getOptionalOrchestrationMetadata(payload),
+                };
+            }
             const fieldValue = requestedField === 'tagline'
                 ? normaliseRuntimeText(payload.tagline ?? payload.value ?? payload?.subject?.tagline ?? null)
                 : requestedField === 'imageTheme'
@@ -1053,6 +1110,7 @@ function buildQueuePayload(payload) {
                 subjectLabel: requestedField,
                 hexId,
                 ...(title ? { title } : {}),
+                ...getOptionalOrchestrationMetadata(payload),
             };
         }
 
@@ -1083,7 +1141,10 @@ function buildQueuePayload(payload) {
         };
     }
 
-    return payload;
+    return {
+        ...payload,
+        ...getOptionalOrchestrationMetadata(payload),
+    };
 }
 
 function isSqsPublishEnabled() {
@@ -1189,14 +1250,14 @@ export async function lambdaHandler(event) {
                         continue;
                     }
 
-                    if (rawRealm === 'scoutsRequest' && (rawAction === 'request' || rawAction === 'persist')) {
+                    if ((rawRealm === 'scoutsRequest' || rawRealm === 'stateMachine') && (rawAction === 'request' || rawAction === 'persist')) {
                         try {
                             const translatedPayload = withRequestContext(messageBody, requestContext);
-                            console.log('[scoutsRequest] Translating field-level request:', JSON.stringify(translatedPayload));
+                            console.log(`[${rawRealm}] Translating field-level request:`, JSON.stringify(translatedPayload));
                             await sendToSQS(translatedPayload);
-                            console.log(`[scoutsRequest] ${rawAction} field request forwarded successfully`);
+                            console.log(`[${rawRealm}] ${rawAction} field request forwarded successfully`);
                         } catch (error) {
-                            console.error(`[scoutsRequest] Failed to translate field-level request: ${error.message}`);
+                            console.error(`[${rawRealm}] Failed to translate field-level request: ${error.message}`);
                         }
                         continue;
                     }

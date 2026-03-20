@@ -305,6 +305,9 @@ function buildRuntimeRequestEntry(record, messageBody, status) {
         subject: getSubjectHintFromMessageBody(messageBody),
         realm: typeof messageBody?.realm === 'string' && messageBody.realm.trim() ? messageBody.realm.trim() : null,
         action: normaliseActionHint(messageBody?.action),
+        taskToken: normaliseRuntimeText(messageBody?.taskToken ?? null),
+        orchestrationType: normaliseRuntimeText(messageBody?.orchestrationType ?? null),
+        orchestrationStep: normaliseRuntimeText(messageBody?.orchestrationStep ?? null),
         status,
     };
 }
@@ -314,14 +317,22 @@ function deduplicateRuntimeRequestEntries(entries = []) {
 
     for (const entry of entries) {
         if (!entry || typeof entry !== 'object') continue;
-        const key = [
-            entry.requestId ?? '',
-            entry.messageId ?? '',
-            entry.hexId ?? '',
-            entry.realm ?? '',
-            entry.action ?? '',
-            entry.status ?? '',
-        ].join('|');
+        const taskToken = normaliseRuntimeText(entry.taskToken ?? null);
+        const key = taskToken
+            ? [
+                'taskToken',
+                taskToken,
+                entry.orchestrationStep ?? '',
+                entry.status ?? '',
+            ].join('|')
+            : [
+                entry.requestId ?? '',
+                entry.messageId ?? '',
+                entry.hexId ?? '',
+                entry.realm ?? '',
+                entry.action ?? '',
+                entry.status ?? '',
+            ].join('|');
         deduped.set(key, entry);
     }
 
