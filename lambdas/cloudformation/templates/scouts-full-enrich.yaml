@@ -42,64 +42,81 @@ Resources:
         !Sub |
           {
             "Comment": "Full enrichment workflow for new Scouts HEX records",
-            "StartAt": "GenerateTagline",
+            "StartAt": "GenerateCoreMetadata",
             "States": {
-              "GenerateTagline": {
-                "Type": "Task",
-                "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
-                "Parameters": {
-                  "FunctionName": "${Sqs2ScoutsFunctionName}",
-                  "Payload": {
-                    "invocationType": "stepFunctions",
-                    "orchestrationType": "fullEnrich",
-                    "source": "scouts2sqs",
-                    "approvalMode.$": "$.approvalMode",
-                    "requestMode.$": "$.requestMode",
-                    "requestId.$": "$.requestId",
-                    "requestHex.$": "$.hexId",
-                    "realm": "tagline",
-                    "action": "request",
-                    "subject.$": "$.hexId"
-                  }
-                },
-                "ResultPath": "$.stageResults.tagline",
-                "Retry": [
+              "GenerateCoreMetadata": {
+                "Type": "Parallel",
+                "Branches": [
                   {
-                    "ErrorEquals": ["States.ALL"],
-                    "IntervalSeconds": 2,
-                    "MaxAttempts": 2,
-                    "BackoffRate": 2
+                    "StartAt": "GenerateTagline",
+                    "States": {
+                      "GenerateTagline": {
+                        "Type": "Task",
+                        "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                        "Parameters": {
+                          "FunctionName": "${Sqs2ScoutsFunctionName}",
+                          "Payload": {
+                            "invocationType": "stepFunctions",
+                            "orchestrationType": "fullEnrich",
+                            "source": "scouts2sqs",
+                            "approvalMode.$": "$.approvalMode",
+                            "requestMode.$": "$.requestMode",
+                            "requestId.$": "$.requestId",
+                            "requestHex.$": "$.hexId",
+                            "realm": "tagline",
+                            "action": "request",
+                            "subject.$": "$.hexId"
+                          }
+                        },
+                        "ResultPath": "$.stageResults.tagline",
+                        "Retry": [
+                          {
+                            "ErrorEquals": ["States.ALL"],
+                            "IntervalSeconds": 2,
+                            "MaxAttempts": 2,
+                            "BackoffRate": 2
+                          }
+                        ],
+                        "End": true
+                      }
+                    }
+                  },
+                  {
+                    "StartAt": "GenerateImageTheme",
+                    "States": {
+                      "GenerateImageTheme": {
+                        "Type": "Task",
+                        "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                        "Parameters": {
+                          "FunctionName": "${Sqs2ScoutsFunctionName}",
+                          "Payload": {
+                            "invocationType": "stepFunctions",
+                            "orchestrationType": "fullEnrich",
+                            "source": "scouts2sqs",
+                            "approvalMode.$": "$.approvalMode",
+                            "requestMode.$": "$.requestMode",
+                            "requestId.$": "$.requestId",
+                            "requestHex.$": "$.hexId",
+                            "realm": "imageTheme",
+                            "action": "request",
+                            "subject.$": "$.hexId"
+                          }
+                        },
+                        "ResultPath": "$.stageResults.imageTheme",
+                        "Retry": [
+                          {
+                            "ErrorEquals": ["States.ALL"],
+                            "IntervalSeconds": 2,
+                            "MaxAttempts": 2,
+                            "BackoffRate": 2
+                          }
+                        ],
+                        "End": true
+                      }
+                    }
                   }
                 ],
-                "Next": "GenerateImageTheme"
-              },
-              "GenerateImageTheme": {
-                "Type": "Task",
-                "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
-                "Parameters": {
-                  "FunctionName": "${Sqs2ScoutsFunctionName}",
-                  "Payload": {
-                    "invocationType": "stepFunctions",
-                    "orchestrationType": "fullEnrich",
-                    "source": "scouts2sqs",
-                    "approvalMode.$": "$.approvalMode",
-                    "requestMode.$": "$.requestMode",
-                    "requestId.$": "$.requestId",
-                    "requestHex.$": "$.hexId",
-                    "realm": "imageTheme",
-                    "action": "request",
-                    "subject.$": "$.hexId"
-                  }
-                },
-                "ResultPath": "$.stageResults.imageTheme",
-                "Retry": [
-                  {
-                    "ErrorEquals": ["States.ALL"],
-                    "IntervalSeconds": 2,
-                    "MaxAttempts": 2,
-                    "BackoffRate": 2
-                  }
-                ],
+                "ResultPath": "$.stageResults.coreMetadata",
                 "Next": "GenerateImage"
               },
               "GenerateImage": {
