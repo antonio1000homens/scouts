@@ -70,7 +70,7 @@ Resources:
                             "orchestrationType": "fullEnrich",
                             "orchestrationStep": "tagline",
                             "taskToken.$": "$$.Task.Token",
-                            "action": "request",
+                            "action": "request"
                           }
                         },
                         "TimeoutSeconds": 900,
@@ -109,7 +109,7 @@ Resources:
                             "orchestrationType": "fullEnrich",
                             "orchestrationStep": "imageTheme",
                             "taskToken.$": "$$.Task.Token",
-                            "action": "request",
+                            "action": "request"
                           }
                         },
                         "TimeoutSeconds": 900,
@@ -149,7 +149,7 @@ Resources:
                     "orchestrationType": "fullEnrich",
                     "orchestrationStep": "image",
                     "taskToken.$": "$$.Task.Token",
-                    "action": "request",
+                    "action": "request"
                   }
                 },
                 "TimeoutSeconds": 900,
