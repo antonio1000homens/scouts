@@ -4064,17 +4064,11 @@ export async function lambdaHandler(event = {}) {
         const isComplete = hasEventTagline(hexData) && getEventImageUrl(hexData) && getEventImageTheme(hexData);
 
         if (!isComplete) {
-          console.log(`[sqs2scouts] Incomplete data for ${hexValue}, queueing for processing.`);
-          await postToScoutsRequestsQueue({
-              realm: 'scoutsRequest',
-              subject: hexData,
-              action: 'new'
-          }, 'sqs2scouts:incomplete');
-          
+          console.log(`[sqs2scouts] Incomplete data for ${hexValue}, skipping requeue from callback path.`);
           return {
             statusCode: 200,
             headers: corsHeaders,
-            body: JSON.stringify({ status: 'ok', message: `Incomplete data for ${hexValue}, queued for processing.` })
+            body: JSON.stringify({ status: 'ok', message: `Incomplete data for ${hexValue}, no requeue performed.` })
           };
         }
 
