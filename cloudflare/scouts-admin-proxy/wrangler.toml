@@ -11,6 +11,5 @@ routes = [
 [vars]
 # Set to "true" to require a Cloudflare Access JWT on incoming requests.
 REQUIRE_CF_ACCESS = "true"
-SCOUTS2SQS_URL = "https://rc23djdoaofiwwvueboxe5ycue0jqtrx.lambda-url.eu-west-2.on.aws/"
-SCOUTS_REFRESH_URL = "https://w6yfull3fisjxefw2lknyblezu0kbokv.lambda-url.eu-west-2.on.aws/"
+SCOUTS_URL = "https://w6yfull3fisjxefw2lknyblezu0kbokv.lambda-url.eu-west-2.on.aws/"
 IFTTT_EVENT_NAME = "scoutsContactForm"

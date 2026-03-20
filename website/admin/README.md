@@ -37,7 +37,8 @@ Default browser config:
 Optional browser overrides:
 
 - `window.SCOUTS_AUTH_STATUS_URL`
-- `window.SCOUTS_REFRESH_URL`
+- `window.SCOUTS_URL`
+- `window.SCOUTS_REFRESH_URL` (legacy alias)
 
 Security model:
 

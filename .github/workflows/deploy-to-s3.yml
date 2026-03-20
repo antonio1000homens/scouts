@@ -240,7 +240,7 @@ jobs:
       - name: Install Wrangler
         run: npm install --global wrangler@4
       - name: Deploy admin proxy worker
-        run: bash cloudflare/deploy-ci.sh
+        run: bash cloudflare/scouts-admin-proxy/deploy-ci.sh
       - name: Deploy slack handler worker
         run: bash cloudflare/scouts-slack-handler/deploy-ci.sh
 
@@ -293,7 +293,7 @@ jobs:
         env:
           ADMIN_API_BASE: ${{ vars.ADMIN_API_BASE }}
           SCOUTS_AUTH_STATUS_URL: ${{ vars['SCOUTS_AUTH_STATUS_URL'] }}
-          SCOUTS_REFRESH_URL: ${{ vars['SCOUTS_REFRESH_URL'] }}
+          SCOUTS_URL: ${{ vars['SCOUTS_URL'] || vars['SCOUTS_REFRESH_URL'] }}
           SCOUTS_CONFIG_URL: ${{ vars['SCOUTS_CONFIG_URL'] }}
         run: |
           ADMIN_API_BASE_VALUE="${ADMIN_API_BASE:-/admin-api}"
@@ -303,8 +303,8 @@ jobs:
             if [ -n "${SCOUTS_AUTH_STATUS_URL:-}" ]; then
               echo "window.SCOUTS_AUTH_STATUS_URL = '${SCOUTS_AUTH_STATUS_URL}';"
             fi
-            if [ -n "${SCOUTS_REFRESH_URL:-}" ]; then
-              echo "window.SCOUTS_REFRESH_URL = '${SCOUTS_REFRESH_URL}';"
+            if [ -n "${SCOUTS_URL:-}" ]; then
+              echo "window.SCOUTS_URL = '${SCOUTS_URL}';"
             fi
             if [ -n "${SCOUTS_CONFIG_URL:-}" ]; then
               echo "window.SCOUTS_CONFIG_URL = '${SCOUTS_CONFIG_URL}';"
@@ -422,6 +422,12 @@ jobs:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           role-session-name: github-actions-scouts-deploy
           aws-region: ${{ env.AWS_REGION }}
+      - name: Get scouts API key from Bitwarden Secrets Manager
+        uses: bitwarden/sm-action@v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
+            ${{ vars.BW_SCOUTS_REQUIRED_API_KEY }} > SCOUTS_REQUIRED_API_KEY
       - name: Deploy scouts function
         env:
           CODE_BUCKET: ${{ env.CODE_BUCKET }}
@@ -431,7 +437,6 @@ jobs:
           CREATE_DATA_BUCKET: 'true'
           SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
           SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
-          SCOUTS_REQUIRED_API_KEY: ${{ secrets.SCOUTS_REQUIRED_API_KEY }}
           CUBS_EVENTS_CALENDAR_URL: ${{ vars.CUBS_EVENTS_CALENDAR_URL }}
           CUBS_PROGRAMME_CALENDAR_URL: ${{ vars.CUBS_PROGRAMME_CALENDAR_URL }}
           CUBS_PROGRAME_CALENDAR_URL: ${{ vars.CUBS_PROGRAME_CALENDAR_URL }}
@@ -479,12 +484,12 @@ jobs:
           secrets: |
             ${{ vars.BW_SCOUTS_SLACK_SIGNING_SECRET }} > SLACK_SIGNING_SECRET
             ${{ vars.BW_SCOUTS_SLACK_BOT_TOKEN }} > SLACK_BOT_TOKEN
+            ${{ vars.BW_SCOUTS_REQUIRED_API_KEY }} > REQUIRED_API_KEY
       - name: Deploy scouts slack-handler
         env:
           CODE_BUCKET: ${{ env.CODE_BUCKET }}
           CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
           EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
-          REQUIRED_API_KEY: ${{ secrets.SCOUTS_REQUIRED_API_KEY }}
           SCOUTS_REQUEST_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
           SCOUTS_REQUEST_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
           NFC_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
@@ -521,6 +526,12 @@ jobs:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           role-session-name: github-actions-scouts-deploy
           aws-region: ${{ env.AWS_REGION }}
+      - name: Get scouts API key from Bitwarden Secrets Manager
+        uses: bitwarden/sm-action@v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
+            ${{ vars.BW_SCOUTS_REQUIRED_API_KEY }} > SCOUTS_REQUIRED_API_KEY
       - name: Deploy scouts2sqs
         env:
           CODE_BUCKET: ${{ env.CODE_BUCKET }}
@@ -532,7 +543,6 @@ jobs:
           DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
           SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
           SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
-          SCOUTS_REQUIRED_API_KEY: ${{ secrets.SCOUTS_REQUIRED_API_KEY }}
         run: cd lambdas/scouts2sqs && bash ./deploy.sh
 
   deploy-sqs2scouts:
@@ -570,6 +580,7 @@ jobs:
           secrets: |
             ${{ vars.BW_SCOUTS_SLACK_SIGNING_SECRET }} > SLACK_SIGNING_SECRET
             ${{ vars.BW_SCOUTS_SLACK_BOT_TOKEN }} > SLACK_BOT_TOKEN
+            ${{ vars.BW_GEMINI_API_KEY }} > GEMINI_API_KEY
       - name: Deploy sqs2scouts
         env:
           CODE_BUCKET: ${{ env.CODE_BUCKET }}
@@ -583,7 +594,6 @@ jobs:
           DLQ_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessingDLQ
           DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
           S3_WEBSITE_BASE_URL: https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_VERSION: ${{ vars.GEMINI_API_VERSION }}
           GEMINI_IMAGE_API_VERSION: ${{ vars.GEMINI_IMAGE_API_VERSION }}
           GEMINI_IMAGE_MODEL: ${{ vars.GEMINI_IMAGE_MODEL }}
