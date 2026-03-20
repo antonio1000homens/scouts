@@ -107,6 +107,8 @@ Resources:
                   - iam:UntagRole
                 Resource:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-*
               - Sid: RuntimeRoleInlinePolicyManagement
                 Effect: Allow
                 Action:
@@ -115,12 +117,16 @@ Resources:
                   - iam:PutRolePolicy
                 Resource:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-*
               - Sid: RuntimeRolePass
                 Effect: Allow
                 Action:
                   - iam:PassRole
                 Resource:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-*
               - Sid: LambdaCreateAndList
                 Effect: Allow
                 Action:
@@ -153,6 +159,8 @@ Resources:
                   - lambda:UpdateFunctionConfiguration
                 Resource:
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts*
+                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts2sqs
+                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:sqs2scouts
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:layer:scouts-shared:*
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:event-source-mapping:*
               - Sid: StepFunctionsManagement
