@@ -1,5 +1,6 @@
 import { SQSClient, SendMessageCommand, GetQueueAttributesCommand } from '@aws-sdk/client-sqs';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import https from 'https';
 import crypto from 'crypto';
 
@@ -13,9 +14,11 @@ const SCOUTS_REQUESTS_QUEUE_URL_FALLBACK =
     || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests';
 const QUEUED_REQUESTS_RUNTIME_KEY = 'runtime/scoutsQueued.json';
 const PROCESSING_REQUESTS_RUNTIME_KEY = 'runtime/scoutsProcessing.json';
+const FULL_ENRICH_STATE_MACHINE_ARN = process.env.FULL_ENRICH_STATE_MACHINE_ARN || '';
 
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'eu-west-2' });
 const sqsClient = new SQSClient({ region: process.env.AWS_REGION || 'eu-west-2' });
+const sfnClient = new SFNClient({ region: process.env.AWS_REGION || 'eu-west-2' });
 
 const CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
@@ -352,6 +355,83 @@ function withRequestContext(payload, context) {
         next.requestHex = context.hex;
     }
     return next;
+}
+
+function isFullEnrichRequest(payload) {
+    const realm = typeof payload?.realm === 'string' ? payload.realm.trim() : '';
+    const action = typeof payload?.action === 'string' ? payload.action.trim() : '';
+    return realm === 'scoutsRequest' && action === 'fullEnrich';
+}
+
+function normalizeFlowMode(value, fallback) {
+    if (typeof value !== 'string') return fallback;
+    const normalized = value.trim().toLowerCase();
+    return normalized || fallback;
+}
+
+function buildExecutionName(requestId, hexId) {
+    const requestToken = String(requestId ?? crypto.randomUUID())
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 40) || 'request';
+    const hexToken = String(hexId ?? 'hex')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
+        .slice(0, 40) || 'hex';
+    const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+    return `${hexToken}-${requestToken}-${timestamp}`.slice(0, 80);
+}
+
+function buildFullEnrichExecutionInput(payload, context = {}) {
+    const subject = ensureObjectSubject(parseJsonSubject(payload?.subject) ?? payload?.subject);
+    applySanitizedUidToSubject(subject);
+    ensureRuntimeMetadata(subject);
+
+    const hexId = getHexHintFromMessageBody({
+        ...payload,
+        subject,
+    });
+    if (!hexId) {
+        throw new Error('fullEnrich request missing hex identifier');
+    }
+
+    return {
+        requestId: context?.requestId ?? String(payload?.requestId ?? crypto.randomUUID()),
+        hexId,
+        requestHex: context?.hex ?? hexId,
+        source: typeof payload?.source === 'string' && payload.source.trim() ? payload.source.trim() : 'scouts2sqs',
+        orchestrationType: 'fullEnrich',
+        requestMode: normalizeFlowMode(payload?.requestMode, 'auto'),
+        approvalMode: normalizeFlowMode(payload?.approvalMode, 'auto'),
+        subject,
+    };
+}
+
+async function startFullEnrichExecution(payload, context = {}) {
+    if (!FULL_ENRICH_STATE_MACHINE_ARN) {
+        throw new Error('FULL_ENRICH_STATE_MACHINE_ARN is not configured');
+    }
+
+    const input = buildFullEnrichExecutionInput(payload, context);
+    const command = new StartExecutionCommand({
+        stateMachineArn: FULL_ENRICH_STATE_MACHINE_ARN,
+        name: buildExecutionName(input.requestId, input.hexId),
+        input: JSON.stringify(input),
+    });
+    const response = await sfnClient.send(command);
+    console.log('[StepFunctions] Started fullEnrich execution', {
+        stateMachineArn: FULL_ENRICH_STATE_MACHINE_ARN,
+        executionArn: response?.executionArn ?? null,
+        hexId: input.hexId,
+        requestId: input.requestId,
+    });
+    return {
+        executionArn: response?.executionArn ?? null,
+        startDate: response?.startDate ?? null,
+        input,
+    };
 }
 
 async function fetchQueueDepthSnapshot(queueUrl) {
@@ -1098,6 +1178,17 @@ export async function lambdaHandler(event) {
                         continue;
                     }
 
+                    if (isFullEnrichRequest(messageBody)) {
+                        try {
+                            const orchestratedPayload = withRequestContext(messageBody, requestContext);
+                            await startFullEnrichExecution(orchestratedPayload, requestContext);
+                            console.log('[scoutsRequest] fullEnrich request started successfully');
+                        } catch (error) {
+                            console.error(`[scoutsRequest] Failed to start fullEnrich execution: ${error.message}`);
+                        }
+                        continue;
+                    }
+
                     if (rawRealm === 'scoutsRequest' && (rawAction === 'request' || rawAction === 'persist')) {
                         try {
                             const translatedPayload = withRequestContext(messageBody, requestContext);
@@ -1267,6 +1358,15 @@ export async function lambdaHandler(event) {
             applySanitizedUidToSubject(processedSubject);
         }
 
+        if (isFullEnrichRequest(body)) {
+            const requestContext = buildRequestContext(null, body);
+            const orchestratedPayload = withRequestContext({
+                ...body,
+                subject: processedSubject,
+            }, requestContext);
+            await startFullEnrichExecution(orchestratedPayload, requestContext);
+            return withCors({ statusCode: 200, body: JSON.stringify({ message: 'fullEnrich execution started' }) });
+        }
 
         const allowed = new Set(['tagline', 'AI', 'imageTheme', 'imagePrompt', 'image', 'persist']);
         if (!allowed.has(normalizedRealm)) {
@@ -1300,4 +1400,4 @@ export async function lambdaHandler(event) {
     }
 }
 
-export { buildQueuePayload, buildRuntimeRequestEntry };
+export { buildFullEnrichExecutionInput, buildQueuePayload, buildRuntimeRequestEntry };

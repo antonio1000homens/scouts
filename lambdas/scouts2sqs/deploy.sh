@@ -49,6 +49,7 @@ SCOUTS_CONFIG_KEY="${SCOUTS_CONFIG_KEY:-scouts.conf}"
 REQUIRED_API_KEY="${REQUIRED_API_KEY:-${SCOUTS_REQUIRED_API_KEY:-}}"
 SCOUTS2SQS_PUBLISH_ENABLED="${SCOUTS2SQS_PUBLISH_ENABLED:-true}"
 DLQ_URL="${DLQ_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ}"
+FULL_ENRICH_STATE_MACHINE_ARN="${FULL_ENRICH_STATE_MACHINE_ARN:-}"
 
 TEMPLATE_FILE="${ROOT_DIR}/cloudformation/templates/scouts2sqs.yaml"
 
@@ -105,6 +106,17 @@ if [ -z "${REQUIRED_API_KEY}" ]; then
   CURRENT_REQUIRED_API_KEY="$(aws lambda get-function-configuration --function-name "${FUNCTION_NAME}" --region "${REGION}" --query 'Environment.Variables.REQUIRED_API_KEY' --output text 2>/dev/null || true)"
   if [ -n "${CURRENT_REQUIRED_API_KEY}" ] && [ "${CURRENT_REQUIRED_API_KEY}" != "None" ] && [ "${CURRENT_REQUIRED_API_KEY}" != "null" ]; then
     REQUIRED_API_KEY="${CURRENT_REQUIRED_API_KEY}"
+  fi
+fi
+
+if [ -z "${FULL_ENRICH_STATE_MACHINE_ARN}" ]; then
+  DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN="$(aws cloudformation describe-stacks \
+    --region "${REGION}" \
+    --stack-name scouts-full-enrich \
+    --query "Stacks[0].Outputs[?OutputKey=='StateMachineArn'].OutputValue" \
+    --output text 2>/dev/null || true)"
+  if [ -n "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" ] && [ "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" != "None" ] && [ "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" != "null" ]; then
+    FULL_ENRICH_STATE_MACHINE_ARN="${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}"
   fi
 fi
 
@@ -169,6 +181,7 @@ CFN_DEPLOY_ARGS+=(
     ScoutsRequestsQueueUrl="${SCOUTS_REQUESTS_QUEUE_URL}"
     ProcessingQueueUrl="${QUEUE_URL}"
     DlqUrl="${DLQ_URL}"
+    FullEnrichStateMachineArn="${FULL_ENRICH_STATE_MACHINE_ARN}"
 )
 
 aws cloudformation deploy \

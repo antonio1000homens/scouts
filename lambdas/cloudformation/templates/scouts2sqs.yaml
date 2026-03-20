@@ -85,9 +85,13 @@ Parameters:
       - 'true'
       - 'false'
     Default: 'true'
+  FullEnrichStateMachineArn:
+    Type: String
+    Default: ''
 
 Conditions:
   IsPublicFunctionUrl: !Equals [!Ref FunctionUrlAuthType, 'NONE']
+  HasFullEnrichStateMachineArn: !Not [!Equals [!Ref FullEnrichStateMachineArn, '']]
 
 Resources:
   Scouts2SqsLayer:
@@ -140,6 +144,13 @@ Resources:
                   - s3:GetObject
                   - s3:PutObject
                 Resource: !Sub arn:aws:s3:::${TargetBucket}/*
+              - !If
+                - HasFullEnrichStateMachineArn
+                - Effect: Allow
+                  Action:
+                    - states:StartExecution
+                  Resource: !Ref FullEnrichStateMachineArn
+                - !Ref AWS::NoValue
 
   Scouts2SqsFunction:
     Type: AWS::Lambda::Function
@@ -161,6 +172,7 @@ Resources:
           SCOUTS_REQUESTS_QUEUE_URL: !Ref ScoutsRequestsQueueUrl
           SQS_QUEUE_URL: !Ref ProcessingQueueUrl
           DLQ_URL: !Ref DlqUrl
+          FULL_ENRICH_STATE_MACHINE_ARN: !Ref FullEnrichStateMachineArn
       Code:
         S3Bucket: !Ref CodeBucket
         S3Key: !Ref FunctionCodeKey
