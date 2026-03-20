@@ -2056,6 +2056,41 @@ function applyProcessingStatusToEvents(events, activeProcessingByHex) {
 }
 
 function mergeProcessingSnapshotIntoIndex(snapshot, index, eventByHex) {
+  const requests = Array.isArray(snapshot?.requests)
+    ? snapshot.requests
+    : (Array.isArray(snapshot?.observed?.requests) ? snapshot.observed.requests : []);
+  for (const request of requests) {
+    const hex = typeof request?.hexId === 'string'
+      ? request.hexId.trim().toLowerCase()
+      : (typeof request?.hex === 'string' ? request.hex.trim().toLowerCase() : '');
+    if (!hex) continue;
+
+    const requestSubject = typeof request?.subject === 'string' ? request.subject.trim().toLowerCase() : '';
+    if (requestSubject === 'tagline') {
+      addProcessingRealmToIndex(index, hex, 'tagline');
+      continue;
+    }
+    if (requestSubject === 'imagetheme') {
+      addProcessingRealmToIndex(index, hex, 'imageTheme');
+      continue;
+    }
+    if (requestSubject === 'imageurl') {
+      addProcessingRealmToIndex(index, hex, 'image');
+      continue;
+    }
+
+    const requestRealm = normaliseProcessingRealm(request?.realm);
+    if (requestRealm) {
+      addProcessingRealmToIndex(index, hex, requestRealm);
+      continue;
+    }
+
+    const derivedRealm = deriveProcessingRealmFromEvent(eventByHex.get(hex));
+    if (derivedRealm) {
+      addProcessingRealmToIndex(index, hex, derivedRealm);
+    }
+  }
+
   const links = Array.isArray(snapshot?.links)
     ? snapshot.links
     : (Array.isArray(snapshot?.observed?.links) ? snapshot.observed.links : []);
