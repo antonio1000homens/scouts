@@ -76,6 +76,31 @@ test('buildRuntimeRequestEntry preserves external tracking fields for scoutsRequ
   assert.equal(entry.status, 'processing');
 });
 
+test('buildRuntimeRequestEntry normalizes translated persist jobs back to logical scoutsRequest tracking fields', () => {
+  const entry = buildRuntimeRequestEntry({
+    messageId: 'msg-persist',
+    attributes: { SentTimestamp: String(Date.parse('2026-03-16T18:15:00.000Z')) },
+  }, {
+    requestId: 'req-persist',
+    realm: 'persist',
+    action: 'persist',
+    requestedField: 'tagline',
+    subject: {
+      hexId: '63616d70',
+      tagline: 'Ready for camp',
+    },
+    title: 'Camp Night',
+  }, 'processing');
+
+  assert.equal(entry.requestId, 'req-persist');
+  assert.equal(entry.hexId, '63616d70');
+  assert.equal(entry.title, 'Camp Night');
+  assert.equal(entry.subject, 'tagline');
+  assert.equal(entry.realm, 'scoutsRequest');
+  assert.equal(entry.action, 'persist');
+  assert.equal(entry.status, 'processing');
+});
+
 test('buildQueuePayload translates scoutsRequest imageTheme request to internal imageTheme request', () => {
   const payload = buildQueuePayload({
     requestId: 'req-4',

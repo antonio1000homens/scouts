@@ -129,6 +129,78 @@ function getSubjectHintFromMessageBody(messageBody) {
     return null;
 }
 
+function inferRequestedFieldFromSubject(subject) {
+    if (!subject || typeof subject !== 'object') {
+        return null;
+    }
+
+    if (
+        Object.prototype.hasOwnProperty.call(subject, 'tagline')
+        || Object.prototype.hasOwnProperty.call(subject, 'AI')
+        || Object.prototype.hasOwnProperty.call(subject, 'ai')
+        || Object.prototype.hasOwnProperty.call(subject.metadata ?? {}, 'tagline')
+    ) {
+        return 'tagline';
+    }
+
+    const metadataImage = subject.metadata?.image && typeof subject.metadata.image === 'object'
+        ? subject.metadata.image
+        : {};
+    const image = subject.image && typeof subject.image === 'object'
+        ? subject.image
+        : {};
+
+    if (
+        Object.prototype.hasOwnProperty.call(subject, 'imageTheme')
+        || Object.prototype.hasOwnProperty.call(subject, 'imagePrompt')
+        || Object.prototype.hasOwnProperty.call(metadataImage, 'theme')
+        || Object.prototype.hasOwnProperty.call(image, 'theme')
+        || Object.prototype.hasOwnProperty.call(image, 'prompt')
+    ) {
+        return 'imageTheme';
+    }
+
+    if (
+        Object.prototype.hasOwnProperty.call(subject, 'imageUrl')
+        || Object.prototype.hasOwnProperty.call(metadataImage, 'url')
+        || Object.prototype.hasOwnProperty.call(image, 'url')
+    ) {
+        return 'imageUrl';
+    }
+
+    return null;
+}
+
+function normalizeRuntimeRequestDescriptor(messageBody) {
+    const rawRealm = typeof messageBody?.realm === 'string' && messageBody.realm.trim()
+        ? messageBody.realm.trim()
+        : null;
+    const action = normaliseActionHint(messageBody?.action);
+    const explicitSubject = getSubjectHintFromMessageBody(messageBody);
+    const inferredSubject = explicitSubject
+        ?? inferRequestedFieldFromSubject(messageBody?.subject)
+        ?? (rawRealm === 'persist' ? 'persist' : null);
+    const internalRealmToSubject = {
+        tagline: 'tagline',
+        AI: 'tagline',
+        imageTheme: 'imageTheme',
+        imagePrompt: 'imageTheme',
+        image: 'imageUrl',
+        imageUrl: 'imageUrl',
+        persist: inferredSubject,
+    };
+    const logicalSubject = inferredSubject ?? internalRealmToSubject[rawRealm] ?? null;
+    const usesLogicalRequestContract = rawRealm === 'scoutsRequest'
+        || rawRealm === 'stateMachine'
+        || Object.prototype.hasOwnProperty.call(internalRealmToSubject, rawRealm ?? '');
+
+    return {
+        realm: usesLogicalRequestContract && logicalSubject ? 'scoutsRequest' : rawRealm,
+        subject: logicalSubject,
+        action,
+    };
+}
+
 function normaliseActionHint(value) {
     if (value === undefined || value === null) return null;
     const normalized = String(value).trim();
@@ -176,15 +248,17 @@ function buildRuntimeRequestEntry(record, messageBody, status) {
         ?? record?.messageId
         ?? null;
 
+    const descriptor = normalizeRuntimeRequestDescriptor(messageBody);
+
     return {
         requestTime: getRequestTimeHint(record, messageBody),
         requestId: requestId ? String(requestId) : null,
         messageId: messageId ? String(messageId) : null,
         hexId: getHexHintFromMessageBody(messageBody),
         title: getTitleHintFromMessageBody(messageBody),
-        subject: getSubjectHintFromMessageBody(messageBody),
-        realm: typeof messageBody?.realm === 'string' && messageBody.realm.trim() ? messageBody.realm.trim() : null,
-        action: normaliseActionHint(messageBody?.action),
+        subject: descriptor.subject,
+        realm: descriptor.realm,
+        action: descriptor.action,
         taskToken: normaliseRuntimeText(messageBody?.taskToken ?? null),
         orchestrationType: normaliseRuntimeText(messageBody?.orchestrationType ?? null),
         orchestrationStep: normaliseRuntimeText(messageBody?.orchestrationStep ?? null),
@@ -540,22 +614,6 @@ async function persistQueuedRequestsRuntimeSnapshot(records, requestIds, hexIds,
         hexIds: Array.from(
             new Set(reconciled.requests.map((entry) => entry?.hexId).filter(Boolean))
         ).slice(0, 50),
-        links: Array.from(
-            new Map(
-                reconciled.requests
-                    .filter((entry) => entry?.requestId && entry?.hexId)
-                    .map((entry) => [`${entry.requestId}|${entry.hexId}`, {
-                        requestId: entry.requestId,
-                        hex: entry.hexId,
-                        sourceMessageId: entry.messageId ?? null,
-                        realm: entry.realm ?? null,
-                        action: entry.action ?? null,
-                    }])
-            ).values()
-        ).slice(0, 100),
-        recordCount: reconciled.requests.length,
-        scannedRecordCount: Array.isArray(records) ? records.length : 0,
-        removedOrphanedRequestCount: reconciled.removedCount,
     };
 
     try {
