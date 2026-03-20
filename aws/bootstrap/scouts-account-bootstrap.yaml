@@ -106,7 +106,7 @@ Resources:
                   - iam:TagRole
                   - iam:UntagRole
                 Resource:
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-lambda-role
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-*
               - Sid: RuntimeRoleInlinePolicyManagement
                 Effect: Allow
                 Action:
@@ -114,13 +114,13 @@ Resources:
                   - iam:GetRolePolicy
                   - iam:PutRolePolicy
                 Resource:
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-lambda-role
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-*
               - Sid: RuntimeRolePass
                 Effect: Allow
                 Action:
                   - iam:PassRole
                 Resource:
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-lambda-role
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-*
               - Sid: LambdaCreateAndList
                 Effect: Allow
                 Action:
@@ -152,9 +152,20 @@ Resources:
                   - lambda:UpdateFunctionCode
                   - lambda:UpdateFunctionConfiguration
                 Resource:
-                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts
+                  - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:scouts*
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:layer:scouts-shared:*
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:event-source-mapping:*
+              - Sid: StepFunctionsManagement
+                Effect: Allow
+                Action:
+                  - states:CreateStateMachine
+                  - states:DeleteStateMachine
+                  - states:DescribeStateMachine
+                  - states:TagResource
+                  - states:UntagResource
+                  - states:UpdateStateMachine
+                Resource:
+                  - !Sub arn:aws:states:eu-west-2:${AWS::AccountId}:stateMachine:scouts-*
               - Sid: QueueManagement
                 Effect: Allow
                 Action:
@@ -299,9 +310,7 @@ Resources:
                   - cloudformation:DescribeStacks
                   - cloudformation:ExecuteChangeSet
                 Resource:
-                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-cloudfront/*
-                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-lambda/*
-                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-queues/*
+                  - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:stack/scouts-*/*
                   - !Sub arn:aws:cloudformation:eu-west-2:${AWS::AccountId}:changeSet/*/*
               - Sid: CloudFormationReadGlobal
                 Effect: Allow
