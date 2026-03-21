@@ -753,7 +753,7 @@ async function buildGeminiTextRequestPrompt(event, mode, configOverride = null) 
         template = typeof config.taglineThemePromptTemplate === 'string' && config.taglineThemePromptTemplate.trim()
             ? config.taglineThemePromptTemplate
             : null;
-    } else if (mode === 'imageTheme' || mode === 'imagePrompt') {
+    } else if (mode === 'imageTheme') {
         template = typeof config.imageThemePromptTemplate === 'string' && config.imageThemePromptTemplate.trim()
             ? config.imageThemePromptTemplate
             : null;
@@ -878,7 +878,6 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null) 
 function ensureImageContainer(image = {}) {
     return {
         theme: image.theme ?? null,
-        prompt: image.prompt ?? null,
         url: image.url ?? null,
     };
 }
@@ -951,9 +950,7 @@ function ensureRuntimeMetadata(event, fallbackHex = null) {
     const metadataImage = metadata.image && typeof metadata.image === 'object' ? metadata.image : {};
     const imageTheme = normalizeLegacyText(
         metadataImage.theme
-        ?? metadataImage.prompt
         ?? legacyImage.theme
-        ?? legacyImage.prompt
     );
     const imageUrl = normalizeLegacyText(metadataImage.url ?? legacyImage.url);
     event.image = ensureImageContainer({
@@ -994,7 +991,7 @@ function ensureRuntimeMetadata(event, fallbackHex = null) {
 function getImageThemeValue(event) {
     const metadataImage = getMetadataObject(event)?.image;
     if (!metadataImage || typeof metadataImage !== 'object') return null;
-    return normalizeLegacyText(metadataImage.theme ?? metadataImage.prompt);
+    return normalizeLegacyText(metadataImage.theme);
 }
 
 function getImageUrlValue(event) {
@@ -1700,6 +1697,10 @@ async function saveHexEventToS3(hexValue, payload) {
     if (toStore && typeof toStore === 'object' && !Array.isArray(toStore)) {
         normalizeHexEventShape(toStore, trimmed);
         removeTopLevelFieldsDuplicatedByMetadata(toStore);
+        delete toStore.location;
+        delete toStore.section;
+        delete toStore.icsType;
+        delete toStore.processing;
     }
     
     try {
@@ -1792,11 +1793,23 @@ async function saveEventToS3(eventData) {
     }
 
     const key = `events/${sanitized}.json`;
+    const toStore =
+        eventData && typeof eventData === 'object' && !Array.isArray(eventData)
+            ? JSON.parse(JSON.stringify(eventData))
+            : eventData;
+    if (toStore && typeof toStore === 'object' && !Array.isArray(toStore)) {
+        normalizeHexEventShape(toStore, sanitized);
+        removeTopLevelFieldsDuplicatedByMetadata(toStore);
+        delete toStore.location;
+        delete toStore.section;
+        delete toStore.icsType;
+        delete toStore.processing;
+    }
     await s3Client.send(
         new PutObjectCommand({
             Bucket: TARGET_BUCKET,
             Key: key,
-            Body: JSON.stringify(eventData, null, 2),
+            Body: JSON.stringify(toStore, null, 2),
             ContentType: 'application/json',
             CacheControl: 'no-store',
         })
@@ -2293,19 +2306,19 @@ function buildEventDetailsSection(event, actionLabel, realm = null, options = {}
         if (shouldInclude('tagline') && tagline) {
             lines.push(formatDetailLine('Tagline', tagline));
         }
-        if ((shouldInclude('imageTheme') || shouldInclude('imagePrompt')) && event.image?.theme) {
+        if (shouldInclude('imageTheme') && event.image?.theme) {
             lines.push(formatDetailLine('Image Theme', event.image.theme));
         }
     }
     // For imageTheme realm: show image theme
-    else if (realm === 'imageTheme' || realm === 'imagePrompt') {
-        if ((shouldInclude('imageTheme') || shouldInclude('imagePrompt')) && event.image?.theme) {
+    else if (realm === 'imageTheme') {
+        if (shouldInclude('imageTheme') && event.image?.theme) {
             lines.push(formatDetailLine('Image Theme', event.image.theme));
         }
     }
     // For image/imageUrl realms: show image link only if assigned
     else if (realm === 'image' || realm === 'imageUrl') {
-        if ((shouldInclude('imageTheme') || shouldInclude('imagePrompt')) && derivedImagePrompt) {
+        if (shouldInclude('imageTheme') && derivedImagePrompt) {
             lines.push(formatDetailLine('Image Prompt', derivedImagePrompt));
         }
         if (shouldInclude('imageUrl') && event.image?.url) {
@@ -2324,10 +2337,10 @@ function buildEventDetailsSection(event, actionLabel, realm = null, options = {}
         if (shouldInclude('title')) {
             lines.push(formatDetailLine('Title', event.title ?? event.summary ?? event.name));
         }
-        if ((shouldInclude('imageTheme') || shouldInclude('imagePrompt')) && event.image?.theme) {
+        if (shouldInclude('imageTheme') && event.image?.theme) {
             lines.push(formatDetailLine('Image Theme', event.image.theme));
         }
-        if ((shouldInclude('imageTheme') || shouldInclude('imagePrompt')) && derivedImagePrompt) {
+        if (shouldInclude('imageTheme') && derivedImagePrompt) {
             lines.push(formatDetailLine('Image Prompt', derivedImagePrompt));
         }
         if (shouldInclude('imageUrl')) {
@@ -2359,7 +2372,7 @@ function buildApprovalBlocks(event, actionLabel, options = {}) {
     let reviewTarget;
     if (realm === 'AI') {
         reviewTarget = 'Tagline';
-    } else if (realm === 'imageTheme' || realm === 'imagePrompt') {
+    } else if (realm === 'imageTheme') {
         reviewTarget = 'Image Theme';
     } else if (realm === 'image' || realm === 'imageUrl') {
         reviewTarget = 'Image Link';
@@ -2604,7 +2617,6 @@ async function prepareEnrichmentReview(realm, subject, configOverride = null) {
         }
         if (previewTheme) {
             excludeFields.add('imageTheme');
-            excludeFields.add('imagePrompt');
         }
     }
 
@@ -2965,7 +2977,7 @@ export async function lambdaHandler(event) {
 
         console.log(`Processing scouts message - Realm: ${realm}, Action: ${action}`);
 
-        const enrichmentRealms = new Set(['tagline', 'AI', 'imageTheme', 'imagePrompt', 'image']);
+        const enrichmentRealms = new Set(['tagline', 'AI', 'imageTheme', 'image']);
         let scoutsConfig = null;
         if (enrichmentRealms.has(realm)) {
             scoutsConfig = await loadScoutsConfig().catch((error) => {
@@ -2979,7 +2991,7 @@ export async function lambdaHandler(event) {
         // - 'tagline' (legacy 'AI'), 'imageTheme', 'image': enrichment tasks triggered by scouts2sqs
         // - 'persist': finalisation tasks routed internally
         // Anything else is dropped and shunted to the DLQ to avoid noisy retries.
-        const allowedRealms = new Set(['tagline', 'AI', 'imageTheme', 'imagePrompt', 'image', 'persist']);
+        const allowedRealms = new Set(['tagline', 'AI', 'imageTheme', 'image', 'persist']);
         if (!allowedRealms.has(realm)) {
             console.error(`[SQS2Scouts] Dropping unsupported realm=${realm} action=${action} subject=${(rawSubject && (rawSubject.title || rawSubject.hex)) || 'unknown'}`);
             // Send unsupported realm to DLQ
@@ -3036,7 +3048,7 @@ export async function lambdaHandler(event) {
         }
         
         // Handle imageTheme realm - generate only the persisted image theme
-        if (realm === 'imageTheme' || realm === 'imagePrompt') {
+        if (realm === 'imageTheme') {
             const hexValue = typeof rawSubject === 'string' ? rawSubject.trim() : null;
             if (!hexValue) {
                 throw new Error('imageTheme request missing hex identifier');

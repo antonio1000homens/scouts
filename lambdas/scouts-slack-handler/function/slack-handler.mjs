@@ -164,7 +164,7 @@ function parseAdminBody(rawBody) {
     }
 }
 
-const ADMIN_ALLOWED_REALMS = new Set(['AI', 'imagePrompt', 'persist', 'slack', 'scoutsRequest']);
+const ADMIN_ALLOWED_REALMS = new Set(['AI', 'persist', 'slack', 'scoutsRequest']);
 
 function normalizeAdminPayload(rawPayload) {
     if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) {

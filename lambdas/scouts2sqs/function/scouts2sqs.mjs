@@ -152,10 +152,8 @@ function inferRequestedFieldFromSubject(subject) {
 
     if (
         Object.prototype.hasOwnProperty.call(subject, 'imageTheme')
-        || Object.prototype.hasOwnProperty.call(subject, 'imagePrompt')
         || Object.prototype.hasOwnProperty.call(metadataImage, 'theme')
         || Object.prototype.hasOwnProperty.call(image, 'theme')
-        || Object.prototype.hasOwnProperty.call(image, 'prompt')
     ) {
         return 'imageTheme';
     }
@@ -184,7 +182,6 @@ function normalizeRuntimeRequestDescriptor(messageBody) {
         tagline: 'tagline',
         AI: 'tagline',
         imageTheme: 'imageTheme',
-        imagePrompt: 'imageTheme',
         image: 'imageUrl',
         imageUrl: 'imageUrl',
         persist: inferredSubject,
@@ -958,7 +955,6 @@ function buildPersistPatchForProcessing(rawSubject) {
 
     if (
         Object.prototype.hasOwnProperty.call(compactSubject, 'imageTheme')
-        || Object.prototype.hasOwnProperty.call(compactSubject, 'imagePrompt')
         || Object.prototype.hasOwnProperty.call(compactSubject, 'image')
         || Object.prototype.hasOwnProperty.call(compactSubject.metadata ?? {}, 'image')
     ) {
@@ -969,7 +965,6 @@ function buildPersistPatchForProcessing(rawSubject) {
         patch.metadata.image.theme = normalizeNullableText(
             compactSubject.metadata?.image?.theme
             ?? compactSubject.imageTheme
-            ?? compactSubject.imagePrompt
         );
     }
     if (
@@ -1149,7 +1144,7 @@ function buildQueuePayload(payload) {
             const fieldValue = requestedField === 'tagline'
                 ? normaliseRuntimeText(payload.tagline ?? payload.value ?? payload?.subject?.tagline ?? null)
                 : requestedField === 'imageTheme'
-                    ? normaliseRuntimeText(payload.imageTheme ?? payload.imagePrompt ?? payload.value ?? payload?.subject?.imageTheme ?? payload?.subject?.imagePrompt ?? null)
+                    ? normaliseRuntimeText(payload.imageTheme ?? payload.value ?? payload?.subject?.imageTheme ?? null)
                     : normaliseRuntimeText(payload.imageUrl ?? payload.value ?? payload?.subject?.imageUrl ?? null);
             if (!fieldValue) {
                 throw new Error(`${requestedField} persist request missing ${requestedField} value`);
@@ -1177,7 +1172,7 @@ function buildQueuePayload(payload) {
 
     // Only allow a small set of realms through (include 'persist' so this lambda
     // can publish persist messages created during approval flows)
-    const allowedRealms = new Set(['tagline', 'AI', 'imageTheme', 'imagePrompt', 'image', 'persist']);
+    const allowedRealms = new Set(['tagline', 'AI', 'imageTheme', 'image', 'persist']);
     if (!allowedRealms.has(realm)) {
         throw new Error(`Realm ${realm} not supported by this lambda`);
     }
@@ -1370,7 +1365,7 @@ export async function lambdaHandler(event) {
                         }
                     } else {
                         // Only allow tagline (legacy AI), imageTheme, image and persist realms through from SQS
-                        const allowed = new Set(['tagline', 'AI', 'imageTheme', 'imagePrompt', 'image', 'persist']);
+                        const allowed = new Set(['tagline', 'AI', 'imageTheme', 'image', 'persist']);
                         if (!allowed.has(rawRealm)) {
                             console.error(`[SQS] Dropping unsupported realm=${rawRealm} action=${rawAction} subject=${(rawSubject && rawSubject.title) || 'unknown'}`);
                             // drop the message (don't throw) so SQS won't retry
@@ -1487,7 +1482,7 @@ export async function lambdaHandler(event) {
             return withCors({ statusCode: 200, body: JSON.stringify({ message: 'fullEnrich execution started' }) });
         }
 
-        const allowed = new Set(['tagline', 'AI', 'imageTheme', 'imagePrompt', 'image', 'persist']);
+        const allowed = new Set(['tagline', 'AI', 'imageTheme', 'image', 'persist']);
         if (!allowed.has(normalizedRealm)) {
             console.error(`[HTTP] Dropping unsupported realm=${normalizedRealm} action=${normalizedAction}`);
             // Send unsupported realm to DLQ

@@ -334,7 +334,6 @@ function buildAgendaMetadata(event) {
   metadata.tagline = getEventTagline(event);
   metadata.image = {
     theme: getEventImageTheme(event),
-    prompt: null,
     url: getEventImageUrl(event),
   };
   metadata.status = buildStatusForStorage(event);
@@ -427,14 +426,12 @@ function normalizeHexEventToMetadata(eventData) {
   const topLevelImage = normalized.image && typeof normalized.image === 'object' ? normalized.image : {};
   const image = {
     theme: normaliseLegacyText(metadataImage.theme ?? topLevelImage.theme ?? topLevelImage.prompt),
-    prompt: null,
     url: normaliseLegacyText(metadataImage.url ?? topLevelImage.url ?? topLevelImage.src ?? topLevelImage.href),
   };
   const existingImage = metadata.image && typeof metadata.image === 'object' ? metadata.image : null;
   if (!existingImage
     || existingImage.theme !== image.theme
-    || existingImage.url !== image.url
-    || existingImage.prompt !== image.prompt) {
+    || existingImage.url !== image.url) {
     metadata.image = image;
     changed = true;
   }
@@ -2045,16 +2042,6 @@ function deriveProcessingRealmFromEvent(event, isEligibleForImageProcessing = tr
   return null;
 }
 
-function applyProcessingStatusToEvents(events, activeProcessingByHex) {
-  if (!Array.isArray(events)) return;
-  for (const event of events) {
-    if (!event || typeof event !== 'object') continue;
-    const hex = typeof event.hex === 'string' ? event.hex.trim().toLowerCase() : '';
-    const active = hex ? activeProcessingByHex.get(hex) : null;
-    event.processing = normaliseProcessingList(active ?? []);
-  }
-}
-
 function mergeProcessingSnapshotIntoIndex(snapshot, index, eventByHex) {
   const requests = Array.isArray(snapshot?.requests)
     ? snapshot.requests
@@ -2216,16 +2203,10 @@ function hydrateStoredDataset(dataset) {
       ? formatDateComponent(lastModifiedRaw, null)
       : null;
 
-    let section = SECTION_CUBS;
-    if (event.icsType && event.icsType.startsWith('beaver')) {
-      section = SECTION_BEAVERS;
-    }
-
     hydratedEvents.push({
       uid: sanitizedUid,
       ...(event.originalUid && event.originalUid !== sanitizedUid ? { originalUid: event.originalUid } : {}),
       title,
-      location: event.location ?? null,
       start,
       lastModified,
       sortKey: start.sortKey,
@@ -2233,14 +2214,10 @@ function hydrateStoredDataset(dataset) {
       hex: event.hex ?? event.metadata?.hex ?? null,
       image: {
         theme: getEventImageTheme(event),
-        prompt: null,
         url: getEventImageUrl(event),
       },
       metadata: buildAgendaMetadata(event),
       status: buildStatusForStorage(event),
-      processing: normaliseProcessingList(event.processing),
-      section,
-      icsType: event.icsType ?? null,
     });
   }
 
@@ -2250,11 +2227,6 @@ function hydrateStoredDataset(dataset) {
 /**
  * Prepare an event for storage in `agenda.json`.
  *
- * Behaviour note: if the incoming event does not include a `location` and the
- * `icsType` indicates a programme (contains "program" or "programme", case
- * insensitive) we default `location` to the string "the Den". This mirrors
- * the requirement that programme events should show the Den when a location
- * isn't provided by the ICS feed.
  */
 function prepareEventForStorage(event) {
   ensureRuntimeMetadata(event);
@@ -2266,14 +2238,10 @@ function prepareEventForStorage(event) {
   return {
     uid: event.uid,
     summary,
-    location: event.location ?? (event.icsType && /programme?|program/i.test(event.icsType) ? 'the Den' : null),
     dtstart,
     lastModified: lastModifiedRaw ? { raw: lastModifiedRaw } : null,
     metadata,
-    processing: normaliseProcessingList(event.processing),
     hex: event.hex ?? null,
-    section: normaliseSection(event.section, SECTION_CUBS),
-    icsType: event.icsType ?? null,
   };
 }
 
@@ -2373,7 +2341,6 @@ function stripEventEnhancements(event) {
     ...event,
     tagline: null,
     image: ensureImageContainer(),
-    processing: [],
   };
   if ('AI' in stripped) delete stripped.AI;
   if ('ai' in stripped) delete stripped.ai;
@@ -3727,10 +3694,7 @@ export async function lambdaHandler(event = {}) {
     const candidateImageTheme = normalizeNullableText(
       firstDefinedValue(
         subjectObject?.imageTheme,
-        subjectObject?.imagePrompt,
         bodyParams?.imageTheme,
-        bodyParams?.imagePrompt,
-        bodyParams?.image_prompt,
       ),
     );
     const candidateImageUrl = normalizeNullableText(
@@ -4743,14 +4707,6 @@ export async function lambdaHandler(event = {}) {
     if (hiddenInconsistencies.length > 0) {
       console.log(`[Hidden Events] Found and fixed ${hiddenInconsistencies.length} inconsistencies in hidden future events`);
     }
-
-    const activeProcessingByHex = await buildActiveProcessingIndex(
-      bucket,
-      cleanedAgenda,
-      liveQueuedProcessingByHex,
-      runtimeQueueSnapshots,
-    );
-    applyProcessingStatusToEvents(cleanedAgenda, activeProcessingByHex);
 
     const trimmedAgenda = cleanedAgenda.map(prepareEventForStorage);
     const modifiedEvents = listModifiedEvents(mergedAgenda, cleanedAgenda);

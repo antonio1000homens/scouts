@@ -9,7 +9,7 @@ The `scouts.mjs` Lambda function receives messages from the `scoutsDecision` SQS
 **Purpose**: React to persistence outcomes reported by the `sqs2scouts` lambda.
 
 **Actions**:
-- `persisted`: HEX file saved successfully. Scouts lambda checks whether the HEX is complete (AI + image prompt + image URL). If anything is missing it does not requeue from this callback path; otherwise the agenda entry is updated with the final AI/image data.
+- `persisted`: HEX file saved successfully. Scouts lambda checks whether the HEX is complete (tagline + stored image theme + image URL). `imagePrompt` may still appear as a derived/compatibility prompt concept, but it is not intended to be a separately stored completion field. If anything is missing it does not requeue from this callback path; otherwise the agenda entry is updated with the final AI/image data.
 - `hidden`: Event status is `hidden`. Scouts lambda updates `agenda.json` so the event disappears from the public feed.
 
 **Code Location**: `scouts.mjs` around the `structuredCommand.realm === 'sqs2scouts'` branch (~2090 onwards).
