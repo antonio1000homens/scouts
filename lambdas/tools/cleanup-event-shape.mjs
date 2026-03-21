@@ -86,6 +86,7 @@ function cleanupEventDocument(input) {
 
   const value = JSON.parse(JSON.stringify(input));
   const removed = [];
+  let metadata = value.metadata && typeof value.metadata === 'object' ? value.metadata : null;
   const drop = (container, key, label) => {
     if (container && typeof container === 'object' && Object.prototype.hasOwnProperty.call(container, key)) {
       delete container[key];
@@ -93,16 +94,52 @@ function cleanupEventDocument(input) {
     }
   };
 
+  const legacyHex = typeof value.hex === 'string' && value.hex.trim()
+    ? value.hex.trim().toLowerCase()
+    : (typeof value.hexId === 'string' && value.hexId.trim()
+        ? value.hexId.trim().toLowerCase()
+        : '');
+
+  if (!metadata && legacyHex) {
+    metadata = {};
+    value.metadata = metadata;
+    removed.push('created metadata');
+  }
+
+  if (metadata) {
+    const metadataHex = typeof metadata.hex === 'string' && metadata.hex.trim()
+      ? metadata.hex.trim().toLowerCase()
+      : '';
+
+    if (!metadataHex && legacyHex) {
+      metadata.hex = legacyHex;
+      removed.push('moved hex -> metadata.hex');
+    } else if (metadataHex && metadata.hex !== metadataHex) {
+      metadata.hex = metadataHex;
+      removed.push('normalized metadata.hex');
+    }
+    drop(metadata, 'hexId', 'metadata.hexId');
+  }
+
+  drop(value, 'hex', 'hex');
+  drop(value, 'hexId', 'hexId');
+
   drop(value, 'location', 'location');
   drop(value, 'section', 'section');
   drop(value, 'icsType', 'icsType');
+  drop(value, 'dstart', 'dstart');
   drop(value, 'processing', 'processing');
+  drop(value, 'lastNotificationSent', 'lastNotificationSent');
+  drop(value, 'requestIds', 'requestIds');
 
   if (value.image && typeof value.image === 'object') {
     drop(value.image, 'prompt', 'image.prompt');
   }
   if (value.metadata?.image && typeof value.metadata.image === 'object') {
     drop(value.metadata.image, 'prompt', 'metadata.image.prompt');
+  }
+  if (value.metadata && typeof value.metadata === 'object') {
+    drop(value.metadata, 'requestIds', 'metadata.requestIds');
   }
 
   return {
