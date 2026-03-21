@@ -124,6 +124,22 @@ function cleanupEventDocument(input) {
   drop(value, 'hex', 'hex');
   drop(value, 'hexId', 'hexId');
 
+  const sourceImg = typeof value.sourceImg === 'string' && value.sourceImg.trim() ? value.sourceImg.trim() : null;
+  if (sourceImg) {
+    if (!value.metadata) {
+      value.metadata = {};
+      metadata = value.metadata;
+    }
+    if (!value.metadata.image) value.metadata.image = {};
+    if (!value.metadata.image.url) {
+      value.metadata.image.url = sourceImg;
+      removed.push('moved sourceImg -> metadata.image.url');
+    } else {
+      removed.push('dropped sourceImg (metadata.image.url exists)');
+    }
+    delete value.sourceImg;
+  }
+
   drop(value, 'location', 'location');
   drop(value, 'section', 'section');
   drop(value, 'icsType', 'icsType');
