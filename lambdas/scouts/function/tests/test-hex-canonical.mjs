@@ -18,7 +18,7 @@ test('Hex file canonical source logic', async (t) => {
       title: 'Test Event',
       AI: 'Event AI content',
       image: {
-        prompt: 'Event prompt',
+        theme: 'Event theme',
         url: 'https://event.url/image.jpg'
       }
     };
@@ -26,7 +26,7 @@ test('Hex file canonical source logic', async (t) => {
     const existingHexFile = {
       AI: 'Hex AI content',
       image: {
-        prompt: 'Hex prompt',
+        theme: 'Hex theme',
         url: 'https://hex.url/image.jpg'
       }
     };
@@ -35,8 +35,8 @@ test('Hex file canonical source logic', async (t) => {
     if (existingHexFile.AI) {
       baseEvent.AI = existingHexFile.AI;
     }
-    if (existingHexFile.image?.prompt) {
-      baseEvent.image.prompt = existingHexFile.image.prompt;
+    if (existingHexFile.image?.theme) {
+      baseEvent.image.theme = existingHexFile.image.theme;
     }
     if (existingHexFile.image?.url) {
       baseEvent.image.url = existingHexFile.image.url;
@@ -44,7 +44,7 @@ test('Hex file canonical source logic', async (t) => {
 
     // Verify hex file values were used
     assert.strictEqual(baseEvent.AI, 'Hex AI content', 'AI should come from hex file');
-    assert.strictEqual(baseEvent.image.prompt, 'Hex prompt', 'Prompt should come from hex file');
+    assert.strictEqual(baseEvent.image.theme, 'Hex theme', 'Theme should come from hex file');
     assert.strictEqual(baseEvent.image.url, 'https://hex.url/image.jpg', 'URL should come from hex file');
   });
 
@@ -53,7 +53,7 @@ test('Hex file canonical source logic', async (t) => {
       title: 'Test Event',
       AI: 'Event AI content',
       image: {
-        prompt: 'Event prompt',
+        theme: 'Event theme',
         url: 'https://event.url/image.jpg'
       }
     };
@@ -61,8 +61,8 @@ test('Hex file canonical source logic', async (t) => {
     const existingHexFile = {
       AI: 'Hex AI content',
       image: {
-        // Only prompt is set in hex file
-        prompt: 'Hex prompt',
+        // Only theme is set in hex file
+        theme: 'Hex theme',
         url: null
       }
     };
@@ -71,8 +71,8 @@ test('Hex file canonical source logic', async (t) => {
     if (existingHexFile.AI) {
       baseEvent.AI = existingHexFile.AI;
     }
-    if (existingHexFile.image?.prompt) {
-      baseEvent.image.prompt = existingHexFile.image.prompt;
+    if (existingHexFile.image?.theme) {
+      baseEvent.image.theme = existingHexFile.image.theme;
     }
     if (existingHexFile.image?.url) {
       baseEvent.image.url = existingHexFile.image.url;
@@ -80,7 +80,7 @@ test('Hex file canonical source logic', async (t) => {
 
     // Verify hex file values were used where available
     assert.strictEqual(baseEvent.AI, 'Hex AI content', 'AI should come from hex file');
-    assert.strictEqual(baseEvent.image.prompt, 'Hex prompt', 'Prompt should come from hex file');
+    assert.strictEqual(baseEvent.image.theme, 'Hex theme', 'Theme should come from hex file');
     assert.strictEqual(baseEvent.image.url, 'https://event.url/image.jpg', 'URL should remain from event (hex has no URL)');
   });
 
@@ -89,7 +89,7 @@ test('Hex file canonical source logic', async (t) => {
       title: 'Test Event',
       AI: 'AI content',
       image: {
-        prompt: 'Test prompt',
+        theme: 'Test theme',
         url: 'https://example.com/image.jpg'
       },
       runs: 5
@@ -102,37 +102,46 @@ test('Hex file canonical source logic', async (t) => {
     // Verify runs field was removed
     assert.strictEqual(updatedHexFile.runs, undefined, 'Runs field should be undefined');
     assert.strictEqual(updatedHexFile.AI, 'AI content', 'AI should still be present');
-    assert.strictEqual(updatedHexFile.image.prompt, 'Test prompt', 'Prompt should still be present');
+    assert.strictEqual(updatedHexFile.image.theme, 'Test theme', 'Theme should still be present');
     assert.strictEqual(updatedHexFile.image.url, 'https://example.com/image.jpg', 'URL should still be present');
   });
 
-  await t.test('Hex file structure should be preserved except runs field', () => {
+  await t.test('Hex file cleanup should remove deprecated event fields', () => {
     const hexFileData = {
       title: 'Test Event',
       uid: 'event-123',
-      start: { epochMillis: 1234567890 },
+      dtstart: { raw: '2026-03-21T19:00:00.000Z' },
       location: 'The Den',
       section: 'cubs',
+      icsType: 'cubs-programme',
       AI: 'AI content',
       image: {
-        prompt: 'Test prompt',
+        theme: 'Test theme',
         url: 'https://example.com/image.jpg'
       },
+      processing: ['imageTheme'],
       runs: 3,
       hex: '54657374204576656e74'
     };
 
-    // Simulate removing runs field
+    // Simulate removing runs plus deprecated persisted fields
     const updatedHexFile = { ...hexFileData };
     delete updatedHexFile.runs;
+    delete updatedHexFile.location;
+    delete updatedHexFile.section;
+    delete updatedHexFile.icsType;
+    delete updatedHexFile.processing;
 
-    // Verify all fields except runs are preserved
+    // Verify deprecated persisted fields were removed
     assert.strictEqual(updatedHexFile.title, 'Test Event');
     assert.strictEqual(updatedHexFile.uid, 'event-123');
-    assert.strictEqual(updatedHexFile.location, 'The Den');
-    assert.strictEqual(updatedHexFile.section, 'cubs');
+    assert.deepStrictEqual(updatedHexFile.dtstart, { raw: '2026-03-21T19:00:00.000Z' });
+    assert.strictEqual(updatedHexFile.location, undefined);
+    assert.strictEqual(updatedHexFile.section, undefined);
+    assert.strictEqual(updatedHexFile.icsType, undefined);
+    assert.strictEqual(updatedHexFile.processing, undefined);
     assert.strictEqual(updatedHexFile.AI, 'AI content');
-    assert.strictEqual(updatedHexFile.image.prompt, 'Test prompt');
+    assert.strictEqual(updatedHexFile.image.theme, 'Test theme');
     assert.strictEqual(updatedHexFile.image.url, 'https://example.com/image.jpg');
     assert.strictEqual(updatedHexFile.hex, '54657374204576656e74');
     assert.strictEqual(updatedHexFile.runs, undefined);

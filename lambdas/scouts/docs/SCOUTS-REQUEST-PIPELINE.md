@@ -44,8 +44,8 @@ flowchart LR
         Q11 --> E
 
         E -->|"tagline missing"| P1["scoutsProcessing\n{ realm: tagline, action: request, subject: hex }"]
-        E -->|"image.prompt missing"| P2["scoutsProcessing\n{ realm: imagePrompt, action: request, subject: hex }"]
-        E -->|"image.url missing"| P3["scoutsProcessing\n{ realm: pixabay, action: bypass, subject: hex }"]
+        E -->|"image.theme missing"| P2["scoutsProcessing\n{ realm: imageTheme, action: request, subject: hex }"]
+        E -->|"image.url missing"| P3["scoutsProcessing\n{ realm: image, action: request, subject: hex }"]
         E -->|"complete already"| X1["no publish"]
 
         Q4 --> P4["scoutsProcessing\n{ realm: persist, action: persist, subject: full event object }"]
@@ -87,19 +87,28 @@ flowchart LR
 | --- | --- | --- |
 | `{ realm: "scoutsRequest", action: "new|retry|repair", subject: <full event object> }` and no tagline | Derives missing stage from subject completeness | `{ realm: "tagline", action: "request", subject: <hex> }` |
 | `{ realm: "scoutsRequest", action: "new|retry|repair", subject: <full event object> }` and tagline exists but `image.theme` missing | Derives missing stage from subject completeness | `{ realm: "imageTheme", action: "request", subject: <hex> }` |
-| `{ realm: "scoutsRequest", action: "new|retry|repair", subject: <full event object> }` and tagline plus prompt exist but `image.url` missing | Derives missing stage from subject completeness | `{ realm: "pixabay", action: "bypass", subject: <hex> }` |
+| `{ realm: "scoutsRequest", action: "new|retry|repair", subject: <full event object> }` and tagline plus stored theme exist but `image.url` missing | Derives missing stage from subject completeness | `{ realm: "image", action: "request", subject: <hex> }` |
 | `{ realm: "scoutsRequest", action: "new|retry|repair", subject: <full event object> }` and subject is already complete | Stops | no publish |
 | `{ realm: "scoutsRequest", action: "request", subject: "tagline", hexId: <hex> }` | Field-level translation | `{ realm: "tagline", action: "request", subject: <hex> }` |
 | `{ realm: "scoutsRequest", action: "request", subject: "imageTheme", hexId: <hex> }` | Field-level translation | `{ realm: "imageTheme", action: "request", subject: <hex> }` |
+| `{ realm: "scoutsRequest", action: "request", subject: "imagePrompt", hexId: <hex> }` | Compatibility alias for derived image-generation prompt | `{ realm: "imageTheme", action: "request", subject: <hex> }` |
 | `{ realm: "scoutsRequest", action: "request", subject: "imageUrl", hexId: <hex> }` | Field-level translation | `{ realm: "image", action: "request", subject: <hex> }` |
 | `{ realm: "scoutsRequest", action: "persist", subject: "tagline", hexId: <hex>, tagline: <value> }` | Field-level translation | `{ realm: "persist", action: "persist", subject: { hexId: <hex>, tagline: <value> } }` |
 | `{ realm: "scoutsRequest", action: "persist", subject: "imageTheme", hexId: <hex>, imageTheme: <value> }` | Field-level translation | `{ realm: "persist", action: "persist", subject: { hexId: <hex>, imageTheme: <value> } }` |
+| `{ realm: "scoutsRequest", action: "persist", subject: "imagePrompt", hexId: <hex>, imagePrompt: <value> }` | Compatibility alias normalized onto the stored theme field | `{ realm: "persist", action: "persist", subject: { hexId: <hex>, imageTheme: <value> } }` |
 | `{ realm: "scoutsRequest", action: "persist", subject: "imageUrl", hexId: <hex>, imageUrl: <value> }` | Field-level translation | `{ realm: "persist", action: "persist", subject: { hexId: <hex>, imageUrl: <value> } }` |
 | `{ realm: "persist", action: "persist", subject: <full event object> }` | Allowed realm pass-through | same payload to `scoutsProcessing` |
 | `{ realm: "persist", action: "hidden", subject: <full event object> }` | Allowed realm pass-through | same payload to `scoutsProcessing` |
 | `{ realm: "tagline", action: "request", subject: <hex> }` | Allowed realm pass-through | same payload to `scoutsProcessing` |
 | `{ realm: "imageTheme", action: "request", subject: <hex> }` | Allowed realm pass-through | same payload to `scoutsProcessing` |
-| `{ realm: "pixabay", action: "request", subject: <hex> }` | Allowed realm pass-through | same payload to `scoutsProcessing` |
+| `{ realm: "imagePrompt", action: "request", subject: <hex> }` | Allowed compatibility alias pass-through | same payload to `scoutsProcessing` |
+| `{ realm: "image", action: "request", subject: <hex> }` | Allowed realm pass-through | same payload to `scoutsProcessing` |
+
+## Note on `imageTheme` vs `imagePrompt`
+
+- `imageTheme` is the stored field on the event metadata.
+- `imagePrompt` is still used in compatibility code and prompt-building paths as a derived prompt alias.
+- `imagePrompt` is not intended to be stored as a persisted event field.
 | `{ realm: "scouts", subject: "reset", action: <removed-events summary> }` | Unsupported realm | dropped |
 
 ## Relevant source locations

@@ -711,7 +711,7 @@ function formatCompletedRequestOperation(value) {
     if (!hasText(value)) return 'unknown';
     const normalized = String(value).trim();
     if (normalized === 'processing-complete') return 'Processing Complete';
-    if (normalized === 'imageTheme' || normalized === 'imagePrompt') return 'Image Theme';
+    if (normalized === 'imageTheme') return 'Image Theme';
     if (normalized === 'imageUrl') return 'Image URL';
     if (normalized === 'tagline') return 'Tagline';
     if (normalized === 'hidden') return 'Hidden';
@@ -3045,7 +3045,7 @@ function getFieldOperationConfig(field) {
             queueLabel: 'AI tagline',
         };
     }
-    if (field === 'imageTheme' || field === 'imagePrompt') {
+    if (field === 'imageTheme') {
         return {
             subjectKey: 'imageTheme',
             requestSubject: 'imageTheme',
@@ -3068,7 +3068,7 @@ function getModalFieldValue(field) {
         const input = document.getElementById('modal-tagline-input');
         return hasText(input?.value) ? input.value.trim() : '';
     }
-    if (field === 'imageTheme' || field === 'imagePrompt') {
+    if (field === 'imageTheme') {
         const input = document.getElementById('modal-image-prompt-input');
         return hasText(input?.value) ? input.value.trim() : '';
     }
@@ -3138,7 +3138,7 @@ function applyLocalPersistedField(entry, field, value) {
     if (!event.image || typeof event.image !== 'object') {
         event.image = {};
     }
-    if (field === 'imageTheme' || field === 'imagePrompt') {
+    if (field === 'imageTheme') {
         event.image.theme = value;
         if (Object.prototype.hasOwnProperty.call(event.image, 'prompt')) delete event.image.prompt;
         return;

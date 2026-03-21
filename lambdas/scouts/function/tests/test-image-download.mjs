@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * Test Pixabay image download to S3 functionality
+ * Test remote image download to S3 functionality
  * This ensures that:
- * 1. Pixabay URLs are detected correctly
+ * 1. Remote image URLs are detected correctly
  * 2. Download function handles various image formats
  * 3. S3 URL is constructed correctly
  */
@@ -11,26 +11,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 
-test('Pixabay URL detection and S3 transformation', async (t) => {
-  await t.test('Should detect Pixabay URLs', () => {
-    const pixabayUrls = [
-      'https://pixabay.com/get/image123.jpg',
-      'https://cdn.pixabay.com/photo/2024/01/01/12-00-00.jpg',
-      'http://pixabay.com/images/test.png'
+test('Remote image download and S3 transformation', async (t) => {
+  await t.test('Should detect remote image URLs', () => {
+    const remoteImageUrls = [
+      'https://example.com/image123.jpg',
+      'https://cdn.example.com/photo/2024/01/01/12-00-00.jpg',
+      'http://images.example.net/test.png'
     ];
 
-    const nonPixabayUrls = [
-      'https://example.com/image.jpg',
-      'https://s3.amazonaws.com/bucket/image.jpg',
-      'https://imgur.com/abc123'
+    const nonRemoteImageUrls = [
+      '/website/eventImages/image.jpg',
+      'images/local-image.jpg',
+      'not-a-url'
     ];
 
-    for (const url of pixabayUrls) {
-      assert.ok(url.includes('pixabay.com'), `Should detect ${url} as Pixabay URL`);
+    for (const url of remoteImageUrls) {
+      assert.ok(/^https?:\/\//.test(url), `Should detect ${url} as a remote image URL`);
     }
 
-    for (const url of nonPixabayUrls) {
-      assert.ok(!url.includes('pixabay.com'), `Should not detect ${url} as Pixabay URL`);
+    for (const url of nonRemoteImageUrls) {
+      assert.ok(!/^https?:\/\//.test(url), `Should not detect ${url} as a remote image URL`);
     }
   });
 
@@ -104,14 +104,14 @@ test('Pixabay URL detection and S3 transformation', async (t) => {
     }
   });
 
-  await t.test('Should handle approval flow with Pixabay URL', () => {
+  await t.test('Should handle download flow with remote image URL', () => {
     // Simulate the approval flow logic
     const subject = {
       hex: '74657374',
       title: 'Test Event',
       image: {
-        prompt: 'test prompt',
-        url: 'https://pixabay.com/get/test-image.jpg'
+        theme: 'test theme',
+        url: 'https://images.example.com/test-image.jpg'
       }
     };
 
@@ -131,25 +131,25 @@ test('Pixabay URL detection and S3 transformation', async (t) => {
     // Ensure image container
     if (subject.image) {
       mergedEvent.image = {
-        prompt: subject.image.prompt ?? existingHex.image?.prompt ?? null,
+        theme: subject.image.theme ?? existingHex.image?.theme ?? null,
         url: subject.image.url ?? existingHex.image?.url ?? null,
       };
     }
 
-    // Check if URL is from Pixabay
-    const isPixabayUrl = mergedEvent.image?.url && mergedEvent.image.url.includes('pixabay.com');
+    // Check if URL is a remote download candidate
+    const isRemoteImageUrl = mergedEvent.image?.url && /^https?:\/\//.test(mergedEvent.image.url);
     
-    assert.ok(isPixabayUrl, 'Should detect Pixabay URL in approval flow');
-    assert.strictEqual(mergedEvent.image.url, 'https://pixabay.com/get/test-image.jpg');
+    assert.ok(isRemoteImageUrl, 'Should detect remote image URL in download flow');
+    assert.strictEqual(mergedEvent.image.url, 'https://images.example.com/test-image.jpg');
     
     // Simulate URL replacement after download
-    if (isPixabayUrl) {
+    if (isRemoteImageUrl) {
       mergedEvent.image.url = 'http://2ndtolworth.s3-website.eu-west-2.amazonaws.com/images/test-event-123456.jpg';
     }
     
     assert.ok(
-      !mergedEvent.image.url.includes('pixabay.com'),
-      'Pixabay URL should be replaced with S3 URL after download'
+      !mergedEvent.image.url.includes('images.example.com'),
+      'Remote image URL should be replaced with S3 URL after download'
     );
     assert.ok(
       mergedEvent.image.url.includes('2ndtolworth.s3-website'),
@@ -158,4 +158,4 @@ test('Pixabay URL detection and S3 transformation', async (t) => {
   });
 });
 
-console.log('✅ All Pixabay download tests passed');
+console.log('✅ All image download tests passed');

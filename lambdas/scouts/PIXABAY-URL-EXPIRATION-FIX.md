@@ -86,7 +86,7 @@ if (isPixabayUrl) {
 ## Testing
 
 Created diagnostic tools to verify the fix:
-- `test-pixabay-url-detection.mjs` - Tests URL detection logic
+- `test-remote-image-url-detection.mjs` - Tests URL detection logic
 - `debug-pixabay-issue.mjs` - Diagnoses the complete flow
 
 ## Deployment
