@@ -240,7 +240,7 @@ function ensureRuntimeMetadata(event) {
   const topLevelStatus = event.status && typeof event.status === 'object' ? event.status : {};
   const statusStringHidden = typeof event.status === 'string' && event.status.trim().toLowerCase() === 'hidden';
 
-  const hex = normaliseLegacyText(event.hex ?? metadata.hex ?? metadata.hexId ?? event.hexId);
+  const hex = normaliseLegacyText(metadata.hex ?? event.hex ?? metadata.hexId ?? event.hexId);
   const tagline = normaliseLegacyText(metadata.tagline ?? event.tagline ?? event.AI ?? event.ai);
   const imageTheme = normaliseLegacyText(metadataImage.theme ?? topLevelImage.theme ?? topLevelImage.prompt);
   const imageUrl = normaliseLegacyText(metadataImage.url ?? topLevelImage.url ?? topLevelImage.src ?? topLevelImage.href);
@@ -261,10 +261,15 @@ function ensureRuntimeMetadata(event) {
 
   metadata.hex = hex ? hex.toLowerCase() : null;
   if ('hexId' in metadata) delete metadata.hexId;
+  if (metadata.hex) {
+    event.hex = metadata.hex;
+  } else if ('hex' in event) {
+    delete event.hex;
+  }
+  if ('hexId' in event) delete event.hexId;
   metadata.tagline = tagline;
   metadata.image = {
     theme: imageTheme,
-    prompt: null,
     url: imageUrl,
   };
   metadata.status = {
@@ -356,49 +361,35 @@ function normalizeHexEventToMetadata(eventData) {
     changed = true;
   }
 
-  if (typeof normalized.hex === 'string' && normalized.hex.trim()) {
+  if (typeof metadata.hex === 'string' && metadata.hex.trim()) {
+    const nextHex = metadata.hex.trim().toLowerCase();
+    if (metadata.hex !== nextHex) {
+      metadata.hex = nextHex;
+      changed = true;
+    }
+  } else if (typeof normalized.hex === 'string' && normalized.hex.trim()) {
     const nextHex = normalized.hex.trim().toLowerCase();
     if (metadata.hex !== nextHex) {
       metadata.hex = nextHex;
       changed = true;
     }
-  } else if (typeof metadata.hex === 'string' && metadata.hex.trim()) {
-    normalized.hex = metadata.hex.trim().toLowerCase();
-    changed = true;
   }
   if ('hexId' in metadata) {
     delete metadata.hexId;
+    changed = true;
+  }
+  if ('hex' in normalized) {
+    delete normalized.hex;
+    changed = true;
+  }
+  if ('hexId' in normalized) {
+    delete normalized.hexId;
     changed = true;
   }
 
   if (!Array.isArray(normalized.requests)) {
     if (Array.isArray(metadata.requests)) {
       normalized.requests = JSON.parse(JSON.stringify(metadata.requests));
-      changed = true;
-    } else if (Array.isArray(metadata.requestIds)) {
-      normalized.requests = metadata.requestIds.map((entry) => {
-        if (typeof entry === 'string') {
-          return {
-            timestamp: null,
-            requestId: entry,
-            realm: null,
-            subject: metadata.hex ?? normalized.hex ?? null,
-            action: null,
-            status: null,
-          };
-        }
-        if (entry && typeof entry === 'object') {
-          return {
-            timestamp: entry.timestamp ?? entry.appliedAt ?? null,
-            requestId: entry.requestId ?? null,
-            realm: entry.realm ?? null,
-            subject: entry.subject ?? (metadata.hex ?? normalized.hex ?? null),
-            action: entry.action ?? null,
-            status: entry.status ?? null,
-          };
-        }
-        return null;
-      }).filter(Boolean);
       changed = true;
     } else {
       normalized.requests = [];
@@ -493,16 +484,7 @@ function normalizeHexEventToMetadata(eventData) {
     changed = true;
   }
 
-  if (typeof normalized.lastNotificationSent === 'string' && normalized.lastNotificationSent.trim()) {
-    normalized.requests = Array.isArray(normalized.requests) ? normalized.requests : [];
-    normalized.requests.push({
-      timestamp: normalized.lastNotificationSent.trim(),
-      requestId: null,
-      realm: 'legacy',
-      subject: metadata.hex ?? normalized.hex ?? null,
-      action: 'notified',
-      status: 'legacy',
-    });
+  if ('lastNotificationSent' in normalized) {
     delete normalized.lastNotificationSent;
     changed = true;
   }
@@ -1085,9 +1067,20 @@ function removeTopLevelFieldsDuplicatedByMetadata(event) {
     }
   }
 
-  if (Array.isArray(metadata.requestIds) && 'requestIds' in event) {
+  if ('requestIds' in event) {
     delete event.requestIds;
     changed = true;
+  }
+
+  if (typeof metadata.hex === 'string' && metadata.hex.trim()) {
+    if ('hex' in event) {
+      delete event.hex;
+      changed = true;
+    }
+    if ('hexId' in event) {
+      delete event.hexId;
+      changed = true;
+    }
   }
 
   if (metadata.status && typeof metadata.status === 'object') {
@@ -2211,7 +2204,7 @@ function hydrateStoredDataset(dataset) {
       lastModified,
       sortKey: start.sortKey,
       tagline: getEventTagline(event),
-      hex: event.hex ?? event.metadata?.hex ?? null,
+      hex: event.metadata?.hex ?? event.hex ?? null,
       image: {
         theme: getEventImageTheme(event),
         url: getEventImageUrl(event),
@@ -2241,7 +2234,6 @@ function prepareEventForStorage(event) {
     dtstart,
     lastModified: lastModifiedRaw ? { raw: lastModifiedRaw } : null,
     metadata,
-    hex: event.hex ?? null,
   };
 }
 

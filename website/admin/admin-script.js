@@ -418,7 +418,7 @@ function renderEventsJsonViewerContent() {
     uniqueEventEntries.forEach((entry, index) => {
         const event = entry.event || {};
         const title = event.summary || event.title || `Event ${index + 1}`;
-        const hex = hasText(event.hex) ? event.hex.trim() : '';
+        const hex = getEventHex(event);
         const eventPath = hex ? `events/${hex}.json` : 'events/<missing-hex>.json';
         const sourceSummary = (entry.sourceDetails || [])
             .map((source) => `Event Index: ${source.index} | UID: ${source.uid}`)
@@ -1675,7 +1675,7 @@ function formatRuntimeBadgeRequestId(requestId) {
 }
 
 function deriveEventRuntimeBadges(event) {
-    const hex = hasText(event?.hex) ? String(event.hex).trim().toLowerCase() : '';
+    const hex = getEventHex(event);
     if (!hex) return [];
     const appliedRequestIds = getAppliedRequestIdSet(event);
     const aggregateRequests = getAggregateRuntimeRequests(
@@ -1756,6 +1756,18 @@ function formatObservedIds(snapshot) {
     return parts.length > 0 ? parts.join(' | ') : 'n/a';
 }
 
+function getEventHex(event) {
+    const metadata = getMetadataData(event);
+    const candidate = hasText(metadata?.hex)
+        ? metadata.hex
+        : (hasText(metadata?.hexId)
+            ? metadata.hexId
+            : (hasText(event?.hex)
+                ? event.hex
+                : event?.hexId));
+    return hasText(candidate) ? String(candidate).trim().toLowerCase() : '';
+}
+
 function decodeHexToText(hexValue) {
     const hex = hasText(hexValue) ? String(hexValue).trim().toLowerCase() : '';
     if (!hex || hex.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(hex)) return null;
@@ -1775,8 +1787,7 @@ function resolveEventTitleByHex(hexValue) {
     const hex = hasText(hexValue) ? String(hexValue).trim().toLowerCase() : '';
     if (!hex) return null;
     const entry = uniqueEventEntries.find((candidate) => {
-        const candidateHex = hasText(candidate?.event?.hex) ? String(candidate.event.hex).trim().toLowerCase() : '';
-        return candidateHex === hex;
+        return getEventHex(candidate?.event) === hex;
     });
     if (!entry?.event) return null;
     const title = entry.event.summary || entry.event.title || null;
@@ -1950,7 +1961,7 @@ function scheduleActiveHexPreviewPoll(cardIndex, hexValue) {
 
 function openHexPreview(cardIndex) {
     const entry = visibleEventEntries[cardIndex];
-    const hex = hasText(entry?.event?.hex) ? String(entry.event.hex).trim().toLowerCase() : '';
+    const hex = getEventHex(entry?.event);
     closeHexPreview();
     activeHexPreviewCardIndex = cardIndex;
     activeHexPreviewHex = hex || null;
@@ -2247,7 +2258,7 @@ function normaliseAppliedRequestHistory(value) {
 function getAppliedRequestHistory(event) {
     if (!event || typeof event !== 'object') return [];
     const metadata = getMetadataData(event);
-    return normaliseAppliedRequestHistory(metadata?.requests ?? metadata?.requestIds ?? event.requests ?? event.requestIds ?? []);
+    return normaliseAppliedRequestHistory(metadata?.requests ?? event.requests ?? []);
 }
 
 function getAppliedRequestIdSet(event) {
@@ -2278,9 +2289,8 @@ function normaliseEventRecordForUi(event) {
         icsType: source?.icsType ?? event.icsType ?? null,
         image,
         tagline: metadata?.tagline ?? event.tagline ?? null,
-        hexId: metadata?.hex ?? metadata?.hexId ?? event.hexId ?? event.hex ?? null,
-        hex: metadata?.hex ?? metadata?.hexId ?? event.hexId ?? event.hex ?? null,
-        requestIds: getAppliedRequestHistory(event),
+        hexId: getEventHex(event) || null,
+        hex: getEventHex(event) || null,
         approved: status?.isApproved === true || event.approved === true,
         status: status?.isHidden === true ? 'hidden' : event.status ?? null,
         hiddenAt: event.hiddenAt ?? null,
@@ -2444,7 +2454,7 @@ function isEntryHidden(entry) {
 }
 
 function getEventMergeKey(event, index) {
-    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+    const hex = getEventHex(event);
     if (hex) return `hex:${hex}`;
 
     const uid = hasText(event?.uid) ? event.uid.trim() : '';
@@ -2541,7 +2551,10 @@ function buildUniqueEventEntries(events) {
 function getEntryIdentifier(entry) {
     const event = entry?.event || {};
     if (hasText(event.uid)) return event.uid.trim();
-    if (hasText(event.hex)) return `hex:${event.hex.trim()}`;
+    {
+        const hex = getEventHex(event);
+        if (hex) return `hex:${hex}`;
+    }
     return generateEventUID(event, entry?.firstIndex ?? 0);
 }
 
@@ -2657,7 +2670,7 @@ function renderEvents() {
                         <summary>Identifiers</summary>
                         <div class="event-identifiers-body">
                             <div class="event-identifiers-row"><span>UID:</span> <code>${eventUID}</code></div>
-                            <div class="event-identifiers-row"><span>HEX:</span> <code>${event.hex || 'Missing HEX'}</code></div>
+                            <div class="event-identifiers-row"><span>HEX:</span> <code>${getEventHex(event) || 'Missing HEX'}</code></div>
                             <div class="event-identifiers-row"><span>Image URL:</span> <code>${imageUrl || 'Not set'}</code></div>
                             <div class="event-identifiers-row"><span>Occurrences:</span> <code>${entry.duplicateCount}</code></div>
                             ${sourceDetailsMarkup}
@@ -2789,7 +2802,7 @@ function openUploadModal(index) {
     const modal = document.getElementById('upload-modal');
     
     document.getElementById('modal-event-name').textContent = event.summary || event.title || 'Event ' + index;
-    document.getElementById('modal-event-hex').textContent = event.hex || 'Missing HEX';
+    document.getElementById('modal-event-hex').textContent = getEventHex(event) || 'Missing HEX';
     
     const currentImage = getImageUrl(event);
     const currentImageTheme = getImageTheme(event);
@@ -3149,7 +3162,7 @@ function applyLocalPersistedField(entry, field, value) {
 function applyLocalHiddenState(entry, hiddenAtIso, hidden = true) {
     if (!entry || !entry.event) return;
     const event = entry.event;
-    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+    const hex = getEventHex(event);
     if (hidden) {
         event.isHidden = true;
         event.hiddenAt = hasText(hiddenAtIso) ? hiddenAtIso : new Date().toISOString();
@@ -3180,7 +3193,7 @@ function applyVisibilityOverrides(entries, options = {}) {
 
     entries.forEach((entry) => {
         const event = entry?.event;
-        const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+        const hex = getEventHex(event);
         if (!hex) return;
 
         const override = localVisibilityOverrides.get(hex);
@@ -3244,7 +3257,7 @@ async function persistCurrentField(field, action = 'persist') {
 
     const event = entry.event;
     const eventLabel = event.summary || event.title || `Event ${currentEventIndex + 1}`;
-    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+    const hex = getEventHex(event);
     if (!hex) {
         updateModalStatus(`Cannot persist ${config.label.toLowerCase()}: event is missing HEX.`, 'error');
         return;
@@ -3317,7 +3330,7 @@ async function requestGeneratedField(field, action = 'generate') {
     const config = getFieldOperationConfig(field);
     const event = entry.event;
     const eventLabel = event.summary || event.title || `Event ${currentEventIndex + 1}`;
-    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+    const hex = getEventHex(event);
     if (!hex) {
         updateModalStatus(`Cannot queue ${config.queueLabel}: event is missing HEX.`, 'error');
         return;
@@ -3399,7 +3412,7 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide') {
     }
 
     const eventLabel = event.summary || event.title || `Event ${eventIndex + 1}`;
-    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+    const hex = getEventHex(event);
     if (!hex) {
         const message = 'Cannot hide event: missing HEX.';
         if (fromModal) updateModalStatus(message, 'error');
@@ -3495,7 +3508,7 @@ async function unhideEvent(eventIndex, fromModal = false, action = 'unhide') {
     }
 
     const eventLabel = event.summary || event.title || `Event ${eventIndex + 1}`;
-    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+    const hex = getEventHex(event);
     if (!hex) {
         const message = 'Cannot unhide event: missing HEX.';
         if (fromModal) updateModalStatus(message, 'error');
@@ -3624,7 +3637,7 @@ async function approveEvent(eventIndex, fromModal = false, action = 'approve') {
     }
 
     const eventLabel = event.summary || event.title || `Event ${eventIndex + 1}`;
-    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+    const hex = getEventHex(event);
     if (!hex) {
         const message = 'Cannot approve event: missing HEX.';
         if (fromModal) updateModalStatus(message, 'error');
@@ -3726,7 +3739,7 @@ async function requeueEvent(eventIndex, fromModal = false, action = 'requeue') {
         return;
     }
 
-    const hex = hasText(event?.hex) ? event.hex.trim().toLowerCase() : '';
+    const hex = getEventHex(event);
     if (!hex) {
         const message = 'Cannot requeue: event is missing HEX.';
         if (fromModal) updateModalStatus(message, 'error');

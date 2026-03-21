@@ -13,18 +13,18 @@ test('prepareEventForStorage writes structured status with approval state', () =
     image: { prompt: 'camp', url: null },
   });
 
-  assert.deepEqual(approvedEvent.source, {
-    uid: 'uid-1',
-    title: 'Camp',
-    summary: 'Camp',
-    location: null,
-    dtstart: '20260626T183000',
-    section: 'cubs',
-    icsType: null,
+  assert.equal(approvedEvent.uid, 'uid-1');
+  assert.equal(approvedEvent.summary, 'Camp');
+  assert.equal(approvedEvent.dtstart, '20260626T183000');
+  assert.equal(approvedEvent.metadata.hex, '63616d70');
+  assert.deepEqual(approvedEvent.metadata.image, {
+    theme: 'camp',
+    url: null,
   });
-  assert.equal(approvedEvent.metadata.hexId, '63616d70');
-  assert.equal(approvedEvent.status.isApproved, true);
-  assert.equal(approvedEvent.status.isHidden, false);
+  assert.deepEqual(approvedEvent.metadata.status, {
+    isApproved: true,
+    isHidden: false,
+  });
 
   const pendingEvent = prepareEventForStorage({
     uid: 'uid-2',
@@ -34,9 +34,11 @@ test('prepareEventForStorage writes structured status with approval state', () =
     image: {},
   });
 
-  assert.equal(pendingEvent.metadata.hexId, null);
-  assert.equal(pendingEvent.status.isApproved, false);
-  assert.equal(pendingEvent.status.isHidden, false);
+  assert.equal(pendingEvent.metadata.hex, null);
+  assert.deepEqual(pendingEvent.metadata.status, {
+    isApproved: false,
+    isHidden: false,
+  });
 });
 
 test('prepareEventForStorage accepts flat isApproved compatibility inputs', () => {
@@ -46,7 +48,7 @@ test('prepareEventForStorage accepts flat isApproved compatibility inputs', () =
     isApproved: 'yes',
     image: {},
   });
-  assert.equal(explicitApprovedEvent.status.isApproved, true);
+  assert.equal(explicitApprovedEvent.metadata.status.isApproved, true);
 
   const explicitPendingEvent = prepareEventForStorage({
     uid: 'uid-4',
@@ -54,7 +56,7 @@ test('prepareEventForStorage accepts flat isApproved compatibility inputs', () =
     isApproved: 'no',
     image: {},
   });
-  assert.equal(explicitPendingEvent.status.isApproved, false);
+  assert.equal(explicitPendingEvent.metadata.status.isApproved, false);
 });
 
 test('prepareEventForStorage keeps hidden-state compatibility across legacy and new fields', () => {
@@ -64,7 +66,7 @@ test('prepareEventForStorage keeps hidden-state compatibility across legacy and 
     status: 'hidden',
     image: {},
   });
-  assert.equal(hiddenByStatus.status.isHidden, true);
+  assert.equal(hiddenByStatus.metadata.status.isHidden, true);
 
   const hiddenByTimestamp = prepareEventForStorage({
     uid: 'uid-6',
@@ -72,8 +74,7 @@ test('prepareEventForStorage keeps hidden-state compatibility across legacy and 
     hiddenAt: '2026-03-06T12:00:00.000Z',
     image: {},
   });
-  assert.equal(hiddenByTimestamp.status.isHidden, true);
-  assert.equal(hiddenByTimestamp.status.hiddenAt, '2026-03-06T12:00:00.000Z');
+  assert.equal(hiddenByTimestamp.metadata.status.isHidden, true);
 
   const explicitVisibleOverride = prepareEventForStorage({
     uid: 'uid-7',
@@ -82,7 +83,7 @@ test('prepareEventForStorage keeps hidden-state compatibility across legacy and 
     hiddenAt: null,
     image: {},
   });
-  assert.equal(explicitVisibleOverride.status.isHidden, false);
+  assert.equal(explicitVisibleOverride.metadata.status.isHidden, false);
 
   const explicitHiddenFlag = prepareEventForStorage({
     uid: 'uid-8',
@@ -90,5 +91,5 @@ test('prepareEventForStorage keeps hidden-state compatibility across legacy and 
     isHidden: 'yes',
     image: {},
   });
-  assert.equal(explicitHiddenFlag.status.isHidden, true);
+  assert.equal(explicitHiddenFlag.metadata.status.isHidden, true);
 });

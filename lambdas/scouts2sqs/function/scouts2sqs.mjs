@@ -60,6 +60,9 @@ function getHexHintFromSubject(subject) {
     if (!subject || typeof subject !== 'object') {
         return null;
     }
+    if (typeof subject.metadata?.hex === 'string' && subject.metadata.hex.trim()) {
+        return subject.metadata.hex.trim().toLowerCase();
+    }
     if (typeof subject.hex === 'string' && subject.hex.trim()) {
         return subject.hex.trim().toLowerCase();
     }
@@ -793,8 +796,8 @@ function ensureRuntimeMetadata(event, fallbackHex = null) {
     }
 
     const hexValue = normalizeNullableText(
-        event.hex
-        ?? metadata.hex
+        metadata.hex
+        ?? event.hex
         ?? event.hexId
         ?? metadata.hexId
         ?? fallbackHex
@@ -803,9 +806,14 @@ function ensureRuntimeMetadata(event, fallbackHex = null) {
         const normalizedHex = hexValue.toLowerCase();
         event.hex = normalizedHex;
         metadata.hex = normalizedHex;
+    } else if ('hex' in event) {
+        delete event.hex;
     }
     if ('hexId' in metadata) {
         delete metadata.hexId;
+    }
+    if ('hexId' in event) {
+        delete event.hexId;
     }
 
     const tagline = normalizeNullableText(metadata.tagline ?? event.tagline ?? event.AI ?? event.ai);
