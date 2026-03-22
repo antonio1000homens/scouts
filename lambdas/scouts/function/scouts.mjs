@@ -544,7 +544,7 @@ function getQueuedRuntimeHexFromSubject(subject) {
   if (!subject || typeof subject !== 'object') {
     return null;
   }
-  const candidate = subject.hex ?? subject.hexId ?? null;
+  const candidate = subject.hex ?? null;
   return typeof candidate === 'string' && candidate.trim()
     ? candidate.trim().toLowerCase()
     : null;
@@ -561,7 +561,7 @@ function normaliseRuntimeText(value) {
 }
 
 function getQueuedRuntimeHexFromPayload(payload) {
-  const directHex = normaliseRuntimeText(payload?.hexId ?? payload?.hex ?? payload?.requestHex ?? null);
+  const directHex = normaliseRuntimeText(payload?.hex ?? payload?.requestHex ?? null);
   if (directHex && /^[0-9a-f]+$/i.test(directHex)) {
     return directHex.toLowerCase();
   }
@@ -569,7 +569,7 @@ function getQueuedRuntimeHexFromPayload(payload) {
 }
 
 function getQueuedRuntimeTitleFromPayload(payload) {
-  const directTitle = normaliseRuntimeText(payload?.title ?? payload?.summary ?? payload?.name ?? null);
+  const directTitle = normaliseRuntimeText(payload?.title ?? null);
   if (directTitle) {
     return directTitle;
   }
@@ -578,11 +578,11 @@ function getQueuedRuntimeTitleFromPayload(payload) {
   if (!subject || typeof subject !== 'object') {
     return null;
   }
-  return normaliseRuntimeText(subject.title ?? subject.summary ?? subject.name ?? null);
+  return normaliseRuntimeText(subject.title ?? null);
 }
 
 function getQueuedRuntimeSubjectFromPayload(payload) {
-  const explicitSubject = normaliseRuntimeText(payload?.subjectLabel ?? payload?.requestedField ?? null);
+  const explicitSubject = normaliseRuntimeText(payload?.subjectLabel ?? null);
   if (explicitSubject) {
     return explicitSubject;
   }
@@ -603,7 +603,8 @@ function buildQueuedRuntimeRequestEntry(payload, messageId = null, timestamp = n
     ? payload.requestId.trim()
     : null;
   const runtimeMessageId = typeof messageId === 'string' && messageId.trim() ? messageId.trim() : null;
-  const hexId = getQueuedRuntimeHexFromPayload(payload);
+  const hex = getQueuedRuntimeHexFromPayload(payload);
+  const subject = getQueuedRuntimeSubjectFromPayload(payload);
   const realm = typeof payload?.realm === 'string' && payload.realm.trim() ? payload.realm.trim() : null;
   const action = typeof payload?.action === 'string' && payload.action.trim() ? payload.action.trim() : null;
   const taskToken = normaliseRuntimeText(payload?.taskToken ?? null);
@@ -614,8 +615,9 @@ function buildQueuedRuntimeRequestEntry(payload, messageId = null, timestamp = n
     requestTime: timestamp,
     requestId,
     messageId: runtimeMessageId,
-    hexId,
+    hex,
     title: getQueuedRuntimeTitleFromPayload(payload),
+    subject,
     realm,
     action,
     taskToken,
@@ -640,7 +642,7 @@ function deduplicateQueuedRuntimeRequests(entries = []) {
       : [
           entry.requestId ?? '',
           entry.messageId ?? '',
-          entry.hexId ?? '',
+          entry.hex ?? '',
           entry.realm ?? '',
           entry.action ?? '',
           entry.status ?? '',
@@ -661,7 +663,6 @@ function getQueuedRuntimeRequestId(entry) {
 }
 
 function getQueuedRuntimeRequestHex(entry) {
-  if (typeof entry?.hexId === 'string' && entry.hexId.trim()) return entry.hexId.trim().toLowerCase();
   if (typeof entry?.hex === 'string' && entry.hex.trim()) return entry.hex.trim().toLowerCase();
   return '';
 }
@@ -783,13 +784,13 @@ function pruneQueuedRuntimeRequests(entries = [], processingSnapshot = null, com
 
 function buildQueuedRuntimeSnapshotPayload(requests, timestamp = new Date().toISOString()) {
   const requestIds = Array.from(new Set(requests.map((entry) => entry?.requestId).filter(Boolean))).slice(0, 50);
-  const hexIds = Array.from(new Set(requests.map((entry) => entry?.hexId).filter(Boolean))).slice(0, 50);
+  const hexes = Array.from(new Set(requests.map((entry) => entry?.hex).filter(Boolean))).slice(0, 50);
   const links = Array.from(new Map(
     requests
-      .filter((entry) => entry?.requestId && entry?.hexId)
-      .map((entry) => [`${entry.requestId}|${entry.hexId}`, {
+      .filter((entry) => entry?.requestId && entry?.hex)
+      .map((entry) => [`${entry.requestId}|${entry.hex}`, {
         requestId: entry.requestId,
-        hex: entry.hexId,
+        hex: entry.hex,
         sourceMessageId: entry.messageId ?? null,
         realm: entry.realm ?? null,
         action: entry.action ?? null,
@@ -802,7 +803,7 @@ function buildQueuedRuntimeSnapshotPayload(requests, timestamp = new Date().toIS
     updatedAt: timestamp,
     requests,
     requestIds,
-    hexIds,
+    hexes,
     links,
     recordCount: requests.length,
   };
@@ -846,7 +847,7 @@ function normalizeCallbackRuntimeEntry(entry) {
     taskToken,
     status: normaliseRuntimeText(entry.status ?? null)?.toLowerCase() ?? 'completed',
     requestId: normaliseRuntimeText(entry.requestId ?? null),
-    hexId: normaliseRuntimeText(entry.hexId ?? entry.hex ?? null)?.toLowerCase() ?? null,
+    hex: normaliseRuntimeText(entry.hex ?? null)?.toLowerCase() ?? null,
     orchestrationType: normaliseRuntimeText(entry.orchestrationType ?? null),
     orchestrationStep: normaliseRuntimeText(entry.orchestrationStep ?? null),
     completedAt: normaliseRuntimeText(entry.completedAt ?? entry.updatedAt ?? entry.requestTime ?? null) ?? new Date().toISOString(),
@@ -863,7 +864,7 @@ function deduplicateCallbackLedgerEntries(entries = []) {
       taskToken,
       status: normaliseRuntimeText(entry.status ?? null) ?? 'succeeded',
       requestId: normaliseRuntimeText(entry.requestId ?? null),
-      hexId: normaliseRuntimeText(entry.hexId ?? null)?.toLowerCase() ?? null,
+      hex: normaliseRuntimeText(entry.hex ?? null)?.toLowerCase() ?? null,
       orchestrationType: normaliseRuntimeText(entry.orchestrationType ?? null),
       orchestrationStep: normaliseRuntimeText(entry.orchestrationStep ?? null),
       callbackSentAt: normaliseRuntimeText(entry.callbackSentAt ?? null) ?? new Date().toISOString(),
@@ -937,7 +938,7 @@ async function reconcileStateMachineCallbacks(bucket, queuedSnapshot, completedS
     const callbackPayload = {
       status: callbackEntry.status === 'failed' ? 'failed' : 'completed',
       requestId: callbackEntry.requestId,
-      hexId: callbackEntry.hexId,
+      hex: callbackEntry.hex,
       orchestrationType: callbackEntry.orchestrationType,
       orchestrationStep: callbackEntry.orchestrationStep,
       completedAt: callbackEntry.completedAt,
@@ -1213,9 +1214,7 @@ async function migrateLegacyImageIfNeeded(bucket, imageUrl) {
     const copyCommand = new CopyObjectCommand({
       Bucket: bucket,
       CopySource: `${bucket}/${details.key}`,
-    hexId: getQueuedRuntimeHexFromPayload(payload),
-    title: getQueuedRuntimeTitleFromPayload(payload),
-    subject: getQueuedRuntimeSubjectFromPayload(payload),
+      Key: destinationKey,
     });
     await s3.send(copyCommand);
     console.log(`[Image Migration] Copied ${details.key} -> ${destinationKey}`);
@@ -1978,9 +1977,9 @@ function normaliseProcessingRealm(realm) {
   if (typeof realm !== 'string') return null;
   const candidate = realm.trim().toLowerCase();
   if (!candidate) return null;
-  if (candidate === 'tagline' || candidate === 'ai') return 'tagline';
-  if (candidate === 'imageprompt' || candidate === 'imagetheme') return 'imageTheme';
-  if (candidate === 'image' || candidate === 'eventimage') return 'image';
+  if (candidate === 'tagline') return 'tagline';
+  if (candidate === 'imagetheme') return 'imageTheme';
+  if (candidate === 'image') return 'image';
   return null;
 }
 
@@ -2040,9 +2039,7 @@ function mergeProcessingSnapshotIntoIndex(snapshot, index, eventByHex) {
     ? snapshot.requests
     : (Array.isArray(snapshot?.observed?.requests) ? snapshot.observed.requests : []);
   for (const request of requests) {
-    const hex = typeof request?.hexId === 'string'
-      ? request.hexId.trim().toLowerCase()
-      : (typeof request?.hex === 'string' ? request.hex.trim().toLowerCase() : '');
+    const hex = typeof request?.hex === 'string' ? request.hex.trim().toLowerCase() : '';
     if (!hex) continue;
 
     const requestSubject = typeof request?.subject === 'string' ? request.subject.trim().toLowerCase() : '';
@@ -2093,10 +2090,14 @@ function mergeProcessingSnapshotIntoIndex(snapshot, index, eventByHex) {
     }
   }
 
-  const hexIds = Array.isArray(snapshot?.hexIds)
-    ? snapshot.hexIds
-    : (Array.isArray(snapshot?.observed?.hexIds) ? snapshot.observed.hexIds : []);
-  for (const rawHex of hexIds) {
+  const hexes = Array.isArray(snapshot?.hexes)
+    ? snapshot.hexes
+    : (Array.isArray(snapshot?.observed?.hexes)
+      ? snapshot.observed.hexes
+      : (Array.isArray(snapshot?.hexIds)
+        ? snapshot.hexIds
+        : (Array.isArray(snapshot?.observed?.hexIds) ? snapshot.observed.hexIds : [])));
+  for (const rawHex of hexes) {
     const hex = typeof rawHex === 'string' ? rawHex.trim().toLowerCase() : '';
     if (!hex) continue;
     const derivedRealm = deriveProcessingRealmFromEvent(eventByHex.get(hex));
@@ -3574,11 +3575,11 @@ export async function lambdaHandler(event = {}) {
     if (!token) return null;
     const normalized = String(token).trim().toLowerCase();
     if (!normalized) return null;
-    if (normalized === 'tagline' || normalized === 'ai') return 'tagline';
-    if (normalized === 'imageprompt' || normalized === 'image-prompt' || normalized === 'imagetheme' || normalized === 'image-theme') return 'imageTheme';
-    if (normalized === 'imageurl' || normalized === 'image-url') return 'imageUrl';
-    if (normalized === 'eventimage' || normalized === 'event-image' || normalized === 'image') return 'eventImage';
-    if (normalized === 'persist' || normalized === 'metadata') return 'all';
+    if (normalized === 'tagline') return 'tagline';
+    if (normalized === 'imagetheme') return 'imageTheme';
+    if (normalized === 'imageurl') return 'imageUrl';
+    if (normalized === 'image') return 'eventImage';
+    if (normalized === 'persist') return 'all';
     return null;
   };
 
@@ -3586,8 +3587,8 @@ export async function lambdaHandler(event = {}) {
     if (!token) return null;
     if (token === 'generatefull') return 'all';
     if (token === 'generatetagline') return 'tagline';
-    if (token === 'generateimagetheme' || token === 'generateimageprompt') return 'imageTheme';
-    if (token === 'generateimage' || token === 'generateimageurl') return 'imageUrl';
+    if (token === 'generateimagetheme') return 'imageTheme';
+    if (token === 'generateimage') return 'imageUrl';
     return null;
   };
 
@@ -3608,9 +3609,9 @@ export async function lambdaHandler(event = {}) {
     const mapPersistFieldFromActionToken = (token) => {
       if (!token) return null;
       if (token === 'persisttagline') return 'tagline';
-      if (token === 'persistimagetheme' || token === 'persistimageprompt') return 'imageTheme';
-      if (token === 'persisturl' || token === 'persistimageurl') return 'imageUrl';
-      if (token === 'approve' || token === 'persistapproval' || token === 'persistapproved') return 'isApproved';
+      if (token === 'persistimagetheme') return 'imageTheme';
+      if (token === 'persistimageurl') return 'imageUrl';
+      if (token === 'approve') return 'isApproved';
       if (token === 'persist') return 'all';
       return null;
     };
@@ -3634,7 +3635,6 @@ export async function lambdaHandler(event = {}) {
       ?? (structuredCommand?.subject && typeof structuredCommand.subject === 'object' ? structuredCommand.subject : null);
     const candidateHex = normalizeNullableText(
       firstDefinedValue(
-        subjectObject?.hexId,
         subjectObject?.hex,
         bodyParams?.hex,
         queryParams?.hex,
@@ -3669,18 +3669,12 @@ export async function lambdaHandler(event = {}) {
       firstDefinedValue(
         subjectObject?.tagline,
         bodyParams?.tagline,
-        bodyParams?.AI,
-        bodyParams?.ai,
       ),
     );
     const candidateTitle = normalizeNullableText(
       firstDefinedValue(
         subjectObject?.title,
-        subjectObject?.summary,
-        subjectObject?.name,
         bodyParams?.title,
-        bodyParams?.summary,
-        bodyParams?.name,
       ),
     );
     const candidateImageTheme = normalizeNullableText(
@@ -3693,7 +3687,6 @@ export async function lambdaHandler(event = {}) {
       firstDefinedValue(
         subjectObject?.imageUrl,
         bodyParams?.imageUrl,
-        bodyParams?.image_url,
       ),
     );
     const candidateIsHidden = (() => {
@@ -3792,7 +3785,7 @@ export async function lambdaHandler(event = {}) {
       };
     }
 
-    const subject = { hexId: candidateHex };
+    const subject = { hex: candidateHex };
     const persistedFields = [];
 
     if (candidateTagline) {
@@ -3843,8 +3836,7 @@ export async function lambdaHandler(event = {}) {
           realm: 'scoutsRequest',
           subject: fieldLevelPersistField,
           subjectLabel: fieldLevelPersistField,
-          requestedField: fieldLevelPersistField,
-          hexId: candidateHex,
+          hex: candidateHex,
           ...(candidateTitle ? { title: candidateTitle } : {}),
           ...(fieldLevelPersistField === 'tagline' ? { tagline: candidateTagline } : {}),
           ...(fieldLevelPersistField === 'imageTheme' ? { imageTheme: candidateImageTheme } : {}),
@@ -3876,7 +3868,7 @@ export async function lambdaHandler(event = {}) {
           requestId: queueResult?.payload?.requestId ?? null,
           realm: queueResult?.payload?.realm ?? (fieldLevelPersistField ? 'scoutsRequest' : 'persist'),
           action: queueResult?.payload?.action ?? 'persist',
-          subjectHex: queueResult?.payload?.hexId ?? queueResult?.payload?.subject?.hexId ?? candidateHex,
+          subjectHex: queueResult?.payload?.hex ?? queueResult?.payload?.subject?.hex ?? candidateHex,
           subjectTitle: queueResult?.payload?.title ?? null,
           subjectField: typeof queueResult?.payload?.subject === 'string' ? queueResult.payload.subject : null,
           queueUrl: queueResult?.queueUrl ?? SCOUTS_REQUESTS_QUEUE_URL,
@@ -3910,7 +3902,6 @@ export async function lambdaHandler(event = {}) {
       ?? (structuredCommand?.subject && typeof structuredCommand.subject === 'object' ? structuredCommand.subject : null);
     const candidateHex = normalizeNullableText(
       firstDefinedValue(
-        subjectObject?.hexId,
         subjectObject?.hex,
         bodyParams?.hex,
         queryParams?.hex,
@@ -3937,7 +3928,7 @@ export async function lambdaHandler(event = {}) {
       {
         realm: 'persist',
         subject: {
-          hexId: candidateHex,
+          hex: candidateHex,
           isHidden: isHideOperation,
         },
         action: 'persist',
@@ -3958,7 +3949,7 @@ export async function lambdaHandler(event = {}) {
           requestId: queueResult?.payload?.requestId ?? null,
           realm: queueResult?.payload?.realm ?? 'persist',
           action: queueResult?.payload?.action ?? 'persist',
-          subjectHex: queueResult?.payload?.subject?.hexId ?? candidateHex,
+          subjectHex: queueResult?.payload?.subject?.hex ?? candidateHex,
           subjectTitle: null,
           queueUrl: queueResult?.queueUrl ?? SCOUTS_REQUESTS_QUEUE_URL,
           messageId: queueResult?.messageId ?? null,
@@ -4000,10 +3991,8 @@ export async function lambdaHandler(event = {}) {
     const candidateHex =
       normalizeNullableText(bodyParams?.hex)?.toLowerCase()
       ?? normalizeNullableText(queryParams?.hex)?.toLowerCase()
-      ?? normalizeNullableText(subjectObject?.hexId)?.toLowerCase()
       ?? normalizeNullableText(subjectObject?.hex)?.toLowerCase()
       ?? normalizeNullableText(eventCandidate?.hex)?.toLowerCase()
-      ?? normalizeNullableText(eventCandidate?.hexId)?.toLowerCase()
       ?? null;
 
     if (!candidateHex) {
@@ -4025,14 +4014,8 @@ export async function lambdaHandler(event = {}) {
     const candidateTitle = normalizeNullableText(
       firstDefinedValue(
         subjectObject?.title,
-        subjectObject?.summary,
-        subjectObject?.name,
         eventCandidate?.title,
-        eventCandidate?.summary,
-        eventCandidate?.name,
         bodyParams?.title,
-        bodyParams?.summary,
-        bodyParams?.name,
       ),
     );
 
@@ -4046,7 +4029,7 @@ export async function lambdaHandler(event = {}) {
         hex: candidateHex,
         ...(candidateTitle ? { title: candidateTitle } : {}),
       },
-      hexId: candidateHex,
+      hex: candidateHex,
       ...(candidateTitle ? { title: candidateTitle } : {}),
     };
 
@@ -4063,13 +4046,13 @@ export async function lambdaHandler(event = {}) {
         message: `Full enrichment request submitted for ${candidateHex}`,
         queueAccepted: true,
         queuedHex: candidateHex,
-        requestedField: 'full',
+        subjectLabel: 'full',
         requestId: queueResult?.payload?.requestId ?? null,
         queuedMessage: {
           requestId: queueResult?.payload?.requestId ?? null,
           realm: queueResult?.payload?.realm ?? 'scoutsRequest',
           action: queueResult?.payload?.action ?? 'fullEnrich',
-          subjectHex: queueResult?.payload?.hexId ?? queueResult?.payload?.subject?.hex ?? candidateHex,
+          subjectHex: queueResult?.payload?.hex ?? queueResult?.payload?.subject?.hex ?? candidateHex,
           subjectTitle: queueResult?.payload?.title ?? queueResult?.payload?.subject?.title ?? null,
           queueUrl: queueResult?.queueUrl ?? SCOUTS_REQUESTS_QUEUE_URL,
           messageId: queueResult?.messageId ?? null,
@@ -4098,10 +4081,8 @@ export async function lambdaHandler(event = {}) {
     const candidateHex =
       normalizeNullableText(bodyParams?.hex)?.toLowerCase()
       ?? normalizeNullableText(queryParams?.hex)?.toLowerCase()
-      ?? normalizeNullableText(subjectObject?.hexId)?.toLowerCase()
       ?? normalizeNullableText(subjectObject?.hex)?.toLowerCase()
       ?? normalizeNullableText(eventCandidate?.hex)?.toLowerCase()
-      ?? normalizeNullableText(eventCandidate?.hexId)?.toLowerCase()
       ?? null;
 
     if (!candidateHex) {
@@ -4129,14 +4110,8 @@ export async function lambdaHandler(event = {}) {
     const candidateTitle = normalizeNullableText(
       firstDefinedValue(
         subjectObject?.title,
-        subjectObject?.summary,
-        subjectObject?.name,
         eventCandidate?.title,
-        eventCandidate?.summary,
-        eventCandidate?.name,
         bodyParams?.title,
-        bodyParams?.summary,
-        bodyParams?.name,
       ),
     );
 
@@ -4149,8 +4124,7 @@ export async function lambdaHandler(event = {}) {
           realm: 'scoutsRequest',
           subject: fieldLevelGenerateField,
           subjectLabel: fieldLevelGenerateField,
-          requestedField: fieldLevelGenerateField,
-          hexId: candidateHex,
+          hex: candidateHex,
           ...(candidateTitle ? { title: candidateTitle } : {}),
           action: 'request',
         }
@@ -4173,13 +4147,13 @@ export async function lambdaHandler(event = {}) {
         message: `${metadataGenerateField} generation request submitted for ${candidateHex}`,
         queueAccepted: true,
         queuedHex: candidateHex,
-        requestedField: metadataGenerateField,
+        subjectLabel: metadataGenerateField,
         requestId: queueResult?.payload?.requestId ?? null,
         queuedMessage: {
           requestId: queueResult?.payload?.requestId ?? null,
           realm: queueResult?.payload?.realm ?? (fieldLevelGenerateField ? 'scoutsRequest' : targetRealm),
           action: queueResult?.payload?.action ?? 'request',
-          subjectHex: queueResult?.payload?.hexId ?? candidateHex,
+          subjectHex: queueResult?.payload?.hex ?? candidateHex,
           subjectTitle: queueResult?.payload?.title ?? null,
           subjectField: typeof queueResult?.payload?.subject === 'string' ? queueResult.payload.subject : null,
           queueUrl: queueResult?.queueUrl ?? SCOUTS_REQUESTS_QUEUE_URL,

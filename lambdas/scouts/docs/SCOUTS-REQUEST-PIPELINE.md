@@ -27,12 +27,12 @@ flowchart LR
     B -->|"admin persist metadata"| Q4["scoutsRequests\n{ realm: persist, action: persist, subject: full event object }"]
     B -->|"admin hide"| Q5["scoutsRequests\n{ realm: persist, action: hidden, subject: full event object }"]
     B -->|"admin unhide"| Q6["scoutsRequests\n{ realm: persist, action: persist, subject: full event object }"]
-    B -->|"admin generate tagline"| Q7["scoutsRequests\n{ realm: scoutsRequest, action: request, subject: tagline, hexId: <hex> }"]
-    B -->|"admin generate image theme"| Q8["scoutsRequests\n{ realm: scoutsRequest, action: request, subject: imageTheme, hexId: <hex> }"]
-    B -->|"admin persist tagline"| Q12["scoutsRequests\n{ realm: scoutsRequest, action: persist, subject: tagline, hexId: <hex>, tagline: <value> }"]
-    B -->|"admin persist image theme"| Q13["scoutsRequests\n{ realm: scoutsRequest, action: persist, subject: imageTheme, hexId: <hex>, imageTheme: <value> }"]
-    B -->|"admin generate image URL"| Q9["scoutsRequests\n{ realm: scoutsRequest, action: request, subject: imageUrl, hexId: <hex> }"]
-    B -->|"admin persist image URL"| Q14["scoutsRequests\n{ realm: scoutsRequest, action: persist, subject: imageUrl, hexId: <hex>, imageUrl: <value> }"]
+    B -->|"admin generate tagline"| Q7["scoutsRequests\n{ realm: scoutsRequest, action: request, subject: tagline, hex: <hex> }"]
+    B -->|"admin generate image theme"| Q8["scoutsRequests\n{ realm: scoutsRequest, action: request, subject: imageTheme, hex: <hex> }"]
+    B -->|"admin persist tagline"| Q12["scoutsRequests\n{ realm: scoutsRequest, action: persist, subject: tagline, hex: <hex>, tagline: <value> }"]
+    B -->|"admin persist image theme"| Q13["scoutsRequests\n{ realm: scoutsRequest, action: persist, subject: imageTheme, hex: <hex>, imageTheme: <value> }"]
+    B -->|"admin generate image URL"| Q9["scoutsRequests\n{ realm: scoutsRequest, action: request, subject: imageUrl, hex: <hex> }"]
+    B -->|"admin persist image URL"| Q14["scoutsRequests\n{ realm: scoutsRequest, action: persist, subject: imageUrl, hex: <hex>, imageUrl: <value> }"]
     B -->|"reset removed events"| Q10["scoutsRequests\n{ realm: scouts, subject: reset, action: removed-events summary }"]
 
     C["sqs2scouts callback path\nno direct SQS trigger into scouts"] -->|"HEX still incomplete"| Q11["no requeue from callback path"]
@@ -72,12 +72,12 @@ flowchart LR
 | Admin persist metadata | `realm=scouts`, `action=persist` | `{ realm: "persist", action: "persist", subject: <full event object> }` |
 | Admin hide | `realm=scouts`, `action=hide|hidden` | `{ realm: "persist", action: "hidden", subject: <full event object> }` |
 | Admin unhide | `realm=scouts`, `action=unhide|show` | `{ realm: "persist", action: "persist", subject: <full event object> }` |
-| Admin persist tagline | `realm=scouts`, `action=persistTagline|persist`, subject token resolves to `tagline` | `{ realm: "scoutsRequest", action: "persist", subject: "tagline", hexId: <hex>, tagline: <value> }` |
-| Admin persist image theme | `realm=scouts`, `action=persistImageTheme|persist`, subject token resolves to `imageTheme` | `{ realm: "scoutsRequest", action: "persist", subject: "imageTheme", hexId: <hex>, imageTheme: <value> }` |
-| Admin persist image URL | `realm=scouts`, `action=persistImageUrl|persist`, subject token resolves to `imageUrl` | `{ realm: "scoutsRequest", action: "persist", subject: "imageUrl", hexId: <hex>, imageUrl: <value> }` |
-| Admin generate tagline | `realm=scouts`, `action=generate|request`, subject token resolves to `tagline` | `{ realm: "scoutsRequest", action: "request", subject: "tagline", hexId: <hex> }` |
-| Admin generate image theme | `realm=scouts`, `action=generate|request`, subject token resolves to `imageTheme` | `{ realm: "scoutsRequest", action: "request", subject: "imageTheme", hexId: <hex> }` |
-| Admin generate image URL | `realm=scouts`, `action=generate|request`, subject token resolves to `imageUrl` | `{ realm: "scoutsRequest", action: "request", subject: "imageUrl", hexId: <hex> }` |
+| Admin persist tagline | `realm=scouts`, `action=persistTagline|persist`, subject token resolves to `tagline` | `{ realm: "scoutsRequest", action: "persist", subject: "tagline", hex: <hex>, tagline: <value> }` |
+| Admin persist image theme | `realm=scouts`, `action=persistImageTheme|persist`, subject token resolves to `imageTheme` | `{ realm: "scoutsRequest", action: "persist", subject: "imageTheme", hex: <hex>, imageTheme: <value> }` |
+| Admin persist image URL | `realm=scouts`, `action=persistImageUrl|persist`, subject token resolves to `imageUrl` | `{ realm: "scoutsRequest", action: "persist", subject: "imageUrl", hex: <hex>, imageUrl: <value> }` |
+| Admin generate tagline | `realm=scouts`, `action=generate|request`, subject token resolves to `tagline` | `{ realm: "scoutsRequest", action: "request", subject: "tagline", hex: <hex> }` |
+| Admin generate image theme | `realm=scouts`, `action=generate|request`, subject token resolves to `imageTheme` | `{ realm: "scoutsRequest", action: "request", subject: "imageTheme", hex: <hex> }` |
+| Admin generate image URL | `realm=scouts`, `action=generate|request`, subject token resolves to `imageUrl` | `{ realm: "scoutsRequest", action: "request", subject: "imageUrl", hex: <hex> }` |
 | Reset cleanup notification | Reset flow removes event files | `{ realm: "scouts", subject: "reset", action: <removed-events summary> }` |
 | `sqs2scouts` callback for incomplete persisted HEX | `realm=sqs2scouts`, `action=persisted`, HEX still incomplete | No requeue from callback path |
 
@@ -89,26 +89,22 @@ flowchart LR
 | `{ realm: "scoutsRequest", action: "new|retry|repair", subject: <full event object> }` and tagline exists but `image.theme` missing | Derives missing stage from subject completeness | `{ realm: "imageTheme", action: "request", subject: <hex> }` |
 | `{ realm: "scoutsRequest", action: "new|retry|repair", subject: <full event object> }` and tagline plus stored theme exist but `image.url` missing | Derives missing stage from subject completeness | `{ realm: "image", action: "request", subject: <hex> }` |
 | `{ realm: "scoutsRequest", action: "new|retry|repair", subject: <full event object> }` and subject is already complete | Stops | no publish |
-| `{ realm: "scoutsRequest", action: "request", subject: "tagline", hexId: <hex> }` | Field-level translation | `{ realm: "tagline", action: "request", subject: <hex> }` |
-| `{ realm: "scoutsRequest", action: "request", subject: "imageTheme", hexId: <hex> }` | Field-level translation | `{ realm: "imageTheme", action: "request", subject: <hex> }` |
-| `{ realm: "scoutsRequest", action: "request", subject: "imagePrompt", hexId: <hex> }` | Compatibility alias for derived image-generation prompt | `{ realm: "imageTheme", action: "request", subject: <hex> }` |
-| `{ realm: "scoutsRequest", action: "request", subject: "imageUrl", hexId: <hex> }` | Field-level translation | `{ realm: "image", action: "request", subject: <hex> }` |
-| `{ realm: "scoutsRequest", action: "persist", subject: "tagline", hexId: <hex>, tagline: <value> }` | Field-level translation | `{ realm: "persist", action: "persist", subject: { hexId: <hex>, tagline: <value> } }` |
-| `{ realm: "scoutsRequest", action: "persist", subject: "imageTheme", hexId: <hex>, imageTheme: <value> }` | Field-level translation | `{ realm: "persist", action: "persist", subject: { hexId: <hex>, imageTheme: <value> } }` |
-| `{ realm: "scoutsRequest", action: "persist", subject: "imagePrompt", hexId: <hex>, imagePrompt: <value> }` | Compatibility alias normalized onto the stored theme field | `{ realm: "persist", action: "persist", subject: { hexId: <hex>, imageTheme: <value> } }` |
-| `{ realm: "scoutsRequest", action: "persist", subject: "imageUrl", hexId: <hex>, imageUrl: <value> }` | Field-level translation | `{ realm: "persist", action: "persist", subject: { hexId: <hex>, imageUrl: <value> } }` |
+| `{ realm: "scoutsRequest", action: "request", subject: "tagline", hex: <hex> }` | Field-level translation | `{ realm: "tagline", action: "request", subject: <hex> }` |
+| `{ realm: "scoutsRequest", action: "request", subject: "imageTheme", hex: <hex> }` | Field-level translation | `{ realm: "imageTheme", action: "request", subject: <hex> }` |
+| `{ realm: "scoutsRequest", action: "request", subject: "imageUrl", hex: <hex> }` | Field-level translation | `{ realm: "image", action: "request", subject: <hex> }` |
+| `{ realm: "scoutsRequest", action: "persist", subject: "tagline", hex: <hex>, tagline: <value> }` | Field-level translation | `{ realm: "persist", action: "persist", subject: { hex: <hex>, tagline: <value> } }` |
+| `{ realm: "scoutsRequest", action: "persist", subject: "imageTheme", hex: <hex>, imageTheme: <value> }` | Field-level translation | `{ realm: "persist", action: "persist", subject: { hex: <hex>, imageTheme: <value> } }` |
+| `{ realm: "scoutsRequest", action: "persist", subject: "imageUrl", hex: <hex>, imageUrl: <value> }` | Field-level translation | `{ realm: "persist", action: "persist", subject: { hex: <hex>, imageUrl: <value> } }` |
 | `{ realm: "persist", action: "persist", subject: <full event object> }` | Allowed realm pass-through | same payload to `scoutsProcessing` |
 | `{ realm: "persist", action: "hidden", subject: <full event object> }` | Allowed realm pass-through | same payload to `scoutsProcessing` |
 | `{ realm: "tagline", action: "request", subject: <hex> }` | Allowed realm pass-through | same payload to `scoutsProcessing` |
 | `{ realm: "imageTheme", action: "request", subject: <hex> }` | Allowed realm pass-through | same payload to `scoutsProcessing` |
-| `{ realm: "imagePrompt", action: "request", subject: <hex> }` | Allowed compatibility alias pass-through | same payload to `scoutsProcessing` |
 | `{ realm: "image", action: "request", subject: <hex> }` | Allowed realm pass-through | same payload to `scoutsProcessing` |
 
-## Note on `imageTheme` vs `imagePrompt`
+## Note on `imageTheme`
 
 - `imageTheme` is the stored field on the event metadata.
-- `imagePrompt` is still used in compatibility code and prompt-building paths as a derived prompt alias.
-- `imagePrompt` is not intended to be stored as a persisted event field.
+- Image generation derives a concrete prompt from the stored theme before calling Gemini image generation.
 | `{ realm: "scouts", subject: "reset", action: <removed-events summary> }` | Unsupported realm | dropped |
 
 ## Relevant source locations

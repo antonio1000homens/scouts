@@ -66,9 +66,6 @@ function getHexHintFromSubject(subject) {
     if (typeof subject.hex === 'string' && subject.hex.trim()) {
         return subject.hex.trim().toLowerCase();
     }
-    if (typeof subject.hexId === 'string' && subject.hexId.trim()) {
-        return subject.hexId.trim().toLowerCase();
-    }
     return null;
 }
 
@@ -82,8 +79,7 @@ function normaliseRuntimeText(value) {
 
 function getHexHintFromMessageBody(messageBody) {
     const directHex = normaliseRuntimeText(
-        messageBody?.hexId
-        ?? messageBody?.hex
+        messageBody?.hex
         ?? messageBody?.requestHex
         ?? null
     );
@@ -98,14 +94,14 @@ function getTitleHintFromMessageBody(messageBody) {
         return null;
     }
 
-    const directTitle = normaliseRuntimeText(messageBody.title ?? messageBody.summary ?? messageBody.name ?? null);
+    const directTitle = normaliseRuntimeText(messageBody.title ?? null);
     if (directTitle) {
         return directTitle;
     }
 
     const subject = messageBody.subject;
     if (subject && typeof subject === 'object') {
-        return normaliseRuntimeText(subject.title ?? subject.summary ?? subject.name ?? null);
+        return normaliseRuntimeText(subject.title ?? null);
     }
 
     return null;
@@ -116,7 +112,7 @@ function getSubjectHintFromMessageBody(messageBody) {
         return null;
     }
 
-    const explicitSubject = normaliseRuntimeText(messageBody.subjectLabel ?? messageBody.requestedField ?? null);
+    const explicitSubject = normaliseRuntimeText(messageBody.subjectLabel ?? null);
     if (explicitSubject) {
         return explicitSubject;
     }
@@ -139,8 +135,6 @@ function inferRequestedFieldFromSubject(subject) {
 
     if (
         Object.prototype.hasOwnProperty.call(subject, 'tagline')
-        || Object.prototype.hasOwnProperty.call(subject, 'AI')
-        || Object.prototype.hasOwnProperty.call(subject, 'ai')
         || Object.prototype.hasOwnProperty.call(subject.metadata ?? {}, 'tagline')
     ) {
         return 'tagline';
@@ -183,7 +177,6 @@ function normalizeRuntimeRequestDescriptor(messageBody) {
         ?? (rawRealm === 'persist' ? 'persist' : null);
     const internalRealmToSubject = {
         tagline: 'tagline',
-        AI: 'tagline',
         imageTheme: 'imageTheme',
         image: 'imageUrl',
         imageUrl: 'imageUrl',
@@ -191,7 +184,6 @@ function normalizeRuntimeRequestDescriptor(messageBody) {
     };
     const logicalSubject = inferredSubject ?? internalRealmToSubject[rawRealm] ?? null;
     const usesLogicalRequestContract = rawRealm === 'scoutsRequest'
-        || rawRealm === 'stateMachine'
         || Object.prototype.hasOwnProperty.call(internalRealmToSubject, rawRealm ?? '');
 
     return {
@@ -239,7 +231,7 @@ function getRequestTimeHint(record, messageBody) {
 function buildRuntimeRequestEntry(record, messageBody, status) {
     const requestId =
         (messageBody && typeof messageBody === 'object'
-            ? (messageBody.requestId ?? messageBody.request_id ?? messageBody.id ?? null)
+            ? (messageBody.requestId ?? null)
             : null)
         ?? record?.messageId
         ?? null;
@@ -254,7 +246,7 @@ function buildRuntimeRequestEntry(record, messageBody, status) {
         requestTime: getRequestTimeHint(record, messageBody),
         requestId: requestId ? String(requestId) : null,
         messageId: messageId ? String(messageId) : null,
-        hexId: getHexHintFromMessageBody(messageBody),
+        hex: getHexHintFromMessageBody(messageBody),
         title: getTitleHintFromMessageBody(messageBody),
         subject: descriptor.subject,
         realm: descriptor.realm,
@@ -282,7 +274,7 @@ function deduplicateRuntimeRequestEntries(entries = []) {
             : [
                 entry.requestId ?? '',
                 entry.messageId ?? '',
-                entry.hexId ?? '',
+                entry.hex ?? '',
                 entry.realm ?? '',
                 entry.action ?? '',
                 entry.status ?? '',
@@ -304,7 +296,6 @@ function getRuntimeRequestId(entry) {
 }
 
 function getRuntimeRequestHex(entry) {
-    if (typeof entry?.hexId === 'string' && entry.hexId.trim()) return entry.hexId.trim().toLowerCase();
     if (typeof entry?.hex === 'string' && entry.hex.trim()) return entry.hex.trim().toLowerCase();
     return '';
 }
@@ -372,12 +363,12 @@ function filterProcessingRequestsAgainstQueuedSnapshot(requests = [], queuedSnap
 
 function collectRequestHints(record, messageBody) {
     const requestIds = new Set();
-    const hexIds = new Set();
+    const hexes = new Set();
     const links = [];
 
     const requestId =
         (messageBody && typeof messageBody === 'object'
-            ? (messageBody.requestId ?? messageBody.request_id ?? messageBody.id ?? null)
+            ? (messageBody.requestId ?? null)
             : null)
         ?? record?.messageId
         ?? null;
@@ -394,7 +385,7 @@ function collectRequestHints(record, messageBody) {
     if (messageBody && typeof messageBody === 'object') {
         hexHint = getHexHintFromSubject(messageBody.subject);
         if (hexHint) {
-            hexIds.add(hexHint);
+            hexes.add(hexHint);
         }
     }
 
@@ -409,11 +400,11 @@ function collectRequestHints(record, messageBody) {
     }
 
     const requests = [buildRuntimeRequestEntry(record, messageBody, 'processing')]
-        .filter((entry) => entry.requestId || entry.messageId || entry.hexId || entry.title || entry.subject);
+        .filter((entry) => entry.requestId || entry.messageId || entry.hex || entry.title || entry.subject);
 
     return {
         requestIds: Array.from(requestIds),
-        hexIds: Array.from(hexIds),
+        hexes: Array.from(hexes),
         links,
         requests,
     };
@@ -422,8 +413,6 @@ function collectRequestHints(record, messageBody) {
 function buildRequestContext(record, messageBody) {
     const baseRequestId =
         messageBody?.requestId
-        ?? messageBody?.request_id
-        ?? messageBody?.id
         ?? record?.messageId
         ?? crypto.randomUUID();
     const requestId = String(baseRequestId);
@@ -481,14 +470,14 @@ function normalizeFlowMode(value, fallback) {
     return normalized || fallback;
 }
 
-function buildExecutionName(requestId, hexId) {
+function buildExecutionName(requestId, hex) {
     const requestToken = String(requestId ?? crypto.randomUUID())
         .toLowerCase()
         .replace(/[^a-z0-9-]/g, '-')
         .replace(/-+/g, '-')
         .replace(/^-|-$/g, '')
         .slice(0, 40) || 'request';
-    const hexToken = String(hexId ?? 'hex')
+    const hexToken = String(hex ?? 'hex')
         .toLowerCase()
         .replace(/[^a-z0-9]/g, '')
         .slice(0, 40) || 'hex';
@@ -501,18 +490,18 @@ function buildFullEnrichExecutionInput(payload, context = {}) {
     applySanitizedUidToSubject(subject);
     ensureRuntimeMetadata(subject);
 
-    const hexId = getHexHintFromMessageBody({
+    const hex = getHexHintFromMessageBody({
         ...payload,
         subject,
     });
-    if (!hexId) {
+    if (!hex) {
         throw new Error('fullEnrich request missing hex identifier');
     }
 
     return {
         requestId: context?.requestId ?? String(payload?.requestId ?? crypto.randomUUID()),
-        hexId,
-        requestHex: context?.hex ?? hexId,
+        hex,
+        requestHex: context?.hex ?? hex,
         source: typeof payload?.source === 'string' && payload.source.trim() ? payload.source.trim() : 'scouts2sqs',
         orchestrationType: 'fullEnrich',
         requestMode: normalizeFlowMode(payload?.requestMode, 'auto'),
@@ -529,14 +518,14 @@ async function startFullEnrichExecution(payload, context = {}) {
     const input = buildFullEnrichExecutionInput(payload, context);
     const command = new StartExecutionCommand({
         stateMachineArn: FULL_ENRICH_STATE_MACHINE_ARN,
-        name: buildExecutionName(input.requestId, input.hexId),
+        name: buildExecutionName(input.requestId, input.hex),
         input: JSON.stringify(input),
     });
     const response = await sfnClient.send(command);
     console.log('[StepFunctions] Started fullEnrich execution', {
         stateMachineArn: FULL_ENRICH_STATE_MACHINE_ARN,
         executionArn: response?.executionArn ?? null,
-        hexId: input.hexId,
+        hex: input.hex,
         requestId: input.requestId,
     });
     return {
@@ -597,7 +586,7 @@ async function writeRuntimeSnapshot(key, payload) {
     await s3Client.send(command);
 }
 
-async function persistQueuedRequestsRuntimeSnapshot(records, requestIds, hexIds, links, requests = []) {
+async function persistQueuedRequestsRuntimeSnapshot(records, requestIds, hexes, links, requests = []) {
     const queuedSnapshot = await readRuntimeSnapshot(QUEUED_REQUESTS_RUNTIME_KEY);
     const reconciled = filterProcessingRequestsAgainstQueuedSnapshot(
         deduplicateRuntimeRequestEntries(requests),
@@ -611,8 +600,8 @@ async function persistQueuedRequestsRuntimeSnapshot(records, requestIds, hexIds,
         requestIds: Array.from(
             new Set(reconciled.requests.map((entry) => entry?.requestId).filter(Boolean))
         ).slice(0, 50),
-        hexIds: Array.from(
-            new Set(reconciled.requests.map((entry) => entry?.hexId).filter(Boolean))
+        hexes: Array.from(
+            new Set(reconciled.requests.map((entry) => entry?.hex).filter(Boolean))
         ).slice(0, 50),
     };
 
@@ -649,7 +638,7 @@ function normaliseSubjectForSlack(subject) {
     }
 
     if (typeof subject === 'object') {
-        const title = subject.title ?? subject.summary ?? subject.name ?? subject.hex ?? null;
+        const title = subject.title ?? subject.hex ?? null;
         const location = subject.location ?? null;
         const parts = [title, location].filter(Boolean);
         if (parts.length > 0) {
@@ -1079,13 +1068,6 @@ function extractHexFromSubject(subject) {
             }
         }
 
-        if (typeof subject.hexId === 'string') {
-            const trimmedHexId = subject.hexId.trim();
-            if (trimmedHexId) {
-                return trimmedHexId;
-            }
-        }
-
         if (typeof subject.value === 'string') {
             const trimmedValue = subject.value.trim();
             if (trimmedValue) {
@@ -1105,15 +1087,15 @@ function buildQueuePayload(payload) {
     const action = typeof payload.action === 'string' ? payload.action.trim() : payload.action;
     const subject = payload.subject;
 
-    if (realm === 'scoutsRequest' || realm === 'stateMachine') {
-        const requestedField = normaliseRuntimeText(payload.subjectLabel ?? payload.requestedField ?? subject);
-        const hexId = getHexHintFromMessageBody(payload);
+    if (realm === 'scoutsRequest') {
+        const requestedField = normaliseRuntimeText(payload.subjectLabel ?? subject);
+        const hex = getHexHintFromMessageBody(payload);
         const title = getTitleHintFromMessageBody(payload);
 
         if (requestedField !== 'tagline' && requestedField !== 'imageTheme' && requestedField !== 'imageUrl' && requestedField !== 'persist') {
             throw new Error(`scoutsRequest subject ${requestedField} not supported by this lambda`);
         }
-        if (!hexId) {
+        if (!hex) {
             throw new Error(`Unable to derive HEX subject for realm=${realm} action=${action}`);
         }
 
@@ -1124,10 +1106,9 @@ function buildQueuePayload(payload) {
             return {
                 realm: requestedField === 'tagline' ? 'tagline' : requestedField === 'imageTheme' ? 'imageTheme' : 'image',
                 action: 'request',
-                subject: hexId,
-                requestedField,
+                subject: hex,
                 subjectLabel: requestedField,
-                hexId,
+                hex,
                 ...(title ? { title } : {}),
                 ...getOptionalOrchestrationMetadata(payload),
             };
@@ -1139,12 +1120,11 @@ function buildQueuePayload(payload) {
                     realm: 'persist',
                     action: 'persist',
                     subject: {
-                        hexId,
+                        hex,
                         ...(title ? { title } : {}),
                     },
-                    requestedField,
                     subjectLabel: requestedField,
-                    hexId,
+                    hex,
                     ...(title ? { title } : {}),
                     ...getOptionalOrchestrationMetadata(payload),
                 };
@@ -1161,15 +1141,14 @@ function buildQueuePayload(payload) {
                 realm: 'persist',
                 action: 'persist',
                 subject: {
-                    hexId,
+                    hex,
                     ...(requestedField === 'tagline' ? { tagline: fieldValue } : {}),
                     ...(requestedField === 'imageTheme' ? { imageTheme: fieldValue } : {}),
                     ...(requestedField === 'imageUrl' ? { imageUrl: fieldValue } : {}),
                     ...(title ? { title } : {}),
                 },
-                requestedField,
                 subjectLabel: requestedField,
-                hexId,
+                hex,
                 ...(title ? { title } : {}),
                 ...getOptionalOrchestrationMetadata(payload),
             };
@@ -1180,14 +1159,14 @@ function buildQueuePayload(payload) {
 
     // Only allow a small set of realms through (include 'persist' so this lambda
     // can publish persist messages created during approval flows)
-    const allowedRealms = new Set(['tagline', 'AI', 'imageTheme', 'image', 'persist']);
+    const allowedRealms = new Set(['tagline', 'imageTheme', 'image', 'persist']);
     if (!allowedRealms.has(realm)) {
         throw new Error(`Realm ${realm} not supported by this lambda`);
     }
 
     const requiresHexOnly =
         typeof realm === 'string'
-        && (realm === 'tagline' || realm === 'AI')
+        && realm === 'tagline'
         && action === 'request';
 
     if (requiresHexOnly) {
@@ -1276,7 +1255,7 @@ export async function lambdaHandler(event) {
     // Handle SQS events from scoutsRequests queue
     if (event.Records && Array.isArray(event.Records)) {
         const observedRequestIds = [];
-        const observedHexIds = [];
+        const observedHexes = [];
         const observedLinks = [];
         const observedRequests = [];
         for (const record of event.Records) {
@@ -1286,7 +1265,7 @@ export async function lambdaHandler(event) {
                     console.log('Processing SQS message:', JSON.stringify(messageBody));
                     const hints = collectRequestHints(record, messageBody);
                     observedRequestIds.push(...hints.requestIds);
-                    observedHexIds.push(...hints.hexIds);
+                    observedHexes.push(...hints.hexes);
                     observedLinks.push(...hints.links);
                     observedRequests.push(...hints.requests);
                     const requestContext = buildRequestContext(record, messageBody);
@@ -1311,7 +1290,7 @@ export async function lambdaHandler(event) {
                         continue;
                     }
 
-                    if ((rawRealm === 'scoutsRequest' || rawRealm === 'stateMachine') && (rawAction === 'request' || rawAction === 'persist')) {
+                    if (rawRealm === 'scoutsRequest' && (rawAction === 'request' || rawAction === 'persist')) {
                         try {
                             const translatedPayload = withRequestContext(messageBody, requestContext);
                             console.log(`[${rawRealm}] Translating field-level request:`, JSON.stringify(translatedPayload));
@@ -1349,7 +1328,7 @@ export async function lambdaHandler(event) {
                             targetAction = 'request';
                             console.log(`[scoutsRequest] Image prompt needed for hex: ${hexValue}`);
                         } else if (!getImageUrlValue(rawSubject)) {
-                            // Need AI-generated event image
+                            // Need a generated event image
                             targetRealm = 'image';
                             targetAction = 'request';
                             console.log(`[scoutsRequest] Event image needed for hex: ${hexValue}`);
@@ -1372,8 +1351,8 @@ export async function lambdaHandler(event) {
                             console.log(`[scoutsRequest] ${rawAction} processed - sent ${targetRealm} request`);
                         }
                     } else {
-                        // Only allow tagline (legacy AI), imageTheme, image and persist realms through from SQS
-                        const allowed = new Set(['tagline', 'AI', 'imageTheme', 'image', 'persist']);
+                        // Only allow tagline, imageTheme, image and persist realms through from SQS
+                        const allowed = new Set(['tagline', 'imageTheme', 'image', 'persist']);
                         if (!allowed.has(rawRealm)) {
                             console.error(`[SQS] Dropping unsupported realm=${rawRealm} action=${rawAction} subject=${(rawSubject && rawSubject.title) || 'unknown'}`);
                             // drop the message (don't throw) so SQS won't retry
@@ -1421,7 +1400,7 @@ export async function lambdaHandler(event) {
             }
         }
 
-        await persistQueuedRequestsRuntimeSnapshot(event.Records, observedRequestIds, observedHexIds, observedLinks, observedRequests);
+        await persistQueuedRequestsRuntimeSnapshot(event.Records, observedRequestIds, observedHexes, observedLinks, observedRequests);
         
         return withCors({ statusCode: 200, body: 'SQS messages processed' });
     }
@@ -1490,7 +1469,7 @@ export async function lambdaHandler(event) {
             return withCors({ statusCode: 200, body: JSON.stringify({ message: 'fullEnrich execution started' }) });
         }
 
-        const allowed = new Set(['tagline', 'AI', 'imageTheme', 'image', 'persist']);
+        const allowed = new Set(['tagline', 'imageTheme', 'image', 'persist']);
         if (!allowed.has(normalizedRealm)) {
             console.error(`[HTTP] Dropping unsupported realm=${normalizedRealm} action=${normalizedAction}`);
             // Send unsupported realm to DLQ

@@ -56,26 +56,18 @@ const GEMINI_IMAGE_MODEL_PREFERENCES = (() => {
     return Array.from(new Set(entries.length > 0 ? entries : DEFAULT_GEMINI_IMAGE_MODELS));
 })();
 
-const GEMINI_TEXT_FEATURE_FLAG_SOURCE = process.env.gemini ?? process.env.GEMINI;
+const GEMINI_TEXT_FEATURE_FLAG_SOURCE = process.env.GEMINI;
 const GEMINI_TEXT_FEATURE_ENABLED = isFeatureFlagEnabled(GEMINI_TEXT_FEATURE_FLAG_SOURCE, true);
 const GEMINI_IMAGE_FEATURE_FLAG_SOURCE =
-    process.env.gemini_images
-    ?? process.env.geminiImages
-    ?? process.env.GEMINI_IMAGES
-    ?? process.env.gemini;
+    process.env.GEMINI_IMAGES;
 const GEMINI_IMAGE_FEATURE_ENABLED = isFeatureFlagEnabled(GEMINI_IMAGE_FEATURE_FLAG_SOURCE, true);
 const SLACK_FEATURE_FLAG_SOURCE = process.env.slack ?? process.env.SLACK;
 const SLACK_FEATURE_ENABLED = isFeatureFlagEnabled(SLACK_FEATURE_FLAG_SOURCE, true);
 const PERSISTENCE_FEATURE_FLAG_SOURCE =
-    process.env.persistence
-    ?? process.env.PERSISTENCE
-    ?? process.env.persist
-    ?? process.env.PERSIST;
+    process.env.PERSISTENCE;
 const PERSISTENCE_FEATURE_ENABLED = isFeatureFlagEnabled(PERSISTENCE_FEATURE_FLAG_SOURCE, true);
 const APPROVAL_PERSISTENCE_FLAG_SOURCE =
-    process.env.approval_persistence
-    ?? process.env.APPROVAL_PERSISTENCE
-    ?? process.env.approval_metadata_persistence
+    process.env.APPROVAL_PERSISTENCE
     ?? process.env.APPROVAL_METADATA_PERSISTENCE
     ?? PERSISTENCE_FEATURE_FLAG_SOURCE;
 const APPROVAL_PERSISTENCE_ENABLED = isFeatureFlagEnabled(APPROVAL_PERSISTENCE_FLAG_SOURCE, true);
@@ -186,9 +178,6 @@ function getHexHintFromSubject(subject) {
     if (typeof subject.hex === 'string' && subject.hex.trim()) {
         return subject.hex.trim().toLowerCase();
     }
-    if (typeof subject.hexId === 'string' && subject.hexId.trim()) {
-        return subject.hexId.trim().toLowerCase();
-    }
     return null;
 }
 
@@ -202,8 +191,7 @@ function normaliseRuntimeText(value) {
 
 function getHexHintFromMessageBody(messageBody) {
     const directHex = normaliseRuntimeText(
-        messageBody?.hexId
-        ?? messageBody?.hex
+        messageBody?.hex
         ?? messageBody?.requestHex
         ?? null
     );
@@ -218,14 +206,14 @@ function getTitleHintFromMessageBody(messageBody) {
         return null;
     }
 
-    const directTitle = normaliseRuntimeText(messageBody.title ?? messageBody.summary ?? messageBody.name ?? null);
+    const directTitle = normaliseRuntimeText(messageBody.title ?? null);
     if (directTitle) {
         return directTitle;
     }
 
     const subject = messageBody.subject;
     if (subject && typeof subject === 'object') {
-        return normaliseRuntimeText(subject.title ?? subject.summary ?? subject.name ?? null);
+        return normaliseRuntimeText(subject.title ?? null);
     }
 
     return null;
@@ -236,7 +224,7 @@ function getSubjectHintFromMessageBody(messageBody) {
         return null;
     }
 
-    const explicitSubject = normaliseRuntimeText(messageBody.subjectLabel ?? messageBody.requestedField ?? null);
+    const explicitSubject = normaliseRuntimeText(messageBody.subjectLabel ?? null);
     if (explicitSubject) {
         return explicitSubject;
     }
@@ -290,7 +278,7 @@ function getRequestTimeHint(record, messageBody) {
 function buildRuntimeRequestEntry(record, messageBody, status) {
     const requestId =
         (messageBody && typeof messageBody === 'object'
-            ? (messageBody.requestId ?? messageBody.request_id ?? messageBody.id ?? null)
+            ? (messageBody.requestId ?? null)
             : null)
         ?? record?.messageId
         ?? null;
@@ -303,7 +291,7 @@ function buildRuntimeRequestEntry(record, messageBody, status) {
         requestTime: getRequestTimeHint(record, messageBody),
         requestId: requestId ? String(requestId) : null,
         messageId: messageId ? String(messageId) : null,
-        hexId: getHexHintFromMessageBody(messageBody),
+        hex: getHexHintFromMessageBody(messageBody),
         title: getTitleHintFromMessageBody(messageBody),
         subject: getSubjectHintFromMessageBody(messageBody),
         realm: typeof messageBody?.realm === 'string' && messageBody.realm.trim() ? messageBody.realm.trim() : null,
@@ -331,7 +319,7 @@ function deduplicateRuntimeRequestEntries(entries = []) {
             : [
                 entry.requestId ?? '',
                 entry.messageId ?? '',
-                entry.hexId ?? '',
+                entry.hex ?? '',
                 entry.realm ?? '',
                 entry.action ?? '',
                 entry.status ?? '',
@@ -344,12 +332,12 @@ function deduplicateRuntimeRequestEntries(entries = []) {
 
 function collectRequestHints(record, messageBody) {
     const requestIds = new Set();
-    const hexIds = new Set();
+    const hexes = new Set();
     const links = [];
 
     const requestId =
         (messageBody && typeof messageBody === 'object'
-            ? (messageBody.requestId ?? messageBody.request_id ?? messageBody.id ?? null)
+            ? (messageBody.requestId ?? null)
             : null)
         ?? record?.messageId
         ?? null;
@@ -365,7 +353,7 @@ function collectRequestHints(record, messageBody) {
     if (messageBody && typeof messageBody === 'object') {
         const hexHint = getHexHintFromSubject(messageBody.subject);
         if (hexHint) {
-            hexIds.add(hexHint);
+            hexes.add(hexHint);
             if (normalizedRequestId) {
                 links.push({
                     requestId: normalizedRequestId,
@@ -379,11 +367,11 @@ function collectRequestHints(record, messageBody) {
     }
 
     const requests = [buildRuntimeRequestEntry(record, messageBody, 'processing')]
-        .filter((entry) => entry.requestId || entry.messageId || entry.hexId || entry.title);
+        .filter((entry) => entry.requestId || entry.messageId || entry.hex || entry.title);
 
     return {
         requestIds: Array.from(requestIds),
-        hexIds: Array.from(hexIds),
+        hexes: Array.from(hexes),
         links,
         requests,
     };
@@ -392,8 +380,6 @@ function collectRequestHints(record, messageBody) {
 function buildRequestContext(record, messageBody) {
     const baseRequestId =
         messageBody?.requestId
-        ?? messageBody?.request_id
-        ?? messageBody?.id
         ?? record?.messageId
         ?? crypto.randomUUID();
     const requestId = String(baseRequestId);
@@ -476,14 +462,14 @@ function withRuntimeRequestStatus(entries = [], status = 'completed') {
     }));
 }
 
-async function persistCompletedRequestsRuntimeSnapshot(records, requestIds, hexIds, links, requests = []) {
+async function persistCompletedRequestsRuntimeSnapshot(records, requestIds, hexes, links, requests = []) {
     const payload = {
         source: 'sqs2scouts',
         queue: 'scoutsComplete',
         updatedAt: new Date().toISOString(),
         requests: deduplicateRuntimeRequestEntries(withRuntimeRequestStatus(requests, 'completed')),
         requestIds: Array.from(new Set((requestIds || []).filter(Boolean))).slice(0, 50),
-        hexIds: Array.from(new Set((hexIds || []).filter(Boolean))).slice(0, 50),
+        hexes: Array.from(new Set((hexes || []).filter(Boolean))).slice(0, 50),
         links: Array.from(
             new Map(
                 (Array.isArray(links) ? links : [])
@@ -521,19 +507,15 @@ function cloneDefaultScoutsConfig() {
         ? BUNDLED_SCOUTS_CONFIG_SOURCE
         : {};
     return {
-        taglineThemePromptTemplate: toNonEmptyString(bundled.taglineThemePromptTemplate)
-            ?? toNonEmptyString(bundled.aiPromptTemplate),
-        imageThemePromptTemplate: toNonEmptyString(bundled.imageThemePromptTemplate)
-            ?? toNonEmptyString(bundled.imagePromptTemplate),
+        taglineThemePromptTemplate: toNonEmptyString(bundled.taglineThemePromptTemplate),
+        imageThemePromptTemplate: toNonEmptyString(bundled.imageThemePromptTemplate),
         imageGenerationPromptTemplate: toNonEmptyString(bundled.imageGenerationPromptTemplate),
         imageGenerationPromptSpecifications: Array.isArray(bundled.imageGenerationPromptSpecifications)
             ? bundled.imageGenerationPromptSpecifications.map((entry) => (typeof entry === 'string' ? entry.trim() : null)).filter(Boolean)
             : [],
         imageThemeGuidelines: Array.isArray(bundled.imageThemeGuidelines)
             ? bundled.imageThemeGuidelines.map((entry) => (typeof entry === 'string' ? entry.trim() : null)).filter(Boolean)
-            : (Array.isArray(bundled.imageTagGuidelines)
-                ? bundled.imageTagGuidelines.map((entry) => (typeof entry === 'string' ? entry.trim() : null)).filter(Boolean)
-                : []),
+            : [],
         scouts2sqs: bundled.scouts2sqs === true,
         themedIcons: Array.isArray(bundled.themedIcons) ? cloneJsonValue(bundled.themedIcons) : [],
     };
@@ -578,14 +560,10 @@ function sanitiseScoutsConfig(raw) {
 
     if (typeof raw.taglineThemePromptTemplate === 'string' && raw.taglineThemePromptTemplate.trim()) {
         config.taglineThemePromptTemplate = raw.taglineThemePromptTemplate;
-    } else if (typeof raw.aiPromptTemplate === 'string' && raw.aiPromptTemplate.trim()) {
-        config.taglineThemePromptTemplate = raw.aiPromptTemplate;
     }
-    
+
     if (typeof raw.imageThemePromptTemplate === 'string' && raw.imageThemePromptTemplate.trim()) {
         config.imageThemePromptTemplate = raw.imageThemePromptTemplate;
-    } else if (typeof raw.imagePromptTemplate === 'string' && raw.imagePromptTemplate.trim()) {
-        config.imageThemePromptTemplate = raw.imagePromptTemplate;
     }
 
     if (typeof raw.imageGenerationPromptTemplate === 'string' && raw.imageGenerationPromptTemplate.trim()) {
@@ -602,10 +580,6 @@ function sanitiseScoutsConfig(raw) {
         config.imageThemeGuidelines = raw.imageThemeGuidelines
             .map((entry) => (typeof entry === 'string' ? entry.trim() : null))
             .filter(Boolean);
-    } else if (Array.isArray(raw.imageTagGuidelines) && raw.imageTagGuidelines.length > 0) {
-        config.imageThemeGuidelines = raw.imageTagGuidelines
-            .map((entry) => (typeof entry === 'string' ? entry.trim() : null))
-            .filter(Boolean);
     }
 
     if (Array.isArray(raw.themedIcons)) {
@@ -614,8 +588,6 @@ function sanitiseScoutsConfig(raw) {
 
     if (raw.scouts2sqs !== undefined) {
         config.scouts2sqs = raw.scouts2sqs === true || String(raw.scouts2sqs).trim().toLowerCase() === 'true';
-    } else if (raw.scouts && typeof raw.scouts === 'object' && raw.scouts.scouts2sqs !== undefined) {
-        config.scouts2sqs = raw.scouts.scouts2sqs === true || String(raw.scouts.scouts2sqs).trim().toLowerCase() === 'true';
     }
 
     return config;
@@ -752,7 +724,7 @@ async function buildGeminiTextRequestPrompt(event, mode, configOverride = null) 
     const config = configOverride ?? (await loadScoutsConfig());
     
     let template;
-    if (mode === 'AI') {
+    if (mode === 'tagline') {
         template = typeof config.taglineThemePromptTemplate === 'string' && config.taglineThemePromptTemplate.trim()
             ? config.taglineThemePromptTemplate
             : null;
@@ -2306,8 +2278,8 @@ function buildEventDetailsSection(event, actionLabel, realm = null, options = {}
         lines.push(formatDetailLine('Hex ID', event.hex));
     }
 
-    // For AI realm: show title, tagline and image prompt
-    if (realm === 'AI') {
+    // For tagline realm: show title, tagline and image theme
+    if (realm === 'tagline') {
         if (shouldInclude('title') && (event.title ?? event.summary ?? event.name)) {
             lines.push(formatDetailLine('Title', event.title ?? event.summary ?? event.name));
         }
@@ -2379,7 +2351,7 @@ function buildApprovalBlocks(event, actionLabel, options = {}) {
     const eventTitle = event.title ?? event.summary ?? event.name ?? 'Scouts Event';
 
     let reviewTarget;
-    if (realm === 'AI') {
+    if (realm === 'tagline') {
         reviewTarget = 'Tagline';
     } else if (realm === 'imageTheme') {
         reviewTarget = 'Image Theme';
@@ -2585,8 +2557,8 @@ async function prepareEnrichmentReview(realm, subject, configOverride = null) {
     let previewText = '';
     let previewTagline = null;
     let previewTheme = null;
-    if (realm === 'AI') {
-        const result = await generateGeminiTextSuggestion(mergedEvent, 'AI', scoutsConfig);
+    if (realm === 'tagline') {
+        const result = await generateGeminiTextSuggestion(mergedEvent, 'tagline', scoutsConfig);
         const tagline = typeof result?.tagline === 'string' ? result.tagline.trim() : null;
         const theme = typeof result?.imageTheme === 'string' ? result.imageTheme : null;
         
@@ -2620,7 +2592,7 @@ async function prepareEnrichmentReview(realm, subject, configOverride = null) {
     }
 
     const excludeFields = new Set(['title']);
-    if (realm === 'AI') {
+    if (realm === 'tagline') {
         if (previewTagline) {
             excludeFields.add('tagline');
         }
@@ -2908,14 +2880,14 @@ export async function lambdaHandler(event) {
     const directInvocation = isStepFunctionsInvocation(event);
     const records = Array.isArray(event?.Records) ? event.Records : [];
     const observedRequestIds = [];
-    const observedHexIds = [];
+    const observedHexes = [];
     const observedLinks = [];
     const observedRequests = [];
     try {
         if (directInvocation) {
             const hints = collectRequestHints(null, event);
             observedRequestIds.push(...hints.requestIds);
-            observedHexIds.push(...hints.hexIds);
+            observedHexes.push(...hints.hexes);
             observedLinks.push(...hints.links);
             observedRequests.push(...hints.requests);
         } else {
@@ -2925,7 +2897,7 @@ export async function lambdaHandler(event) {
                     const body = typeof record.body === 'string' ? JSON.parse(record.body) : record.body;
                     const hints = collectRequestHints(record, body);
                     observedRequestIds.push(...hints.requestIds);
-                    observedHexIds.push(...hints.hexIds);
+                    observedHexes.push(...hints.hexes);
                     observedLinks.push(...hints.links);
                     observedRequests.push(...hints.requests);
                 } catch {
@@ -2986,7 +2958,7 @@ export async function lambdaHandler(event) {
 
         console.log(`Processing scouts message - Realm: ${realm}, Action: ${action}`);
 
-        const enrichmentRealms = new Set(['tagline', 'AI', 'imageTheme', 'image']);
+        const enrichmentRealms = new Set(['tagline', 'imageTheme', 'image']);
         let scoutsConfig = null;
         if (enrichmentRealms.has(realm)) {
             scoutsConfig = await loadScoutsConfig().catch((error) => {
@@ -2997,10 +2969,10 @@ export async function lambdaHandler(event) {
 
         // Only accept a small set of realms in this lambda.
         // Supported realms:
-        // - 'tagline' (legacy 'AI'), 'imageTheme', 'image': enrichment tasks triggered by scouts2sqs
+        // - 'tagline', 'imageTheme', 'image': enrichment tasks triggered by scouts2sqs
         // - 'persist': finalisation tasks routed internally
         // Anything else is dropped and shunted to the DLQ to avoid noisy retries.
-        const allowedRealms = new Set(['tagline', 'AI', 'imageTheme', 'image', 'persist']);
+        const allowedRealms = new Set(['tagline', 'imageTheme', 'image', 'persist']);
         if (!allowedRealms.has(realm)) {
             console.error(`[SQS2Scouts] Dropping unsupported realm=${realm} action=${action} subject=${(rawSubject && (rawSubject.title || rawSubject.hex)) || 'unknown'}`);
             // Send unsupported realm to DLQ
@@ -3012,8 +2984,8 @@ export async function lambdaHandler(event) {
             return { statusCode: 200, body: JSON.stringify({ message: 'Dropped unsupported realm' }) };
         }
 
-        // Handle tagline realm (legacy AI realm) - generate tagline and image prompt
-        if (realm === 'tagline' || realm === 'AI') {
+        // Handle tagline realm - generate tagline and image prompt
+        if (realm === 'tagline') {
             const hexValue = typeof rawSubject === 'string' ? rawSubject.trim() : null;
             if (!hexValue) {
                 throw new Error('tagline request missing hex identifier');
@@ -3024,7 +2996,7 @@ export async function lambdaHandler(event) {
                 throw new Error(`HEX ${hexValue} not found`);
             }
             
-            const result = await generateGeminiTextSuggestion(hexData, 'AI', scoutsConfig);
+            const result = await generateGeminiTextSuggestion(hexData, 'tagline', scoutsConfig);
             if (result?.tagline) {
                 setTagline(hexData, result.tagline);
             }
@@ -3042,7 +3014,7 @@ export async function lambdaHandler(event) {
             if (!requiresApproval || autoApproval) {
                 return {
                     statusCode: 200,
-                    body: JSON.stringify({ message: `AI enrichment persisted for HEX ${hexValue}` })
+                    body: JSON.stringify({ message: `Tagline enrichment persisted for HEX ${hexValue}` })
                 };
             }
 
@@ -3174,8 +3146,6 @@ export async function lambdaHandler(event) {
                 typeof rawSubject === 'string' ? rawSubject.trim().toLowerCase() : null
             ) || (
                 typeof subjectObject.hex === 'string' ? subjectObject.hex.trim().toLowerCase() : null
-            ) || (
-                typeof subjectObject.hexId === 'string' ? subjectObject.hexId.trim().toLowerCase() : null
             );
             
             if (!hexValue) {
@@ -3384,7 +3354,7 @@ export async function lambdaHandler(event) {
             body: JSON.stringify({ error: error.message })
         };
     } finally {
-        await persistCompletedRequestsRuntimeSnapshot(records, observedRequestIds, observedHexIds, observedLinks, observedRequests);
+        await persistCompletedRequestsRuntimeSnapshot(records, observedRequestIds, observedHexes, observedLinks, observedRequests);
     }
 }
 
