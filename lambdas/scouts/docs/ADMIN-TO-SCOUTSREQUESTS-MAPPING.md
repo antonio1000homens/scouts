@@ -35,14 +35,14 @@ flowchart LR
 | Agenda refresh | `realm: 'scouts'`, `subject: 'agenda'`, `action: <number>`, `maxEvents` | Indirect only: `realm: 'scoutsRequest'`, `action: 'new'`, `subject: <merged event object>` | Derives next stage from completeness: `tagline/request`, `imageTheme/request`, `image/request`, or no publish | Queue work is created by enrichment logic, not by a 1:1 admin command translation. |
 | Auto heartbeat | `realm: 'scouts'`, `subject: 'agenda'`, `action: 0`, `maxEvents: 0` | Same as agenda refresh | Same as agenda refresh | Same enrichment path as manual agenda refresh. |
 | Calendar refresh | `realm: 'scouts'`, `subject: '<calendar token>'` or `'calendars'`, `action: 'refreshCalendars'` or another refresh token | Indirect only: `realm: 'scoutsRequest'`, `action: 'new'`, `subject: <merged event object>` | Derives next stage from completeness: `tagline/request`, `imageTheme/request`, `image/request`, or no publish | Selected feed token comes from the admin button value and subject token. |
-| Persist tagline | `realm: 'scouts'`, `subject: { hexId, tagline }`, `action: 'persistTagline'` or targeted `persist` | `realm: 'scoutsRequest'`, `action: 'persist'`, `subject: 'tagline'`, `hexId`, `tagline` | Translated by `scouts2sqs` to `persist/persist` with object subject | `scoutsQueued` keeps the field-level external contract; downstream queues keep the translated internal contract. |
-| Persist image theme | `realm: 'scouts'`, `subject: { hexId, imageTheme }`, `action: 'persistImageTheme'` or targeted `persist` | `realm: 'scoutsRequest'`, `action: 'persist'`, `subject: 'imageTheme'`, `hexId`, `imageTheme` | Translated by `scouts2sqs` to `persist/persist` with object subject | `imageTheme` remains the internal field name in the current flow. |
-| Persist image URL | `realm: 'scouts'`, `subject: { hexId, imageUrl }`, `action: 'persistImageUrl'` or targeted `persist` | `realm: 'scoutsRequest'`, `action: 'persist'`, `subject: 'imageUrl'`, `hexId`, `imageUrl` | Translated by `scouts2sqs` to `persist/persist` with object subject | URL validation still happens in `scouts` before queueing. |
-| Generate tagline | `realm: 'scouts'`, `subject: { hexId }`, `action: 'generateTagline'` | `realm: 'scoutsRequest'`, `action: 'request'`, `subject: 'tagline'`, `hexId` | Translated by `scouts2sqs` to `tagline/request` with hex subject | The admin button still passes the field-specific action token; the queue boundary now uses the external field-level contract. |
-| Generate image theme | `realm: 'scouts'`, `subject: { hexId }`, `action: 'generateImageTheme'` | `realm: 'scoutsRequest'`, `action: 'request'`, `subject: 'imageTheme'`, `hexId` | Translated by `scouts2sqs` to `imageTheme/request` with hex subject | `imageTheme` is the stored field. `imagePrompt` still appears in compatibility code as a derived prompt alias and is not intended to be persisted. |
-| Generate image | `realm: 'scouts'`, `subject: { hexId }`, `action: 'generateImage'` | `realm: 'scoutsRequest'`, `action: 'request'`, `subject: 'imageUrl'`, `hexId` | Translated by `scouts2sqs` to `image/request` with hex subject | The external contract now normalizes the field name as `imageUrl` while the internal processing realm remains `image`. |
-| Hide event | `realm: 'scouts'`, `subject: { hexId, isHidden: true }`, `action: 'hide'` | `realm: 'persist'`, `action: 'persist'`, `subject: { hexId, isHidden: true }` | Forwarded to `scoutsProcessing` as `persist/persist` | Current admin hide no longer publishes `persist/hidden`. |
-| Unhide event | `realm: 'scouts'`, `subject: { hexId, isHidden: false }`, `action: 'unhide'` | `realm: 'persist'`, `action: 'persist'`, `subject: { hexId, isHidden: false }` | Forwarded to `scoutsProcessing` as `persist/persist` | Same queue shape as hide, with `isHidden: false`. |
+| Persist tagline | `realm: 'scouts'`, `subject: { hex, tagline }`, `action: 'persistTagline'` or targeted `persist` | `realm: 'scoutsRequest'`, `action: 'persist'`, `subject: 'tagline'`, `hex`, `tagline` | Translated by `scouts2sqs` to `persist/persist` with object subject | `scoutsQueued` keeps the field-level external contract; downstream queues keep the translated internal contract. |
+| Persist image theme | `realm: 'scouts'`, `subject: { hex, imageTheme }`, `action: 'persistImageTheme'` or targeted `persist` | `realm: 'scoutsRequest'`, `action: 'persist'`, `subject: 'imageTheme'`, `hex`, `imageTheme` | Translated by `scouts2sqs` to `persist/persist` with object subject | `imageTheme` remains the stored field name throughout the active flow. |
+| Persist image URL | `realm: 'scouts'`, `subject: { hex, imageUrl }`, `action: 'persistImageUrl'` or targeted `persist` | `realm: 'scoutsRequest'`, `action: 'persist'`, `subject: 'imageUrl'`, `hex`, `imageUrl` | Translated by `scouts2sqs` to `persist/persist` with object subject | URL validation still happens in `scouts` before queueing. |
+| Generate tagline | `realm: 'scouts'`, `subject: { hex }`, `action: 'generateTagline'` | `realm: 'scoutsRequest'`, `action: 'request'`, `subject: 'tagline'`, `hex` | Translated by `scouts2sqs` to `tagline/request` with hex subject | The admin button still passes the field-specific action token; the queue boundary now uses the field-level contract. |
+| Generate image theme | `realm: 'scouts'`, `subject: { hex }`, `action: 'generateImageTheme'` | `realm: 'scoutsRequest'`, `action: 'request'`, `subject: 'imageTheme'`, `hex` | Translated by `scouts2sqs` to `imageTheme/request` with hex subject | `imageTheme` is the canonical stored field. |
+| Generate image | `realm: 'scouts'`, `subject: { hex }`, `action: 'generateImage'` | `realm: 'scoutsRequest'`, `action: 'request'`, `subject: 'imageUrl'`, `hex` | Translated by `scouts2sqs` to `image/request` with hex subject | The external contract uses `imageUrl` while the internal processing realm remains `image`. |
+| Hide event | `realm: 'scouts'`, `subject: { hex, isHidden: true }`, `action: 'hide'` | `realm: 'persist'`, `action: 'persist'`, `subject: { hex, isHidden: true }` | Forwarded to `scoutsProcessing` as `persist/persist` | Current admin hide no longer publishes `persist/hidden`. |
+| Unhide event | `realm: 'scouts'`, `subject: { hex, isHidden: false }`, `action: 'unhide'` | `realm: 'persist'`, `action: 'persist'`, `subject: { hex, isHidden: false }` | Forwarded to `scoutsProcessing` as `persist/persist` | Same queue shape as hide, with `isHidden: false`. |
 | Requeue incomplete event | `realm: 'scouts'`, `subject: 'scoutsRequest'`, `action: 'requeue'`, `event: <normalized event>` | `realm: 'scoutsRequest'`, `action: 'new'`, `subject: <normalized event>` | Derives next stage from completeness: `tagline/request`, `imageTheme/request`, `image/request`, or no publish | The event object is normalized before queueing. |
 
 ## Additional non-admin producers of `scoutsRequests`
@@ -60,16 +60,16 @@ These are not sent directly by the admin page, but they affect the real pipeline
 
 ### 1. Admin metadata commands now use structured `subject` objects
 
-The older flow used token-like subjects such as `tagline`, `imagePrompt`, `imageUrl`, or `metadata`.
+The older flow used token-like subjects such as `tagline`, `imageUrl`, or `metadata`.
 
 The current admin page sends payloads like:
 
 - `realm: 'scouts'`
-- `subject: { hexId, tagline }`
-- `subject: { hexId, imageTheme }`
-- `subject: { hexId, imageUrl }`
-- `subject: { hexId }` for generate actions
-- `subject: { hexId, isHidden: true|false }` for hide/unhide
+- `subject: { hex, tagline }`
+- `subject: { hex, imageTheme }`
+- `subject: { hex, imageUrl }`
+- `subject: { hex }` for generate actions
+- `subject: { hex, isHidden: true|false }` for hide/unhide
 - `subject: 'scoutsRequest', event: <normalized event>` for requeue
 
 The `scouts` lambda then translates those admin requests into queue-specific payloads.
@@ -80,7 +80,7 @@ Current hide and unhide requests are both translated to:
 
 - `realm: 'persist'`
 - `action: 'persist'`
-- `subject: { hexId, isHidden: true|false }`
+- `subject: { hex, isHidden: true|false }`
 
 That is a meaningful change from the older `persist/hidden` hide path.
 
@@ -92,7 +92,7 @@ For the current admin and `scoutsRequest` flows, the active downstream stages ar
 - `imageTheme`
 - `image`
 
-`imagePrompt`, `AI`, and other legacy names still appear in compatibility code, but they are not the primary names the current admin flow emits.
+The active admin flow emits `tagline`, `imageTheme`, `imageUrl`, and `hex`.
 
 ### 4. `scouts2sqs` derives the next stage from subject completeness
 

@@ -112,11 +112,11 @@ Related Gemini env vars:
 
 ```json
 {
-   "realm": "tagline | AI | imageTheme | imagePrompt | image | persist",
+   "realm": "tagline | imageTheme | image | persist",
    "action": "string",
    "subject": "string | object",
    "title": "optional string used for runtime tracking",
-   "requestedField": "optional string such as tagline or imageTheme used for runtime tracking",
+   "subjectLabel": "optional string such as tagline or imageTheme used for runtime tracking",
    "responseUrl": "optional string",
    "response_url": "optional string",
    "slackMetadata": {
@@ -127,9 +127,8 @@ Related Gemini env vars:
 ```
 
 Only these `realm` values are accepted:
-- `tagline` (legacy alias: `AI`)
-- `imageTheme` (preferred)
-- `imagePrompt`
+- `tagline`
+- `imageTheme`
 - `image`
 - `persist`
 
@@ -138,18 +137,18 @@ Any other `realm` is dropped and sent to DLQ.
 ### Key: `realm`
 
 `realm` routes the message to a specific handler:
-- `tagline` / `AI`: generate tagline and (if missing) image prompt from HEX event data.
-- `imagePrompt`: generate image prompt only from HEX event data.
-- `imageRequest`: generate an AI image from `image.prompt` and store the returned image URL.
+- `tagline`: generate tagline and, when missing, an `imageTheme` from HEX event data.
+- `imageTheme`: generate the persisted image theme only.
+- `image`: generate an event image from the stored theme-derived prompt and store the returned image URL.
 - `persist`: persist the event payload (and optionally download image to website bucket).
 
 ### Key: `action`
 
 `action` is a string interpreted per realm:
 
-- For `tagline` / `AI`: informational only for this handler path.
-- For `imagePrompt`: informational only for this handler path.
-- For `imageRequest`:
+- For `tagline`: informational only for this handler path.
+- For `imageTheme`: informational only for this handler path.
+- For `image`:
    - `"bypass"` (case-insensitive): use full event object from `subject` when provided.
    - Any other non-`"request"` string: treated as image prompt override.
    - `"request"`: no prompt override.
@@ -169,7 +168,7 @@ Slack action IDs are also accepted and mapped before handling:
 
 #### 1. HEX string form
 
-Used by `tagline`, `AI`, `imagePrompt`, and `imageRequest` standard path.
+Used by `tagline`, `imageTheme`, and `image` standard paths.
 
 ```json
 {
@@ -185,7 +184,6 @@ Used by `imageRequest` bypass and `persist`.
 {
    "subject": {
       "hex": "68656c6c6f2d6576656e74",
-      "hexId": "68656c6c6f2d6576656e74",
       "uid": "optional event uid",
       "originalUid": "optional original uid",
 
@@ -197,7 +195,6 @@ Used by `imageRequest` bypass and `persist`.
       "icsType": "Optional type",
 
       "tagline": "Optional tagline",
-      "AI": "legacy tagline alias",
       "image": {
          "prompt": "Optional image prompt",
          "url": "Optional image URL"
@@ -218,7 +215,7 @@ Used by `imageRequest` bypass and `persist`.
          "icsType": "optional"
       },
       "metadata": {
-         "hexId": "optional",
+         "hex": "optional",
          "tagline": "optional",
          "image": {
             "prompt": "optional",
@@ -234,13 +231,12 @@ Used by `imageRequest` bypass and `persist`.
 ```
 
 HEX resolution priority inside `subject` object:
-1. `subject.metadata.hexId`
-2. `subject.hexId`
-3. `subject.hex`
+1. `subject.metadata.hex`
+2. `subject.hex`
 
 ## Realm-Specific Examples
 
-### `tagline` / `AI`
+### `tagline`
 
 ```json
 {
@@ -250,21 +246,21 @@ HEX resolution priority inside `subject` object:
 }
 ```
 
-### `imagePrompt`
+### `imageTheme`
 
 ```json
 {
-   "realm": "imagePrompt",
+   "realm": "imageTheme",
    "action": "request",
    "subject": "68656c6c6f2d6576656e74"
 }
 ```
 
-### `imageRequest` (standard)
+### `image` (standard)
 
 ```json
 {
-   "realm": "imageRequest",
+   "realm": "image",
    "action": "cartoonish image of scouts in a forest camp at sunset",
    "subject": "68656c6c6f2d6576656e74"
 }

@@ -10,8 +10,8 @@ test('buildQueuePayload translates scoutsRequest tagline request to internal tag
     requestId: 'req-1',
     realm: 'scoutsRequest',
     subject: 'tagline',
-    requestedField: 'tagline',
-    hexId: '6b696e6773746f6e',
+    subjectLabel: 'tagline',
+    hex: '6b696e6773746f6e',
     title: 'Kingston Visit',
     action: 'request',
   });
@@ -20,9 +20,8 @@ test('buildQueuePayload translates scoutsRequest tagline request to internal tag
     realm: 'tagline',
     action: 'request',
     subject: '6b696e6773746f6e',
-    requestedField: 'tagline',
     subjectLabel: 'tagline',
-    hexId: '6b696e6773746f6e',
+    hex: '6b696e6773746f6e',
     title: 'Kingston Visit',
   });
 });
@@ -32,8 +31,8 @@ test('buildQueuePayload translates scoutsRequest tagline persist to internal per
     requestId: 'req-2',
     realm: 'scoutsRequest',
     subject: 'tagline',
-    requestedField: 'tagline',
-    hexId: '63616d70',
+    subjectLabel: 'tagline',
+    hex: '63616d70',
     title: 'Camp Night',
     tagline: 'Ready for camp',
     action: 'persist',
@@ -43,13 +42,12 @@ test('buildQueuePayload translates scoutsRequest tagline persist to internal per
     realm: 'persist',
     action: 'persist',
     subject: {
-      hexId: '63616d70',
+      hex: '63616d70',
       tagline: 'Ready for camp',
       title: 'Camp Night',
     },
-    requestedField: 'tagline',
     subjectLabel: 'tagline',
-    hexId: '63616d70',
+    hex: '63616d70',
     title: 'Camp Night',
   });
 });
@@ -62,13 +60,13 @@ test('buildRuntimeRequestEntry preserves external tracking fields for scoutsRequ
     requestId: 'req-3',
     realm: 'scoutsRequest',
     subject: 'tagline',
-    requestedField: 'tagline',
-    hexId: '6b696e6773746f6e',
+    subjectLabel: 'tagline',
+    hex: '6b696e6773746f6e',
     title: 'Kingston Visit',
     action: 'request',
   }, 'processing');
 
-  assert.equal(entry.hexId, '6b696e6773746f6e');
+  assert.equal(entry.hex, '6b696e6773746f6e');
   assert.equal(entry.title, 'Kingston Visit');
   assert.equal(entry.subject, 'tagline');
   assert.equal(entry.realm, 'scoutsRequest');
@@ -84,16 +82,15 @@ test('buildRuntimeRequestEntry normalizes translated persist jobs back to logica
     requestId: 'req-persist',
     realm: 'persist',
     action: 'persist',
-    requestedField: 'tagline',
     subject: {
-      hexId: '63616d70',
+      hex: '63616d70',
       tagline: 'Ready for camp',
     },
     title: 'Camp Night',
   }, 'processing');
 
   assert.equal(entry.requestId, 'req-persist');
-  assert.equal(entry.hexId, '63616d70');
+  assert.equal(entry.hex, '63616d70');
   assert.equal(entry.title, 'Camp Night');
   assert.equal(entry.subject, 'tagline');
   assert.equal(entry.realm, 'scoutsRequest');
@@ -106,8 +103,8 @@ test('buildQueuePayload translates scoutsRequest imageTheme request to internal 
     requestId: 'req-4',
     realm: 'scoutsRequest',
     subject: 'imageTheme',
-    requestedField: 'imageTheme',
-    hexId: '696d6167657468656d65',
+    subjectLabel: 'imageTheme',
+    hex: '696d6167657468656d65',
     title: 'Night Walk',
     action: 'request',
   });
@@ -116,9 +113,8 @@ test('buildQueuePayload translates scoutsRequest imageTheme request to internal 
     realm: 'imageTheme',
     action: 'request',
     subject: '696d6167657468656d65',
-    requestedField: 'imageTheme',
     subjectLabel: 'imageTheme',
-    hexId: '696d6167657468656d65',
+    hex: '696d6167657468656d65',
     title: 'Night Walk',
   });
 });
@@ -128,8 +124,8 @@ test('buildQueuePayload translates scoutsRequest imageTheme persist to internal 
     requestId: 'req-5',
     realm: 'scoutsRequest',
     subject: 'imageTheme',
-    requestedField: 'imageTheme',
-    hexId: '696d6167657468656d65',
+    subjectLabel: 'imageTheme',
+    hex: '696d6167657468656d65',
     title: 'Night Walk',
     imageTheme: 'Lantern-lit woodland path',
     action: 'persist',
@@ -139,13 +135,12 @@ test('buildQueuePayload translates scoutsRequest imageTheme persist to internal 
     realm: 'persist',
     action: 'persist',
     subject: {
-      hexId: '696d6167657468656d65',
+      hex: '696d6167657468656d65',
       imageTheme: 'Lantern-lit woodland path',
       title: 'Night Walk',
     },
-    requestedField: 'imageTheme',
     subjectLabel: 'imageTheme',
-    hexId: '696d6167657468656d65',
+    hex: '696d6167657468656d65',
     title: 'Night Walk',
   });
 });
@@ -155,8 +150,8 @@ test('buildQueuePayload translates scoutsRequest imageUrl request to internal im
     requestId: 'req-6',
     realm: 'scoutsRequest',
     subject: 'imageUrl',
-    requestedField: 'imageUrl',
-    hexId: '696d61676575726c',
+    subjectLabel: 'imageUrl',
+    hex: '696d61676575726c',
     title: 'River Hike',
     action: 'request',
   });
@@ -165,9 +160,8 @@ test('buildQueuePayload translates scoutsRequest imageUrl request to internal im
     realm: 'image',
     action: 'request',
     subject: '696d61676575726c',
-    requestedField: 'imageUrl',
     subjectLabel: 'imageUrl',
-    hexId: '696d61676575726c',
+    hex: '696d61676575726c',
     title: 'River Hike',
   });
 });
@@ -177,8 +171,8 @@ test('buildQueuePayload translates scoutsRequest imageUrl persist to internal pe
     requestId: 'req-7',
     realm: 'scoutsRequest',
     subject: 'imageUrl',
-    requestedField: 'imageUrl',
-    hexId: '696d61676575726c',
+    subjectLabel: 'imageUrl',
+    hex: '696d61676575726c',
     title: 'River Hike',
     imageUrl: 'https://example.com/river-hike.jpg',
     action: 'persist',
@@ -188,13 +182,12 @@ test('buildQueuePayload translates scoutsRequest imageUrl persist to internal pe
     realm: 'persist',
     action: 'persist',
     subject: {
-      hexId: '696d61676575726c',
+      hex: '696d61676575726c',
       imageUrl: 'https://example.com/river-hike.jpg',
       title: 'River Hike',
     },
-    requestedField: 'imageUrl',
     subjectLabel: 'imageUrl',
-    hexId: '696d61676575726c',
+    hex: '696d61676575726c',
     title: 'River Hike',
   });
 });
@@ -218,7 +211,7 @@ test('buildFullEnrichExecutionInput normalizes a new full-enrich request for ste
   });
 
   assert.equal(payload.requestId, 'req-full-1');
-  assert.equal(payload.hexId, '6e6577686578');
+  assert.equal(payload.hex, '6e6577686578');
   assert.equal(payload.requestHex, '6e6577686578');
   assert.equal(payload.requestMode, 'auto');
   assert.equal(payload.approvalMode, 'auto');

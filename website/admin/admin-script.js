@@ -811,9 +811,7 @@ function resolveRequestSubject(entry) {
         return directTitle.trim();
     }
 
-    const hex = hasText(entry?.hex)
-        ? entry.hex.trim()
-        : (hasText(entry?.hexId) ? entry.hexId.trim() : '');
+    const hex = getSnapshotRequestHex(entry);
     const knownTitle = resolveEventTitleByHex(hex);
     if (hasText(knownTitle)) {
         return knownTitle.trim();
@@ -831,9 +829,7 @@ function normaliseRequestCardEntry(entry, options = {}) {
     if (!entry || typeof entry !== 'object') return null;
 
     const subject = resolveRequestSubject(entry);
-    const hex = hasText(entry?.hex)
-        ? entry.hex.trim()
-        : (hasText(entry?.hexId) ? entry.hexId.trim() : '');
+    const hex = getSnapshotRequestHex(entry);
     const title = hasText(subject)
         ? subject
         : (hex || (hasText(entry?.requestId) ? entry.requestId.trim() : 'Unknown'));
@@ -1542,8 +1538,8 @@ function getSnapshotRequests(snapshot) {
 }
 
 function getSnapshotRequestHex(request) {
-    if (hasText(request?.hexId)) return String(request.hexId).trim().toLowerCase();
     if (hasText(request?.hex)) return String(request.hex).trim().toLowerCase();
+    if (hasText(request?.hexId)) return String(request.hexId).trim().toLowerCase();
     return '';
 }
 
@@ -1585,8 +1581,7 @@ function mergeRuntimeRequestEntries(primary, secondary) {
         ...(primary && typeof primary === 'object' ? primary : {}),
         title: hasText(primary?.title) ? primary.title : secondary?.title,
         summary: hasText(primary?.summary) ? primary.summary : secondary?.summary,
-        hex: hasText(primary?.hex) ? primary.hex : (hasText(primary?.hexId) ? primary.hexId : (secondary?.hex ?? secondary?.hexId)),
-        hexId: hasText(primary?.hexId) ? primary.hexId : (hasText(primary?.hex) ? primary.hex : (secondary?.hexId ?? secondary?.hex)),
+        hex: getSnapshotRequestHex(primary) || getSnapshotRequestHex(secondary),
         requestId: hasText(primary?.requestId) ? primary.requestId : (secondary?.requestId ?? ''),
         messageId: hasText(primary?.messageId) ? primary.messageId : (secondary?.messageId ?? ''),
         requestTime: hasText(primary?.requestTime) ? primary.requestTime : (secondary?.requestTime ?? secondary?.processedAt ?? ''),
@@ -1737,11 +1732,12 @@ function formatObservedIds(snapshot) {
     }
     const requestIds = [];
     const messageIds = [];
-    const hexIds = [];
+    const hexes = [];
     requests.forEach((request) => {
         if (hasText(request?.requestId)) requestIds.push(request.requestId.trim());
         if (hasText(request?.messageId)) messageIds.push(request.messageId.trim());
-        if (hasText(request?.hexId)) hexIds.push(request.hexId.trim());
+        const hex = getSnapshotRequestHex(request);
+        if (hasText(hex)) hexes.push(hex);
     });
     const parts = [];
     if (requestIds.length > 0) {
@@ -1750,8 +1746,8 @@ function formatObservedIds(snapshot) {
     if (messageIds.length > 0) {
         parts.push(`messageIds=${Array.from(new Set(messageIds)).slice(0, 3).join(', ')}`);
     }
-    if (hexIds.length > 0) {
-        parts.push(`hex=${Array.from(new Set(hexIds)).slice(0, 3).join(', ')}`);
+    if (hexes.length > 0) {
+        parts.push(`hex=${Array.from(new Set(hexes)).slice(0, 3).join(', ')}`);
     }
     return parts.length > 0 ? parts.join(' | ') : 'n/a';
 }
@@ -1808,7 +1804,7 @@ function formatObservedTitles(snapshot) {
             titles.add(`${String(directTitle).trim()}${statusSuffix}`);
             return;
         }
-        const byHex = resolveEventTitleByHex(request?.hexId);
+        const byHex = resolveEventTitleByHex(getSnapshotRequestHex(request));
         if (hasText(byHex)) {
             const statusSuffix = hasText(request?.status) ? ` [${String(request.status).trim()}]` : '';
             titles.add(`${byHex}${statusSuffix}`);
@@ -1816,7 +1812,7 @@ function formatObservedTitles(snapshot) {
     });
 
     requests.forEach((request) => {
-        const hex = request?.hexId;
+        const hex = getSnapshotRequestHex(request);
         const byHex = resolveEventTitleByHex(hex);
         if (hasText(byHex)) {
             const statusSuffix = hasText(request?.status) ? ` [${String(request.status).trim()}]` : '';
@@ -2289,7 +2285,6 @@ function normaliseEventRecordForUi(event) {
         icsType: source?.icsType ?? event.icsType ?? null,
         image,
         tagline: metadata?.tagline ?? event.tagline ?? null,
-        hexId: getEventHex(event) || null,
         hex: getEventHex(event) || null,
         approved: status?.isApproved === true || event.approved === true,
         status: status?.isHidden === true ? 'hidden' : event.status ?? null,
@@ -3264,7 +3259,7 @@ async function persistCurrentField(field, action = 'persist') {
     }
 
     const subject = {
-        hexId: hex,
+        hex,
         [config.subjectKey]: nextValue,
     };
 
@@ -3339,7 +3334,7 @@ async function requestGeneratedField(field, action = 'generate') {
     const payload = {
         realm: 'scouts',
         subject: {
-            hexId: hex,
+            hex,
         },
         action,
     };
@@ -3422,7 +3417,7 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide') {
 
     const hiddenAtIso = new Date().toISOString();
     const subject = {
-        hexId: hex,
+        hex,
         isHidden: true,
     };
 
@@ -3517,7 +3512,7 @@ async function unhideEvent(eventIndex, fromModal = false, action = 'unhide') {
     }
 
     const subject = {
-        hexId: hex,
+        hex,
         isHidden: false,
     };
 
@@ -3648,7 +3643,7 @@ async function approveEvent(eventIndex, fromModal = false, action = 'approve') {
     const payload = {
         realm: 'scouts',
         subject: {
-            hexId: hex,
+            hex,
             isApproved: true,
         },
         action,
