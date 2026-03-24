@@ -8,7 +8,7 @@ import {
   CopyObjectCommand,
 } from '@aws-sdk/client-s3';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
+import { SFNClient, ListExecutionsCommand, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
 import { randomUUID } from 'crypto';
 // Updated: Testing CI deployment mode to bypass environment parsing issues
 
@@ -23,6 +23,7 @@ const {
   REQUIRED_API_KEY,
   SCOUTS2SQS_FUNCTION_URL,
   SCOUTS_REQUESTS_QUEUE_URL: SCOUTS_REQUESTS_QUEUE_URL_ENV,
+  FULL_ENRICH_STATE_MACHINE_ARN,
 } = process.env;
 
 const DEFAULT_BUCKET = 'scouts-2ndtolworth-prod-553490163883';
@@ -1112,6 +1113,46 @@ const s3 = new S3Client({ region: process.env.AWS_REGION || 'eu-west-2' });
 const sqs = new SQSClient({ region: process.env.AWS_REGION || 'eu-west-2' });
 const sfn = new SFNClient({ region: process.env.AWS_REGION || 'eu-west-2' });
 const SCOUTS_REQUESTS_QUEUE_URL = SCOUTS_REQUESTS_QUEUE_URL_ENV || "https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests";
+const ACTIVE_EXECUTIONS_LIMIT = 20;
+
+async function listActiveFullEnrichExecutions() {
+  const stateMachineArn = trimOptionalText(FULL_ENRICH_STATE_MACHINE_ARN);
+  if (!stateMachineArn) {
+    return {
+      configured: false,
+      stateMachineArn: null,
+      activeExecutionCount: 0,
+      activeExecutions: [],
+    };
+  }
+
+  const response = await sfn.send(new ListExecutionsCommand({
+    stateMachineArn,
+    statusFilter: 'RUNNING',
+    maxResults: ACTIVE_EXECUTIONS_LIMIT,
+  }));
+
+  const activeExecutions = Array.isArray(response?.executions)
+    ? response.executions.map((execution) => ({
+        executionArn: execution?.executionArn ?? null,
+        name: execution?.name ?? null,
+        status: execution?.status ?? 'RUNNING',
+        startDate: execution?.startDate
+          ? new Date(execution.startDate).toISOString()
+          : null,
+        stopDate: execution?.stopDate
+          ? new Date(execution.stopDate).toISOString()
+          : null,
+      }))
+    : [];
+
+  return {
+    configured: true,
+    stateMachineArn,
+    activeExecutionCount: activeExecutions.length,
+    activeExecutions,
+  };
+}
 
 // Themed icons are configurable via optional S3 configuration; keep an empty default
 // so the runtime falls back to the static Scout logo when nothing is provided.
@@ -4619,6 +4660,20 @@ export async function lambdaHandler(event = {}) {
       console.warn('[HEX Image Verification] Error during HEX file image verification:', hexVerifyError?.message || String(hexVerifyError));
     }
 
+    let fullEnrichExecutions = null;
+    try {
+      fullEnrichExecutions = await listActiveFullEnrichExecutions();
+    } catch (stepFunctionsError) {
+      console.warn('[Step Functions] Failed to list active full-enrich executions:', stepFunctionsError?.message || String(stepFunctionsError));
+      fullEnrichExecutions = {
+        configured: Boolean(trimOptionalText(FULL_ENRICH_STATE_MACHINE_ARN)),
+        stateMachineArn: trimOptionalText(FULL_ENRICH_STATE_MACHINE_ARN),
+        activeExecutionCount: 0,
+        activeExecutions: [],
+        error: stepFunctionsError?.message || String(stepFunctionsError),
+      };
+    }
+
     const responseBody = {
       status: 'ok',
       eventsCount: trimmedAgenda.length,
@@ -4630,6 +4685,9 @@ export async function lambdaHandler(event = {}) {
       runtimeQueueSnapshots: {
         queued: summariseRuntimeQueueSnapshot(runtimeQueueSnapshots?.queuedSnapshot),
         processing: summariseRuntimeQueueSnapshot(runtimeQueueSnapshots?.processingSnapshot),
+      },
+      stepFunctions: {
+        fullEnrich: fullEnrichExecutions,
       },
       aiSummary: {
         processedEvent: aiContext.processedEvent ?? null,

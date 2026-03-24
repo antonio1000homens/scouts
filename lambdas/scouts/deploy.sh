@@ -54,6 +54,7 @@ BEAVERS_PROGRAMME_CALENDAR_URL="${BEAVERS_PROGRAMME_CALENDAR_URL:-}"
 SCOUTS_REQUESTS_QUEUE_ARN="${SCOUTS_REQUESTS_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsRequests}"
 SCOUTS_REQUESTS_QUEUE_URL="${SCOUTS_REQUESTS_QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests}"
 SCOUTS2SQS_FUNCTION_URL="${SCOUTS2SQS_FUNCTION_URL:-}"
+FULL_ENRICH_STATE_MACHINE_ARN="${FULL_ENRICH_STATE_MACHINE_ARN:-}"
 
 TEMPLATE_FILE="${ROOT_DIR}/cloudformation/templates/scouts.yaml"
 
@@ -159,6 +160,17 @@ if [ -z "${SCOUTS2SQS_FUNCTION_URL}" ]; then
   fi
 fi
 
+if [ -z "${FULL_ENRICH_STATE_MACHINE_ARN}" ]; then
+  DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN="$(aws cloudformation describe-stacks \
+    --region "${REGION}" \
+    --stack-name scouts-full-enrich \
+    --query "Stacks[0].Outputs[?OutputKey=='StateMachineArn'].OutputValue" \
+    --output text 2>/dev/null || true)"
+  if [ -n "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" ] && [ "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" != "None" ] && [ "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" != "null" ]; then
+    FULL_ENRICH_STATE_MACHINE_ARN="${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}"
+  fi
+fi
+
 echo -e "\n${YELLOW}Step 1: Build shared Lambda layer...${NC}"
 pushd "${SHARED_LAYER_DIR}/nodejs" >/dev/null
 if [ ! -f package.json ]; then
@@ -226,6 +238,7 @@ CFN_DEPLOY_ARGS+=(
     ScoutsRequestsQueueArn="${SCOUTS_REQUESTS_QUEUE_ARN}"
     ScoutsRequestsQueueUrl="${SCOUTS_REQUESTS_QUEUE_URL}"
     Scouts2SqsFunctionUrl="${SCOUTS2SQS_FUNCTION_URL}"
+    FullEnrichStateMachineArn="${FULL_ENRICH_STATE_MACHINE_ARN}"
 )
 
 aws cloudformation deploy \
