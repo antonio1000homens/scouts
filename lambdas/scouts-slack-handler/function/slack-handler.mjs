@@ -329,11 +329,17 @@ function ensureImageContainer(image) {
     };
 }
 
+function ensureMetadataObject(event) {
+    if (!event || typeof event !== 'object') return {};
+    if (!event.metadata || typeof event.metadata !== 'object') {
+        event.metadata = {};
+    }
+    return event.metadata;
+}
+
 function getTagline(event) {
     if (!event || typeof event !== 'object') return null;
-    const source = typeof event.tagline === 'string' && event.tagline.trim()
-        ? event.tagline
-        : event.AI;
+    const source = event.metadata?.tagline;
     if (typeof source !== 'string') return null;
     const trimmed = source.trim();
     return trimmed.length > 0 ? trimmed : null;
@@ -343,7 +349,33 @@ function normaliseTaglineFields(event) {
     if (!event || typeof event !== 'object') return;
     const tagline = getTagline(event);
     event.tagline = tagline;
-    event.AI = tagline;
+    if ('AI' in event) delete event.AI;
+}
+
+function ensureEditableMetadata(event) {
+    if (!event || typeof event !== 'object') return event;
+    const metadata = ensureMetadataObject(event);
+    metadata.hex = typeof metadata.hex === 'string' && metadata.hex.trim()
+        ? metadata.hex.trim().toLowerCase()
+        : (typeof event.hex === 'string' && event.hex.trim() ? event.hex.trim().toLowerCase() : null);
+    if (metadata.hex) {
+        event.hex = metadata.hex;
+    } else if ('hex' in event) {
+        delete event.hex;
+    }
+
+    metadata.tagline = getTagline(event);
+    metadata.image = ensureImageContainer(metadata.image ?? event.image);
+    metadata.status = metadata.status && typeof metadata.status === 'object'
+        ? {
+            isApproved: metadata.status.isApproved === true,
+            isHidden: metadata.status.isHidden === true,
+        }
+        : { isApproved: false, isHidden: false };
+
+    event.image = { ...metadata.image };
+    normaliseTaglineFields(event);
+    return event;
 }
 
 function extractInputValues(parsedPayload) {
@@ -422,10 +454,7 @@ function parseActionValue(rawValue) {
 
 function ensureEditableEvent(event) {
     const cloned = cloneEvent(event);
-    if (cloned.image && typeof cloned.image === 'object') {
-        cloned.image = { ...cloned.image };
-    }
-    normaliseTaglineFields(cloned);
+    ensureEditableMetadata(cloned);
     return cloned;
 }
 
@@ -437,12 +466,15 @@ function applyInputValuesToEvent(event, inputValues = {}) {
     const { tagline, imageTheme, imageUrl } = inputValues;
 
     if (tagline !== undefined) {
+        const metadata = ensureMetadataObject(event);
+        metadata.tagline = tagline;
         event.tagline = tagline;
-        event.AI = tagline;
+        if ('AI' in event) delete event.AI;
     }
 
     if (imageTheme !== undefined || imageUrl !== undefined) {
-        const currentImage = typeof event.image === 'object' ? { ...event.image } : {};
+        const metadata = ensureMetadataObject(event);
+        const currentImage = ensureImageContainer(metadata.image ?? event.image);
         if (imageTheme !== undefined) {
             currentImage.theme = imageTheme;
             if ('prompt' in currentImage) delete currentImage.prompt;
@@ -450,6 +482,7 @@ function applyInputValuesToEvent(event, inputValues = {}) {
         if (imageUrl !== undefined) {
             currentImage.url = imageUrl;
         }
+        metadata.image = currentImage;
         event.image = currentImage;
     }
 }
@@ -462,19 +495,24 @@ function updateEventField(event, field, value) {
     switch (field) {
         case 'AI':
         case 'tagline':
-            event.AI = value;
+            ensureMetadataObject(event).tagline = value;
             event.tagline = value;
+            if ('AI' in event) delete event.AI;
             break;
         case 'image.theme': {
-            const currentImage = typeof event.image === 'object' ? { ...event.image } : {};
+            const metadata = ensureMetadataObject(event);
+            const currentImage = ensureImageContainer(metadata.image ?? event.image);
             currentImage.theme = value;
             if ('prompt' in currentImage) delete currentImage.prompt;
+            metadata.image = currentImage;
             event.image = currentImage;
             break;
         }
         case 'image.url': {
-            const currentImage = typeof event.image === 'object' ? { ...event.image } : {};
+            const metadata = ensureMetadataObject(event);
+            const currentImage = ensureImageContainer(metadata.image ?? event.image);
             currentImage.url = value;
+            metadata.image = currentImage;
             event.image = currentImage;
             break;
         }
@@ -515,7 +553,7 @@ function buildEditModalView({
     approveAction = 'persist',
 }) {
     const event = { ...(eventData ?? {}) };
-    normaliseTaglineFields(event);
+    ensureEditableMetadata(event);
     const image = ensureImageContainer(event.image);
     const title = event.title ?? event.summary ?? event.name ?? 'Scouts event';
     const privateMetadata = JSON.stringify({
@@ -755,6 +793,7 @@ async function handleEditModalSubmission(parsedPayload) {
         subject: baseEvent,
     };
     normaliseTaglineFields(payload.subject);
+    ensureEditableMetadata(payload.subject);
 
     if (channel || ts || responseUrl || metadata.previewText) {
         payload.slackMetadata = {
@@ -845,7 +884,7 @@ export async function lambdaHandler(event) {
                 // Extract event data and metadata from the action payload
                 const { event: parsedEvent, meta: actionMeta } = parseActionValue(action.value);
                 const eventData = ensureEditableEvent(parsedEvent);
-                normaliseTaglineFields(eventData);
+                ensureEditableMetadata(eventData);
                 console.log('[Debug] Parsed event data keys:', Object.keys(eventData).sort());
                 console.log('[Debug] Parsed event data (first 1000 chars):', JSON.stringify(eventData).substring(0, 1000));
                 
@@ -952,7 +991,13 @@ export async function lambdaHandler(event) {
                         realm,
                         subject: {
                             ...eventData,
-                            status: 'hidden',
+                            metadata: {
+                                ...(eventData.metadata && typeof eventData.metadata === 'object' ? eventData.metadata : {}),
+                                status: {
+                                    ...((eventData.metadata && typeof eventData.metadata.status === 'object') ? eventData.metadata.status : {}),
+                                    isHidden: true,
+                                },
+                            },
                         },
                         action: 'hidden',
                         slackMetadata: {

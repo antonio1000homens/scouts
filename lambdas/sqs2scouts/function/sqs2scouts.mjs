@@ -903,9 +903,6 @@ function ensureRuntimeMetadata(event, fallbackHex = null) {
 
     const hexValue = normalizeLegacyText(
         metadata.hex
-        ?? event.hex
-        ?? metadata.hexId
-        ?? event.hexId
         ?? fallbackHex
     );
     if (hexValue) {
@@ -915,24 +912,15 @@ function ensureRuntimeMetadata(event, fallbackHex = null) {
     } else if ('hex' in event) {
         delete event.hex;
     }
-    if ('hexId' in metadata) {
-        delete metadata.hexId;
-    }
-    if ('hexId' in event) {
-        delete event.hexId;
-    }
-
-    const tagline = normalizeLegacyText(metadata.tagline ?? event.tagline ?? event.AI ?? event.ai);
+    const tagline = normalizeLegacyText(metadata.tagline);
     metadata.tagline = tagline;
     event.tagline = tagline;
 
-    const legacyImage = event.image && typeof event.image === 'object' ? event.image : {};
     const metadataImage = metadata.image && typeof metadata.image === 'object' ? metadata.image : {};
     const imageTheme = normalizeLegacyText(
         metadataImage.theme
-        ?? legacyImage.theme
     );
-    const imageUrl = normalizeLegacyText(metadataImage.url ?? legacyImage.url);
+    const imageUrl = normalizeLegacyText(metadataImage.url);
     event.image = ensureImageContainer({
         theme: imageTheme,
         url: imageUrl,
@@ -942,23 +930,9 @@ function ensureRuntimeMetadata(event, fallbackHex = null) {
         url: imageUrl,
     };
 
-    const legacyStatusObject = event.status && typeof event.status === 'object' ? event.status : null;
     const metadataStatus = metadata.status && typeof metadata.status === 'object' ? metadata.status : {};
-    const statusStringHidden = typeof event.status === 'string' && event.status.trim().toLowerCase() === 'hidden';
-    const isApproved = firstDefinedBoolean(
-        metadataStatus.isApproved,
-        legacyStatusObject?.isApproved,
-        event.isApproved,
-        event.approved
-    ) ?? false;
-    const isHidden = firstDefinedBoolean(
-        metadataStatus.isHidden,
-        legacyStatusObject?.isHidden,
-        event.isHidden,
-        event.hidden,
-        statusStringHidden ? true : null,
-        event.hiddenAt ? true : null
-    ) ?? false;
+    const isApproved = firstDefinedBoolean(metadataStatus.isApproved) ?? false;
+    const isHidden = firstDefinedBoolean(metadataStatus.isHidden) ?? false;
 
     metadata.status = {
         isApproved,
@@ -1011,10 +985,7 @@ function removeTopLevelFieldsDuplicatedByMetadata(event) {
 
 function normalizeHexEventShape(eventData, fallbackHex = null) {
     if (!eventData || typeof eventData !== 'object') return eventData;
-    const normalized = ensureRuntimeMetadata(eventData, fallbackHex);
-    if ('AI' in normalized) delete normalized.AI;
-    if ('ai' in normalized) delete normalized.ai;
-    return normalized;
+    return ensureRuntimeMetadata(eventData, fallbackHex);
 }
 
 function getTagline(event) {
@@ -1029,12 +1000,6 @@ function setTagline(event, value) {
     }
     event.metadata.tagline = finalValue;
     event.tagline = finalValue;
-    if ('AI' in event) {
-        delete event.AI;
-    }
-    if ('ai' in event) {
-        delete event.ai;
-    }
 }
 
 function setImageApprovalState(event, isApproved) {

@@ -786,9 +786,6 @@ function ensureRuntimeMetadata(event, fallbackHex = null) {
 
     const hexValue = normalizeNullableText(
         metadata.hex
-        ?? event.hex
-        ?? event.hexId
-        ?? metadata.hexId
         ?? fallbackHex
     );
     if (hexValue) {
@@ -798,28 +795,15 @@ function ensureRuntimeMetadata(event, fallbackHex = null) {
     } else if ('hex' in event) {
         delete event.hex;
     }
-    if ('hexId' in metadata) {
-        delete metadata.hexId;
-    }
-    if ('hexId' in event) {
-        delete event.hexId;
-    }
-
-    const tagline = normalizeNullableText(metadata.tagline ?? event.tagline ?? event.AI ?? event.ai);
+    const tagline = normalizeNullableText(metadata.tagline);
     metadata.tagline = tagline;
     event.tagline = tagline;
-    if ('AI' in event) delete event.AI;
-    if ('ai' in event) delete event.ai;
 
-    const legacyImage = event.image && typeof event.image === 'object' ? event.image : {};
     const metadataImage = metadata.image && typeof metadata.image === 'object' ? metadata.image : {};
     const imageTheme = normalizeNullableText(
         metadataImage.theme
-        ?? metadataImage.prompt
-        ?? legacyImage.theme
-        ?? legacyImage.prompt
     );
-    const imageUrl = normalizeNullableText(metadataImage.url ?? legacyImage.url);
+    const imageUrl = normalizeNullableText(metadataImage.url);
     metadata.image = {
         theme: imageTheme,
         url: imageUrl,
@@ -829,16 +813,10 @@ function ensureRuntimeMetadata(event, fallbackHex = null) {
         url: imageUrl,
     });
 
-    const legacyStatus = event.status && typeof event.status === 'object' ? event.status : {};
     const metadataStatus = metadata.status && typeof metadata.status === 'object' ? metadata.status : {};
-    const statusStringHidden = typeof event.status === 'string' && event.status.trim().toLowerCase() === 'hidden';
     metadata.status = {
-        isApproved: normalizeOptionalBoolean(
-            metadataStatus.isApproved ?? legacyStatus.isApproved ?? event.isApproved ?? event.approved
-        ) ?? false,
-        isHidden: normalizeOptionalBoolean(
-            metadataStatus.isHidden ?? legacyStatus.isHidden ?? event.isHidden ?? event.hidden ?? (statusStringHidden ? true : null) ?? (event.hiddenAt ? true : null)
-        ) ?? false,
+        isApproved: normalizeOptionalBoolean(metadataStatus.isApproved) ?? false,
+        isHidden: normalizeOptionalBoolean(metadataStatus.isHidden) ?? false,
     };
 
     event.metadata = metadata;
@@ -932,7 +910,7 @@ function buildPersistPatchForProcessing(rawSubject) {
         throw new Error('Persist request subject must be an object');
     }
 
-    const hexValue = normalizeNullableText(compactSubject.hexId ?? compactSubject.hex)?.toLowerCase();
+    const hexValue = normalizeNullableText(compactSubject.metadata?.hex ?? compactSubject.hex)?.toLowerCase();
     if (!hexValue) {
         throw new Error('Persist request missing hex identifier');
     }
@@ -940,46 +918,31 @@ function buildPersistPatchForProcessing(rawSubject) {
     const patch = {};
     ensureRuntimeMetadata(compactSubject, hexValue);
 
-    if (
-        Object.prototype.hasOwnProperty.call(compactSubject, 'tagline')
-        || Object.prototype.hasOwnProperty.call(compactSubject, 'AI')
-        || Object.prototype.hasOwnProperty.call(compactSubject, 'ai')
-        || Object.prototype.hasOwnProperty.call(compactSubject.metadata ?? {}, 'tagline')
-    ) {
+    if (Object.prototype.hasOwnProperty.call(compactSubject.metadata ?? {}, 'tagline')) {
         patch.metadata = patch.metadata && typeof patch.metadata === 'object' ? patch.metadata : {};
         patch.metadata.tagline = normalizeNullableText(compactSubject.metadata?.tagline);
     }
 
-    if (
-        Object.prototype.hasOwnProperty.call(compactSubject, 'imageTheme')
-        || Object.prototype.hasOwnProperty.call(compactSubject, 'image')
-        || Object.prototype.hasOwnProperty.call(compactSubject.metadata ?? {}, 'image')
-    ) {
+    if (Object.prototype.hasOwnProperty.call(compactSubject.metadata ?? {}, 'image')) {
         patch.metadata = patch.metadata && typeof patch.metadata === 'object' ? patch.metadata : {};
         patch.metadata.image = patch.metadata.image && typeof patch.metadata.image === 'object'
             ? patch.metadata.image
             : {};
         patch.metadata.image.theme = normalizeNullableText(
             compactSubject.metadata?.image?.theme
-            ?? compactSubject.imageTheme
         );
     }
-    if (
-        Object.prototype.hasOwnProperty.call(compactSubject, 'imageUrl')
-        || Object.prototype.hasOwnProperty.call(compactSubject, 'image')
-        || Object.prototype.hasOwnProperty.call(compactSubject.metadata ?? {}, 'image')
-    ) {
+    if (Object.prototype.hasOwnProperty.call(compactSubject.metadata ?? {}, 'image')) {
         patch.metadata = patch.metadata && typeof patch.metadata === 'object' ? patch.metadata : {};
         patch.metadata.image = patch.metadata.image && typeof patch.metadata.image === 'object'
             ? patch.metadata.image
             : {};
         patch.metadata.image.url = normalizeNullableText(
             compactSubject.metadata?.image?.url
-            ?? compactSubject.imageUrl
         );
     }
 
-    const isHidden = normalizeOptionalBoolean(compactSubject.metadata?.status?.isHidden ?? compactSubject.isHidden);
+    const isHidden = normalizeOptionalBoolean(compactSubject.metadata?.status?.isHidden);
     if (isHidden !== null) {
         patch.metadata = patch.metadata && typeof patch.metadata === 'object' ? patch.metadata : {};
         patch.metadata.status = patch.metadata.status && typeof patch.metadata.status === 'object'
@@ -988,7 +951,7 @@ function buildPersistPatchForProcessing(rawSubject) {
         patch.metadata.status.isHidden = isHidden;
     }
 
-    const isApproved = normalizeOptionalBoolean(compactSubject.metadata?.status?.isApproved ?? compactSubject.isApproved);
+    const isApproved = normalizeOptionalBoolean(compactSubject.metadata?.status?.isApproved);
     if (isApproved !== null) {
         patch.metadata = patch.metadata && typeof patch.metadata === 'object' ? patch.metadata : {};
         patch.metadata.status = patch.metadata.status && typeof patch.metadata.status === 'object'
