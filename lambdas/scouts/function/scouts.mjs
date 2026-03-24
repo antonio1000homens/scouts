@@ -3121,10 +3121,66 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
   };
 }
 
+function formatInvocationResponse({ isHttpInvocation, corsHeaders, statusCode, body, headers = {} }) {
+  const responseBody = typeof body === 'string' ? body : JSON.stringify(body);
+
+  if (isHttpInvocation) {
+    return {
+      statusCode,
+      headers: {
+        ...corsHeaders,
+        ...headers,
+      },
+      body: responseBody,
+    };
+  }
+
+  if (body === '') {
+    return {
+      statusCode,
+      status: 'ok',
+    };
+  }
+
+  if (typeof body === 'string') {
+    try {
+      return JSON.parse(body);
+    } catch (_) {
+      return {
+        statusCode,
+        body,
+      };
+    }
+  }
+
+  if (body && typeof body === 'object') {
+    return body;
+  }
+
+  return {
+    statusCode,
+    body,
+  };
+}
+
 export async function lambdaHandler(event = {}) {
   const corsHeaders = {
     'Content-Type': 'application/json',
   };
+  const isHttpInvocation = Boolean(
+    event?.requestContext?.http
+    || event?.httpMethod
+    || event?.headers
+    || event?.queryStringParameters
+    || typeof event?.body !== 'undefined'
+  );
+  const respond = (statusCode, body, headers = {}) => formatInvocationResponse({
+    isHttpInvocation,
+    corsHeaders,
+    statusCode,
+    body,
+    headers,
+  });
 
   // Check for X-Blocked header and rate limit information
   const headers = event?.headers || {};
@@ -3154,19 +3210,14 @@ export async function lambdaHandler(event = {}) {
       sourceIp: event?.requestContext?.http?.sourceIp || event?.requestContext?.identity?.sourceIp
     });
     
-    return {
-      statusCode: 429,
-      headers: {
-        ...corsHeaders,
-        'X-Blocked': 'true',
-        'Retry-After': rateLimitReset || '3600'
-      },
-      body: JSON.stringify({
-        status: 'blocked',
-        message: 'Request blocked due to rate limiting',
-        retryAfter: rateLimitReset ? `${rateLimitReset} seconds` : 'unknown'
-      })
-    };
+    return respond(429, {
+      status: 'blocked',
+      message: 'Request blocked due to rate limiting',
+      retryAfter: rateLimitReset ? `${rateLimitReset} seconds` : 'unknown'
+    }, {
+      'X-Blocked': 'true',
+      'Retry-After': rateLimitReset || '3600'
+    });
   }
 
   const bucket = TARGET_BUCKET || DEFAULT_BUCKET;
@@ -3220,23 +3271,12 @@ export async function lambdaHandler(event = {}) {
 
   const method = (event?.requestContext?.http?.method || event?.httpMethod || 'POST').toUpperCase();
   if (method === 'OPTIONS') {
-    return {
-      statusCode: 200,
-      headers: corsHeaders,
-      body: '',
-    };
+    return respond(200, '');
   }
   const queryParams = event?.queryStringParameters || {};
   const multiValueHeaders = event?.multiValueHeaders || {};
   const multiValueQueryParams = event?.multiValueQueryStringParameters || {};
   const bodyParams = decodeRequestBody(event);
-  const isHttpInvocation = Boolean(
-    event?.requestContext?.http
-    || event?.httpMethod
-    || event?.headers
-    || event?.queryStringParameters
-    || typeof event?.body !== 'undefined'
-  );
 
   console.log('[Invocation] Request payload', sanitizeLogValue(
     isHttpInvocation
@@ -3301,11 +3341,7 @@ export async function lambdaHandler(event = {}) {
       method,
     });
 
-    return {
-      statusCode: 403,
-      headers: corsHeaders,
-      body: JSON.stringify({ error: 'Forbidden: Invalid API Key' }),
-    };
+    return respond(403, { error: 'Forbidden: Invalid API Key' });
   }
 
   const normaliseOptionalString = (value) => {
@@ -4849,21 +4885,13 @@ export async function lambdaHandler(event = {}) {
       };
     }
 
-    return {
-      statusCode: 200,
-      headers: corsHeaders,
-      body: JSON.stringify(responseBody),
-    };
+    return respond(200, responseBody);
   } catch (error) {
     console.error('Failed to refresh scout calendars', error);
-    return {
-      statusCode: 500,
-      headers: corsHeaders,
-      body: JSON.stringify({
-        status: 'error',
-        message: error.message,
-      }),
-    };
+    return respond(500, {
+      status: 'error',
+      message: error.message,
+    });
   } finally {
     if (isScoutsExecutionCommand) {
       await touchQueuedRuntimeSnapshot(bucket);
