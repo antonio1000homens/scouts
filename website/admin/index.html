@@ -222,6 +222,13 @@
                 <div id="requests-list" class="request-list request-list-scrollable request-sidebar-scrollable">
                     <p class="refresh-status">No active requests.</p>
                 </div>
+                <div class="requests-sidebar-toolbar">
+                    <span id="image-enrich-count" class="request-section-count">0 image workflows</span>
+                    <p id="image-enrich-updated" class="refresh-status requests-overview-updated">Last refresh: n/a</p>
+                </div>
+                <div id="image-enrich-list" class="request-list request-list-scrollable request-sidebar-scrollable">
+                    <p class="refresh-status">No active image workflows.</p>
+                </div>
             </aside>
         </div>
 
@@ -298,7 +305,7 @@
                                 class="btn btn-secondary requires-api"
                                 value="generateFull"
                                 onclick="requestGeneratedField('full', this.value)"
-                            >Request Full Enrichment</button>
+                            >Request Image Enrichment</button>
                         </div>
                     </div>
 

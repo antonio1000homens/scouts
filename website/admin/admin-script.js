@@ -45,6 +45,8 @@ let statusPollingTimer = null;
 let statusPollingInFlight = false;
 let latestCompletedRequests = [];
 let latestCompletedRequestsUpdatedAt = null;
+let latestImageEnrichExecutions = [];
+let latestImageEnrichUpdatedAt = null;
 let showArchivedRequests = false;
 let showStalledRequests = false;
 let cachedScoutsConfig = null;
@@ -1127,6 +1129,85 @@ function updateCompletedRequestsFromResult(result) {
             : new Date().toISOString();
         setCompletedRequests(completedRequests, updatedAt);
     }
+}
+
+function renderImageEnrichExecutions() {
+    const updatedEl = document.getElementById('image-enrich-updated');
+    const countEl = document.getElementById('image-enrich-count');
+    const listEl = document.getElementById('image-enrich-list');
+    if (!updatedEl || !countEl || !listEl) return;
+
+    const entries = Array.isArray(latestImageEnrichExecutions) ? latestImageEnrichExecutions : [];
+    countEl.textContent = `${entries.length} image workflow${entries.length === 1 ? '' : 's'}`;
+    if (latestImageEnrichUpdatedAt) {
+        const parsed = new Date(latestImageEnrichUpdatedAt);
+        updatedEl.textContent = `Last refresh: ${Number.isNaN(parsed.getTime()) ? latestImageEnrichUpdatedAt : parsed.toLocaleString('en-GB')}`;
+    } else {
+        updatedEl.textContent = 'Last refresh: n/a';
+    }
+
+    if (entries.length === 0) {
+        listEl.innerHTML = '<p class="refresh-status">No active image workflows.</p>';
+        return;
+    }
+
+    listEl.innerHTML = entries.map((entry) => {
+        const title = hasText(entry?.hex) ? entry.hex.trim() : (hasText(entry?.name) ? entry.name.trim() : 'Unknown workflow');
+        const badge = hasText(entry?.status) ? entry.status.trim().toLowerCase() : 'running';
+        const badgeClass = badge === 'running' ? 'badge-processing' : 'badge-completed';
+        const startedAt = hasText(entry?.startDate) ? formatTrackerTimestamp(entry.startDate) : 'n/a';
+        const currentStage = hasText(entry?.currentStage) ? entry.currentStage.trim() : 'waiting';
+        const workerStatus = hasText(entry?.workerStatus) ? entry.workerStatus.trim() : 'running';
+        const requestId = hasText(entry?.requestId) ? entry.requestId.trim() : 'n/a';
+        const executionArn = hasText(entry?.executionArn) ? entry.executionArn.trim() : 'n/a';
+        return `
+            <article class="request-card">
+                <div class="request-card-header">
+                    <div class="request-card-lead">
+                        <div class="request-card-time"${hasText(entry?.startDate) ? ` title="${escapeHtml(entry.startDate)}"` : ''}>${escapeHtml(startedAt)}</div>
+                        <div class="request-card-title">
+                            <span class="request-card-title-text">${escapeHtml(title)}</span>
+                            <span class="request-card-title-action">${escapeHtml(currentStage)}</span>
+                        </div>
+                        <div class="request-card-subtitle">${escapeHtml(workerStatus)}</div>
+                    </div>
+                    <span class="request-card-badge ${badgeClass}">${escapeHtml(String(badge).toUpperCase())}</span>
+                </div>
+                <details class="request-card-meta-toggle">
+                    <summary>Execution metadata</summary>
+                    <div class="request-card-meta-grid">
+                        <div class="request-card-meta-row"><div class="request-card-meta-label">Request ID</div><div class="request-card-meta-value">${escapeHtml(requestId)}</div></div>
+                        <div class="request-card-meta-row"><div class="request-card-meta-label">Execution</div><div class="request-card-meta-value">${escapeHtml(executionArn)}</div></div>
+                    </div>
+                </details>
+            </article>
+        `;
+    }).join('');
+}
+
+function setImageEnrichExecutions(entries, updatedAt = null) {
+    latestImageEnrichExecutions = Array.isArray(entries) ? entries : [];
+    latestImageEnrichUpdatedAt = hasText(updatedAt) ? updatedAt : null;
+    renderImageEnrichExecutions();
+}
+
+function updateImageEnrichExecutionsFromResult(result) {
+    const imageEnrich = result?.stepFunctions?.imageEnrich;
+    if (!imageEnrich || typeof imageEnrich !== 'object') {
+        return;
+    }
+    const executions = Array.isArray(imageEnrich.executions)
+        ? imageEnrich.executions
+        : (Array.isArray(imageEnrich.activeExecutions) ? imageEnrich.activeExecutions : []);
+    setImageEnrichExecutions(
+        executions,
+        hasText(result?.generatedAt) ? result.generatedAt : new Date().toISOString(),
+    );
+}
+
+function updateRuntimePanelsFromResult(result) {
+    updateCompletedRequestsFromResult(result);
+    updateImageEnrichExecutionsFromResult(result);
 }
 
 function readCookie(name) {
@@ -2911,7 +2992,7 @@ async function refreshLambda(action = 'refreshAgenda') {
     try {
         const result = await sendScoutsCommand(payload);
         await pollQueueDepthSnapshots();
-        updateCompletedRequestsFromResult(result);
+        updateRuntimePanelsFromResult(result);
 
         const modifiedEvents = Array.isArray(result?.modifiedEvents) ? result.modifiedEvents : [];
         const modifiedCount = Number.isFinite(result?.modifiedEventsCount)
@@ -2971,7 +3052,7 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
     try {
         const result = await sendScoutsCommand(payload);
         await pollQueueDepthSnapshots();
-        updateCompletedRequestsFromResult(result);
+        updateRuntimePanelsFromResult(result);
         const count = Number.isFinite(result?.eventsCount) ? result.eventsCount : null;
         const generatedAt = result?.generatedAt ? new Date(result.generatedAt).toLocaleString('en-GB') : null;
         const countSuffix = count !== null ? ` (${count} events in agenda)` : '';
@@ -3005,7 +3086,7 @@ async function invokeLambdaHeartbeat() {
         };
         const result = await sendScoutsCommand(payload);
         await pollQueueDepthSnapshots();
-        updateCompletedRequestsFromResult(result);
+        updateRuntimePanelsFromResult(result);
     } catch (error) {
         console.warn('[Admin] Auto lambda heartbeat failed:', error?.message || error);
     } finally {

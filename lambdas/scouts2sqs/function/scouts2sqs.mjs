@@ -1,6 +1,6 @@
 import { SQSClient, SendMessageCommand, GetQueueAttributesCommand } from '@aws-sdk/client-sqs';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
-import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
+import { SFNClient, ListExecutionsCommand, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import https from 'https';
 import crypto from 'crypto';
 
@@ -14,7 +14,7 @@ const SCOUTS_REQUESTS_QUEUE_URL_FALLBACK =
     || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests';
 const QUEUED_REQUESTS_RUNTIME_KEY = 'runtime/scoutsQueued.json';
 const PROCESSING_REQUESTS_RUNTIME_KEY = 'runtime/scoutsProcessing.json';
-const FULL_ENRICH_STATE_MACHINE_ARN = process.env.FULL_ENRICH_STATE_MACHINE_ARN || '';
+const IMAGE_ENRICH_STATE_MACHINE_ARN = process.env.IMAGE_ENRICH_STATE_MACHINE_ARN || '';
 
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'eu-west-2' });
 const sqsClient = new SQSClient({ region: process.env.AWS_REGION || 'eu-west-2' });
@@ -458,10 +458,10 @@ function getOptionalOrchestrationMetadata(payload) {
     return metadata;
 }
 
-function isFullEnrichRequest(payload) {
+function isImageEnrichRequest(payload) {
     const realm = typeof payload?.realm === 'string' ? payload.realm.trim() : '';
     const action = typeof payload?.action === 'string' ? payload.action.trim() : '';
-    return realm === 'scoutsRequest' && action === 'fullEnrich';
+    return realm === 'scoutsRequest' && action === 'imageEnrich';
 }
 
 function normalizeFlowMode(value, fallback) {
@@ -470,60 +470,115 @@ function normalizeFlowMode(value, fallback) {
     return normalized || fallback;
 }
 
-function buildExecutionName(requestId, hex) {
-    const requestToken = String(requestId ?? crypto.randomUUID())
+function buildImageEnrichHexToken(hex) {
+    const normalizedHex = String(hex ?? '')
         .toLowerCase()
-        .replace(/[^a-z0-9-]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '')
-        .slice(0, 40) || 'request';
-    const hexToken = String(hex ?? 'hex')
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '')
-        .slice(0, 40) || 'hex';
-    const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
-    return `${hexToken}-${requestToken}-${timestamp}`.slice(0, 80);
+        .replace(/[^a-f0-9]/g, '');
+    const visiblePrefix = normalizedHex.slice(0, 12) || 'hex';
+    const hash = crypto.createHash('sha256')
+        .update(normalizedHex || 'hex')
+        .digest('hex')
+        .slice(0, 16);
+    return `${visiblePrefix}-${hash}`;
 }
 
-function buildFullEnrichExecutionInput(payload, context = {}) {
-    const subject = ensureObjectSubject(parseJsonSubject(payload?.subject) ?? payload?.subject);
-    applySanitizedUidToSubject(subject);
-    ensureRuntimeMetadata(subject);
+function buildImageEnrichExecutionPrefix(hex) {
+    return `image-${buildImageEnrichHexToken(hex)}`.slice(0, 64);
+}
 
+function buildImageEnrichExecutionName(hex) {
+    const prefix = buildImageEnrichExecutionPrefix(hex);
+    const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+    return `${prefix}-${timestamp}`.slice(0, 80);
+}
+
+async function findActiveImageEnrichExecution(hex) {
+    if (!IMAGE_ENRICH_STATE_MACHINE_ARN) {
+        return null;
+    }
+    const executionPrefix = buildImageEnrichExecutionPrefix(hex);
+    let nextToken = undefined;
+
+    do {
+        const response = await sfnClient.send(new ListExecutionsCommand({
+            stateMachineArn: IMAGE_ENRICH_STATE_MACHINE_ARN,
+            statusFilter: 'RUNNING',
+            maxResults: 100,
+            ...(nextToken ? { nextToken } : {}),
+        }));
+        const match = Array.isArray(response?.executions)
+            ? response.executions.find((execution) => {
+                const name = typeof execution?.name === 'string' ? execution.name.trim() : '';
+                return name.startsWith(executionPrefix);
+            })
+            : null;
+        if (match) {
+            return match;
+        }
+        nextToken = typeof response?.nextToken === 'string' && response.nextToken.trim()
+            ? response.nextToken.trim()
+            : undefined;
+    } while (nextToken);
+
+    return null;
+}
+
+function buildImageEnrichExecutionInput(payload, context = {}, executionName = null) {
     const hex = getHexHintFromMessageBody({
         ...payload,
-        subject,
     });
     if (!hex) {
-        throw new Error('fullEnrich request missing hex identifier');
+        throw new Error('imageEnrich request missing hex identifier');
     }
 
     return {
-        requestId: context?.requestId ?? String(payload?.requestId ?? crypto.randomUUID()),
+        requestId: executionName ?? context?.requestId ?? buildImageEnrichExecutionName(hex),
         hex,
         requestHex: context?.hex ?? hex,
         source: typeof payload?.source === 'string' && payload.source.trim() ? payload.source.trim() : 'scouts2sqs',
-        orchestrationType: 'fullEnrich',
+        orchestrationType: 'imageEnrich',
         requestMode: normalizeFlowMode(payload?.requestMode, 'auto'),
         approvalMode: normalizeFlowMode(payload?.approvalMode, 'auto'),
-        subject,
     };
 }
 
-async function startFullEnrichExecution(payload, context = {}) {
-    if (!FULL_ENRICH_STATE_MACHINE_ARN) {
-        throw new Error('FULL_ENRICH_STATE_MACHINE_ARN is not configured');
+async function startImageEnrichExecution(payload, context = {}) {
+    if (!IMAGE_ENRICH_STATE_MACHINE_ARN) {
+        throw new Error('IMAGE_ENRICH_STATE_MACHINE_ARN is not configured');
     }
 
-    const input = buildFullEnrichExecutionInput(payload, context);
+    const hex = getHexHintFromMessageBody(payload);
+    if (!hex) {
+        throw new Error('imageEnrich request missing hex identifier');
+    }
+
+    const existingExecution = await findActiveImageEnrichExecution(hex);
+    if (existingExecution) {
+        const reusedInput = buildImageEnrichExecutionInput(payload, context, existingExecution.name);
+        console.log('[StepFunctions] Reusing active imageEnrich execution', {
+            stateMachineArn: IMAGE_ENRICH_STATE_MACHINE_ARN,
+            executionArn: existingExecution.executionArn ?? null,
+            hex,
+            requestId: reusedInput.requestId,
+        });
+        return {
+            executionArn: existingExecution.executionArn ?? null,
+            startDate: existingExecution.startDate ?? null,
+            input: reusedInput,
+            reused: true,
+        };
+    }
+
+    const executionName = buildImageEnrichExecutionName(hex);
+    const input = buildImageEnrichExecutionInput(payload, context, executionName);
     const command = new StartExecutionCommand({
-        stateMachineArn: FULL_ENRICH_STATE_MACHINE_ARN,
-        name: buildExecutionName(input.requestId, input.hex),
+        stateMachineArn: IMAGE_ENRICH_STATE_MACHINE_ARN,
+        name: executionName,
         input: JSON.stringify(input),
     });
     const response = await sfnClient.send(command);
-    console.log('[StepFunctions] Started fullEnrich execution', {
-        stateMachineArn: FULL_ENRICH_STATE_MACHINE_ARN,
+    console.log('[StepFunctions] Started imageEnrich execution', {
+        stateMachineArn: IMAGE_ENRICH_STATE_MACHINE_ARN,
         executionArn: response?.executionArn ?? null,
         hex: input.hex,
         requestId: input.requestId,
@@ -532,6 +587,7 @@ async function startFullEnrichExecution(payload, context = {}) {
         executionArn: response?.executionArn ?? null,
         startDate: response?.startDate ?? null,
         input,
+        reused: false,
     };
 }
 
@@ -1242,13 +1298,13 @@ export async function lambdaHandler(event) {
                         continue;
                     }
 
-                    if (isFullEnrichRequest(messageBody)) {
+                    if (isImageEnrichRequest(messageBody)) {
                         try {
                             const orchestratedPayload = withRequestContext(messageBody, requestContext);
-                            await startFullEnrichExecution(orchestratedPayload, requestContext);
-                            console.log('[scoutsRequest] fullEnrich request started successfully');
+                            await startImageEnrichExecution(orchestratedPayload, requestContext);
+                            console.log('[scoutsRequest] imageEnrich request started successfully');
                         } catch (error) {
-                            console.error(`[scoutsRequest] Failed to start fullEnrich execution: ${error.message}`);
+                            console.error(`[scoutsRequest] Failed to start imageEnrich execution: ${error.message}`);
                         }
                         continue;
                     }
@@ -1286,32 +1342,41 @@ export async function lambdaHandler(event) {
                             targetAction = 'request';
                             console.log(`[scoutsRequest] Tagline needed for hex: ${hexValue}`);
                         } else if (!getImageThemeValue(rawSubject)) {
-                            // Need image prompt generation
-                            targetRealm = 'imageTheme';
-                            targetAction = 'request';
-                            console.log(`[scoutsRequest] Image prompt needed for hex: ${hexValue}`);
+                            targetRealm = 'imageEnrich';
+                            targetAction = 'imageEnrich';
+                            console.log(`[scoutsRequest] Image enrichment workflow needed for hex: ${hexValue}`);
                         } else if (!getImageUrlValue(rawSubject)) {
-                            // Need a generated event image
-                            targetRealm = 'image';
-                            targetAction = 'request';
-                            console.log(`[scoutsRequest] Event image needed for hex: ${hexValue}`);
+                            targetRealm = 'imageEnrich';
+                            targetAction = 'imageEnrich';
+                            console.log(`[scoutsRequest] Image generation workflow needed for hex: ${hexValue}`);
                         } else {
                             console.log(`[scoutsRequest] Subject appears complete for hex: ${hexValue}`);
                             continue;
                         }
                         
                         if (targetRealm) {
-                            // Send request to scoutsProcessing queue (NOT scoutsRequests queue)
-                            const scoutsPayload = {
-                                realm: targetRealm,
-                                subject: hexValue,
-                                action: targetAction ?? 'request'
-                            };
-                            
-                            const finalScoutsPayload = withRequestContext(scoutsPayload, requestContext);
-                            console.log(`[scoutsRequest] Sending to scoutsProcessing queue:`, JSON.stringify(finalScoutsPayload));
-                            await sendToSQS(finalScoutsPayload);
-                            console.log(`[scoutsRequest] ${rawAction} processed - sent ${targetRealm} request`);
+                            if (targetRealm === 'imageEnrich') {
+                                const orchestrationPayload = withRequestContext({
+                                    realm: 'scoutsRequest',
+                                    action: 'imageEnrich',
+                                    subject: rawSubject,
+                                    requestMode: messageBody.requestMode ?? 'auto',
+                                    approvalMode: messageBody.approvalMode ?? 'auto',
+                                    source: messageBody.source ?? 'scouts2sqs',
+                                }, requestContext);
+                                await startImageEnrichExecution(orchestrationPayload, requestContext);
+                                console.log(`[scoutsRequest] ${rawAction} processed - started imageEnrich workflow`);
+                            } else {
+                                const scoutsPayload = {
+                                    realm: targetRealm,
+                                    subject: hexValue,
+                                    action: targetAction ?? 'request'
+                                };
+                                const finalScoutsPayload = withRequestContext(scoutsPayload, requestContext);
+                                console.log(`[scoutsRequest] Sending to scoutsProcessing queue:`, JSON.stringify(finalScoutsPayload));
+                                await sendToSQS(finalScoutsPayload);
+                                console.log(`[scoutsRequest] ${rawAction} processed - sent ${targetRealm} request`);
+                            }
                         }
                     } else {
                         // Only allow tagline, imageTheme, image and persist realms through from SQS
@@ -1422,14 +1487,14 @@ export async function lambdaHandler(event) {
             applySanitizedUidToSubject(processedSubject);
         }
 
-        if (isFullEnrichRequest(body)) {
+        if (isImageEnrichRequest(body)) {
             const requestContext = buildRequestContext(null, body);
             const orchestratedPayload = withRequestContext({
                 ...body,
                 subject: processedSubject,
             }, requestContext);
-            await startFullEnrichExecution(orchestratedPayload, requestContext);
-            return withCors({ statusCode: 200, body: JSON.stringify({ message: 'fullEnrich execution started' }) });
+            await startImageEnrichExecution(orchestratedPayload, requestContext);
+            return withCors({ statusCode: 200, body: JSON.stringify({ message: 'imageEnrich execution started' }) });
         }
 
         const allowed = new Set(['tagline', 'imageTheme', 'image', 'persist']);
@@ -1464,4 +1529,4 @@ export async function lambdaHandler(event) {
     }
 }
 
-export { buildFullEnrichExecutionInput, buildQueuePayload, buildRuntimeRequestEntry };
+export { buildImageEnrichExecutionInput, buildQueuePayload, buildRuntimeRequestEntry };

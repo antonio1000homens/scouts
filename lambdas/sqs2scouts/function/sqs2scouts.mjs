@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { readFileSync } from 'fs';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { SQSClient, SendMessageCommand, GetQueueAttributesCommand } from '@aws-sdk/client-sqs';
+import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
 import sharp from 'sharp';
 
 // Load configuration from environment variables
@@ -32,6 +33,7 @@ const GENERATED_IMAGE_HEIGHT = Number.isFinite(Number(process.env.GEMINI_IMAGE_O
     : 768;
 const s3Client = new S3Client({ region: AWS_REGION });
 const sqsClient = new SQSClient({ region: AWS_REGION });
+const sfnClient = new SFNClient({ region: AWS_REGION });
 const SCOUTS_DECISION_QUEUE_URL = process.env.SCOUTS_DECISION_QUEUE_URL || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsDecision';
 const SCOUTS_PROCESSING_QUEUE_URL_FALLBACK =
     process.env.SCOUTS_PROCESSING_QUEUE_URL
@@ -162,6 +164,47 @@ function resolveScoutsProcessingQueueUrl(records = []) {
         if (fromArn) return fromArn;
     }
     return SCOUTS_PROCESSING_QUEUE_URL_FALLBACK;
+}
+
+function hasStepFunctionsTaskToken(messageBody) {
+    return Boolean(
+        typeof messageBody?.taskToken === 'string'
+        && messageBody.taskToken.trim()
+        && messageBody?.orchestrationType === 'imageEnrich'
+    );
+}
+
+async function completeImageEnrichTask(messageBody, payload) {
+    if (!hasStepFunctionsTaskToken(messageBody)) {
+        return false;
+    }
+
+    await sfnClient.send(new SendTaskSuccessCommand({
+        taskToken: messageBody.taskToken.trim(),
+        output: JSON.stringify(payload ?? {}),
+    }));
+    return true;
+}
+
+async function failImageEnrichTask(messageBody, error) {
+    if (!hasStepFunctionsTaskToken(messageBody)) {
+        return false;
+    }
+
+    const errorName = typeof error?.name === 'string' && error.name.trim()
+        ? error.name.trim()
+        : 'ImageEnrichStepFailed';
+    await sfnClient.send(new SendTaskFailureCommand({
+        taskToken: messageBody.taskToken.trim(),
+        error: errorName,
+        cause: JSON.stringify({
+            message: error?.message || String(error),
+            hex: getHexHintFromMessageBody(messageBody),
+            requestId: normaliseRuntimeText(messageBody?.requestId ?? null),
+            orchestrationStep: normaliseRuntimeText(messageBody?.orchestrationStep ?? null),
+        }),
+    }));
+    return true;
 }
 
 function getHexHintFromSubject(subject) {
@@ -2974,6 +3017,12 @@ export async function lambdaHandler(event) {
             }
 
             await saveHexEventToS3(hexValue, hexData);
+            await completeImageEnrichTask(messageBody, {
+                hex: hexValue,
+                requestId: requestContext.requestId,
+                orchestrationStep: 'imageTheme',
+                imageTheme: getImageThemeValue(hexData),
+            });
 
             const requiresApproval = hasCompleteApprovalData(hexData);
             if (!requiresApproval || autoApproval) {
@@ -3084,6 +3133,13 @@ export async function lambdaHandler(event) {
             setImageApprovalState(hexData, false);
 
             await saveHexEventToS3(hexValue, hexData);
+            await completeImageEnrichTask(messageBody, {
+                hex: hexValue,
+                requestId: requestContext.requestId,
+                orchestrationStep: 'image',
+                imageTheme,
+                imageUrl: generatedImage.relativeUrl,
+            });
 
             if (autoApproval) {
                 return {
@@ -3304,6 +3360,12 @@ export async function lambdaHandler(event) {
 
     } catch (error) {
         console.error("Exception occurred:", error.message);
+        try {
+            const callbackBody = event.Records?.[0]?.body ? JSON.parse(event.Records[0].body) : event;
+            await failImageEnrichTask(callbackBody, error);
+        } catch (callbackError) {
+            console.warn('[Step Functions] Failed to report task failure:', callbackError?.message || callbackError);
+        }
         // Send processing error to DLQ
         try {
             const messageBody = event.Records?.[0]?.body ? JSON.parse(event.Records[0].body) : event;

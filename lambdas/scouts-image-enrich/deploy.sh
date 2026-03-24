@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Scouts full-enrich Step Functions deployment via CloudFormation
+# Scouts image-enrich Step Functions deployment via CloudFormation
 
 set -euo pipefail
 
@@ -15,14 +15,15 @@ if [ -f "${ROOT_DIR}/.env" ]; then
 fi
 
 REGION="${AWS_REGION:-eu-west-2}"
-STACK_NAME="${STACK_NAME:-scouts-full-enrich}"
+STACK_NAME="${STACK_NAME:-scouts-image-enrich}"
 EXPECTED_AWS_ACCOUNT="${EXPECTED_AWS_ACCOUNT:-553490163883}"
 CLOUDFORMATION_ROLE_ARN="${CLOUDFORMATION_ROLE_ARN:-}"
 
-STATE_MACHINE_NAME="${STATE_MACHINE_NAME:-scouts-full-enrich}"
-SQS2SCOUTS_FUNCTION_NAME="${SQS2SCOUTS_FUNCTION_NAME:-sqs2scouts}"
+STATE_MACHINE_NAME="${STATE_MACHINE_NAME:-scouts-image-enrich}"
+PROCESSING_QUEUE_URL="${PROCESSING_QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing}"
+PROCESSING_QUEUE_ARN="${PROCESSING_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing}"
 
-TEMPLATE_FILE="${ROOT_DIR}/cloudformation/templates/scouts-full-enrich.yaml"
+TEMPLATE_FILE="${ROOT_DIR}/cloudformation/templates/scouts-image-enrich.yaml"
 
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -30,7 +31,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${BLUE}=== Scouts Full Enrich Step Functions Deployment ===${NC}"
+echo -e "${BLUE}=== Scouts Image Enrich Step Functions Deployment ===${NC}"
 
 cleanup_failed_stack() {
   local stack_status
@@ -81,7 +82,8 @@ fi
 CFN_DEPLOY_ARGS+=(
   --parameter-overrides
     StateMachineName="${STATE_MACHINE_NAME}"
-    Sqs2ScoutsFunctionName="${SQS2SCOUTS_FUNCTION_NAME}"
+    ProcessingQueueUrl="${PROCESSING_QUEUE_URL}"
+    ProcessingQueueArn="${PROCESSING_QUEUE_ARN}"
 )
 
 aws cloudformation deploy "${CFN_DEPLOY_ARGS[@]}"

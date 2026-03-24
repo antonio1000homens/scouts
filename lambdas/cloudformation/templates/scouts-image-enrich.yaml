@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Scouts image-enrich Step Functions state machine
+
+Parameters:
+  StateMachineName:
+    Type: String
+    Default: scouts-image-enrich
+  ProcessingQueueUrl:
+    Type: String
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
+  ProcessingQueueArn:
+    Type: String
+    Default: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing
+
+Resources:
+  ScoutsImageEnrichRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${StateMachineName}-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DispatchScoutsProcessing
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !Ref ProcessingQueueArn
+
+  ScoutsImageEnrichStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Ref StateMachineName
+      RoleArn: !GetAtt ScoutsImageEnrichRole.Arn
+      DefinitionString:
+        !Sub |
+          {
+            "Comment": "Image enrichment workflow for Scouts HEX records",
+            "StartAt": "GenerateImageTheme",
+            "States": {
+              "GenerateImageTheme": {
+                "Type": "Task",
+                "Resource": "arn:${AWS::Partition}:states:::sqs:sendMessage.waitForTaskToken",
+                "Parameters": {
+                  "QueueUrl": "${ProcessingQueueUrl}",
+                  "MessageBody": {
+                    "realm": "imageTheme",
+                    "action": "request",
+                    "subject.$": "$.requestHex",
+                    "subjectLabel": "imageTheme",
+                    "source": "scouts-image-enrich",
+                    "approvalMode.$": "$.approvalMode",
+                    "requestMode.$": "$.requestMode",
+                    "requestId.$": "$.requestId",
+                    "requestHex.$": "$.requestHex",
+                    "hex.$": "$.requestHex",
+                    "orchestrationType": "imageEnrich",
+                    "orchestrationStep": "imageTheme",
+                    "taskToken.$": "$$.Task.Token"
+                  }
+                },
+                "TimeoutSeconds": 900,
+                "ResultPath": "$.stageResults.imageTheme",
+                "Retry": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 2,
+                    "BackoffRate": 2
+                  }
+                ],
+                "Next": "GenerateImage"
+              },
+              "GenerateImage": {
+                "Type": "Task",
+                "Resource": "arn:${AWS::Partition}:states:::sqs:sendMessage.waitForTaskToken",
+                "Parameters": {
+                  "QueueUrl": "${ProcessingQueueUrl}",
+                  "MessageBody": {
+                    "realm": "image",
+                    "subject.$": "$.requestHex",
+                    "subjectLabel": "imageUrl",
+                    "source": "scouts-image-enrich",
+                    "approvalMode.$": "$.approvalMode",
+                    "requestMode.$": "$.requestMode",
+                    "requestId.$": "$.requestId",
+                    "requestHex.$": "$.requestHex",
+                    "hex.$": "$.requestHex",
+                    "orchestrationType": "imageEnrich",
+                    "orchestrationStep": "image",
+                    "taskToken.$": "$$.Task.Token",
+                    "action": "request"
+                  }
+                },
+                "TimeoutSeconds": 900,
+                "ResultPath": "$.stageResults.image",
+                "Retry": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 2,
+                    "BackoffRate": 2
+                  }
+                ],
+                "End": true
+              }
+            }
+          }
+
+Outputs:
+  StateMachineArn:
+    Value: !Ref ScoutsImageEnrichStateMachine
+  RoleArn:
+    Value: !GetAtt ScoutsImageEnrichRole.Arn

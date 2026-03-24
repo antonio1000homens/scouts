@@ -149,6 +149,11 @@ Resources:
                   - s3:PutObject
                   - s3:DeleteObject
                 Resource: !Sub arn:aws:s3:::${TargetBucket}/*
+              - Effect: Allow
+                Action:
+                  - states:SendTaskSuccess
+                  - states:SendTaskFailure
+                Resource: '*'
 
   Sqs2ScoutsFunction:
     Type: AWS::Lambda::Function
