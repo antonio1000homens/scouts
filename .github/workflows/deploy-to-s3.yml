@@ -271,6 +271,16 @@ jobs:
           node-version: "24"
           package-manager-cache: false
       - name: Get secrets from Bitwarden Secrets Manager
+        id: fetch_cloudflare_secrets
+        continue-on-error: true
+        uses: bitwarden/sm-action@v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
+            ${{ vars.BW_SECRET_ID_CF_DEPLOY_API_TOKEN || vars.BW_SCOUTS_CF_DEPLOY }} > CF_DEPLOY_API_TOKEN
+            ${{ vars.BW_SCOUTS_SLACK_HANDLER_URL }} > SCOUTS_SLACK_HANDLER_URL
+      - name: Retry secrets from Bitwarden Secrets Manager
+        if: steps.fetch_cloudflare_secrets.outcome == 'failure'
         uses: bitwarden/sm-action@v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
@@ -303,6 +313,15 @@ jobs:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           role-session-name: github-actions-scouts-deploy
       - name: Get CloudFront distribution ID from Bitwarden Secrets Manager
+        id: fetch_cloudfront_distribution_id
+        continue-on-error: true
+        uses: bitwarden/sm-action@v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
+            ${{ vars.BW_CLOUDFRONT_DISTRIBUTION_ID }} > CLOUDFRONT_DISTRIBUTION_ID
+      - name: Retry CloudFront distribution ID from Bitwarden Secrets Manager
+        if: steps.fetch_cloudfront_distribution_id.outcome == 'failure'
         uses: bitwarden/sm-action@v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
@@ -541,6 +560,17 @@ jobs:
           role-session-name: github-actions-scouts-deploy
           aws-region: ${{ env.AWS_REGION }}
       - name: Get Slack signing secret from Bitwarden Secrets Manager
+        id: fetch_slack_handler_secrets
+        continue-on-error: true
+        uses: bitwarden/sm-action@v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
+            ${{ vars.BW_SCOUTS_SLACK_SIGNING_SECRET }} > SLACK_SIGNING_SECRET
+            ${{ vars.BW_SCOUTS_SLACK_BOT_TOKEN }} > SLACK_BOT_TOKEN
+            ${{ vars.BW_SCOUTS_REQUIRED_API_KEY }} > REQUIRED_API_KEY
+      - name: Retry Slack signing secret from Bitwarden Secrets Manager
+        if: steps.fetch_slack_handler_secrets.outcome == 'failure'
         uses: bitwarden/sm-action@v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
@@ -656,6 +686,17 @@ jobs:
           role-session-name: github-actions-scouts-deploy
           aws-region: ${{ env.AWS_REGION }}
       - name: Get Slack secrets from Bitwarden Secrets Manager
+        id: fetch_sqs2scouts_secrets
+        continue-on-error: true
+        uses: bitwarden/sm-action@v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
+            ${{ vars.BW_SCOUTS_SLACK_SIGNING_SECRET }} > SLACK_SIGNING_SECRET
+            ${{ vars.BW_SCOUTS_SLACK_BOT_TOKEN }} > SLACK_BOT_TOKEN
+            ${{ vars.BW_GEMINI_API_KEY }} > GEMINI_API_KEY
+      - name: Retry Slack secrets from Bitwarden Secrets Manager
+        if: steps.fetch_sqs2scouts_secrets.outcome == 'failure'
         uses: bitwarden/sm-action@v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
