@@ -140,6 +140,25 @@ function buildEventChangeSnapshot(event) {
   };
 }
 
+function areChangeValuesEqual(left, right) {
+  const leftValue = left ?? null;
+  const rightValue = right ?? null;
+
+  if (leftValue === rightValue) {
+    return true;
+  }
+
+  if (typeof leftValue === 'object' && leftValue !== null && typeof rightValue === 'object' && rightValue !== null) {
+    try {
+      return JSON.stringify(leftValue) === JSON.stringify(rightValue);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 function listModifiedEvents(beforeEvents = [], afterEvents = []) {
   const beforeMap = new Map();
   for (let index = 0; index < beforeEvents.length; index += 1) {
@@ -160,7 +179,7 @@ function listModifiedEvents(beforeEvents = [], afterEvents = []) {
     const fields = ['tagline', 'imageTheme', 'imageUrl', 'status', 'hiddenAt'];
     const changes = [];
     for (const field of fields) {
-      if ((beforeSnapshot[field] ?? null) !== (afterSnapshot[field] ?? null)) {
+      if (!areChangeValuesEqual(beforeSnapshot[field], afterSnapshot[field])) {
         changes.push({
           field,
           before: beforeSnapshot[field] ?? null,
@@ -181,6 +200,20 @@ function listModifiedEvents(beforeEvents = [], afterEvents = []) {
   }
 
   return modified;
+}
+
+function buildNormalizationSummary() {
+  return {
+    description: 'Storage normalization applied during refresh and persistence flows.',
+    rules: [
+      'HEX identifiers are normalized to lowercase and stored under metadata.hex.',
+      'Legacy top-level fields like hex, hexId, tagline, AI, ai, image, approved, hidden, and status are migrated into metadata fields.',
+      'Image metadata is normalized to metadata.image.theme and metadata.image.url.',
+      'Status metadata is normalized to metadata.status.isHidden and metadata.status.isApproved.',
+      'Transient metadata such as metadata.requests/requestIds and deprecated top-level notification fields are removed from stored agenda/HEX payloads.',
+      'Agenda storage is reduced to the canonical shape: uid, summary, dtstart, lastModified, and metadata.',
+    ],
+  };
 }
 
 function normalizeImagePrompt(value) {
@@ -4812,6 +4845,7 @@ export async function lambdaHandler(event = {}) {
       generatedAt,
       modifiedEventsCount: modifiedEvents.length,
       modifiedEvents,
+      normalization: buildNormalizationSummary(),
       processedEvents,
       runtimeQueueSnapshots: {
         queued: summariseRuntimeQueueSnapshot(runtimeQueueSnapshots?.queuedSnapshot),
