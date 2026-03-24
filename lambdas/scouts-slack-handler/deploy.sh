@@ -16,6 +16,10 @@ CODE_BUCKET="${CODE_BUCKET:-aws2022-lambda-code-eu-west-2-553490163883}"
 DEPLOY_ID="${DEPLOY_ID:-$(date -u +%Y%m%d%H%M%S)}"
 S3_PREFIX="${S3_PREFIX:-lambdas/scouts-slack-handler}"
 
+if [ -z "${AWS_ACCESS_KEY_ID:-}" ] && [ -z "${AWS_WEB_IDENTITY_TOKEN_FILE:-}" ] && [ -z "${AWS_CONTAINER_CREDENTIALS_RELATIVE_URI:-}" ] && [ -z "${AWS_CONTAINER_CREDENTIALS_FULL_URI:-}" ]; then
+  export AWS_PROFILE="${AWS_PROFILE_NAME:-${AWS_PROFILE:-scouts}}"
+fi
+
 FUNCTION_NAME="${FUNCTION_NAME:-scouts-slack-handler}"
 LAYER_NAME="${LAYER_NAME:-scouts-shared}"
 ROLE_NAME="${ROLE_NAME:-scouts-slack-handler-lambda-role}"

@@ -14,6 +14,10 @@ SCOUTS_REPO_OWNER="${SCOUTS_REPO_OWNER:-antonio1000homens}"
 SCOUTS_REPO_NAME="${SCOUTS_REPO_NAME:-scouts}"
 SCOUTS_BRANCH="${SCOUTS_BRANCH:-master}"
 
+if [ -z "${AWS_ACCESS_KEY_ID:-}" ] && [ -z "${AWS_WEB_IDENTITY_TOKEN_FILE:-}" ] && [ -z "${AWS_CONTAINER_CREDENTIALS_RELATIVE_URI:-}" ] && [ -z "${AWS_CONTAINER_CREDENTIALS_FULL_URI:-}" ]; then
+  export AWS_PROFILE="${AWS_PROFILE_NAME:-${AWS_PROFILE:-scouts}}"
+fi
+
 if [ -z "${BOOTSTRAP_PRINCIPAL_ARN}" ]; then
   echo "BOOTSTRAP_PRINCIPAL_ARN is required." >&2
   exit 1

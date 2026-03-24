@@ -98,11 +98,12 @@ Parameters:
     Default: ''
   ImageEnrichStateMachineArn:
     Type: String
-    Default: arn:aws:states:eu-west-2:553490163883:stateMachine:scouts-image-enrich
+    Default: ''
 
 Conditions:
   ShouldCreateDataBucket: !Equals [!Ref CreateDataBucket, 'true']
   IsPublicFunctionUrl: !Equals [!Ref FunctionUrlAuthType, 'NONE']
+  HasImageEnrichStateMachineArn: !Not [!Equals [!Ref ImageEnrichStateMachineArn, '']]
 
 Resources:
   ScoutsDataBucket:
@@ -155,11 +156,14 @@ Resources:
                 Action:
                   - sqs:SendMessage
                 Resource: !Ref ScoutsRequestsQueueArn
-              - Effect: Allow
-                Action:
-                  - states:ListExecutions
-                  - states:DescribeExecution
-                Resource: !Ref ImageEnrichStateMachineArn
+              - !If
+                - HasImageEnrichStateMachineArn
+                - Effect: Allow
+                  Action:
+                    - states:ListExecutions
+                    - states:DescribeExecution
+                  Resource: !Ref ImageEnrichStateMachineArn
+                - !Ref AWS::NoValue
 
   ScoutsFunction:
     Type: AWS::Lambda::Function

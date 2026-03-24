@@ -14,6 +14,7 @@
 - Use `AWS_PROFILE=windsor` for Windsor AWS account `243857182133`.
 - Do not rely on the default AWS profile for work in this repo.
 - Do not rely on the default AWS profile for work in this repo.
+- AWS deploy scripts in this repo default to the `scouts` profile when no explicit AWS credentials are already present in the environment.
 
 ## Who Uses `scouts.conf`
 
@@ -44,3 +45,5 @@
 - `scouts/deploy.sh website` uploads `lambdas/scouts/scouts.conf` to `s3://scouts-2ndtolworth-prod-553490163883/scouts.conf`.
 - `scouts/deploy-manual.sh` is a compatibility wrapper around `./deploy.sh website`.
 - GitHub Actions in this repo now own Scouts website, queue, Lambda, and Scouts Slack-handler deployments.
+- The `scouts-function` GitHub Actions job must not run ahead of `deploy-scouts-image-enrich` when the image-enrich state machine is part of the same rollout.
+- The `scouts-lambda` stack treats `ImageEnrichStateMachineArn` as optional until the state machine output is available.
