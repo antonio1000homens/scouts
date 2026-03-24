@@ -96,9 +96,9 @@ Parameters:
   Scouts2SqsFunctionUrl:
     Type: String
     Default: ''
-  FullEnrichStateMachineArn:
+  ImageEnrichStateMachineArn:
     Type: String
-    Default: arn:aws:states:eu-west-2:553490163883:stateMachine:scouts-full-enrich
+    Default: arn:aws:states:eu-west-2:553490163883:stateMachine:scouts-image-enrich
 
 Conditions:
   ShouldCreateDataBucket: !Equals [!Ref CreateDataBucket, 'true']
@@ -157,13 +157,9 @@ Resources:
                 Resource: !Ref ScoutsRequestsQueueArn
               - Effect: Allow
                 Action:
-                  - states:SendTaskSuccess
-                  - states:SendTaskFailure
-                Resource: '*'
-              - Effect: Allow
-                Action:
                   - states:ListExecutions
-                Resource: !Ref FullEnrichStateMachineArn
+                  - states:DescribeExecution
+                Resource: !Ref ImageEnrichStateMachineArn
 
   ScoutsFunction:
     Type: AWS::Lambda::Function
@@ -188,7 +184,7 @@ Resources:
           TARGET_BUCKET: !Ref DataBucketName
           SCOUTS_REQUESTS_QUEUE_URL: !Ref ScoutsRequestsQueueUrl
           SCOUTS2SQS_FUNCTION_URL: !Ref Scouts2SqsFunctionUrl
-          FULL_ENRICH_STATE_MACHINE_ARN: !Ref FullEnrichStateMachineArn
+          IMAGE_ENRICH_STATE_MACHINE_ARN: !Ref ImageEnrichStateMachineArn
       Code:
         S3Bucket: !Ref CodeBucket
         S3Key: !Ref FunctionCodeKey

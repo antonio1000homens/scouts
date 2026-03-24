@@ -8,7 +8,7 @@ import {
   CopyObjectCommand,
 } from '@aws-sdk/client-s3';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { SFNClient, ListExecutionsCommand, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
+import { SFNClient, DescribeExecutionCommand, ListExecutionsCommand } from '@aws-sdk/client-sfn';
 import { randomUUID } from 'crypto';
 // Updated: Testing CI deployment mode to bypass environment parsing issues
 
@@ -23,7 +23,7 @@ const {
   REQUIRED_API_KEY,
   SCOUTS2SQS_FUNCTION_URL,
   SCOUTS_REQUESTS_QUEUE_URL: SCOUTS_REQUESTS_QUEUE_URL_ENV,
-  FULL_ENRICH_STATE_MACHINE_ARN,
+  IMAGE_ENRICH_STATE_MACHINE_ARN,
 } = process.env;
 
 const DEFAULT_BUCKET = 'scouts-2ndtolworth-prod-553490163883';
@@ -31,7 +31,6 @@ const DEFAULT_SCOUTS2SQS_URL = '';
 const QUEUED_REQUESTS_RUNTIME_KEY = 'runtime/scoutsQueued.json';
 const PROCESSING_REQUESTS_RUNTIME_KEY = 'runtime/scoutsProcessing.json';
 const COMPLETED_REQUESTS_RUNTIME_KEY = 'runtime/scoutsComplete.json';
-const CALLBACK_REQUESTS_RUNTIME_KEY = 'runtime/scoutsCallbacks.json';
 const QUEUED_RUNTIME_STALE_PRUNE_MS = 24 * 60 * 60 * 1000;
 
 const SECTION_CUBS = 'cubs';
@@ -645,172 +644,6 @@ async function touchQueuedRuntimeSnapshot(bucket, existingSnapshot = null) {
   return nextSnapshot;
 }
 
-function normalizeCallbackRuntimeEntry(entry) {
-  if (!entry || typeof entry !== 'object') return null;
-
-  const taskToken = normaliseRuntimeText(entry.taskToken ?? null);
-  if (!taskToken) return null;
-
-  return {
-    taskToken,
-    status: normaliseRuntimeText(entry.status ?? null)?.toLowerCase() ?? 'completed',
-    requestId: normaliseRuntimeText(entry.requestId ?? null),
-    hex: normaliseRuntimeText(entry.hex ?? null)?.toLowerCase() ?? null,
-    orchestrationType: normaliseRuntimeText(entry.orchestrationType ?? null),
-    orchestrationStep: normaliseRuntimeText(entry.orchestrationStep ?? null),
-    completedAt: normaliseRuntimeText(entry.completedAt ?? entry.updatedAt ?? entry.requestTime ?? null) ?? new Date().toISOString(),
-  };
-}
-
-function deduplicateCallbackLedgerEntries(entries = []) {
-  const deduped = new Map();
-  for (const entry of Array.isArray(entries) ? entries : []) {
-    if (!entry || typeof entry !== 'object') continue;
-    const taskToken = normaliseRuntimeText(entry.taskToken ?? null);
-    if (!taskToken) continue;
-    deduped.set(taskToken, {
-      taskToken,
-      status: normaliseRuntimeText(entry.status ?? null) ?? 'succeeded',
-      requestId: normaliseRuntimeText(entry.requestId ?? null),
-      hex: normaliseRuntimeText(entry.hex ?? null)?.toLowerCase() ?? null,
-      orchestrationType: normaliseRuntimeText(entry.orchestrationType ?? null),
-      orchestrationStep: normaliseRuntimeText(entry.orchestrationStep ?? null),
-      callbackSentAt: normaliseRuntimeText(entry.callbackSentAt ?? null) ?? new Date().toISOString(),
-      error: normaliseRuntimeText(entry.error ?? null),
-    });
-  }
-  return Array.from(deduped.values()).slice(-500);
-}
-
-function buildCallbackLedgerPayload(entries, timestamp = new Date().toISOString()) {
-  const callbacks = deduplicateCallbackLedgerEntries(entries);
-  return {
-    source: 'scouts',
-    queue: 'scoutsCallbacks',
-    updatedAt: timestamp,
-    callbacks,
-    callbackCount: callbacks.length,
-  };
-}
-
-function buildQueuedFullEnrichTaskTokenSet(queuedSnapshot) {
-  const activeTokens = new Set();
-  for (const entry of getRuntimeSnapshotRequests(queuedSnapshot)) {
-    const taskToken = normaliseRuntimeText(entry?.taskToken ?? null);
-    const orchestrationType = normaliseRuntimeText(entry?.orchestrationType ?? null);
-    if (!taskToken || orchestrationType !== 'fullEnrich') {
-      continue;
-    }
-    activeTokens.add(taskToken);
-  }
-  return activeTokens;
-}
-
-async function reconcileStateMachineCallbacks(bucket, queuedSnapshot, completedSnapshot) {
-  const activeQueuedTaskTokens = buildQueuedFullEnrichTaskTokenSet(queuedSnapshot);
-  if (activeQueuedTaskTokens.size === 0) {
-    return { attempted: 0, completed: 0, skipped: 0 };
-  }
-
-  const callbackEntries = getRuntimeSnapshotRequests(completedSnapshot)
-    .map((entry) => normalizeCallbackRuntimeEntry(entry))
-    .filter((entry) => (
-      entry
-      && entry.taskToken
-      && entry.orchestrationType === 'fullEnrich'
-      && activeQueuedTaskTokens.has(entry.taskToken)
-    ));
-
-  if (callbackEntries.length === 0) {
-    return { attempted: 0, completed: 0, skipped: 0 };
-  }
-
-  const existingLedger = await getJsonFromS3(bucket, CALLBACK_REQUESTS_RUNTIME_KEY, 'runtime:scoutsCallbacks');
-  const ledgerEntries = Array.isArray(existingLedger?.callbacks) ? existingLedger.callbacks : [];
-  const seenTokens = new Set(
-    ledgerEntries
-      .map((entry) => normaliseRuntimeText(entry?.taskToken ?? null))
-      .filter(Boolean)
-  );
-  const nextLedgerEntries = [...ledgerEntries];
-  let changed = false;
-  let completed = 0;
-  let skipped = 0;
-
-  for (const callbackEntry of callbackEntries) {
-    if (seenTokens.has(callbackEntry.taskToken)) {
-      skipped += 1;
-      continue;
-    }
-
-    const callbackPayload = {
-      status: callbackEntry.status === 'failed' ? 'failed' : 'completed',
-      requestId: callbackEntry.requestId,
-      hex: callbackEntry.hex,
-      orchestrationType: callbackEntry.orchestrationType,
-      orchestrationStep: callbackEntry.orchestrationStep,
-      completedAt: callbackEntry.completedAt,
-    };
-
-    try {
-      if (callbackEntry.status === 'failed') {
-        await sfn.send(new SendTaskFailureCommand({
-          taskToken: callbackEntry.taskToken,
-          error: 'FullEnrichStepFailed',
-          cause: JSON.stringify(callbackPayload),
-        }));
-        nextLedgerEntries.push({
-          ...callbackEntry,
-          status: 'failed',
-          callbackSentAt: new Date().toISOString(),
-        });
-      } else {
-        await sfn.send(new SendTaskSuccessCommand({
-          taskToken: callbackEntry.taskToken,
-          output: JSON.stringify(callbackPayload),
-        }));
-        nextLedgerEntries.push({
-          ...callbackEntry,
-          status: 'succeeded',
-          callbackSentAt: new Date().toISOString(),
-        });
-      }
-      seenTokens.add(callbackEntry.taskToken);
-      completed += 1;
-      changed = true;
-    } catch (error) {
-      const errorName = normaliseRuntimeText(error?.name ?? error?.Code ?? null) ?? 'CallbackError';
-      console.warn('[Callbacks] Failed sending Step Functions callback:', errorName, error?.message || error);
-      if (['TaskTimedOut', 'TaskDoesNotExist', 'InvalidToken'].includes(errorName)) {
-        nextLedgerEntries.push({
-          ...callbackEntry,
-          status: 'expired',
-          callbackSentAt: new Date().toISOString(),
-          error: normaliseRuntimeText(error?.message ?? null) ?? errorName,
-        });
-        seenTokens.add(callbackEntry.taskToken);
-        skipped += 1;
-        changed = true;
-      }
-    }
-  }
-
-  if (changed) {
-    await putJsonToS3(
-      bucket,
-      CALLBACK_REQUESTS_RUNTIME_KEY,
-      buildCallbackLedgerPayload(nextLedgerEntries),
-      'runtime:scoutsCallbacks',
-      true,
-    );
-  }
-
-  return {
-    attempted: callbackEntries.length,
-    completed,
-    skipped,
-  };
-}
 
 function getRequestHistory(eventData) {
   if (!eventData || typeof eventData !== 'object') return [];
@@ -1115,8 +948,66 @@ const sfn = new SFNClient({ region: process.env.AWS_REGION || 'eu-west-2' });
 const SCOUTS_REQUESTS_QUEUE_URL = SCOUTS_REQUESTS_QUEUE_URL_ENV || "https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests";
 const ACTIVE_EXECUTIONS_LIMIT = 20;
 
-async function listActiveFullEnrichExecutions() {
-  const stateMachineArn = trimOptionalText(FULL_ENRICH_STATE_MACHINE_ARN);
+function buildImageEnrichRuntimeStageIndex(runtimeQueueSnapshots = {}) {
+  const stageIndex = new Map();
+  const snapshots = [
+    { snapshot: runtimeQueueSnapshots?.processingSnapshot, fallbackStage: 'processing' },
+    { snapshot: runtimeQueueSnapshots?.queuedSnapshot, fallbackStage: 'queued' },
+    { snapshot: runtimeQueueSnapshots?.completedSnapshot, fallbackStage: 'completed' },
+  ];
+
+  for (const { snapshot, fallbackStage } of snapshots) {
+    for (const entry of getRuntimeSnapshotRequests(snapshot)) {
+      const orchestrationType = normaliseRuntimeText(entry?.orchestrationType ?? null);
+      if (orchestrationType !== 'imageEnrich') {
+        continue;
+      }
+
+      const hex = normaliseRuntimeText(entry?.hex ?? null)?.toLowerCase() ?? null;
+      if (!hex) continue;
+
+      const updatedAt = firstDefinedValue(
+        entry?.updatedAt,
+        entry?.requestTime,
+        entry?.completedAt,
+        null,
+      );
+      const timestampValue = hasText(updatedAt) ? new Date(updatedAt).getTime() : 0;
+      const existing = stageIndex.get(hex);
+      if (existing && existing.timestampValue > timestampValue) {
+        continue;
+      }
+
+      stageIndex.set(hex, {
+        currentStage: normaliseRuntimeText(entry?.orchestrationStep ?? null) ?? fallbackStage,
+        workerStatus: normaliseRuntimeText(entry?.status ?? null) ?? fallbackStage,
+        requestId: normaliseRuntimeText(entry?.requestId ?? null),
+        updatedAt: hasText(updatedAt) ? String(updatedAt) : null,
+        timestampValue,
+      });
+    }
+  }
+
+  return stageIndex;
+}
+
+async function describeExecutionInput(executionArn) {
+  if (!hasText(executionArn)) {
+    return {};
+  }
+  const response = await sfn.send(new DescribeExecutionCommand({ executionArn }));
+  if (!hasText(response?.input)) {
+    return {};
+  }
+  try {
+    return JSON.parse(response.input);
+  } catch (_) {
+    return {};
+  }
+}
+
+async function listActiveImageEnrichExecutions(runtimeQueueSnapshots = null) {
+  const stateMachineArn = trimOptionalText(IMAGE_ENRICH_STATE_MACHINE_ARN);
   if (!stateMachineArn) {
     return {
       configured: false,
@@ -1132,24 +1023,37 @@ async function listActiveFullEnrichExecutions() {
     maxResults: ACTIVE_EXECUTIONS_LIMIT,
   }));
 
+  const runtimeStageIndex = buildImageEnrichRuntimeStageIndex(runtimeQueueSnapshots || {});
   const activeExecutions = Array.isArray(response?.executions)
-    ? response.executions.map((execution) => ({
-        executionArn: execution?.executionArn ?? null,
-        name: execution?.name ?? null,
-        status: execution?.status ?? 'RUNNING',
-        startDate: execution?.startDate
-          ? new Date(execution.startDate).toISOString()
-          : null,
-        stopDate: execution?.stopDate
-          ? new Date(execution.stopDate).toISOString()
-          : null,
+    ? await Promise.all(response.executions.map(async (execution) => {
+        const executionInput = await describeExecutionInput(execution?.executionArn ?? null);
+        const hex = trimOptionalText(executionInput?.requestHex ?? executionInput?.hex ?? null)?.toLowerCase() ?? null;
+        const runtimeStage = hex ? runtimeStageIndex.get(hex) : null;
+        return {
+          executionArn: execution?.executionArn ?? null,
+          name: execution?.name ?? null,
+          status: execution?.status ?? 'RUNNING',
+          startDate: execution?.startDate
+            ? new Date(execution.startDate).toISOString()
+            : null,
+          stopDate: execution?.stopDate
+            ? new Date(execution.stopDate).toISOString()
+            : null,
+          hex,
+          requestId: trimOptionalText(executionInput?.requestId ?? runtimeStage?.requestId ?? null),
+          currentStage: trimOptionalText(runtimeStage?.currentStage ?? null),
+          workerStatus: trimOptionalText(runtimeStage?.workerStatus ?? null),
+          updatedAt: trimOptionalText(runtimeStage?.updatedAt ?? null),
+        };
       }))
     : [];
 
   return {
     configured: true,
     stateMachineArn,
+    executionCount: activeExecutions.length,
     activeExecutionCount: activeExecutions.length,
+    executions: activeExecutions,
     activeExecutions,
   };
 }
@@ -2954,7 +2858,7 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
             {
               realm: 'scoutsRequest',
               subject: notificationData.hexData,
-              action: 'fullEnrich',
+              action: notificationData.processingRealm === 'tagline' ? 'new' : 'imageEnrich',
               requestMode: 'auto',
               approvalMode: 'auto',
             },
@@ -3900,7 +3804,7 @@ export async function lambdaHandler(event = {}) {
       return {
         statusCode: 400,
         headers: corsHeaders,
-        body: JSON.stringify({ error: 'Invalid hex value for full enrichment generation request' }),
+        body: JSON.stringify({ error: 'Invalid hex value for image enrichment generation request' }),
       };
     }
 
@@ -3911,10 +3815,19 @@ export async function lambdaHandler(event = {}) {
         bodyParams?.title,
       ),
     );
+    const candidateTagline = normalizeNullableText(
+      firstDefinedValue(
+        subjectObject?.metadata?.tagline,
+        subjectObject?.tagline,
+        eventCandidate?.metadata?.tagline,
+        eventCandidate?.tagline,
+        null,
+      ),
+    );
 
     const queuePayload = {
       realm: 'scoutsRequest',
-      action: 'fullEnrich',
+      action: candidateTagline ? 'imageEnrich' : 'new',
       source: 'scouts',
       requestMode: 'auto',
       approvalMode: 'auto',
@@ -3931,12 +3844,15 @@ export async function lambdaHandler(event = {}) {
       'AdminGenerate:full',
     );
 
+    const queuedAction = queueResult?.payload?.action ?? queuePayload.action ?? 'imageEnrich';
+    const requestLabel = queuedAction === 'imageEnrich' ? 'Image enrichment' : 'Metadata generation';
+
     return {
       statusCode: 200,
       headers: corsHeaders,
       body: JSON.stringify({
         status: 'ok',
-        message: `Full enrichment request submitted for ${candidateHex}`,
+        message: `${requestLabel} request submitted for ${candidateHex}`,
         queueAccepted: true,
         queuedHex: candidateHex,
         subjectLabel: 'full',
@@ -3944,7 +3860,7 @@ export async function lambdaHandler(event = {}) {
         queuedMessage: {
           requestId: queueResult?.payload?.requestId ?? null,
           realm: queueResult?.payload?.realm ?? 'scoutsRequest',
-          action: queueResult?.payload?.action ?? 'fullEnrich',
+          action: queuedAction,
           subjectHex: queueResult?.payload?.hex ?? queueResult?.payload?.subject?.hex ?? candidateHex,
           subjectTitle: queueResult?.payload?.title ?? queueResult?.payload?.subject?.title ?? null,
           queueUrl: queueResult?.queueUrl ?? SCOUTS_REQUESTS_QUEUE_URL,
@@ -4486,18 +4402,6 @@ export async function lambdaHandler(event = {}) {
     }
 
     const runtimeQueueSnapshots = await readRuntimeQueueSnapshots(bucket);
-    try {
-      const callbackSummary = await reconcileStateMachineCallbacks(
-        bucket,
-        runtimeQueueSnapshots.queuedSnapshot,
-        runtimeQueueSnapshots.completedSnapshot,
-      );
-      if (callbackSummary.attempted > 0) {
-        console.log('[Callbacks] Reconciled Step Functions callbacks:', callbackSummary);
-      }
-    } catch (callbackError) {
-      console.warn('[Callbacks] Failed reconciling Step Functions callbacks:', callbackError?.message || callbackError);
-    }
     const existingAgendaRaw = await (resetRequested ? null : getJsonFromS3(bucket, agendaKey, 'agenda'));
     const existingAgenda = hydrateStoredDataset(existingAgendaRaw);
     const mergedAgenda = mergeEvents(existingAgenda, dedupedNewEvents);
@@ -4660,15 +4564,17 @@ export async function lambdaHandler(event = {}) {
       console.warn('[HEX Image Verification] Error during HEX file image verification:', hexVerifyError?.message || String(hexVerifyError));
     }
 
-    let fullEnrichExecutions = null;
+    let imageEnrichExecutions = null;
     try {
-      fullEnrichExecutions = await listActiveFullEnrichExecutions();
+      imageEnrichExecutions = await listActiveImageEnrichExecutions(runtimeQueueSnapshots);
     } catch (stepFunctionsError) {
-      console.warn('[Step Functions] Failed to list active full-enrich executions:', stepFunctionsError?.message || String(stepFunctionsError));
-      fullEnrichExecutions = {
-        configured: Boolean(trimOptionalText(FULL_ENRICH_STATE_MACHINE_ARN)),
-        stateMachineArn: trimOptionalText(FULL_ENRICH_STATE_MACHINE_ARN),
+      console.warn('[Step Functions] Failed to list active image-enrich executions:', stepFunctionsError?.message || String(stepFunctionsError));
+      imageEnrichExecutions = {
+        configured: Boolean(trimOptionalText(IMAGE_ENRICH_STATE_MACHINE_ARN)),
+        stateMachineArn: trimOptionalText(IMAGE_ENRICH_STATE_MACHINE_ARN),
+        executionCount: 0,
         activeExecutionCount: 0,
+        executions: [],
         activeExecutions: [],
         error: stepFunctionsError?.message || String(stepFunctionsError),
       };
@@ -4685,9 +4591,10 @@ export async function lambdaHandler(event = {}) {
       runtimeQueueSnapshots: {
         queued: summariseRuntimeQueueSnapshot(runtimeQueueSnapshots?.queuedSnapshot),
         processing: summariseRuntimeQueueSnapshot(runtimeQueueSnapshots?.processingSnapshot),
+        completed: summariseRuntimeQueueSnapshot(runtimeQueueSnapshots?.completedSnapshot),
       },
       stepFunctions: {
-        fullEnrich: fullEnrichExecutions,
+        imageEnrich: imageEnrichExecutions,
       },
       aiSummary: {
         processedEvent: aiContext.processedEvent ?? null,
