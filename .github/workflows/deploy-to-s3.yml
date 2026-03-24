@@ -471,11 +471,26 @@ jobs:
           role-session-name: github-actions-scouts-deploy
           aws-region: ${{ env.AWS_REGION }}
       - name: Get scouts API key from Bitwarden Secrets Manager
+        id: fetch_scouts_api_key
+        continue-on-error: true
         uses: bitwarden/sm-action@v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
             ${{ vars.BW_SCOUTS_REQUIRED_API_KEY }} > SCOUTS_REQUIRED_API_KEY
+      - name: Retry scouts API key from Bitwarden Secrets Manager
+        if: steps.fetch_scouts_api_key.outcome == 'failure'
+        uses: bitwarden/sm-action@v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
+            ${{ vars.BW_SCOUTS_REQUIRED_API_KEY }} > SCOUTS_REQUIRED_API_KEY
+      - name: Verify scouts API key is loaded
+        run: |
+          if [ -z "${SCOUTS_REQUIRED_API_KEY:-}" ]; then
+            echo "SCOUTS_REQUIRED_API_KEY was not loaded from Bitwarden"
+            exit 1
+          fi
       - name: Deploy scouts function
         env:
           CODE_BUCKET: ${{ env.CODE_BUCKET }}
@@ -579,11 +594,26 @@ jobs:
           role-session-name: github-actions-scouts-deploy
           aws-region: ${{ env.AWS_REGION }}
       - name: Get scouts API key from Bitwarden Secrets Manager
+        id: fetch_scouts2sqs_api_key
+        continue-on-error: true
         uses: bitwarden/sm-action@v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
             ${{ vars.BW_SCOUTS_REQUIRED_API_KEY }} > SCOUTS_REQUIRED_API_KEY
+      - name: Retry scouts API key from Bitwarden Secrets Manager
+        if: steps.fetch_scouts2sqs_api_key.outcome == 'failure'
+        uses: bitwarden/sm-action@v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
+            ${{ vars.BW_SCOUTS_REQUIRED_API_KEY }} > SCOUTS_REQUIRED_API_KEY
+      - name: Verify scouts API key is loaded
+        run: |
+          if [ -z "${SCOUTS_REQUIRED_API_KEY:-}" ]; then
+            echo "SCOUTS_REQUIRED_API_KEY was not loaded from Bitwarden"
+            exit 1
+          fi
       - name: Deploy scouts2sqs
         env:
           CODE_BUCKET: ${{ env.CODE_BUCKET }}
