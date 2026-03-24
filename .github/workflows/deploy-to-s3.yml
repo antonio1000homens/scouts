@@ -439,15 +439,19 @@ jobs:
         run: cd lambdas/scouts-queues && bash ./deploy.sh
 
   deploy-scouts-function:
-    needs: [detect-changes, deploy-scouts-queues]
+    needs: [detect-changes, deploy-scouts-queues, deploy-scouts-image-enrich]
     if: |
-      (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.scouts_function == 'true') ||
-      (github.event_name == 'workflow_dispatch' && (
-        github.event.inputs.deploy_all == 'true' ||
-        github.event.inputs.deploy_target == 'all' ||
-        github.event.inputs.deploy_target == 'scouts-function' ||
-        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.scouts_function == 'true')
-      ))
+      always() &&
+      (needs.deploy-scouts-image-enrich.result == 'success' || needs.deploy-scouts-image-enrich.result == 'skipped') &&
+      (
+        (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.scouts_function == 'true') ||
+        (github.event_name == 'workflow_dispatch' && (
+          github.event.inputs.deploy_all == 'true' ||
+          github.event.inputs.deploy_target == 'all' ||
+          github.event.inputs.deploy_target == 'scouts-function' ||
+          (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.scouts_function == 'true')
+        ))
+      )
     runs-on: ubuntu-latest
     concurrency:
       group: scouts-function-stack-${{ github.ref }}
