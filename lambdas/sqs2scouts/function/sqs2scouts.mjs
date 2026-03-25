@@ -2883,8 +2883,45 @@ function mapActionId(actionId) {
     return actionMap[actionId] || actionId;
 }
 
+function summarizeInvocationEvent(event) {
+    const records = Array.isArray(event?.Records) ? event.Records : [];
+    if (records.length > 0) {
+        return {
+            source: 'sqs',
+            recordCount: records.length,
+            messageIds: records
+                .map((record) => (typeof record?.messageId === 'string' ? record.messageId : null))
+                .filter(Boolean)
+                .slice(0, 10),
+            eventSources: Array.from(new Set(
+                records
+                    .map((record) => (typeof record?.eventSource === 'string' ? record.eventSource : null))
+                    .filter(Boolean),
+            )),
+        };
+    }
+
+    return {
+        source: isStepFunctionsInvocation(event) ? 'step-functions-direct' : 'direct',
+        keys: event && typeof event === 'object' ? Object.keys(event).slice(0, 12) : [],
+    };
+}
+
+function summarizeMessageBody(messageBody) {
+    return {
+        realm: typeof messageBody?.realm === 'string' ? messageBody.realm : null,
+        action: typeof messageBody?.action === 'string' ? messageBody.action : null,
+        requestId: normaliseRuntimeText(messageBody?.requestId ?? null),
+        hex: getHexHintFromMessageBody(messageBody),
+        title: getTitleHintFromMessageBody(messageBody),
+        subject: getSubjectHintFromMessageBody(messageBody),
+        orchestrationType: normaliseRuntimeText(messageBody?.orchestrationType ?? null),
+        orchestrationStep: normaliseRuntimeText(messageBody?.orchestrationStep ?? null),
+    };
+}
+
 export async function lambdaHandler(event) {
-    console.log("Lambda function invoked with event:", JSON.stringify(event));
+    console.log('[sqs2scouts] Lambda invoked:', JSON.stringify(summarizeInvocationEvent(event)));
     const directInvocation = isStepFunctionsInvocation(event);
     const records = Array.isArray(event?.Records) ? event.Records : [];
     const observedRequestIds = [];
@@ -2927,9 +2964,6 @@ export async function lambdaHandler(event) {
         }
 
         const sqsMessage = directInvocation ? null : records[0];
-        if (sqsMessage) {
-            console.log("Raw SQS message:", JSON.stringify(sqsMessage));
-        }
 
         let messageBody;
         try {
@@ -2951,7 +2985,7 @@ export async function lambdaHandler(event) {
             throw new Error(`Invalid JSON in SQS message body: ${error.message}`);
         }
 
-        console.log("Parsed SQS message body:", JSON.stringify(messageBody));
+        console.log('[sqs2scouts] Parsed message body:', JSON.stringify(summarizeMessageBody(messageBody)));
         const requestContext = buildRequestContext(sqsMessage, messageBody);
         const autoApproval = isAutoApprovalMode(messageBody);
 
