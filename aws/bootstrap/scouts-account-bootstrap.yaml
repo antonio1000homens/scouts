@@ -355,6 +355,7 @@ Resources:
               - Sid: CloudFormationDeploy
                 Effect: Allow
                 Action:
+                  - cloudformation:ContinueUpdateRollback
                   - cloudformation:CreateChangeSet
                   - cloudformation:DeleteStack
                   - cloudformation:DeleteChangeSet
