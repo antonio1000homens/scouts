@@ -32,6 +32,46 @@ const withCors = (response = {}) => ({
     body: response.body ?? '',
 });
 
+function summarizeInvocationEvent(event) {
+    const records = Array.isArray(event?.Records) ? event.Records : [];
+    if (records.length > 0) {
+        return {
+            source: 'sqs',
+            recordCount: records.length,
+            messageIds: records
+                .map((record) => (typeof record?.messageId === 'string' ? record.messageId : null))
+                .filter(Boolean)
+                .slice(0, 10),
+            eventSources: Array.from(new Set(
+                records
+                    .map((record) => (typeof record?.eventSource === 'string' ? record.eventSource : null))
+                    .filter(Boolean),
+            )),
+        };
+    }
+
+    const method = event?.requestContext?.http?.method ?? event?.httpMethod ?? null;
+    return {
+        source: method ? 'http' : 'direct',
+        method,
+        hasBody: Object.prototype.hasOwnProperty.call(event ?? {}, 'body'),
+        keys: event && typeof event === 'object' ? Object.keys(event).slice(0, 12) : [],
+    };
+}
+
+function summarizeMessageBody(messageBody) {
+    return {
+        realm: typeof messageBody?.realm === 'string' ? messageBody.realm : null,
+        action: typeof messageBody?.action === 'string' ? messageBody.action : null,
+        requestId: normaliseRuntimeText(messageBody?.requestId ?? null),
+        hex: getHexHintFromMessageBody(messageBody),
+        subject: getSubjectHintFromMessageBody(messageBody),
+        title: getTitleHintFromMessageBody(messageBody),
+        orchestrationType: normaliseRuntimeText(messageBody?.orchestrationType ?? null),
+        orchestrationStep: normaliseRuntimeText(messageBody?.orchestrationStep ?? null),
+    };
+}
+
 function parseQueueUrlFromArn(queueArn, fallbackUrl = null) {
     if (!queueArn || typeof queueArn !== 'string') return fallbackUrl;
     const parts = queueArn.split(':');
@@ -1264,7 +1304,7 @@ async function sendToSQS(payload, retryCount = 0) {
 
 // Lambda handler
 export async function lambdaHandler(event) {
-    console.log("Lambda function invoked with event:", JSON.stringify(event));
+    console.log('[scouts2sqs] Lambda invoked:', JSON.stringify(summarizeInvocationEvent(event)));
 
     // Handle CORS preflight early
     if (event?.requestContext?.http?.method === 'OPTIONS' || event?.httpMethod === 'OPTIONS') {
@@ -1281,7 +1321,7 @@ export async function lambdaHandler(event) {
             if (record.eventSource === 'aws:sqs') {
                 try {
                     const messageBody = JSON.parse(record.body);
-                    console.log('Processing SQS message:', JSON.stringify(messageBody));
+                    console.log('[scouts2sqs] Processing SQS message:', JSON.stringify(summarizeMessageBody(messageBody)));
                     const hints = collectRequestHints(record, messageBody);
                     observedRequestIds.push(...hints.requestIds);
                     observedHexes.push(...hints.hexes);
