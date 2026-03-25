@@ -456,6 +456,8 @@ jobs:
           role-session-name: github-actions-scouts-deploy
           aws-region: ${{ env.AWS_REGION }}
       - name: Deploy Scouts AWS bootstrap
+        env:
+          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
         run: cd aws/bootstrap && bash ./deploy.sh
 
   deploy-scouts-queues:
