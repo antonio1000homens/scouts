@@ -2536,20 +2536,6 @@ async function verifyAndRepairHexFile(bucket, hexKey, hexData) {
   return null;
 }
 
-/**
- * Send a repair notification to scoutsRequests queue for a broken image.
- * Works the same way as new/retry notifications but with action 'repair'.
- */
-async function notifyImageRepair(hexData) {
-  const payload = {
-    realm: 'scoutsRequest',
-    subject: hexData,
-    action: 'repair',
-  };
-
-  await postToScoutsRequestsQueue(payload, 'Image Repair');
-}
-
 async function enrichEventsWithAI(events, context, collectionName, options = {}) {
   const now = Date.now();
   const enrichedEvents = [];
@@ -2567,9 +2553,13 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
     : Math.max(0, firstFutureEventIndex - 3);
 
   // Collect events that reach run threshold for batched notification
-  const eventsAtThreshold = [];
-  
-  // Collect unique HEX identifiers that need notifications (to batch per title HEX)
+      statusCode: 400,
+      headers: corsHeaders,
+      body: JSON.stringify({
+        error: 'Admin requeue is no longer supported by scouts.mjs',
+        realmError: 'requeue',
+        realmErrorDetail: 'Request/repair now belongs to an orchestration flow instead of the admin path',
+      }),
   const hexNotifications = new Map(); // Map<hexValue, { realm, title }>
   const processedTitles = new Set(); // Track processed titles to avoid duplicates
   const liveQueuedProcessingByHex = new Map(); // Map<hexValue, Array<'tagline'|'imageTheme'|'image'>>
@@ -3402,206 +3392,6 @@ export async function lambdaHandler(event = {}) {
     )
   );
 
-  if (isMetadataPersistCommand) {
-    const mapPersistFieldFromActionToken = (token) => {
-      if (!token) return null;
-      if (token === 'persisttagline') return 'tagline';
-      if (token === 'persistimagetheme') return 'imageTheme';
-      if (token === 'persistimageurl') return 'imageUrl';
-      if (token === 'approve') return 'isApproved';
-      if (token === 'persist') return 'all';
-      return null;
-    };
-
-    const normalizeNullableText = (value) => {
-      if (value === undefined || value === null) return null;
-      const text = String(value).trim();
-      return text ? text : null;
-    };
-
-    const isAcceptedPersistImageUrl = (value) => {
-      const candidate = normalizeNullableText(value);
-      if (!candidate) return false;
-      return /^https?:\/\//i.test(candidate)
-        || candidate.startsWith('/')
-        || candidate.startsWith('website/');
-    };
-
-    const subjectObject =
-      (bodyParams?.subject && typeof bodyParams.subject === 'object' ? bodyParams.subject : null)
-      ?? (structuredCommand?.subject && typeof structuredCommand.subject === 'object' ? structuredCommand.subject : null);
-    const candidateHex = normalizeNullableText(
-      firstDefinedValue(
-        subjectObject?.hex,
-        bodyParams?.hex,
-        queryParams?.hex,
-      ),
-    )?.toLowerCase() ?? null;
-
-    if (!candidateHex) {
-      return {
-        statusCode: 400,
-        headers: corsHeaders,
-        body: JSON.stringify({ 
-          error: 'Missing required hex value for metadata persist',
-          realmError: 'persist',
-          realmErrorDetail: 'Missing required hex value for metadata persist'
-        }),
-      };
-    }
-
-    if (!/^[0-9a-f]+$/i.test(candidateHex)) {
-      return {
-        statusCode: 400,
-        headers: corsHeaders,
-        body: JSON.stringify({ 
-          error: 'Invalid hex value for metadata persist',
-          realmError: 'persist',
-          realmErrorDetail: 'Invalid hex value for metadata persist'
-        }),
-      };
-    }
-
-    const candidateTagline = normalizeNullableText(
-      firstDefinedValue(
-        subjectObject?.tagline,
-        bodyParams?.tagline,
-      ),
-    );
-    const candidateTitle = normalizeNullableText(
-      firstDefinedValue(
-        subjectObject?.title,
-        bodyParams?.title,
-      ),
-    );
-    const candidateImageTheme = normalizeNullableText(
-      firstDefinedValue(
-        subjectObject?.imageTheme,
-        bodyParams?.imageTheme,
-      ),
-    );
-    const candidateImageUrl = normalizeNullableText(
-      firstDefinedValue(
-        subjectObject?.imageUrl,
-        bodyParams?.imageUrl,
-      ),
-    );
-    const candidateIsHidden = (() => {
-      const value = firstDefinedValue(subjectObject?.isHidden, bodyParams?.isHidden);
-      if (value === null) return null;
-      if (typeof value === 'boolean') return value;
-      if (typeof value === 'string') {
-        const normalized = value.trim().toLowerCase();
-        if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) return true;
-        if (['false', '0', 'no', 'n', 'off'].includes(normalized)) return false;
-      }
-      return null;
-    })();
-    const candidateIsApproved = (() => {
-      const value = firstDefinedValue(subjectObject?.isApproved, bodyParams?.isApproved);
-      if (value === null) return null;
-      if (typeof value === 'boolean') return value;
-      if (typeof value === 'string') {
-        const normalized = value.trim().toLowerCase();
-        if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) return true;
-        if (['false', '0', 'no', 'n', 'off'].includes(normalized)) return false;
-      }
-      return null;
-    })();
-    const requiredPersistField = mapPersistFieldFromActionToken(commandActionToken);
-
-    if (candidateImageUrl && !isAcceptedPersistImageUrl(candidateImageUrl)) {
-      return {
-        statusCode: 400,
-        headers: corsHeaders,
-        body: JSON.stringify({ 
-          error: 'Invalid imageUrl value for persist operation',
-          realmError: 'persist',
-          realmErrorDetail: 'Invalid imageUrl value for persist operation'
-        }),
-      };
-    }
-
-    if (requiredPersistField === 'tagline' && !candidateTagline) {
-      return {
-        statusCode: 400,
-        headers: corsHeaders,
-        body: JSON.stringify({ 
-          error: 'persistTagline requires subject.tagline',
-          realmError: 'persist',
-          realmErrorDetail: 'persistTagline requires subject.tagline'
-        }),
-      };
-    }
-
-    if (requiredPersistField === 'imageTheme' && !candidateImageTheme) {
-      return {
-        statusCode: 400,
-        headers: corsHeaders,
-        body: JSON.stringify({ 
-          error: 'persistImageTheme requires subject.imageTheme',
-          realmError: 'persist',
-          realmErrorDetail: 'persistImageTheme requires subject.imageTheme'
-        }),
-      };
-    }
-
-    if (requiredPersistField === 'imageUrl' && !candidateImageUrl) {
-      return {
-        statusCode: 400,
-        headers: corsHeaders,
-        body: JSON.stringify({ 
-          error: 'persistUrl requires subject.imageUrl',
-          realmError: 'persist',
-          realmErrorDetail: 'persistUrl requires subject.imageUrl'
-        }),
-      };
-    }
-
-    if (requiredPersistField === 'isApproved' && candidateIsApproved !== true) {
-      return {
-        statusCode: 400,
-        headers: corsHeaders,
-        body: JSON.stringify({ 
-          error: 'approve requires subject.isApproved=true',
-          realmError: 'persist',
-          realmErrorDetail: 'approve requires subject.isApproved=true'
-        }),
-      };
-    }
-
-    if (candidateIsHidden === null && candidateIsApproved === null && !candidateTagline && !candidateImageTheme && !candidateImageUrl) {
-      return {
-        statusCode: 400,
-        headers: corsHeaders,
-        body: JSON.stringify({ 
-          error: 'No metadata field value supplied to persist',
-          realmError: 'persist',
-          realmErrorDetail: 'No metadata field value supplied to persist'
-        }),
-      };
-    }
-
-    const subject = { hex: candidateHex };
-    const persistedFields = [];
-
-    if (candidateTagline) {
-      subject.tagline = candidateTagline;
-      persistedFields.push('tagline');
-    }
-
-    if (candidateImageTheme) {
-      subject.imageTheme = candidateImageTheme;
-      persistedFields.push('imageTheme');
-    }
-
-    if (candidateImageUrl) {
-      subject.imageUrl = candidateImageUrl;
-      persistedFields.push('imageUrl');
-    }
-
-    if (candidateIsHidden !== null) {
-      subject.isHidden = candidateIsHidden;
       persistedFields.push('isHidden');
     }
 
@@ -4430,27 +4220,8 @@ export async function lambdaHandler(event = {}) {
     console.log('[Image Verification] Starting image verification for agenda events...');
     const { repairedEvents: verifiedAgenda, brokenImages } = await verifyAndRepairEventImages(enrichedAgenda, bucket);
     
-    // Send repair notifications for broken images
-    let repairNotificationsSent = 0;
-    for (const brokenImage of brokenImages) {
-      try {
-        // Load hex file data for the broken image event
-        const hexKey = buildHexStorageKey(brokenImage.title);
-        const hexData = await getJsonFromS3(bucket, hexKey, `hex:${brokenImage.title}`);
-        
-        if (hexData) {
-          await notifyImageRepair(hexData);
-          repairNotificationsSent += 1;
-        } else {
-          console.warn(`[Image Repair] Could not load hex data for ${brokenImage.title}`);
-        }
-      } catch (notifyError) {
-        console.warn(`[Image Repair] Failed to notify about broken image for ${brokenImage.title}:`, notifyError.message);
-      }
-    }
-
     if (brokenImages.length > 0) {
-      console.log(`[Image Verification] Found ${brokenImages.length} broken images, sent ${repairNotificationsSent} repair notifications`);
+      console.log(`[Image Verification] Found ${brokenImages.length} broken images and removed their broken URLs from agenda output`);
     }
 
     // Clean up hidden past events and validate hidden future events
@@ -4540,7 +4311,6 @@ export async function lambdaHandler(event = {}) {
               const { updatedHex, status } = repairResult;
               if (status === 'removed') {
                 hexFilesWithBrokenImages += 1;
-                await notifyImageRepair(updatedHex);
               } else if (status === 'migrated') {
                 hexFilesMigrated += 1;
               }
@@ -4641,7 +4411,7 @@ export async function lambdaHandler(event = {}) {
         })),
         hexFilesBrokenImagesCount: hexFilesWithBrokenImages,
         hexFilesRepaired,
-        repairNotificationsSent: repairNotificationsSent + (hexFilesRepaired ?? 0),
+        repairNotificationsSent: 0,
       };
     }
 

@@ -22,8 +22,6 @@ flowchart LR
     A["Caller -> scouts lambda"] --> B{"Request type in scouts"}
 
     B -->|"scheduled/admin run finds new or stale HEX"| Q1["scoutsRequests\n{ realm: scoutsRequest, action: new, subject: full event object }"]
-    B -->|"broken image repair"| Q2["scoutsRequests\n{ realm: scoutsRequest, action: repair, subject: full event object }"]
-    B -->|"admin requeue"| Q3["scoutsRequests\n{ realm: scoutsRequest, action: new, subject: full event object }"]
     B -->|"admin persist metadata"| Q4["scoutsRequests\n{ realm: persist, action: persist, subject: full event object }"]
     B -->|"admin hide"| Q5["scoutsRequests\n{ realm: persist, action: hidden, subject: full event object }"]
     B -->|"admin unhide"| Q6["scoutsRequests\n{ realm: persist, action: persist, subject: full event object }"]
@@ -39,8 +37,6 @@ flowchart LR
 
     subgraph D["scouts2sqs consuming scoutsRequests"]
         Q1 --> E{"subject completeness"}
-        Q2 --> E
-        Q3 --> E
         Q11 --> E
 
         E -->|"tagline missing"| P1["scoutsProcessing\n{ realm: tagline, action: request, subject: hex }"]
@@ -67,8 +63,6 @@ flowchart LR
 | --- | --- | --- |
 | Scheduled or admin run finds a new event needing enrichment | Event processing collects a new HEX notification | `{ realm: "scoutsRequest", action: "new", subject: <full event object> }` |
 | Scheduled or admin run finds a stale threshold event | Retry path for stuck HEX files | `{ realm: "scoutsRequest", action: "new", subject: <full event object> }` |
-| Broken image repair | Broken image detected in agenda or HEX files | `{ realm: "scoutsRequest", action: "repair", subject: <full event object> }` |
-| Admin requeue | `realm=scouts`, `action=requeue` | `{ realm: "scoutsRequest", action: "new", subject: <full event object> }` |
 | Admin persist metadata | `realm=scouts`, `action=persist` | `{ realm: "persist", action: "persist", subject: <full event object> }` |
 | Admin hide | `realm=scouts`, `action=hide|hidden` | `{ realm: "persist", action: "hidden", subject: <full event object> }` |
 | Admin unhide | `realm=scouts`, `action=unhide|show` | `{ realm: "persist", action: "persist", subject: <full event object> }` |
@@ -85,10 +79,10 @@ flowchart LR
 
 | Consumed from `scoutsRequests` | `scouts2sqs` behavior | Published to `scoutsProcessing` |
 | --- | --- | --- |
-| `{ realm: "scoutsRequest", action: "new|retry|repair", subject: <full event object> }` and no tagline | Derives missing stage from subject completeness | `{ realm: "tagline", action: "request", subject: <hex> }` |
-| `{ realm: "scoutsRequest", action: "new|retry|repair", subject: <full event object> }` and tagline exists but `image.theme` missing | Derives missing stage from subject completeness | `{ realm: "imageTheme", action: "request", subject: <hex> }` |
-| `{ realm: "scoutsRequest", action: "new|retry|repair", subject: <full event object> }` and tagline plus stored theme exist but `image.url` missing | Derives missing stage from subject completeness | `{ realm: "image", action: "request", subject: <hex> }` |
-| `{ realm: "scoutsRequest", action: "new|retry|repair", subject: <full event object> }` and subject is already complete | Stops | no publish |
+| `{ realm: "scoutsRequest", action: "new|retry", subject: <full event object> }` and no tagline | Derives missing stage from subject completeness | `{ realm: "tagline", action: "request", subject: <hex> }` |
+| `{ realm: "scoutsRequest", action: "new|retry", subject: <full event object> }` and tagline exists but `image.theme` missing | Derives missing stage from subject completeness | `{ realm: "imageTheme", action: "request", subject: <hex> }` |
+| `{ realm: "scoutsRequest", action: "new|retry", subject: <full event object> }` and tagline plus stored theme exist but `image.url` missing | Derives missing stage from subject completeness | `{ realm: "image", action: "request", subject: <hex> }` |
+| `{ realm: "scoutsRequest", action: "new|retry", subject: <full event object> }` and subject is already complete | Stops | no publish |
 | `{ realm: "scoutsRequest", action: "request", subject: "tagline", hex: <hex> }` | Field-level translation | `{ realm: "tagline", action: "request", subject: <hex> }` |
 | `{ realm: "scoutsRequest", action: "request", subject: "imageTheme", hex: <hex> }` | Field-level translation | `{ realm: "imageTheme", action: "request", subject: <hex> }` |
 | `{ realm: "scoutsRequest", action: "request", subject: "imageUrl", hex: <hex> }` | Field-level translation | `{ realm: "image", action: "request", subject: <hex> }` |

@@ -271,6 +271,7 @@
                         <p class="refresh-status modal-input-help"><strong>Persist to HEX:</strong> immediately replaces the selected field in the HEX payload.</p>
                         <p class="refresh-status modal-input-help"><strong>Request AI/Image:</strong> queues generation for that field and updates later through the existing SQS workflow.</p>
                         <p class="refresh-status modal-input-help"><strong>Hide/Unhide Event:</strong> toggles visibility in HEX and agenda for this event.</p>
+                        <p class="refresh-status modal-input-help"><strong>Requeue/repair:</strong> no longer starts from the admin page.</p>
                         <div class="field-actions">
                             <button
                                 id="modal-hide-toggle-button"
@@ -354,7 +355,6 @@
                                 value="generateImage"
                                 onclick="requestGeneratedField('imageUrl', this.value)"
                             >Request AI Image</button>
-                            <button id="modal-requeue-button" class="btn btn-secondary requires-api" value="requeue" style="display:none;" onclick="requeueCurrentEvent(this.value)">Requeue Missing Fields</button>
                         </div>
                     </div>
 
