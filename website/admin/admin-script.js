@@ -2703,7 +2703,7 @@ function renderEvents() {
         const tagline = getAIPrompt(event);
         const imageTheme = getImageTheme(event);
         const missingFields = getMissingMetadataFields(event);
-        const requeueEligible = missingFields.length > 0;
+        const hasMissingMetadata = missingFields.length > 0;
         const section = getEventSection(event);
         const isHidden = isEntryHidden(entry);
         const isApproved = isEntryApproved(entry);
@@ -2770,8 +2770,8 @@ function renderEvents() {
                         </div>
                     ` : ''}
 
-                    ${requeueEligible
-                        ? `<p class="requeue-hint">Missing: ${missingFields.join(', ')}</p>`
+                    ${hasMissingMetadata
+                        ? `<p class="metadata-hint">Missing: ${missingFields.join(', ')}</p>`
                         : ''
                     }
                     <div class="event-actions">
@@ -2787,10 +2787,6 @@ function renderEvents() {
                         }
                         ${showApprovalState
                             ? `<button class="btn btn-primary requires-api" value="approve" onclick="approveEvent(${index}, false, this.value)">Approve</button>`
-                            : ''
-                        }
-                        ${requeueEligible
-                            ? `<button class="btn btn-secondary requires-api" value="requeue" onclick="requeueEvent(${index}, false, this.value)">Requeue Missing Fields</button>`
                             : ''
                         }
                         <button class="btn btn-secondary" onclick="toggleHexPreview(${index})">HEX</button>
@@ -2901,7 +2897,6 @@ function openUploadModal(index) {
     const imageUrlInput = document.getElementById('modal-image-url-input');
     const hideToggleButton = document.getElementById('modal-hide-toggle-button');
     const approveButton = document.getElementById('modal-approve-button');
-    const requeueButton = document.getElementById('modal-requeue-button');
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
     if (imagePromptInput) imagePromptInput.value = currentImageTheme || '';
     if (taglineInput) taglineInput.value = getAIPrompt(event) || '';
@@ -2915,9 +2910,6 @@ function openUploadModal(index) {
     }
     if (approveButton) {
         approveButton.style.display = isEntryHidden(entry) || isEntryApproved(entry) ? 'none' : 'inline-block';
-    }
-    if (requeueButton) {
-        requeueButton.style.display = 'inline-block';
     }
     document.getElementById('modal-status').textContent = '';
     document.getElementById('modal-status').className = 'status-text';
@@ -3781,108 +3773,6 @@ function approveCurrentEvent(action = 'approve') {
     }
     approveEvent(currentEventIndex, true, action);
 }
-
-async function requeueEvent(eventIndex, fromModal = false, action = 'requeue') {
-    if (!apiAuthReady) {
-        updateApiAuthStatus(
-            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
-            'error',
-        );
-        if (fromModal) updateModalStatus('Admin API auth not ready.', 'error');
-        return;
-    }
-    if (uiCommandInFlight) {
-        const message = 'Another admin request is already in flight. Wait for completion before queueing.';
-        if (fromModal) updateModalStatus(message, 'error');
-        else updateRuntimeDetails(message, 'error');
-        return;
-    }
-
-    const entry = visibleEventEntries[eventIndex];
-    if (!entry || !entry.event) {
-        if (fromModal) updateModalStatus('Unable to find selected event entry.', 'error');
-        else updateRuntimeDetails('Unable to find selected event entry.', 'error');
-        return;
-    }
-
-    const event = entry.event;
-    const eventLabel = event.summary || event.title || `Event ${eventIndex + 1}`;
-    const missing = getMissingMetadataFields(event);
-    if (missing.length === 0) {
-        const message = 'Event metadata is complete. Requeue not required.';
-        if (fromModal) updateModalStatus(message, 'info');
-        else updateRuntimeDetails(message, 'info');
-        return;
-    }
-
-    const hex = getEventHex(event);
-    if (!hex) {
-        const message = 'Cannot requeue: event is missing HEX.';
-        if (fromModal) updateModalStatus(message, 'error');
-        else updateRuntimeDetails(message, 'error');
-        return;
-    }
-
-    const subject = JSON.parse(JSON.stringify(event || {}));
-    subject.hex = hex;
-    if (!subject.image || typeof subject.image !== 'object') {
-        subject.image = {};
-    }
-    if (!hasText(subject.tagline) && hasText(subject.AI)) {
-        subject.tagline = subject.AI;
-    }
-    if (Object.prototype.hasOwnProperty.call(subject, 'AI')) delete subject.AI;
-    if (Object.prototype.hasOwnProperty.call(subject, 'ai')) delete subject.ai;
-    if (!hasText(subject.tagline)) subject.tagline = null;
-    if (!hasText(subject.image.theme)) subject.image.theme = null;
-    if (Object.prototype.hasOwnProperty.call(subject.image, 'prompt')) delete subject.image.prompt;
-    if (!hasText(subject.image.url)) subject.image.url = null;
-
-    const payload = {
-        realm: 'scouts',
-        subject: 'scoutsRequest',
-        action,
-        event: subject,
-    };
-
-    const loadingMessage = `Requeueing "${eventLabel}" (missing: ${missing.join(', ')})...`;
-    if (fromModal) updateModalStatus(loadingMessage, 'loading');
-    else pinRuntimeDetails(loadingMessage, 'loading');
-
-    uiCommandInFlight = true;
-    refreshApiActionButtons();
-    try {
-        const result = await sendScoutsCommand(payload);
-        const queueAcceptedSuffix = result?.queueAccepted === true ? ' Queue accepted.' : '';
-        const statusCode = Number.isFinite(result?._httpStatus) ? result._httpStatus : 200;
-        const backendMessage = typeof result?.message === 'string' && result.message.trim()
-            ? ` ${result.message.trim()}`
-            : '';
-        const successMessage = appendBackendRequestIdMessage(
-            `Requeue request submitted for "${eventLabel}" [HTTP ${statusCode}].${queueAcceptedSuffix}${backendMessage}`,
-            result,
-        );
-        if (fromModal) updateModalStatus(successMessage, 'success');
-        else pinRuntimeDetails(successMessage, 'success');
-    } catch (error) {
-        console.error('Error requeueing event:', error);
-        const failureMessage = `Failed to requeue event: ${error.message}`;
-        if (fromModal) updateModalStatus(failureMessage, 'error');
-        else pinRuntimeDetails(failureMessage, 'error');
-    } finally {
-        uiCommandInFlight = false;
-        refreshApiActionButtons();
-    }
-}
-
-function requeueCurrentEvent(action = 'requeue') {
-    if (currentEventIndex === null) {
-        updateModalStatus('Open an event first before requeueing.', 'error');
-        return;
-    }
-    requeueEvent(currentEventIndex, true, action);
-}
-
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {

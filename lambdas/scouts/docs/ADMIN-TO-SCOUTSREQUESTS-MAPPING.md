@@ -43,7 +43,6 @@ flowchart LR
 | Generate image | `realm: 'scouts'`, `subject: { hex }`, `action: 'generateImage'` | `realm: 'scoutsRequest'`, `action: 'request'`, `subject: 'imageUrl'`, `hex` | Translated by `scouts2sqs` to `image/request` with hex subject | The external contract uses `imageUrl` while the internal processing realm remains `image`. |
 | Hide event | `realm: 'scouts'`, `subject: { hex, isHidden: true }`, `action: 'hide'` | `realm: 'persist'`, `action: 'persist'`, `subject: { hex, isHidden: true }` | Forwarded to `scoutsProcessing` as `persist/persist` | Current admin hide no longer publishes `persist/hidden`. |
 | Unhide event | `realm: 'scouts'`, `subject: { hex, isHidden: false }`, `action: 'unhide'` | `realm: 'persist'`, `action: 'persist'`, `subject: { hex, isHidden: false }` | Forwarded to `scoutsProcessing` as `persist/persist` | Same queue shape as hide, with `isHidden: false`. |
-| Requeue incomplete event | `realm: 'scouts'`, `subject: 'scoutsRequest'`, `action: 'requeue'`, `event: <normalized event>` | `realm: 'scoutsRequest'`, `action: 'new'`, `subject: <normalized event>` | Derives next stage from completeness: `tagline/request`, `imageTheme/request`, `image/request`, or no publish | The event object is normalized before queueing. |
 
 ## Additional non-admin producers of `scoutsRequests`
 
@@ -52,7 +51,6 @@ These are not sent directly by the admin page, but they affect the real pipeline
 | Producer | Message published to `scoutsRequests` | `scouts2sqs` result | Notes |
 | --- | --- | --- | --- |
 | Enrichment run finds new or stale work | `realm: 'scoutsRequest'`, `action: 'new'`, `subject: <merged event object>` | Derives `tagline/request`, `imageTheme/request`, `image/request`, or no publish | Used by agenda/calendar processing and retry handling. |
-| Broken image repair | `realm: 'scoutsRequest'`, `action: 'repair'`, `subject: <event object>` | Derives `tagline/request`, `imageTheme/request`, `image/request`, or no publish | Repair goes through the same completeness logic in `scouts2sqs`. |
 | Reset cleanup notification | `realm: 'scouts'`, `subject: 'reset'`, `action: <removed-events summary>` | Dropped by `scouts2sqs` | `scouts2sqs` does not support the `scouts` realm on the SQS path. |
 | `sqs2scouts` callback for incomplete persisted HEX | No outbound queue message | No downstream queue work is emitted from this callback path | Persisted-but-incomplete HEX is logged and left in place. |
 
@@ -70,7 +68,6 @@ The current admin page sends payloads like:
 - `subject: { hex, imageUrl }`
 - `subject: { hex }` for generate actions
 - `subject: { hex, isHidden: true|false }` for hide/unhide
-- `subject: 'scoutsRequest', event: <normalized event>` for requeue
 
 The `scouts` lambda then translates those admin requests into queue-specific payloads.
 
@@ -96,7 +93,7 @@ The active admin flow emits `tagline`, `imageTheme`, `imageUrl`, and `hex`.
 
 ### 4. `scouts2sqs` derives the next stage from subject completeness
 
-For `realm: 'scoutsRequest'` with `action: 'new' | 'retry' | 'repair'`, `scouts2sqs` checks the subject in this order:
+For `realm: 'scoutsRequest'` with `action: 'new' | 'retry'`, `scouts2sqs` checks the subject in this order:
 
 1. missing tagline -> publish `tagline / request / <hex>`
 2. missing `image.theme` -> publish `imageTheme / request / <hex>`
@@ -126,11 +123,9 @@ So queue payloads are normalized copies, not exact object echoes from the admin 
 - Admin generate helper: `/Users/antoniofreire/storage/github/scouts/website/admin/admin-script.js:2885`
 - Admin hide helper: `/Users/antoniofreire/storage/github/scouts/website/admin/admin-script.js:2948`
 - Admin unhide helper: `/Users/antoniofreire/storage/github/scouts/website/admin/admin-script.js:3041`
-- Admin requeue helper: `/Users/antoniofreire/storage/github/scouts/website/admin/admin-script.js:3149`
 - Admin button action tokens: `/Users/antoniofreire/storage/github/scouts/website/admin/index.html:283`
 - Queue publisher and identifier stripping: `/Users/antoniofreire/storage/github/lambdas/scouts/function/scouts.mjs:1310`
 - Reset notification producer: `/Users/antoniofreire/storage/github/lambdas/scouts/function/scouts.mjs:1355`
-- Broken image repair producer: `/Users/antoniofreire/storage/github/lambdas/scouts/function/scouts.mjs:2234`
 - Enrichment new/retry queue emission: `/Users/antoniofreire/storage/github/lambdas/scouts/function/scouts.mjs:2470`
 - Metadata persist translation: `/Users/antoniofreire/storage/github/lambdas/scouts/function/scouts.mjs:3066`
 - Hide/unhide translation: `/Users/antoniofreire/storage/github/lambdas/scouts/function/scouts.mjs:3233`

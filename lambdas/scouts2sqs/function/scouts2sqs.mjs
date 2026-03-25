@@ -1362,7 +1362,7 @@ export async function lambdaHandler(event) {
                     }
 
                     // Process scoutsRequest messages
-                    if (rawRealm === 'scoutsRequest' && (rawAction === 'retry' || rawAction === 'new' || rawAction === 'repair')) {
+                    if (rawRealm === 'scoutsRequest' && (rawAction === 'retry' || rawAction === 'new')) {
                         console.log(`[scoutsRequest] Processing ${rawAction} action for:`, rawSubject.title || 'unknown');
                         ensureRuntimeMetadata(rawSubject);
                         
