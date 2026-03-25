@@ -45,9 +45,12 @@ Parameters:
   ProcessingQueueUrl:
     Type: String
     Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
+  DlqArn:
+    Type: String
+    Default: arn:aws:sqs:eu-west-2:553490163883:scoutsRequestsDLQ
   DlqUrl:
     Type: String
-    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequestsDLQ
   BatchSize:
     Type: Number
     Default: 1
@@ -126,7 +129,9 @@ Resources:
                 Action:
                   - sqs:SendMessage
                   - sqs:GetQueueAttributes
-                Resource: !Ref QueueArn
+                Resource:
+                  - !Ref QueueArn
+                  - !Ref DlqArn
               - Effect: Allow
                 Action:
                   - sqs:ReceiveMessage

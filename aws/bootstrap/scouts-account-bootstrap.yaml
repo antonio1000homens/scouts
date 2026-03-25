@@ -194,6 +194,7 @@ Resources:
                   - sqs:ChangeMessageVisibility
                 Resource:
                   - !Sub arn:aws:sqs:eu-west-2:${AWS::AccountId}:scoutsRequests
+                  - !Sub arn:aws:sqs:eu-west-2:${AWS::AccountId}:scoutsRequestsDLQ
                   - !Sub arn:aws:sqs:eu-west-2:${AWS::AccountId}:scoutsProcessing
                   - !Sub arn:aws:sqs:eu-west-2:${AWS::AccountId}:scoutsDecision
                   - !Sub arn:aws:sqs:eu-west-2:${AWS::AccountId}:scoutsProcessingDLQ

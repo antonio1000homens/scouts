@@ -53,7 +53,8 @@ TARGET_BUCKET="${TARGET_BUCKET:-scouts-2ndtolworth-prod-553490163883}"
 SCOUTS_CONFIG_KEY="${SCOUTS_CONFIG_KEY:-scouts.conf}"
 REQUIRED_API_KEY="${REQUIRED_API_KEY:-${SCOUTS_REQUIRED_API_KEY:-}}"
 SCOUTS2SQS_PUBLISH_ENABLED="${SCOUTS2SQS_PUBLISH_ENABLED:-true}"
-DLQ_URL="${DLQ_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ}"
+DLQ_ARN="${DLQ_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsRequestsDLQ}"
+DLQ_URL="${DLQ_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequestsDLQ}"
 IMAGE_ENRICH_STATE_MACHINE_ARN="${IMAGE_ENRICH_STATE_MACHINE_ARN:-}"
 
 TEMPLATE_FILE="${ROOT_DIR}/cloudformation/templates/scouts2sqs.yaml"
@@ -185,6 +186,7 @@ CFN_DEPLOY_ARGS+=(
     ScoutsConfigKey="${SCOUTS_CONFIG_KEY}"
     ScoutsRequestsQueueUrl="${SCOUTS_REQUESTS_QUEUE_URL}"
     ProcessingQueueUrl="${QUEUE_URL}"
+    DlqArn="${DLQ_ARN}"
     DlqUrl="${DLQ_URL}"
     ImageEnrichStateMachineArn="${IMAGE_ENRICH_STATE_MACHINE_ARN}"
 )
