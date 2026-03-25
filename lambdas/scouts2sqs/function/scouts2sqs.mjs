@@ -7,7 +7,7 @@ import crypto from 'crypto';
 // Load configuration from environment variables
 const { REQUIRED_API_KEY, TARGET_BUCKET } = process.env;
 const SQS_QUEUE_URL = process.env.SQS_QUEUE_URL || "https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing";
-const DLQ_URL = process.env.DLQ_URL || "https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ";
+const DLQ_URL = process.env.DLQ_URL || "https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequestsDLQ";
 const DEFAULT_BUCKET = 'scouts-2ndtolworth-prod-553490163883';
 const SCOUTS_REQUESTS_QUEUE_URL_FALLBACK =
     process.env.SCOUTS_REQUESTS_QUEUE_URL

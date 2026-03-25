@@ -5,6 +5,9 @@ Parameters:
   RequestsQueueName:
     Type: String
     Default: scoutsRequests
+  RequestsDlqName:
+    Type: String
+    Default: scoutsRequestsDLQ
   ProcessingQueueName:
     Type: String
     Default: scoutsProcessing
@@ -25,6 +28,13 @@ Parameters:
     Default: 5
 
 Resources:
+  ScoutsRequestsDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref RequestsDlqName
+      VisibilityTimeout: !Ref VisibilityTimeout
+      MessageRetentionPeriod: !Ref MessageRetentionSeconds
+
   ScoutsProcessingDlq:
     Type: AWS::SQS::Queue
     Properties:
@@ -38,6 +48,9 @@ Resources:
       QueueName: !Ref RequestsQueueName
       VisibilityTimeout: !Ref VisibilityTimeout
       MessageRetentionPeriod: !Ref MessageRetentionSeconds
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt ScoutsRequestsDlq.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
 
   ScoutsDecisionQueue:
     Type: AWS::SQS::Queue
@@ -61,6 +74,10 @@ Outputs:
     Value: !GetAtt ScoutsRequestsQueue.Arn
   ScoutsRequestsQueueUrl:
     Value: !Ref ScoutsRequestsQueue
+  ScoutsRequestsDlqArn:
+    Value: !GetAtt ScoutsRequestsDlq.Arn
+  ScoutsRequestsDlqUrl:
+    Value: !Ref ScoutsRequestsDlq
   ScoutsProcessingQueueArn:
     Value: !GetAtt ScoutsProcessingQueue.Arn
   ScoutsProcessingQueueUrl:

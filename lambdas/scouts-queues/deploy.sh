@@ -16,6 +16,7 @@ if [ -z "${AWS_ACCESS_KEY_ID:-}" ] && [ -z "${AWS_WEB_IDENTITY_TOKEN_FILE:-}" ] 
 fi
 
 REQUESTS_QUEUE_NAME="${REQUESTS_QUEUE_NAME:-scoutsRequests}"
+REQUESTS_DLQ_NAME="${REQUESTS_DLQ_NAME:-scoutsRequestsDLQ}"
 PROCESSING_QUEUE_NAME="${PROCESSING_QUEUE_NAME:-scoutsProcessing}"
 DECISION_QUEUE_NAME="${DECISION_QUEUE_NAME:-scoutsDecision}"
 PROCESSING_DLQ_NAME="${PROCESSING_DLQ_NAME:-scoutsProcessingDLQ}"
@@ -42,6 +43,7 @@ fi
 CFN_ARGS+=(
   --parameter-overrides
     RequestsQueueName="${REQUESTS_QUEUE_NAME}"
+    RequestsDlqName="${REQUESTS_DLQ_NAME}"
     ProcessingQueueName="${PROCESSING_QUEUE_NAME}"
     DecisionQueueName="${DECISION_QUEUE_NAME}"
     ProcessingDlqName="${PROCESSING_DLQ_NAME}"
