@@ -109,6 +109,23 @@ Resources:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-*
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-*
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-*
+              - Sid: BootstrapRoleManagement
+                Effect: Allow
+                Action:
+                  - iam:AttachRolePolicy
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:DetachRolePolicy
+                  - iam:GetRole
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListRolePolicies
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:UpdateAssumeRolePolicy
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/ScoutsBootstrapAdminRole
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/GitHubActionsScoutsDeployRole
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/CloudFormationExecutionRole
               - Sid: RuntimeRoleInlinePolicyManagement
                 Effect: Allow
                 Action:
@@ -119,6 +136,16 @@ Resources:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-*
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-*
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-*
+              - Sid: BootstrapRoleInlinePolicyManagement
+                Effect: Allow
+                Action:
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:PutRolePolicy
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/ScoutsBootstrapAdminRole
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/GitHubActionsScoutsDeployRole
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/CloudFormationExecutionRole
               - Sid: RuntimeRolePass
                 Effect: Allow
                 Action:
@@ -127,6 +154,23 @@ Resources:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts-*
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/scouts2sqs-*
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/sqs2scouts-*
+              - Sid: BootstrapRolePass
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/ScoutsBootstrapAdminRole
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/GitHubActionsScoutsDeployRole
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/CloudFormationExecutionRole
+              - Sid: OidcProviderManagement
+                Effect: Allow
+                Action:
+                  - iam:CreateOpenIDConnectProvider
+                  - iam:DeleteOpenIDConnectProvider
+                  - iam:GetOpenIDConnectProvider
+                  - iam:TagOpenIDConnectProvider
+                  - iam:UntagOpenIDConnectProvider
+                Resource: '*'
               - Sid: LambdaCreateAndList
                 Effect: Allow
                 Action:
