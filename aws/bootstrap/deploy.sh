@@ -14,6 +14,18 @@ SCOUTS_REPO_OWNER="${SCOUTS_REPO_OWNER:-antonio1000homens}"
 SCOUTS_REPO_NAME="${SCOUTS_REPO_NAME:-scouts}"
 SCOUTS_BRANCH="${SCOUTS_BRANCH:-master}"
 
+if [ -z "${BOOTSTRAP_PRINCIPAL_ARN}" ]; then
+  EXISTING_BOOTSTRAP_PRINCIPAL_ARN="$(aws cloudformation describe-stacks \
+    --region "${REGION}" \
+    --stack-name "${STACK_NAME}" \
+    --query "Stacks[0].Parameters[?ParameterKey=='BootstrapPrincipalArn'].ParameterValue | [0]" \
+    --output text 2>/dev/null || true)"
+
+  if [ -n "${EXISTING_BOOTSTRAP_PRINCIPAL_ARN}" ] && [ "${EXISTING_BOOTSTRAP_PRINCIPAL_ARN}" != "None" ] && [ "${EXISTING_BOOTSTRAP_PRINCIPAL_ARN}" != "null" ]; then
+    BOOTSTRAP_PRINCIPAL_ARN="${EXISTING_BOOTSTRAP_PRINCIPAL_ARN}"
+  fi
+fi
+
 if [ -z "${AWS_ACCESS_KEY_ID:-}" ] && [ -z "${AWS_WEB_IDENTITY_TOKEN_FILE:-}" ] && [ -z "${AWS_CONTAINER_CREDENTIALS_RELATIVE_URI:-}" ] && [ -z "${AWS_CONTAINER_CREDENTIALS_FULL_URI:-}" ]; then
   export AWS_PROFILE="${AWS_PROFILE_NAME:-${AWS_PROFILE:-scouts}}"
 fi

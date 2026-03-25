@@ -5,12 +5,12 @@ Parameters:
   StateMachineName:
     Type: String
     Default: scouts-image-enrich
-  ProcessingQueueUrl:
+  RequestsQueueUrl:
     Type: String
-    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
-  ProcessingQueueArn:
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+  RequestsQueueArn:
     Type: String
-    Default: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing
+    Default: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
 
 Resources:
   ScoutsImageEnrichRole:
@@ -25,14 +25,14 @@ Resources:
               Service: states.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: DispatchScoutsProcessing
+        - PolicyName: DispatchScoutsRequests
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
                   - sqs:SendMessage
-                Resource: !Ref ProcessingQueueArn
+                Resource: !Ref RequestsQueueArn
 
   ScoutsImageEnrichStateMachine:
     Type: AWS::StepFunctions::StateMachine
@@ -49,11 +49,11 @@ Resources:
                 "Type": "Task",
                 "Resource": "arn:${AWS::Partition}:states:::sqs:sendMessage.waitForTaskToken",
                 "Parameters": {
-                  "QueueUrl": "${ProcessingQueueUrl}",
+                  "QueueUrl": "${RequestsQueueUrl}",
                   "MessageBody": {
-                    "realm": "imageTheme",
+                    "realm": "scoutsRequest",
                     "action": "request",
-                    "subject.$": "$.requestHex",
+                    "subject": "imageTheme",
                     "subjectLabel": "imageTheme",
                     "source": "scouts-image-enrich",
                     "approvalMode.$": "$.approvalMode",
@@ -82,10 +82,10 @@ Resources:
                 "Type": "Task",
                 "Resource": "arn:${AWS::Partition}:states:::sqs:sendMessage.waitForTaskToken",
                 "Parameters": {
-                  "QueueUrl": "${ProcessingQueueUrl}",
+                  "QueueUrl": "${RequestsQueueUrl}",
                   "MessageBody": {
-                    "realm": "image",
-                    "subject.$": "$.requestHex",
+                    "realm": "scoutsRequest",
+                    "subject": "imageUrl",
                     "subjectLabel": "imageUrl",
                     "source": "scouts-image-enrich",
                     "approvalMode.$": "$.approvalMode",

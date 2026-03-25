@@ -24,8 +24,8 @@ if [ -z "${AWS_ACCESS_KEY_ID:-}" ] && [ -z "${AWS_WEB_IDENTITY_TOKEN_FILE:-}" ] 
 fi
 
 STATE_MACHINE_NAME="${STATE_MACHINE_NAME:-scouts-image-enrich}"
-PROCESSING_QUEUE_URL="${PROCESSING_QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing}"
-PROCESSING_QUEUE_ARN="${PROCESSING_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing}"
+REQUESTS_QUEUE_URL="${REQUESTS_QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests}"
+REQUESTS_QUEUE_ARN="${REQUESTS_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsRequests}"
 
 TEMPLATE_FILE="${ROOT_DIR}/cloudformation/templates/scouts-image-enrich.yaml"
 
@@ -86,8 +86,8 @@ fi
 CFN_DEPLOY_ARGS+=(
   --parameter-overrides
     StateMachineName="${STATE_MACHINE_NAME}"
-    ProcessingQueueUrl="${PROCESSING_QUEUE_URL}"
-    ProcessingQueueArn="${PROCESSING_QUEUE_ARN}"
+    RequestsQueueUrl="${REQUESTS_QUEUE_URL}"
+    RequestsQueueArn="${REQUESTS_QUEUE_ARN}"
 )
 
 aws cloudformation deploy "${CFN_DEPLOY_ARGS[@]}"
