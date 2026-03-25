@@ -119,6 +119,39 @@ test('buildQueuePayload translates scoutsRequest imageTheme request to internal 
   });
 });
 
+test('buildQueuePayload preserves step functions metadata when translating scoutsRequest imageTheme request', () => {
+  const payload = buildQueuePayload({
+    requestId: 'req-sfn-theme',
+    realm: 'scoutsRequest',
+    subject: 'imageTheme',
+    subjectLabel: 'imageTheme',
+    requestHex: '696d6167657468656d65',
+    action: 'request',
+    taskToken: 'task-token-1',
+    orchestrationType: 'imageEnrich',
+    orchestrationStep: 'imageTheme',
+    source: 'scouts-image-enrich',
+    approvalMode: 'auto',
+    requestMode: 'auto',
+  });
+
+  assert.deepEqual(payload, {
+    realm: 'imageTheme',
+    action: 'request',
+    subject: '696d6167657468656d65',
+    subjectLabel: 'imageTheme',
+    hex: '696d6167657468656d65',
+    requestId: 'req-sfn-theme',
+    requestHex: '696d6167657468656d65',
+    taskToken: 'task-token-1',
+    orchestrationType: 'imageEnrich',
+    orchestrationStep: 'imageTheme',
+    source: 'scouts-image-enrich',
+    approvalMode: 'auto',
+    requestMode: 'auto',
+  });
+});
+
 test('buildQueuePayload translates scoutsRequest imageTheme persist to internal persist payload', () => {
   const payload = buildQueuePayload({
     requestId: 'req-5',
@@ -163,6 +196,39 @@ test('buildQueuePayload translates scoutsRequest imageUrl request to internal im
     subjectLabel: 'imageUrl',
     hex: '696d61676575726c',
     title: 'River Hike',
+  });
+});
+
+test('buildQueuePayload preserves step functions metadata when translating scoutsRequest imageUrl request', () => {
+  const payload = buildQueuePayload({
+    requestId: 'req-sfn-image',
+    realm: 'scoutsRequest',
+    subject: 'imageUrl',
+    subjectLabel: 'imageUrl',
+    requestHex: '696d61676575726c',
+    action: 'request',
+    taskToken: 'task-token-2',
+    orchestrationType: 'imageEnrich',
+    orchestrationStep: 'image',
+    source: 'scouts-image-enrich',
+    approvalMode: 'auto',
+    requestMode: 'auto',
+  });
+
+  assert.deepEqual(payload, {
+    realm: 'image',
+    action: 'request',
+    subject: '696d61676575726c',
+    subjectLabel: 'imageUrl',
+    hex: '696d61676575726c',
+    requestId: 'req-sfn-image',
+    requestHex: '696d61676575726c',
+    taskToken: 'task-token-2',
+    orchestrationType: 'imageEnrich',
+    orchestrationStep: 'image',
+    source: 'scouts-image-enrich',
+    approvalMode: 'auto',
+    requestMode: 'auto',
   });
 });
 

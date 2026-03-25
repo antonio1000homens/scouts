@@ -15,6 +15,7 @@ on:
         options:
           - changed
           - all
+          - aws-bootstrap
           - website
           - cloudflare
           - scouts-queues
@@ -45,6 +46,7 @@ jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
+      aws_bootstrap: "${{ steps.changes.outputs['aws-bootstrap'] }}"
       website: "${{ steps.changes.outputs.website }}"
       cloudflare: "${{ steps.changes.outputs.cloudflare }}"
       scouts_queues: "${{ steps.changes.outputs['scouts-queues'] }}"
@@ -92,6 +94,7 @@ jobs:
             append_file "${key}" "${file}"
           }
 
+          aws_bootstrap='false'
           website='false'
           cloudflare='false'
           scouts_queues='false'
@@ -101,6 +104,7 @@ jobs:
           scouts2sqs='false'
           sqs2scouts='false'
 
+          aws_bootstrap_files=''
           website_files=''
           cloudflare_files=''
           scouts_queues_files=''
@@ -142,6 +146,12 @@ jobs:
 
           while IFS= read -r file; do
             [ -n "${file}" ] || continue
+
+            case "${file}" in
+              aws/bootstrap/*)
+                mark_changed 'aws-bootstrap' "${file}"
+                ;;
+            esac
 
             case "${file}" in
               index.html|deploy-manual.sh|.github/workflows/deploy-to-s3.yml|lambdas/sqs2scouts/scouts.conf|website/*)
@@ -194,6 +204,8 @@ jobs:
           done <<< "${changed_files}"
 
           {
+            echo "aws-bootstrap=${aws_bootstrap}"
+            echo "aws-bootstrap_files=${aws_bootstrap_files}"
             echo "website=${website}"
             echo "website_files=${website_files}"
             echo "cloudflare=${cloudflare}"
@@ -213,6 +225,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
       - name: Debug detected changes
         run: |
+          echo "aws-bootstrap=${{ steps.changes.outputs['aws-bootstrap'] }} files=${{ steps.changes.outputs['aws-bootstrap_files'] }}"
           echo "website=${{ steps.changes.outputs.website }} files=${{ steps.changes.outputs.website_files }}"
           echo "cloudflare=${{ steps.changes.outputs.cloudflare }} files=${{ steps.changes.outputs.cloudflare_files }}"
           echo "scouts-queues=${{ steps.changes.outputs['scouts-queues'] }} files=${{ steps.changes.outputs['scouts-queues_files'] }}"
@@ -417,29 +430,61 @@ jobs:
             echo "No CloudFront distribution ID loaded from Bitwarden; skipping invalidation."
           fi
 
-  deploy-scouts-queues:
+  deploy-aws-bootstrap:
     needs: detect-changes
     if: |
-      (github.event_name != 'workflow_dispatch' && (
-        needs.detect-changes.outputs.scouts_queues == 'true' ||
-        needs.detect-changes.outputs.scouts_function == 'true' ||
-        needs.detect-changes.outputs.scouts2sqs == 'true' ||
-        needs.detect-changes.outputs.sqs2scouts == 'true'
-      )) ||
+      (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.aws_bootstrap == 'true') ||
       (github.event_name == 'workflow_dispatch' && (
         github.event.inputs.deploy_all == 'true' ||
         github.event.inputs.deploy_target == 'all' ||
+        github.event.inputs.deploy_target == 'aws-bootstrap' ||
         github.event.inputs.deploy_target == 'scouts-queues' ||
         github.event.inputs.deploy_target == 'scouts-function' ||
         github.event.inputs.deploy_target == 'scouts2sqs' ||
         github.event.inputs.deploy_target == 'sqs2scouts' ||
-        (github.event.inputs.deploy_target == 'changed' && (
+        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.aws_bootstrap == 'true')
+      ))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: scouts-aws-bootstrap-stack-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: github-actions-scouts-deploy
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Deploy Scouts AWS bootstrap
+        run: cd aws/bootstrap && bash ./deploy.sh
+
+  deploy-scouts-queues:
+    needs: [detect-changes, deploy-aws-bootstrap]
+    if: |
+      always() &&
+      (needs.deploy-aws-bootstrap.result == 'success' || needs.deploy-aws-bootstrap.result == 'skipped') &&
+      (
+        (github.event_name != 'workflow_dispatch' && (
           needs.detect-changes.outputs.scouts_queues == 'true' ||
           needs.detect-changes.outputs.scouts_function == 'true' ||
           needs.detect-changes.outputs.scouts2sqs == 'true' ||
           needs.detect-changes.outputs.sqs2scouts == 'true'
+        )) ||
+        (github.event_name == 'workflow_dispatch' && (
+          github.event.inputs.deploy_all == 'true' ||
+          github.event.inputs.deploy_target == 'all' ||
+          github.event.inputs.deploy_target == 'scouts-queues' ||
+          github.event.inputs.deploy_target == 'scouts-function' ||
+          github.event.inputs.deploy_target == 'scouts2sqs' ||
+          github.event.inputs.deploy_target == 'sqs2scouts' ||
+          (github.event.inputs.deploy_target == 'changed' && (
+            needs.detect-changes.outputs.scouts_queues == 'true' ||
+            needs.detect-changes.outputs.scouts_function == 'true' ||
+            needs.detect-changes.outputs.scouts2sqs == 'true' ||
+            needs.detect-changes.outputs.sqs2scouts == 'true'
+          ))
         ))
-      ))
+      )
     runs-on: ubuntu-latest
     concurrency:
       group: scouts-queues-stack-${{ github.ref }}
@@ -461,6 +506,7 @@ jobs:
     needs: [detect-changes, deploy-scouts-queues, deploy-scouts-image-enrich]
     if: |
       always() &&
+      (needs.deploy-scouts-queues.result == 'success' || needs.deploy-scouts-queues.result == 'skipped') &&
       (needs.deploy-scouts-image-enrich.result == 'success' || needs.deploy-scouts-image-enrich.result == 'skipped') &&
       (
         (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.scouts_function == 'true') ||
@@ -595,6 +641,7 @@ jobs:
     needs: [detect-changes, deploy-scouts-queues, deploy-scouts-image-enrich]
     if: |
       always() &&
+      (needs.deploy-scouts-queues.result == 'success' || needs.deploy-scouts-queues.result == 'skipped') &&
       (needs.deploy-scouts-image-enrich.result == 'success' || needs.deploy-scouts-image-enrich.result == 'skipped') &&
       (
         (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.scouts2sqs == 'true') ||
