@@ -43,11 +43,81 @@ for cmd in aws; do
   }
 done
 
+print_recent_stack_events() {
+  aws cloudformation describe-stack-events \
+    --region "${REGION}" \
+    --stack-name "${STACK_NAME}" \
+    --max-items 25 \
+    --query 'StackEvents[].{Time:Timestamp,LogicalResourceId:LogicalResourceId,ResourceStatus:ResourceStatus,Reason:ResourceStatusReason}' \
+    --output table 2>/dev/null || true
+}
+
+wait_for_stack_recovery() {
+  local max_attempts="${1:-60}"
+  local attempt=1
+
+  while [ "${attempt}" -le "${max_attempts}" ]; do
+    local status
+    status="$(aws cloudformation describe-stacks \
+      --region "${REGION}" \
+      --stack-name "${STACK_NAME}" \
+      --query 'Stacks[0].StackStatus' \
+      --output text 2>/dev/null || true)"
+
+    case "${status}" in
+      UPDATE_ROLLBACK_COMPLETE|UPDATE_COMPLETE|CREATE_COMPLETE)
+        return 0
+        ;;
+      UPDATE_ROLLBACK_FAILED)
+        echo "Stack ${STACK_NAME} is still in ${status} after recovery attempt." >&2
+        print_recent_stack_events >&2
+        return 1
+        ;;
+      UPDATE_ROLLBACK_IN_PROGRESS|UPDATE_COMPLETE_CLEANUP_IN_PROGRESS|UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS)
+        sleep 10
+        ;;
+      "")
+        sleep 5
+        ;;
+      *)
+        echo "Stack ${STACK_NAME} is in unexpected state ${status} during recovery." >&2
+        print_recent_stack_events >&2
+        return 1
+        ;;
+    esac
+
+    attempt=$((attempt + 1))
+  done
+
+  echo "Timed out waiting for ${STACK_NAME} rollback recovery." >&2
+  print_recent_stack_events >&2
+  return 1
+}
+
+recover_stack_if_needed() {
+  local status
+  status="$(aws cloudformation describe-stacks \
+    --region "${REGION}" \
+    --stack-name "${STACK_NAME}" \
+    --query 'Stacks[0].StackStatus' \
+    --output text 2>/dev/null || true)"
+
+  if [ "${status}" = "UPDATE_ROLLBACK_FAILED" ]; then
+    echo "Stack ${STACK_NAME} is in UPDATE_ROLLBACK_FAILED. Attempting continue-update-rollback." >&2
+    aws cloudformation continue-update-rollback \
+      --region "${REGION}" \
+      --stack-name "${STACK_NAME}"
+    wait_for_stack_recovery
+  fi
+}
+
 CALLER_ACCOUNT="$(aws sts get-caller-identity --query 'Account' --output text)"
 if [ "${CALLER_ACCOUNT}" != "${ACCOUNT_ID}" ]; then
   echo "Unexpected AWS account ${CALLER_ACCOUNT}. Expected ${ACCOUNT_ID}." >&2
   exit 1
 fi
+
+recover_stack_if_needed
 
 CFN_ARGS=(
   --region "${REGION}"
@@ -69,7 +139,11 @@ CFN_ARGS+=(
     ScoutsBranch="${SCOUTS_BRANCH}"
 )
 
-aws cloudformation deploy "${CFN_ARGS[@]}"
+if ! aws cloudformation deploy "${CFN_ARGS[@]}"; then
+  echo "Bootstrap deploy failed. Recent CloudFormation events:" >&2
+  print_recent_stack_events >&2
+  exit 1
+fi
 
 aws cloudformation describe-stacks \
   --region "${REGION}" \
