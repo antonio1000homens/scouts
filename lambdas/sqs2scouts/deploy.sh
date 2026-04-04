@@ -53,6 +53,9 @@ MEMORY_SIZE="${MEMORY_SIZE:-256}"
 SLACK_SIGNING_SECRET="${SLACK_SIGNING_SECRET:-}"
 SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN:-}"
 GEMINI_API_KEY="${GEMINI_API_KEY:-}"
+SLACK_SIGNING_SECRET_PARAMETER="${SLACK_SIGNING_SECRET_PARAMETER:-/scouts/shared/slack-signing-secret}"
+SLACK_BOT_TOKEN_PARAMETER="${SLACK_BOT_TOKEN_PARAMETER:-/scouts/shared/slack-bot-token}"
+GEMINI_API_KEY_PARAMETER="${GEMINI_API_KEY_PARAMETER:-/scouts/sqs2scouts/gemini-api-key}"
 GEMINI_API_VERSION="${GEMINI_API_VERSION:-}"
 GEMINI_IMAGE_API_VERSION="${GEMINI_IMAGE_API_VERSION:-}"
 GEMINI_IMAGE_MODEL="${GEMINI_IMAGE_MODEL:-}"
@@ -99,6 +102,18 @@ for cmd in aws npm zip; do
   fi
 done
 
+put_standard_secure_parameter() {
+  local name="$1"
+  local value="$2"
+  aws ssm put-parameter \
+    --region "${REGION}" \
+    --name "${name}" \
+    --type SecureString \
+    --tier Standard \
+    --overwrite \
+    --value "${value}" >/dev/null
+}
+
 echo -e "\n${YELLOW}AWS identity preflight...${NC}"
 CALLER_ARN="$(aws sts get-caller-identity --query 'Arn' --output text 2>/dev/null || true)"
 CALLER_ACCOUNT="$(aws sts get-caller-identity --query 'Account' --output text 2>/dev/null || true)"
@@ -121,21 +136,13 @@ if declare -F bws_export_if_unset >/dev/null 2>&1; then
 fi
 
 if [ -z "${SLACK_SIGNING_SECRET}" ] || [ -z "${SLACK_BOT_TOKEN}" ]; then
-  CURRENT_SIGNING_SECRET="$(aws lambda get-function-configuration --function-name "${FUNCTION_NAME}" --region "${REGION}" --query 'Environment.Variables.SLACK_SIGNING_SECRET' --output text 2>/dev/null || true)"
-  CURRENT_BOT_TOKEN="$(aws lambda get-function-configuration --function-name "${FUNCTION_NAME}" --region "${REGION}" --query 'Environment.Variables.SLACK_BOT_TOKEN' --output text 2>/dev/null || true)"
-  if [ -z "${SLACK_SIGNING_SECRET}" ] && [ -n "${CURRENT_SIGNING_SECRET}" ] && [ "${CURRENT_SIGNING_SECRET}" != "None" ] && [ "${CURRENT_SIGNING_SECRET}" != "null" ]; then
-    SLACK_SIGNING_SECRET="${CURRENT_SIGNING_SECRET}"
-  fi
-  if [ -z "${SLACK_BOT_TOKEN}" ] && [ -n "${CURRENT_BOT_TOKEN}" ] && [ "${CURRENT_BOT_TOKEN}" != "None" ] && [ "${CURRENT_BOT_TOKEN}" != "null" ]; then
-    SLACK_BOT_TOKEN="${CURRENT_BOT_TOKEN}"
-  fi
+  echo -e "${RED}SLACK_SIGNING_SECRET and SLACK_BOT_TOKEN must be set before deploying.${NC}"
+  exit 1
 fi
 
 if [ -z "${GEMINI_API_KEY}" ]; then
-  CURRENT_GEMINI_API_KEY="$(aws lambda get-function-configuration --function-name "${FUNCTION_NAME}" --region "${REGION}" --query 'Environment.Variables.GEMINI_API_KEY' --output text 2>/dev/null || true)"
-  if [ -n "${CURRENT_GEMINI_API_KEY}" ] && [ "${CURRENT_GEMINI_API_KEY}" != "None" ] && [ "${CURRENT_GEMINI_API_KEY}" != "null" ]; then
-    GEMINI_API_KEY="${CURRENT_GEMINI_API_KEY}"
-  fi
+  echo -e "${RED}GEMINI_API_KEY must be set before deploying.${NC}"
+  exit 1
 fi
 
 if [ -z "${GEMINI_TEXT_MODEL}" ]; then
@@ -241,9 +248,9 @@ CFN_DEPLOY_ARGS+=(
     BatchSize="${BATCH_SIZE}"
     Timeout="${TIMEOUT}"
     MemorySize="${MEMORY_SIZE}"
-    SlackSigningSecret="${SLACK_SIGNING_SECRET}"
-    SlackBotToken="${SLACK_BOT_TOKEN}"
-    GeminiApiKey="${GEMINI_API_KEY}"
+    SlackSigningSecretParameter="${SLACK_SIGNING_SECRET_PARAMETER}"
+    SlackBotTokenParameter="${SLACK_BOT_TOKEN_PARAMETER}"
+    GeminiApiKeyParameter="${GEMINI_API_KEY_PARAMETER}"
     GeminiApiVersion="${GEMINI_API_VERSION}"
     GeminiImageApiVersion="${GEMINI_IMAGE_API_VERSION}"
     GeminiImageModel="${GEMINI_IMAGE_MODEL}"
@@ -259,6 +266,10 @@ CFN_DEPLOY_ARGS+=(
 
 aws cloudformation deploy \
   "${CFN_DEPLOY_ARGS[@]}"
+
+put_standard_secure_parameter "${SLACK_SIGNING_SECRET_PARAMETER}" "${SLACK_SIGNING_SECRET}"
+put_standard_secure_parameter "${SLACK_BOT_TOKEN_PARAMETER}" "${SLACK_BOT_TOKEN}"
+put_standard_secure_parameter "${GEMINI_API_KEY_PARAMETER}" "${GEMINI_API_KEY}"
 
 echo -e "\n${YELLOW}Step 5: Read stack outputs...${NC}"
 aws cloudformation describe-stacks \

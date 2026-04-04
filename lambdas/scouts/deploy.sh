@@ -50,6 +50,7 @@ FUNCTION_URL_AUTH_TYPE="${FUNCTION_URL_AUTH_TYPE:-NONE}"
 TIMEOUT="${TIMEOUT:-30}"
 MEMORY_SIZE="${MEMORY_SIZE:-256}"
 REQUIRED_API_KEY="${REQUIRED_API_KEY:-${SCOUTS_REQUIRED_API_KEY:-}}"
+REQUIRED_API_KEY_PARAMETER="${REQUIRED_API_KEY_PARAMETER:-/scouts/shared/required-api-key}"
 CUBS_EVENTS_CALENDAR_URL="${CUBS_EVENTS_CALENDAR_URL:-}"
 CUBS_PROGRAMME_CALENDAR_URL="${CUBS_PROGRAMME_CALENDAR_URL:-${CUBS_PROGRAME_CALENDAR_URL:-}}"
 SCOUTS_EVENTS_CALENDAR_URL="${SCOUTS_EVENTS_CALENDAR_URL:-}"
@@ -93,6 +94,18 @@ for cmd in aws npm zip; do
   fi
 done
 
+put_standard_secure_parameter() {
+  local name="$1"
+  local value="$2"
+  aws ssm put-parameter \
+    --region "${REGION}" \
+    --name "${name}" \
+    --type SecureString \
+    --tier Standard \
+    --overwrite \
+    --value "${value}" >/dev/null
+}
+
 echo -e "\n${YELLOW}AWS identity preflight...${NC}"
 CALLER_ARN="$(aws sts get-caller-identity --query 'Arn' --output text 2>/dev/null || true)"
 CALLER_ACCOUNT="$(aws sts get-caller-identity --query 'Account' --output text 2>/dev/null || true)"
@@ -113,10 +126,8 @@ if declare -F bws_export_if_unset >/dev/null 2>&1; then
 fi
 
 if [ -z "${REQUIRED_API_KEY}" ]; then
-  CURRENT_REQUIRED_API_KEY="$(aws lambda get-function-configuration --function-name "${FUNCTION_NAME}" --region "${REGION}" --query 'Environment.Variables.REQUIRED_API_KEY' --output text 2>/dev/null || true)"
-  if [ -n "${CURRENT_REQUIRED_API_KEY}" ] && [ "${CURRENT_REQUIRED_API_KEY}" != "None" ] && [ "${CURRENT_REQUIRED_API_KEY}" != "null" ]; then
-    REQUIRED_API_KEY="${CURRENT_REQUIRED_API_KEY}"
-  fi
+  echo -e "${RED}REQUIRED_API_KEY must be set before deploying.${NC}"
+  exit 1
 fi
 
 reuse_lambda_env_if_unset() {
@@ -233,7 +244,7 @@ CFN_DEPLOY_ARGS+=(
     FunctionUrlAuthType="${FUNCTION_URL_AUTH_TYPE}"
     Timeout="${TIMEOUT}"
     MemorySize="${MEMORY_SIZE}"
-    RequiredApiKey="${REQUIRED_API_KEY}"
+    RequiredApiKeyParameter="${REQUIRED_API_KEY_PARAMETER}"
     CubsEventsCalendarUrl="${CUBS_EVENTS_CALENDAR_URL}"
     CubsProgrammeCalendarUrl="${CUBS_PROGRAMME_CALENDAR_URL}"
     ScoutsEventsCalendarUrl="${SCOUTS_EVENTS_CALENDAR_URL}"
@@ -248,6 +259,8 @@ CFN_DEPLOY_ARGS+=(
 
 aws cloudformation deploy \
   "${CFN_DEPLOY_ARGS[@]}"
+
+put_standard_secure_parameter "${REQUIRED_API_KEY_PARAMETER}" "${REQUIRED_API_KEY}"
 
 echo -e "\n${YELLOW}Step 5: Read stack outputs...${NC}"
 aws cloudformation describe-stacks \

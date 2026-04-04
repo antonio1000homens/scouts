@@ -53,18 +53,15 @@ Parameters:
   BatchSize:
     Type: Number
     Default: 1
-  SlackSigningSecret:
+  SlackSigningSecretParameter:
     Type: String
-    Default: ''
-    NoEcho: true
-  SlackBotToken:
+    Default: /scouts/shared/slack-signing-secret
+  SlackBotTokenParameter:
     Type: String
-    Default: ''
-    NoEcho: true
-  GeminiApiKey:
+    Default: /scouts/shared/slack-bot-token
+  GeminiApiKeyParameter:
     Type: String
-    Default: ''
-    NoEcho: true
+    Default: /scouts/sqs2scouts/gemini-api-key
   GeminiApiVersion:
     Type: String
     Default: ''
@@ -154,6 +151,13 @@ Resources:
                   - states:SendTaskSuccess
                   - states:SendTaskFailure
                 Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/shared/slack-signing-secret
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/shared/slack-bot-token
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/sqs2scouts/gemini-api-key
 
   Sqs2ScoutsFunction:
     Type: AWS::Lambda::Function
@@ -168,9 +172,9 @@ Resources:
         - !Ref Sqs2ScoutsLayer
       Environment:
         Variables:
-          SLACK_SIGNING_SECRET: !Ref SlackSigningSecret
-          SLACK_BOT_TOKEN: !Ref SlackBotToken
-          GEMINI_API_KEY: !Ref GeminiApiKey
+          SLACK_SIGNING_SECRET_PARAMETER: !Ref SlackSigningSecretParameter
+          SLACK_BOT_TOKEN_PARAMETER: !Ref SlackBotTokenParameter
+          GEMINI_API_KEY_PARAMETER: !Ref GeminiApiKeyParameter
           GEMINI_API_VERSION: !Ref GeminiApiVersion
           GEMINI_IMAGE_API_VERSION: !Ref GeminiImageApiVersion
           GEMINI_IMAGE_MODEL: !Ref GeminiImageModel

@@ -43,18 +43,15 @@ Parameters:
       - NONE
       - AWS_IAM
     Default: NONE
-  SlackSigningSecret:
+  SlackSigningSecretParameter:
     Type: String
-    Default: ''
-    NoEcho: true
-  SlackBotToken:
+    Default: /scouts/shared/slack-signing-secret
+  SlackBotTokenParameter:
     Type: String
-    Default: ''
-    NoEcho: true
-  RequiredApiKey:
+    Default: /scouts/shared/slack-bot-token
+  RequiredApiKeyParameter:
     Type: String
-    Default: ''
-    NoEcho: true
+    Default: /scouts/shared/required-api-key
   ScoutsRequestQueueUrl:
     Type: String
     Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
@@ -105,6 +102,13 @@ Resources:
                 Resource:
                   - !Ref ScoutsRequestQueueArn
                   - !Ref NfcQueueArn
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/shared/slack-signing-secret
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/shared/slack-bot-token
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/shared/required-api-key
 
   SlackHandlerLayer:
     Type: AWS::Lambda::LayerVersion
@@ -129,9 +133,9 @@ Resources:
         - !Ref SlackHandlerLayer
       Environment:
         Variables:
-          SLACK_SIGNING_SECRET: !Ref SlackSigningSecret
-          SLACK_BOT_TOKEN: !Ref SlackBotToken
-          REQUIRED_API_KEY: !Ref RequiredApiKey
+          SLACK_SIGNING_SECRET_PARAMETER: !Ref SlackSigningSecretParameter
+          SLACK_BOT_TOKEN_PARAMETER: !Ref SlackBotTokenParameter
+          REQUIRED_API_KEY_PARAMETER: !Ref RequiredApiKeyParameter
           SCOUTS_REQUEST_QUEUE_URL: !Ref ScoutsRequestQueueUrl
           NFC_QUEUE_URL: !Ref NfcQueueUrl
           TARGET_BUCKET: !Ref TargetBucket

@@ -78,10 +78,9 @@ Parameters:
   ScoutsConfigKey:
     Type: String
     Default: scouts.conf
-  RequiredApiKey:
+  RequiredApiKeyParameter:
     Type: String
-    Default: ''
-    NoEcho: true
+    Default: /scouts/shared/required-api-key
   Scouts2SqsPublishEnabled:
     Type: String
     AllowedValues:
@@ -156,6 +155,10 @@ Resources:
                     - states:StartExecution
                   Resource: !Ref ImageEnrichStateMachineArn
                 - !Ref AWS::NoValue
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/shared/required-api-key
 
   Scouts2SqsFunction:
     Type: AWS::Lambda::Function
@@ -170,7 +173,7 @@ Resources:
         - !Ref Scouts2SqsLayer
       Environment:
         Variables:
-          REQUIRED_API_KEY: !Ref RequiredApiKey
+          REQUIRED_API_KEY_PARAMETER: !Ref RequiredApiKeyParameter
           TARGET_BUCKET: !Ref TargetBucket
           SCOUTS_CONFIG_KEY: !Ref ScoutsConfigKey
           SCOUTS2SQS_PUBLISH_ENABLED: !Ref Scouts2SqsPublishEnabled

@@ -5,23 +5,21 @@ import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3
 import { SQSClient, SendMessageCommand, GetQueueAttributesCommand } from '@aws-sdk/client-sqs';
 import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
 import sharp from 'sharp';
+import { getOptionalSecret, getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 
 // Load configuration from environment variables
 console.log('sqs2scouts: Loading configuration from environment variables');
 
 // Constants from environment variables
-const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const SLACK_CHANNEL = "#scouts";
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || 'https://slack.com/api/chat.postMessage';
 const DLQ_URL = process.env.DLQ_URL || "https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ";
 const SLACK_CHAT_UPDATE_URL = process.env.SLACK_CHAT_UPDATE_URL || 'https://slack.com/api/chat.update';
 const SLACK_VIEWS_OPEN_URL = process.env.SLACK_VIEWS_OPEN_URL || 'https://slack.com/api/views.open';
-const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET || '';
 const AWS_REGION = process.env.AWS_REGION || 'eu-west-2';
 const DEFAULT_BUCKET = 'scouts-2ndtolworth-prod-553490163883';
 const TARGET_BUCKET = process.env.TARGET_BUCKET || DEFAULT_BUCKET;
 const EVENT_IMAGE_PREFIX = 'website/eventImages/';
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_API_VERSION = (process.env.GEMINI_API_VERSION || 'v1').trim() || 'v1';
 const GEMINI_IMAGE_API_VERSION = (process.env.GEMINI_IMAGE_API_VERSION || 'v1beta').trim() || 'v1beta';
 const GEMINI_TEXT_MODEL = (process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash-lite').trim() || 'gemini-2.5-flash-lite';
@@ -829,7 +827,8 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null) 
         return null;
     }
     
-    if (!GEMINI_API_KEY) {
+    const geminiApiKey = await getOptionalSecret('GEMINI_API_KEY_PARAMETER', '');
+    if (!geminiApiKey) {
         console.warn('[Gemini] GEMINI_API_KEY not set; skipping AI suggestion');
         return null;
     }
@@ -855,7 +854,7 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null) 
     }
 
     try {
-        const genAI = new GoogleGenerativeAILib(GEMINI_API_KEY);
+        const genAI = new GoogleGenerativeAILib(geminiApiKey);
         const suggestionModel = genAI.getGenerativeModel({
             model: GEMINI_TEXT_MODEL,
             generationConfig: {
@@ -1396,7 +1395,8 @@ async function generateGeminiImageAsset(promptText, { hexValue, eventTitle, requ
         console.log('[GeminiImage] Runtime disabled; skipping Gemini image generation');
         return null;
     }
-    if (!GEMINI_API_KEY) {
+    const geminiApiKey = await getOptionalSecret('GEMINI_API_KEY_PARAMETER', '');
+    if (!geminiApiKey) {
         console.warn('[GeminiImage] GEMINI_API_KEY not set; cannot generate image');
         return null;
     }
@@ -1421,7 +1421,7 @@ async function generateGeminiImageAsset(promptText, { hexValue, eventTitle, requ
     }
 
     const genAI = new GoogleGenAIClient({
-        apiKey: GEMINI_API_KEY,
+        apiKey: geminiApiKey,
         apiVersion: GEMINI_IMAGE_API_VERSION,
     });
     let lastError = null;
@@ -2010,10 +2010,11 @@ async function persistApprovalMetadata(metadata, overrides = {}) {
 }
 
 async function sendSlackApiRequest(url, payload, retryCount = 0) {
+    const slackBotToken = await getRequiredSecret('SLACK_BOT_TOKEN_PARAMETER');
     const options = {
         method: 'POST',
         headers: {
-            Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+            Authorization: `Bearer ${slackBotToken}`,
             'Content-Type': 'application/json',
         },
     };
@@ -2674,6 +2675,7 @@ async function sendToScoutsDecisionQueue(payload) {
 }
 
 async function postSlackMessage(message) {
+    const slackBotToken = await getRequiredSecret('SLACK_BOT_TOKEN_PARAMETER');
     if (!SLACK_FEATURE_ENABLED) {
         console.log('[Slack] Slack notifications disabled by feature flag; skipping message');
         console.log('[Slack] Message that would have been sent:', JSON.stringify(message, null, 2));
@@ -2697,7 +2699,7 @@ async function postSlackMessage(message) {
     console.log('[Slack] Request payload:', JSON.stringify(slackMessage, null, 2));
     
     const actualHeaders = {
-        Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+        Authorization: `Bearer ${slackBotToken}`,
         'Content-Type': 'application/json',
     };
 

@@ -10,6 +10,7 @@ import {
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SFNClient, DescribeExecutionCommand, ListExecutionsCommand } from '@aws-sdk/client-sfn';
 import { randomUUID } from 'crypto';
+import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 // Updated: Testing CI deployment mode to bypass environment parsing issues
 
 const {
@@ -20,7 +21,7 @@ const {
   BEAVERS_EVENTS_CALENDAR_URL,
   BEAVERS_PROGRAMME_CALENDAR_URL,
   TARGET_BUCKET,
-  REQUIRED_API_KEY,
+  REQUIRED_API_KEY_PARAMETER,
   SCOUTS2SQS_FUNCTION_URL,
   SCOUTS_REQUESTS_QUEUE_URL: SCOUTS_REQUESTS_QUEUE_URL_ENV,
   IMAGE_ENRICH_STATE_MACHINE_ARN,
@@ -2553,13 +2554,6 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
     : Math.max(0, firstFutureEventIndex - 3);
 
   // Collect events that reach run threshold for batched notification
-      statusCode: 400,
-      headers: corsHeaders,
-      body: JSON.stringify({
-        error: 'Admin requeue is no longer supported by scouts.mjs',
-        realmError: 'requeue',
-        realmErrorDetail: 'Request/repair now belongs to an orchestration flow instead of the admin path',
-      }),
   const hexNotifications = new Map(); // Map<hexValue, { realm, title }>
   const processedTitles = new Set(); // Track processed titles to avoid duplicates
   const liveQueuedProcessingByHex = new Map(); // Map<hexValue, Array<'tagline'|'imageTheme'|'image'>>
@@ -3067,7 +3061,7 @@ export async function lambdaHandler(event = {}) {
     }
   }
 
-  const requiredApiKey = normaliseApiKeyCandidate(REQUIRED_API_KEY);
+  const requiredApiKey = normaliseApiKeyCandidate(await getRequiredSecret('REQUIRED_API_KEY_PARAMETER'));
   if (isHttpInvocation && requiredApiKey && requestApiKey !== requiredApiKey && !event?._triggeredBySqs) {
     const requestMeta = apiKeyMeta(requestApiKey);
     const requiredMeta = apiKeyMeta(requiredApiKey);
@@ -3392,6 +3386,146 @@ export async function lambdaHandler(event = {}) {
     )
   );
 
+  if (isMetadataPersistCommand) {
+    const normalizeNullableText = (value) => {
+      if (value === undefined || value === null) return null;
+      const text = String(value).trim();
+      return text ? text : null;
+    };
+    const normalizeNullableBoolean = (value) => {
+      if (value === undefined || value === null || value === '') return null;
+      if (typeof value === 'boolean') return value;
+      const normalized = String(value).trim().toLowerCase();
+      if (!normalized) return null;
+      if (['true', '1', 'yes', 'y'].includes(normalized)) return true;
+      if (['false', '0', 'no', 'n'].includes(normalized)) return false;
+      return null;
+    };
+
+    const eventCandidate =
+      (bodyParams?.event && typeof bodyParams.event === 'object' ? bodyParams.event : null)
+      ?? (bodyParams?.subjectEvent && typeof bodyParams.subjectEvent === 'object' ? bodyParams.subjectEvent : null)
+      ?? (structuredCommand?.subject && typeof structuredCommand.subject === 'object' ? structuredCommand.subject : null)
+      ?? (bodyParams?.subject && typeof bodyParams.subject === 'object' ? bodyParams.subject : null)
+      ?? null;
+    const subjectObject =
+      (bodyParams?.subject && typeof bodyParams.subject === 'object' ? bodyParams.subject : null)
+      ?? (structuredCommand?.subject && typeof structuredCommand.subject === 'object' ? structuredCommand.subject : null)
+      ?? null;
+
+    const candidateHex = normalizeNullableText(
+      firstDefinedValue(
+        bodyParams?.hex,
+        queryParams?.hex,
+        structuredCommand?.hex,
+        subjectObject?.hex,
+        eventCandidate?.hex,
+      ),
+    )?.toLowerCase() ?? null;
+
+    if (!candidateHex) {
+      return {
+        statusCode: 400,
+        headers: corsHeaders,
+        body: JSON.stringify({ error: 'Missing hex value for persist operation' }),
+      };
+    }
+
+    if (!/^[0-9a-f]+$/i.test(candidateHex)) {
+      return {
+        statusCode: 400,
+        headers: corsHeaders,
+        body: JSON.stringify({ error: 'Invalid hex value for persist operation' }),
+      };
+    }
+
+    const candidateTitle = normalizeNullableText(
+      firstDefinedValue(
+        subjectObject?.title,
+        eventCandidate?.title,
+        bodyParams?.title,
+      ),
+    );
+    const candidateTagline = normalizeNullableText(
+      firstDefinedValue(
+        bodyParams?.tagline,
+        subjectObject?.metadata?.tagline,
+        subjectObject?.tagline,
+        eventCandidate?.metadata?.tagline,
+        eventCandidate?.tagline,
+      ),
+    );
+    const candidateImageTheme = normalizeNullableText(
+      firstDefinedValue(
+        bodyParams?.imageTheme,
+        subjectObject?.metadata?.imageTheme,
+        subjectObject?.imageTheme,
+        subjectObject?.image?.theme,
+        eventCandidate?.metadata?.imageTheme,
+        eventCandidate?.imageTheme,
+        eventCandidate?.image?.theme,
+      ),
+    );
+    const candidateImageUrl = normalizeNullableText(
+      firstDefinedValue(
+        bodyParams?.imageUrl,
+        subjectObject?.metadata?.imageUrl,
+        subjectObject?.imageUrl,
+        subjectObject?.image?.url,
+        eventCandidate?.metadata?.imageUrl,
+        eventCandidate?.imageUrl,
+        eventCandidate?.image?.url,
+      ),
+    );
+    const candidateIsHidden = normalizeNullableBoolean(
+      firstDefinedValue(
+        bodyParams?.isHidden,
+        bodyParams?.hidden,
+        subjectObject?.isHidden,
+        subjectObject?.hidden,
+        eventCandidate?.isHidden,
+        eventCandidate?.hidden,
+      ),
+    );
+    const candidateIsApproved = normalizeNullableBoolean(
+      firstDefinedValue(
+        bodyParams?.isApproved,
+        bodyParams?.approved,
+        subjectObject?.isApproved,
+        subjectObject?.approved,
+        eventCandidate?.isApproved,
+        eventCandidate?.approved,
+      ),
+    );
+
+    const requiredPersistField = requestedMetadataField === 'all'
+      ? null
+      : requestedMetadataField === 'eventImage'
+        ? 'imageUrl'
+        : requestedMetadataField;
+    const subject = {
+      hex: candidateHex,
+      ...(candidateTitle ? { title: candidateTitle } : {}),
+    };
+    const persistedFields = [];
+
+    if ((requiredPersistField === null || requiredPersistField === 'tagline') && candidateTagline) {
+      subject.tagline = candidateTagline;
+      persistedFields.push('tagline');
+    }
+
+    if ((requiredPersistField === null || requiredPersistField === 'imageTheme') && candidateImageTheme) {
+      subject.imageTheme = candidateImageTheme;
+      persistedFields.push('imageTheme');
+    }
+
+    if ((requiredPersistField === null || requiredPersistField === 'imageUrl') && candidateImageUrl) {
+      subject.imageUrl = candidateImageUrl;
+      persistedFields.push('imageUrl');
+    }
+
+    if (candidateIsHidden !== null) {
+      subject.isHidden = candidateIsHidden;
       persistedFields.push('isHidden');
     }
 
