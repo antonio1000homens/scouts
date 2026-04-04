@@ -24,8 +24,14 @@ sqs2scouts/
 
 ## Configuration
 
-The function uses environment variables instead of config files:
-- `SLACK_BOT_TOKEN` - Slack bot token for API access
+The function keeps non-secret runtime configuration in environment variables and reads secrets from SSM Parameter Store at runtime.
+
+SSM-backed secrets:
+- `SLACK_BOT_TOKEN_PARAMETER` -> default `/scouts/shared/slack-bot-token`
+- `SLACK_SIGNING_SECRET_PARAMETER` -> default `/scouts/shared/slack-signing-secret`
+- `GEMINI_API_KEY_PARAMETER` -> default `/scouts/sqs2scouts/gemini-api-key`
+
+Non-secret environment variables:
 - `SLACK_WEBHOOK_URL` - Slack API endpoint (defaults to chat.postMessage)
 
 ### Gemini image prompt generation
@@ -77,7 +83,7 @@ Deployment paths:
 - `scouts/deploy-manual.sh` uploads the same file for manual website deploys.
 
 Related Gemini env vars:
-- `GEMINI_API_KEY` (required for Gemini calls)
+- `GEMINI_API_KEY_PARAMETER` (SSM parameter name for Gemini calls)
 - `gemini` / `GEMINI` (text suggestion feature flag; defaults enabled)
 - `gemini_images` / `geminiImages` / `GEMINI_IMAGES` (Gemini image generation feature flag; defaults enabled)
 

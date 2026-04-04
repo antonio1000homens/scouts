@@ -777,10 +777,10 @@ jobs:
           VALUE="$(aws lambda get-function-configuration \
             --function-name sqs2scouts \
             --region "${AWS_REGION}" \
-            --query 'Environment.Variables.GEMINI_API_KEY' \
+            --query 'Environment.Variables.GEMINI_API_KEY_PARAMETER' \
             --output text)"
           if [ -z "$VALUE" ] || [ "$VALUE" = "None" ] || [ "$VALUE" = "null" ]; then
-            echo "GEMINI_API_KEY is not set on sqs2scouts after deploy"
+            echo "GEMINI_API_KEY_PARAMETER is not set on sqs2scouts after deploy"
             exit 1
           fi
-          echo "GEMINI_API_KEY is set on sqs2scouts"
+          echo "GEMINI_API_KEY_PARAMETER is set on sqs2scouts"

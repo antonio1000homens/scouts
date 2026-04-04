@@ -2,13 +2,11 @@ import https from 'https';
 import crypto from 'crypto';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 
-const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET || '';
-const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
 const SLACK_VIEWS_OPEN_URL = process.env.SLACK_VIEWS_OPEN_URL || 'https://slack.com/api/views.open';
 const SCOUTS_REQUEST_QUEUE_URL = process.env.SCOUTS_REQUEST_QUEUE_URL || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests';
 const NFC_QUEUE_URL = process.env.NFC_QUEUE_URL || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests';
-const REQUIRED_API_KEY = process.env.REQUIRED_API_KEY || '';
 const sqsClient = new SQSClient({ region: process.env.AWS_REGION || 'eu-west-2' });
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'eu-west-2' });
 
@@ -50,13 +48,13 @@ function getHeader(headers, name) {
     return undefined;
 }
 
-function verifySlackSignature(headers, rawBody) {
-    if (!SLACK_SIGNING_SECRET) return true;
+async function verifySlackSignature(headers, rawBody) {
+    const slackSigningSecret = await getRequiredSecret('SLACK_SIGNING_SECRET_PARAMETER');
     const timestamp = getHeader(headers, 'X-Slack-Request-Timestamp');
     const slackSignature = getHeader(headers, 'X-Slack-Signature');
     if (!timestamp || !slackSignature) return false;
     const baseString = `v0:${timestamp}:${rawBody}`;
-    const computedSignature = `v0=${crypto.createHmac('sha256', SLACK_SIGNING_SECRET).update(baseString).digest('hex')}`;
+    const computedSignature = `v0=${crypto.createHmac('sha256', slackSigningSecret).update(baseString).digest('hex')}`;
     const computedBuffer = Buffer.from(computedSignature, 'utf8');
     const receivedBuffer = Buffer.from(slackSignature, 'utf8');
     if (computedBuffer.length !== receivedBuffer.length) return false;
@@ -197,7 +195,7 @@ async function handleAdminRequest(event, headers, rawBody) {
         return jsonResponse(405, { error: 'Method not allowed. Use POST.' });
     }
 
-    const requiredApiKey = (REQUIRED_API_KEY || '').trim();
+    const requiredApiKey = (await getRequiredSecret('REQUIRED_API_KEY_PARAMETER')).trim();
     if (!requiredApiKey) {
         return jsonResponse(500, { error: 'REQUIRED_API_KEY is not configured for admin requests.' });
     }
@@ -713,7 +711,8 @@ async function openSlackModal(triggerId, view) {
         console.log('[Slack] slack_edit flag is not "on"; skipping modal open');
         return { ok: true, skipped: true };
     }
-    if (!SLACK_BOT_TOKEN) {
+    const slackBotToken = await getRequiredSecret('SLACK_BOT_TOKEN_PARAMETER');
+    if (!slackBotToken) {
         console.warn('[Slack] SLACK_BOT_TOKEN not configured; skipping modal open');
         return { ok: false, skipped: true };
     }
@@ -725,7 +724,7 @@ async function openSlackModal(triggerId, view) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+                Authorization: `Bearer ${slackBotToken}`,
             },
         };
 
@@ -847,7 +846,7 @@ export async function lambdaHandler(event) {
         }
 
         // Verify Slack signature
-        if (!verifySlackSignature(headers, rawBody)) {
+        if (!await verifySlackSignature(headers, rawBody)) {
             console.warn('[Slack] Signature verification failed');
             return { statusCode: 403, body: JSON.stringify({ error: 'Invalid Slack signature' }) };
         }

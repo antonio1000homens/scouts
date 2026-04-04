@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Update environment variables for sqs2scouts Lambda function
-# This script adds the missing environment variables needed for Gemini and shared Scouts configuration
+# Secret values are stored in SSM Parameter Store; this script only writes parameter names.
 
 set -e
 
@@ -32,17 +32,6 @@ else
     exit 1
 fi
 
-if [ -f "${BWS_HELPER}" ]; then
-    # shellcheck disable=SC1090
-    source "${BWS_HELPER}"
-fi
-
-if declare -F bws_export_if_unset >/dev/null 2>&1; then
-    bws_export_if_unset "SLACK_BOT_TOKEN" "${BWS_SLACK_BOT_TOKEN_SECRET_ID:-}" || true
-    bws_export_if_unset "SLACK_SIGNING_SECRET" "${BWS_SLACK_SIGNING_SECRET_SECRET_ID:-}" || true
-    bws_export_if_unset "GEMINI_API_KEY" "${BWS_GEMINI_API_KEY_SECRET_ID:-}" || true
-fi
-
 # Check if function exists
 if ! aws lambda get-function --function-name "${FUNCTION_NAME}" --region "${REGION}" &>/dev/null; then
     echo -e "${RED}Error: Lambda function ${FUNCTION_NAME} not found${NC}"
@@ -56,13 +45,13 @@ aws lambda update-function-configuration \
     --function-name "${FUNCTION_NAME}" \
     --region "${REGION}" \
     --environment "Variables={
-        SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-},
+        SLACK_BOT_TOKEN_PARAMETER=${SLACK_BOT_TOKEN_PARAMETER:-/scouts/shared/slack-bot-token},
         SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-https://slack.com/api/chat.postMessage},
         SLACK_CHAT_UPDATE_URL=${SLACK_CHAT_UPDATE_URL:-https://slack.com/api/chat.update},
         SLACK_VIEWS_OPEN_URL=${SLACK_VIEWS_OPEN_URL:-https://slack.com/api/views.open},
-        SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET:-},
+        SLACK_SIGNING_SECRET_PARAMETER=${SLACK_SIGNING_SECRET_PARAMETER:-/scouts/shared/slack-signing-secret},
         TARGET_BUCKET=${TARGET_BUCKET:-2ndtolworth},
-        GEMINI_API_KEY=${GEMINI_API_KEY:-},
+        GEMINI_API_KEY_PARAMETER=${GEMINI_API_KEY_PARAMETER:-/scouts/sqs2scouts/gemini-api-key},
         GEMINI_API_VERSION=${GEMINI_API_VERSION:-},
         GEMINI_IMAGE_API_VERSION=${GEMINI_IMAGE_API_VERSION:-},
         GEMINI_IMAGE_MODEL=${GEMINI_IMAGE_MODEL:-},

@@ -34,6 +34,9 @@ CLOUDFORMATION_ROLE_ARN="${CLOUDFORMATION_ROLE_ARN:-}"
 SLACK_SIGNING_SECRET="${SLACK_SIGNING_SECRET:-}"
 SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN:-}"
 REQUIRED_API_KEY="${REQUIRED_API_KEY:-}"
+SLACK_SIGNING_SECRET_PARAMETER="${SLACK_SIGNING_SECRET_PARAMETER:-/scouts/shared/slack-signing-secret}"
+SLACK_BOT_TOKEN_PARAMETER="${SLACK_BOT_TOKEN_PARAMETER:-/scouts/shared/slack-bot-token}"
+REQUIRED_API_KEY_PARAMETER="${REQUIRED_API_KEY_PARAMETER:-/scouts/shared/required-api-key}"
 SCOUTS_REQUEST_QUEUE_URL="${SCOUTS_REQUEST_QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests}"
 SCOUTS_REQUEST_QUEUE_ARN="${SCOUTS_REQUEST_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsRequests}"
 NFC_QUEUE_URL="${NFC_QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests}"
@@ -54,6 +57,18 @@ for cmd in aws npm zip; do
   command -v "${cmd}" >/dev/null 2>&1 || error "Missing required command: ${cmd}"
 done
 
+put_standard_secure_parameter() {
+  local name="$1"
+  local value="$2"
+  aws ssm put-parameter \
+    --region "${REGION}" \
+    --name "${name}" \
+    --type SecureString \
+    --tier Standard \
+    --overwrite \
+    --value "${value}" >/dev/null
+}
+
 CALLER_ACCOUNT="$(aws sts get-caller-identity --query 'Account' --output text)"
 if [ "${CALLER_ACCOUNT}" != "${EXPECTED_AWS_ACCOUNT}" ]; then
   error "Unexpected AWS account ${CALLER_ACCOUNT}. Expected ${EXPECTED_AWS_ACCOUNT}."
@@ -61,24 +76,8 @@ fi
 
 cd "${SCRIPT_DIR}"
 
-if [ -z "${SLACK_SIGNING_SECRET}" ] || [ -z "${SLACK_BOT_TOKEN}" ]; then
-  log "Attempting to reuse Slack env vars from existing slack-handler configuration"
-  CURRENT_SIGNING_SECRET="$(aws lambda get-function-configuration --function-name "${FUNCTION_NAME}" --region "${REGION}" --query 'Environment.Variables.SLACK_SIGNING_SECRET' --output text 2>/dev/null || true)"
-  CURRENT_BOT_TOKEN="$(aws lambda get-function-configuration --function-name "${FUNCTION_NAME}" --region "${REGION}" --query 'Environment.Variables.SLACK_BOT_TOKEN' --output text 2>/dev/null || true)"
-  if [ -z "${SLACK_SIGNING_SECRET}" ] && [ -n "${CURRENT_SIGNING_SECRET}" ] && [ "${CURRENT_SIGNING_SECRET}" != "None" ] && [ "${CURRENT_SIGNING_SECRET}" != "null" ]; then
-    SLACK_SIGNING_SECRET="${CURRENT_SIGNING_SECRET}"
-  fi
-  if [ -z "${SLACK_BOT_TOKEN}" ] && [ -n "${CURRENT_BOT_TOKEN}" ] && [ "${CURRENT_BOT_TOKEN}" != "None" ] && [ "${CURRENT_BOT_TOKEN}" != "null" ]; then
-    SLACK_BOT_TOKEN="${CURRENT_BOT_TOKEN}"
-  fi
-fi
-
-if [ -z "${REQUIRED_API_KEY}" ]; then
-  log "Attempting to reuse REQUIRED_API_KEY from existing slack-handler configuration"
-  CURRENT_REQUIRED_API_KEY="$(aws lambda get-function-configuration --function-name "${FUNCTION_NAME}" --region "${REGION}" --query 'Environment.Variables.REQUIRED_API_KEY' --output text 2>/dev/null || true)"
-  if [ -n "${CURRENT_REQUIRED_API_KEY}" ] && [ "${CURRENT_REQUIRED_API_KEY}" != "None" ] && [ "${CURRENT_REQUIRED_API_KEY}" != "null" ]; then
-    REQUIRED_API_KEY="${CURRENT_REQUIRED_API_KEY}"
-  fi
+if [ -z "${SLACK_SIGNING_SECRET}" ] || [ -z "${SLACK_BOT_TOKEN}" ] || [ -z "${REQUIRED_API_KEY}" ]; then
+  error "SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN, and REQUIRED_API_KEY must be set before deploying."
 fi
 
 log "Building shared lambda layer..."
@@ -132,9 +131,9 @@ CFN_ARGS+=(
     FunctionUrlAuthType="${FUNCTION_URL_AUTH_TYPE}"
     Timeout="${TIMEOUT}"
     MemorySize="${MEMORY_SIZE}"
-    SlackSigningSecret="${SLACK_SIGNING_SECRET}"
-    SlackBotToken="${SLACK_BOT_TOKEN}"
-    RequiredApiKey="${REQUIRED_API_KEY}"
+    SlackSigningSecretParameter="${SLACK_SIGNING_SECRET_PARAMETER}"
+    SlackBotTokenParameter="${SLACK_BOT_TOKEN_PARAMETER}"
+    RequiredApiKeyParameter="${REQUIRED_API_KEY_PARAMETER}"
     ScoutsRequestQueueUrl="${SCOUTS_REQUEST_QUEUE_URL}"
     ScoutsRequestQueueArn="${SCOUTS_REQUEST_QUEUE_ARN}"
     NfcQueueUrl="${NFC_QUEUE_URL}"
@@ -144,6 +143,10 @@ CFN_ARGS+=(
 )
 
 aws cloudformation deploy "${CFN_ARGS[@]}"
+
+put_standard_secure_parameter "${SLACK_SIGNING_SECRET_PARAMETER}" "${SLACK_SIGNING_SECRET}"
+put_standard_secure_parameter "${SLACK_BOT_TOKEN_PARAMETER}" "${SLACK_BOT_TOKEN}"
+put_standard_secure_parameter "${REQUIRED_API_KEY_PARAMETER}" "${REQUIRED_API_KEY}"
 
 log "Stack outputs:"
 aws cloudformation describe-stacks \

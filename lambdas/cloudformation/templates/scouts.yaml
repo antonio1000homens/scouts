@@ -59,10 +59,9 @@ Parameters:
   Timeout:
     Type: Number
     Default: 30
-  RequiredApiKey:
+  RequiredApiKeyParameter:
     Type: String
-    Default: ''
-    NoEcho: true
+    Default: /scouts/shared/required-api-key
   CubsEventsCalendarUrl:
     Type: String
     Default: ''
@@ -156,6 +155,10 @@ Resources:
                 Action:
                   - sqs:SendMessage
                 Resource: !Ref ScoutsRequestsQueueArn
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/shared/required-api-key
               - !If
                 - HasImageEnrichStateMachineArn
                 - Effect: Allow
@@ -178,7 +181,7 @@ Resources:
         - !Ref ScoutsSharedLayer
       Environment:
         Variables:
-          REQUIRED_API_KEY: !Ref RequiredApiKey
+          REQUIRED_API_KEY_PARAMETER: !Ref RequiredApiKeyParameter
           CUBS_EVENTS_CALENDAR_URL: !Ref CubsEventsCalendarUrl
           CUBS_PROGRAMME_CALENDAR_URL: !Ref CubsProgrammeCalendarUrl
           SCOUTS_EVENTS_CALENDAR_URL: !Ref ScoutsEventsCalendarUrl

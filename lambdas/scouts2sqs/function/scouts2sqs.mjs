@@ -3,9 +3,10 @@ import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3
 import { SFNClient, ListExecutionsCommand, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import https from 'https';
 import crypto from 'crypto';
+import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 
 // Load configuration from environment variables
-const { REQUIRED_API_KEY, TARGET_BUCKET } = process.env;
+const { TARGET_BUCKET } = process.env;
 const SQS_QUEUE_URL = process.env.SQS_QUEUE_URL || "https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing";
 const DLQ_URL = process.env.DLQ_URL || "https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequestsDLQ";
 const DEFAULT_BUCKET = 'scouts-2ndtolworth-prod-553490163883';
@@ -1487,7 +1488,8 @@ export async function lambdaHandler(event) {
 
         // Skip API key check for SQS-triggered events
         const isSQSTriggered = event.Records && Array.isArray(event.Records) && event.Records.some(r => r.eventSource === 'aws:sqs');
-        if (REQUIRED_API_KEY && requestApiKey !== REQUIRED_API_KEY && !isSQSTriggered) {
+        const requiredApiKey = await getRequiredSecret('REQUIRED_API_KEY_PARAMETER');
+        if (requiredApiKey && requestApiKey !== requiredApiKey && !isSQSTriggered) {
             return withCors({ statusCode: 403, body: JSON.stringify({ error: 'Forbidden: Invalid API Key' }) });
         }
 

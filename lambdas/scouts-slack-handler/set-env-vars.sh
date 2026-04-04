@@ -19,25 +19,16 @@ command -v aws >/dev/null 2>&1 || error "AWS CLI not found"
 
 
 
-# Get Slack signing secret from scouts-slack-handler function
-SLACK_SECRET=$(aws lambda get-function-configuration \
-    --function-name "${FUNCTION_NAME}" \
-    --region "$REGION" \
-    --query 'Environment.Variables.SLACK_SIGNING_SECRET' \
-    --output text 2>/dev/null || echo "")
-
-if [ -z "$SLACK_SECRET" ] || [ "$SLACK_SECRET" = "None" ]; then
-    error "Could not get SLACK_SIGNING_SECRET from ${FUNCTION_NAME}"
-fi
-
 log "Setting environment variables for $FUNCTION_NAME..."
-log "SLACK_SIGNING_SECRET: [REDACTED]"
+log "SLACK_SIGNING_SECRET_PARAMETER: /scouts/shared/slack-signing-secret"
+log "SLACK_BOT_TOKEN_PARAMETER: /scouts/shared/slack-bot-token"
+log "REQUIRED_API_KEY_PARAMETER: /scouts/shared/required-api-key"
 log "SCOUTS_REQUEST_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests"
 
 # Update function environment variables
 aws lambda update-function-configuration \
     --function-name "$FUNCTION_NAME" \
-    --environment "Variables={SLACK_SIGNING_SECRET=$SLACK_SECRET,SCOUTS_REQUEST_QUEUE_URL=https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests}" \
+    --environment "Variables={SLACK_SIGNING_SECRET_PARAMETER=/scouts/shared/slack-signing-secret,SLACK_BOT_TOKEN_PARAMETER=/scouts/shared/slack-bot-token,REQUIRED_API_KEY_PARAMETER=/scouts/shared/required-api-key,SCOUTS_REQUEST_QUEUE_URL=https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests}" \
     --region "$REGION" >/dev/null
 
 log "Environment variables updated successfully!"
