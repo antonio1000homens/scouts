@@ -98,6 +98,16 @@ Parameters:
   ImageEnrichStateMachineArn:
     Type: String
     Default: ''
+  GeminiDailyRequestLimit:
+    Type: Number
+    Default: 10
+    MinValue: 0
+  GeminiUsageTableName:
+    Type: String
+    Default: scouts-gemini-usage
+  GeminiEnrichmentStateTableName:
+    Type: String
+    Default: scouts-enrichment-state
 
 Conditions:
   ShouldCreateDataBucket: !Equals [!Ref CreateDataBucket, 'true']
@@ -157,6 +167,12 @@ Resources:
                 Resource: !Ref ScoutsRequestsQueueArn
               - Effect: Allow
                 Action:
+                  - dynamodb:GetItem
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${GeminiUsageTableName}
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${GeminiEnrichmentStateTableName}
+              - Effect: Allow
+                Action:
                   - ssm:GetParameter
                 Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/shared/required-api-key
               - !If
@@ -192,6 +208,9 @@ Resources:
           SCOUTS_REQUESTS_QUEUE_URL: !Ref ScoutsRequestsQueueUrl
           SCOUTS2SQS_FUNCTION_URL: !Ref Scouts2SqsFunctionUrl
           IMAGE_ENRICH_STATE_MACHINE_ARN: !Ref ImageEnrichStateMachineArn
+          GEMINI_DAILY_REQUEST_LIMIT: !Ref GeminiDailyRequestLimit
+          GEMINI_USAGE_TABLE_NAME: !Ref GeminiUsageTableName
+          GEMINI_ENRICHMENT_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
       Code:
         S3Bucket: !Ref CodeBucket
         S3Key: !Ref FunctionCodeKey

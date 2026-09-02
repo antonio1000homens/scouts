@@ -7,6 +7,18 @@ import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-
 import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import sharp from 'sharp';
 import { getOptionalSecret, getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
+import {
+    buildGenerationId,
+    getEnrichmentState,
+    reserveEnrichmentAttempt,
+    markGeminiSucceeded,
+    markEnrichmentSucceeded,
+    markEnrichmentFailure,
+    loadReusableGeneration,
+    evaluateEnrichmentEligibility,
+    claimEnrichmentEscalation,
+    enrichmentStateConfig,
+} from '/opt/nodejs/enrichment-state.mjs';
 
 // Load configuration from environment variables
 console.log('sqs2scouts: Loading configuration from environment variables');
@@ -29,6 +41,7 @@ const GEMINI_DAILY_REQUEST_LIMIT = Number.isFinite(Number(process.env.GEMINI_DAI
     ? Math.max(0, Math.floor(Number(process.env.GEMINI_DAILY_REQUEST_LIMIT)))
     : 0;
 const GEMINI_USAGE_TTL_DAYS = 90;
+const GEMINI_PROMPT_VERSION = (process.env.GEMINI_PROMPT_VERSION || '1').trim() || '1';
 const GENERATED_IMAGE_WIDTH = Number.isFinite(Number(process.env.GEMINI_IMAGE_OUTPUT_WIDTH))
     ? Math.max(320, Number(process.env.GEMINI_IMAGE_OUTPUT_WIDTH))
     : 1366;
@@ -616,6 +629,33 @@ function emitGeminiMetric(kind, outcome) {
     }));
 }
 
+function emitEnrichmentMetric(name, stage, outcome = 'count') {
+    console.log(JSON.stringify({
+        _aws: {
+            Timestamp: Date.now(),
+            CloudWatchMetrics: [{
+                Namespace: 'Scouts/Gemini',
+                Dimensions: [['Stage', 'Outcome']],
+                Metrics: [{ Name: name, Unit: 'Count' }],
+            }],
+        },
+        Stage: stage,
+        Outcome: outcome,
+        [name]: 1,
+    }));
+}
+
+async function notifyEnrichmentTransition(stage, state, details = {}) {
+    const attemptCount = Number(state?.attemptCount || 0);
+    const category = state?.lastErrorType || 'UNKNOWN';
+    const message = String(state?.lastErrorMessage || 'unknown error').replace(/[\r\n]+/g, ' ').slice(0, 300);
+    if (state?.state === 'retry_wait' && attemptCount === 2) {
+        await postSlackMessage({ text: `⚠️ Scouts enrichment retry warning\n\nHEX: ${details.hex}\nStage: ${stage}\nAttempts: ${attemptCount} / ${enrichmentStateConfig.MAX_ATTEMPTS}\nLast error: ${category}: ${message}\nNext retry: ${state.nextRetryAt || 'unknown'}\nRequest ID: ${details.requestId || 'unknown'}` });
+    } else if (state?.state === 'manual_review' && await claimEnrichmentEscalation({ hex: details.hex, stage })) {
+        await postSlackMessage({ text: `🚨 Scouts enrichment suspended\n\nHEX: ${details.hex}\nStage: ${stage}\nAutomatic enrichment has been stopped.\nAttempts: ${attemptCount}\nLast error: ${category}: ${message}\nGeneration ID: ${details.generationId || state.generationId || 'unknown'}\nRequest ID: ${details.requestId || state.lastRequestId || 'unknown'}` });
+    }
+}
+
 async function notifyGeminiOnce(day, alertType, kind, text) {
     if (!GEMINI_USAGE_TABLE_NAME) return;
 
@@ -723,6 +763,21 @@ async function reserveGeminiRequest(kind) {
 
 function isGeminiQuotaExhausted(value) {
     return value === GEMINI_QUOTA_EXHAUSTED;
+}
+
+async function checkStageEligibility(hex, stage, generationId = null) {
+    try {
+        const state = await getEnrichmentState(hex, stage);
+        const evaluation = evaluateEnrichmentEligibility(state, new Date(), generationId);
+        if (!evaluation.eligible) {
+            emitEnrichmentMetric('EnrichmentSkipped', stage, evaluation.reason || 'ineligible');
+        }
+        return { ...evaluation, state };
+    } catch (error) {
+        console.error('[Enrichment] State lookup failed; blocking request:', error?.message || error);
+        emitEnrichmentMetric('EnrichmentSkipped', stage, 'state_store_error');
+        return { eligible: false, reason: 'state_store_error' };
+    }
 }
 
 function toNonEmptyString(value) {
@@ -953,7 +1008,7 @@ function normaliseGeminiTextResponse(result) {
     };
 }
 
-async function generateGeminiTextSuggestion(event, mode, configOverride = null) {
+async function generateGeminiTextSuggestion(event, mode, configOverride = null, options = {}) {
     if (!GEMINI_TEXT_FEATURE_ENABLED) {
         console.log('[Gemini] Feature flag disabled; skipping AI suggestion', {
             geminiFlag: GEMINI_TEXT_FEATURE_FLAG_SOURCE ?? null,
@@ -964,10 +1019,16 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null) 
         console.log('[Gemini] Runtime disabled; skipping AI suggestion');
         return null;
     }
+
+    const hexValue = String(options.hexValue ?? event?.hex ?? '').trim().toLowerCase();
+    const stage = mode === 'imageTheme' ? 'imageTheme' : 'tagline';
+    const generationId = options.generationId || buildGenerationId(hexValue, stage, event, GEMINI_PROMPT_VERSION);
     
     const geminiApiKey = await getOptionalSecret('GEMINI_API_KEY_PARAMETER', '');
     if (!geminiApiKey) {
         console.warn('[Gemini] GEMINI_API_KEY not set; skipping AI suggestion');
+        const failedState = await markEnrichmentFailure({ hex: hexValue, stage, error: new Error('Gemini API key is not configured'), attemptCount: 1 }).catch(() => null);
+        await notifyEnrichmentTransition(stage, failedState, { hex: hexValue, generationId, requestId: options.requestId }).catch(() => {});
         return null;
     }
 
@@ -991,9 +1052,39 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null) 
         return null;
     }
 
+    const reusable = await loadReusableGeneration({ hex: hexValue, stage, generationId }).catch((error) => {
+        console.warn('[Enrichment] Failed to read generation cache:', error?.message || error);
+        return null;
+    });
+    if (reusable) {
+        console.log(JSON.stringify({ hex: hexValue, stage, generationId, requestId: options.requestId || null, attemptCount: reusable.state?.attemptCount || 0, stateBefore: reusable.state?.state || 'succeeded', stateAfter: 'succeeded', geminiRequestAttempted: false, geminiResultReused: true, failureCategory: null }));
+        emitEnrichmentMetric('GeminiResultReused', stage, 'reused');
+        return normaliseGeminiTextResponse(reusable.generatedValue);
+    }
+
+    const stageEligibility = await checkStageEligibility(hexValue, stage, generationId);
+    if (!stageEligibility.eligible) {
+        return { enrichmentBlocked: true, reason: stageEligibility.reason };
+    }
+
     if (!await reserveGeminiRequest('text')) {
         return GEMINI_QUOTA_EXHAUSTED;
     }
+
+    const reservation = await reserveEnrichmentAttempt({
+        hex: hexValue,
+        stage,
+        generationId,
+        requestId: options.requestId,
+    }).catch((error) => {
+        console.error('[Enrichment] Failed to reserve stage attempt:', error?.message || error);
+        return { reserved: false, reason: 'state_store_error' };
+    });
+    if (!reservation?.reserved) {
+        emitEnrichmentMetric('EnrichmentSkipped', stage, reservation?.reason || 'reservation_rejected');
+        return { enrichmentBlocked: true, reason: reservation?.reason || 'reservation_rejected' };
+    }
+    console.log(JSON.stringify({ hex: hexValue, stage, generationId, requestId: options.requestId || null, attemptCount: reservation.state?.attemptCount || null, stateBefore: stageEligibility.state?.state || 'pending', stateAfter: 'in_progress', geminiRequestAttempted: true, geminiResultReused: false, failureCategory: null }));
 
     try {
         const genAI = new GoogleGenerativeAILib(geminiApiKey);
@@ -1018,15 +1109,38 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null) 
             parsed = JSON.parse(cleaned);
         } catch (jsonErr) {
             emitGeminiMetric('text', 'failure');
+            const failedState = await markEnrichmentFailure({
+                hex: hexValue,
+                stage,
+                error: Object.assign(new Error('Model returned invalid JSON'), { cause: jsonErr }),
+                attemptCount: reservation?.state?.attemptCount,
+            }).catch(() => null);
+            emitEnrichmentMetric(failedState?.state === 'manual_review' ? 'EnrichmentQuarantined' : 'EnrichmentRetry', stage, 'INVALID_EVENT_DATA');
+            await notifyEnrichmentTransition(stage, failedState, { hex: hexValue, generationId, requestId: options.requestId }).catch(() => {});
             console.warn('[Gemini] Failed to parse JSON from model response:', jsonErr.message);
             console.warn('[Gemini] Cleaned response was:', cleaned.slice(0, 1000));
             return null;
         }
 
+        const normalized = normaliseGeminiTextResponse(parsed);
+        await markGeminiSucceeded({ hex: hexValue, stage, generationId, generatedValue: normalized.raw ?? parsed });
         emitGeminiMetric('text', 'success');
-        return normaliseGeminiTextResponse(parsed);
+        return normalized;
     } catch (error) {
         emitGeminiMetric('text', 'failure');
+        const failedState = await markEnrichmentFailure({
+            hex: hexValue,
+            stage,
+            error,
+            attemptCount: reservation?.state?.attemptCount,
+        }).catch((stateError) => {
+            console.error('[Enrichment] Failed to persist text failure state:', stateError?.message || stateError);
+            return null;
+        });
+        emitEnrichmentMetric(failedState?.state === 'manual_review' ? 'EnrichmentQuarantined' : 'EnrichmentRetry', stage, failedState?.lastErrorType || 'failure');
+        await notifyEnrichmentTransition(stage, failedState, { hex: hexValue, generationId, requestId: options.requestId }).catch((notifyError) => {
+            console.warn('[Enrichment] Failed to send transition alert:', notifyError?.message || notifyError);
+        });
         await notifyGeminiFailureOnce('text', error);
         console.warn(`[Gemini] Failed to generate ${mode} suggestion:`, error?.message || error);
         if (error && error.stack) console.debug(error.stack);
@@ -1536,14 +1650,18 @@ function isGeminiNotFoundError(error) {
     return message.includes('404') || message.includes('not found');
 }
 
-async function generateGeminiImageAsset(promptText, { hexValue, eventTitle, requestId } = {}) {
+async function generateGeminiImageAsset(promptText, { hexValue, eventTitle, requestId, event = {}, generationId: suppliedGenerationId } = {}) {
     if (geminiImageRuntimeDisabled) {
         console.log('[GeminiImage] Runtime disabled; skipping Gemini image generation');
         return null;
     }
+    const normalisedHexValue = String(hexValue ?? event?.hex ?? '').trim().toLowerCase();
+    const generationId = suppliedGenerationId || buildGenerationId(normalisedHexValue, 'image', event, GEMINI_PROMPT_VERSION);
     const geminiApiKey = await getOptionalSecret('GEMINI_API_KEY_PARAMETER', '');
     if (!geminiApiKey) {
         console.warn('[GeminiImage] GEMINI_API_KEY not set; cannot generate image');
+        const failedState = await markEnrichmentFailure({ hex: normalisedHexValue, stage: 'image', error: new Error('Gemini API key is not configured'), attemptCount: 1 }).catch(() => null);
+        await notifyEnrichmentTransition('image', failedState, { hex: normalisedHexValue, generationId, requestId }).catch(() => {});
         return null;
     }
 
@@ -1566,6 +1684,38 @@ async function generateGeminiImageAsset(promptText, { hexValue, eventTitle, requ
         return null;
     }
 
+    const reusable = await loadReusableGeneration({ hex: normalisedHexValue, stage: 'image', generationId }).catch((error) => {
+        console.warn('[Enrichment] Failed to read image generation cache:', error?.message || error);
+        return null;
+    });
+    if (reusable) {
+        console.log(JSON.stringify({ hex: normalisedHexValue, stage: 'image', generationId, requestId: requestId || null, attemptCount: reusable.state?.attemptCount || 0, stateBefore: reusable.state?.state || 'succeeded', stateAfter: 'succeeded', geminiRequestAttempted: false, geminiResultReused: true, failureCategory: null }));
+        emitEnrichmentMetric('GeminiResultReused', 'image', 'reused');
+        return reusable.generatedValue;
+    }
+
+    const stageEligibility = await checkStageEligibility(normalisedHexValue, 'image', generationId);
+    if (!stageEligibility.eligible) {
+        return { enrichmentBlocked: true, reason: stageEligibility.reason };
+    }
+    if (!await reserveGeminiRequest('image')) {
+        return GEMINI_QUOTA_EXHAUSTED;
+    }
+    const reservation = await reserveEnrichmentAttempt({
+        hex: normalisedHexValue,
+        stage: 'image',
+        generationId,
+        requestId,
+    }).catch((error) => {
+        console.error('[Enrichment] Failed to reserve image attempt:', error?.message || error);
+        return { reserved: false, reason: 'state_store_error' };
+    });
+    if (!reservation?.reserved) {
+        emitEnrichmentMetric('EnrichmentSkipped', 'image', reservation?.reason || 'reservation_rejected');
+        return { enrichmentBlocked: true, reason: reservation?.reason || 'reservation_rejected' };
+    }
+    console.log(JSON.stringify({ hex: normalisedHexValue, stage: 'image', generationId, requestId: requestId || null, attemptCount: reservation.state?.attemptCount || null, stateBefore: stageEligibility.state?.state || 'pending', stateAfter: 'in_progress', geminiRequestAttempted: true, geminiResultReused: false, failureCategory: null }));
+
     const genAI = new GoogleGenAIClient({
         apiKey: geminiApiKey,
         apiVersion: GEMINI_IMAGE_API_VERSION,
@@ -1574,9 +1724,6 @@ async function generateGeminiImageAsset(promptText, { hexValue, eventTitle, requ
 
     for (const modelName of GEMINI_IMAGE_MODEL_PREFERENCES) {
         if (!modelName) continue;
-        if (!await reserveGeminiRequest('image')) {
-            return GEMINI_QUOTA_EXHAUSTED;
-        }
         console.log(`[GeminiImage] Generating image with model ${modelName} and prompt:`, requestPrompt);
         try {
             const isImagenModel = /^imagen-/i.test(modelName);
@@ -1615,12 +1762,14 @@ async function generateGeminiImageAsset(promptText, { hexValue, eventTitle, requ
                 throw new Error('Gemini image upload failed; no relative URL returned');
             }
 
-            emitGeminiMetric('image', 'success');
-            return {
+            const generatedValue = {
                 relativeUrl: uploadResult.relativeUrl,
                 mimeType,
                 prompt: requestPrompt,
             };
+            await markGeminiSucceeded({ hex: hexValue, stage: 'image', generationId, generatedValue });
+            emitGeminiMetric('image', 'success');
+            return generatedValue;
         } catch (error) {
             emitGeminiMetric('image', 'failure');
             await notifyGeminiFailureOnce('image', error);
@@ -1633,6 +1782,15 @@ async function generateGeminiImageAsset(promptText, { hexValue, eventTitle, requ
             }
             console.warn(`[GeminiImage] Model ${modelName} failed:`, formatGeminiImageErrorForSlack(normalizedError));
             lastError = normalizedError;
+
+            const failedState = await markEnrichmentFailure({
+                hex: hexValue,
+                stage: 'image',
+                error: normalizedError,
+                attemptCount: reservation?.state?.attemptCount,
+            }).catch(() => null);
+            emitEnrichmentMetric(failedState?.state === 'manual_review' ? 'EnrichmentQuarantined' : 'EnrichmentRetry', 'image', failedState?.lastErrorType || 'failure');
+            await notifyEnrichmentTransition('image', failedState, { hex: hexValue, generationId, requestId }).catch(() => {});
 
             if (isGeminiNotFoundError(normalizedError)) {
                 continue;
@@ -3192,8 +3350,9 @@ export async function lambdaHandler(event) {
                 throw new Error(`HEX ${hexValue} not found`);
             }
             
-            const result = await generateGeminiTextSuggestion(hexData, 'tagline', scoutsConfig);
-            if (isGeminiQuotaExhausted(result)) {
+            const generationId = buildGenerationId(hexValue, 'tagline', hexData, GEMINI_PROMPT_VERSION);
+            const result = await generateGeminiTextSuggestion(hexData, 'tagline', scoutsConfig, { hexValue, generationId, requestId: requestContext.requestId });
+            if (isGeminiQuotaExhausted(result) || result?.enrichmentBlocked) {
                 await completeImageEnrichTask(messageBody, {
                     hex: hexValue,
                     requestId: requestContext.requestId,
@@ -3216,7 +3375,17 @@ export async function lambdaHandler(event) {
                 }
             }
 
-            await saveHexEventToS3(hexValue, hexData);
+            try {
+                await saveHexEventToS3(hexValue, hexData);
+            } catch (error) {
+                emitEnrichmentMetric('PersistenceRetry', 'tagline', 's3_write_failed');
+                throw error;
+            }
+            if (result) {
+                await markEnrichmentSucceeded({ hex: hexValue, stage: 'tagline', generationId }).catch((error) => {
+                    console.warn('[Enrichment] Failed to mark tagline success:', error?.message || error);
+                });
+            }
             await completeImageEnrichTask(messageBody, {
                 hex: hexValue,
                 requestId: requestContext.requestId,
@@ -3254,8 +3423,9 @@ export async function lambdaHandler(event) {
                 throw new Error(`HEX ${hexValue} not found`);
             }
             
-            const result = await generateGeminiTextSuggestion(hexData, 'imageTheme', scoutsConfig);
-            if (isGeminiQuotaExhausted(result)) {
+            const generationId = buildGenerationId(hexValue, 'imageTheme', hexData, GEMINI_PROMPT_VERSION);
+            const result = await generateGeminiTextSuggestion(hexData, 'imageTheme', scoutsConfig, { hexValue, generationId, requestId: requestContext.requestId });
+            if (isGeminiQuotaExhausted(result) || result?.enrichmentBlocked) {
                 await completeImageEnrichTask(messageBody, {
                     hex: hexValue,
                     requestId: requestContext.requestId,
@@ -3276,7 +3446,17 @@ export async function lambdaHandler(event) {
                 setImageApprovalState(hexData, false);
             }
 
-            await saveHexEventToS3(hexValue, hexData);
+            try {
+                await saveHexEventToS3(hexValue, hexData);
+            } catch (error) {
+                emitEnrichmentMetric('PersistenceRetry', 'imageTheme', 's3_write_failed');
+                throw error;
+            }
+            if (result) {
+                await markEnrichmentSucceeded({ hex: hexValue, stage: 'imageTheme', generationId }).catch((error) => {
+                    console.warn('[Enrichment] Failed to mark imageTheme success:', error?.message || error);
+                });
+            }
 
             const requiresApproval = hasCompleteApprovalData(hexData);
             if (!requiresApproval || autoApproval) {
@@ -3331,12 +3511,15 @@ export async function lambdaHandler(event) {
                 throw new Error(`HEX ${hexValue} image theme did not produce a full prompt`);
             }
 
+            const generationId = buildGenerationId(hexValue, 'image', hexData, GEMINI_PROMPT_VERSION);
             const generatedImage = await generateGeminiImageAsset(imagePrompt, {
                 hexValue,
                 eventTitle: hexData.title || hexData.summary || hexData.name || 'Scouts event',
                 requestId: requestContext.requestId,
+                event: hexData,
+                generationId,
             });
-            if (isGeminiQuotaExhausted(generatedImage)) {
+            if (isGeminiQuotaExhausted(generatedImage) || generatedImage?.enrichmentBlocked) {
                 await completeImageEnrichTask(messageBody, {
                     hex: hexValue,
                     requestId: requestContext.requestId,
@@ -3366,7 +3549,15 @@ export async function lambdaHandler(event) {
             };
             setImageApprovalState(hexData, false);
 
-            await saveHexEventToS3(hexValue, hexData);
+            try {
+                await saveHexEventToS3(hexValue, hexData);
+            } catch (error) {
+                emitEnrichmentMetric('PersistenceRetry', 'image', 's3_write_failed');
+                throw error;
+            }
+            await markEnrichmentSucceeded({ hex: hexValue, stage: 'image', generationId }).catch((error) => {
+                console.warn('[Enrichment] Failed to mark image success:', error?.message || error);
+            });
             await completeImageEnrichTask(messageBody, {
                 hex: hexValue,
                 requestId: requestContext.requestId,
