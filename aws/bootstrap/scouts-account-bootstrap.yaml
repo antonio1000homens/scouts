@@ -287,6 +287,29 @@ Resources:
                   - logs:UntagResource
                 Resource:
                   - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/scouts*
+              - Sid: GeminiUsageTableCreate
+                Effect: Allow
+                Action:
+                  - dynamodb:CreateTable
+                Resource: '*'
+              - Sid: GeminiUsageTableManagement
+                Effect: Allow
+                Action:
+                  - dynamodb:DeleteTable
+                  - dynamodb:DescribeTable
+                  - dynamodb:DescribeTimeToLive
+                  - dynamodb:UpdateTable
+                  - dynamodb:UpdateTimeToLive
+                Resource:
+                  - !Sub arn:aws:dynamodb:eu-west-2:${AWS::AccountId}:table/scouts-gemini-usage
+              - Sid: GeminiAlarmManagement
+                Effect: Allow
+                Action:
+                  - cloudwatch:DeleteAlarms
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:PutMetricAlarm
+                # CloudWatch alarm APIs do not support resource-level IAM permissions.
+                Resource: '*'
               - Sid: CloudFrontManagement
                 Effect: Allow
                 Action:
