@@ -74,6 +74,21 @@ Parameters:
   GeminiTextModel:
     Type: String
     Default: ''
+  GeminiEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  GeminiImagesEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  GeminiDailyRequestLimit:
+    Type: Number
+    Default: 10
+    MinValue: 0
+  GeminiUsageTableName:
+    Type: String
+    Default: scouts-gemini-usage
   SlackWebhookUrl:
     Type: String
     Default: https://slack.com/api/chat.postMessage
@@ -94,6 +109,25 @@ Parameters:
     Default: approvals
 
 Resources:
+  GeminiUsageTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref GeminiUsageTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: usageDay
+          AttributeType: S
+        - AttributeName: usageScope
+          AttributeType: S
+      KeySchema:
+        - AttributeName: usageDay
+          KeyType: HASH
+        - AttributeName: usageScope
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
   Sqs2ScoutsLayer:
     Type: AWS::Lambda::LayerVersion
     Properties:
@@ -153,6 +187,10 @@ Resources:
                 Resource: '*'
               - Effect: Allow
                 Action:
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt GeminiUsageTable.Arn
+              - Effect: Allow
+                Action:
                   - ssm:GetParameter
                 Resource:
                   - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/shared/slack-signing-secret
@@ -179,6 +217,10 @@ Resources:
           GEMINI_IMAGE_API_VERSION: !Ref GeminiImageApiVersion
           GEMINI_IMAGE_MODEL: !Ref GeminiImageModel
           GEMINI_TEXT_MODEL: !Ref GeminiTextModel
+          GEMINI: !Ref GeminiEnabled
+          GEMINI_IMAGES: !Ref GeminiImagesEnabled
+          GEMINI_DAILY_REQUEST_LIMIT: !Ref GeminiDailyRequestLimit
+          GEMINI_USAGE_TABLE_NAME: !Ref GeminiUsageTableName
           SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
           SCOUTS2SQS_FUNCTION_URL: !Ref Scouts2SqsFunctionUrl
           SCOUTS_DECISION_QUEUE_URL: !Ref ScoutsDecisionQueueUrl
@@ -200,6 +242,40 @@ Resources:
       BatchSize: !Ref BatchSize
       Enabled: true
 
+  GeminiQuotaRejectedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: scouts-gemini-daily-limit-reached
+      AlarmDescription: Gemini requests were blocked by the Scouts daily safety limit.
+      Namespace: Scouts/Gemini
+      MetricName: Requests
+      Dimensions:
+        - Name: Outcome
+          Value: quota_rejected
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  GeminiFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: scouts-gemini-request-failed
+      AlarmDescription: A Scouts Gemini request failed after the external request was attempted.
+      Namespace: Scouts/Gemini
+      MetricName: Requests
+      Dimensions:
+        - Name: Outcome
+          Value: failure
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
 Outputs:
   FunctionArn:
     Value: !GetAtt Sqs2ScoutsFunction.Arn
@@ -207,3 +283,5 @@ Outputs:
     Value: !Ref Sqs2ScoutsLayer
   EventSourceMappingId:
     Value: !Ref Sqs2ScoutsEventSourceMapping
+  GeminiUsageTableName:
+    Value: !Ref GeminiUsageTable

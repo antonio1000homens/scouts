@@ -60,6 +60,10 @@ GEMINI_API_VERSION="${GEMINI_API_VERSION:-}"
 GEMINI_IMAGE_API_VERSION="${GEMINI_IMAGE_API_VERSION:-}"
 GEMINI_IMAGE_MODEL="${GEMINI_IMAGE_MODEL:-}"
 GEMINI_TEXT_MODEL="${GEMINI_TEXT_MODEL:-}"
+GEMINI_ENABLED="${GEMINI_ENABLED:-}"
+GEMINI_IMAGES_ENABLED="${GEMINI_IMAGES_ENABLED:-}"
+GEMINI_DAILY_REQUEST_LIMIT="${GEMINI_DAILY_REQUEST_LIMIT:-10}"
+GEMINI_USAGE_TABLE_NAME="${GEMINI_USAGE_TABLE_NAME:-scouts-gemini-usage}"
 REQUIRE_GEMINI_API_KEY="${REQUIRE_GEMINI_API_KEY:-false}"
 SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://slack.com/api/chat.postMessage}"
 TARGET_BUCKET="${TARGET_BUCKET:-scouts-2ndtolworth-prod-553490163883}"
@@ -135,15 +139,18 @@ if declare -F bws_export_if_unset >/dev/null 2>&1; then
   bws_export_if_unset "GEMINI_API_KEY" "${BWS_GEMINI_API_KEY_SECRET_ID:-}" || true
 fi
 
-if [ -z "${SLACK_SIGNING_SECRET}" ] || [ -z "${SLACK_BOT_TOKEN}" ]; then
-  echo -e "${RED}SLACK_SIGNING_SECRET and SLACK_BOT_TOKEN must be set before deploying.${NC}"
-  exit 1
-fi
+require_existing_secure_parameter() {
+  local parameter_name="$1"
+  if ! aws ssm get-parameter --region "${REGION}" --name "${parameter_name}" --query 'Parameter.ARN' --output text >/dev/null; then
+    echo -e "${RED}Required SSM parameter is missing: ${parameter_name}${NC}"
+    exit 1
+  fi
+}
 
-if [ -z "${GEMINI_API_KEY}" ]; then
-  echo -e "${RED}GEMINI_API_KEY must be set before deploying.${NC}"
-  exit 1
-fi
+# Secrets normally stay in SSM. Supplying a value is only necessary when rotating it.
+if [ -z "${SLACK_SIGNING_SECRET}" ]; then require_existing_secure_parameter "${SLACK_SIGNING_SECRET_PARAMETER}"; fi
+if [ -z "${SLACK_BOT_TOKEN}" ]; then require_existing_secure_parameter "${SLACK_BOT_TOKEN_PARAMETER}"; fi
+if [ -z "${GEMINI_API_KEY}" ]; then require_existing_secure_parameter "${GEMINI_API_KEY_PARAMETER}"; fi
 
 if [ -z "${GEMINI_TEXT_MODEL}" ]; then
   CURRENT_GEMINI_TEXT_MODEL="$(aws lambda get-function-configuration --function-name "${FUNCTION_NAME}" --region "${REGION}" --query 'Environment.Variables.GEMINI_TEXT_MODEL' --output text 2>/dev/null || true)"
@@ -170,6 +177,24 @@ if [ -z "${GEMINI_IMAGE_API_VERSION}" ]; then
   CURRENT_GEMINI_IMAGE_API_VERSION="$(aws lambda get-function-configuration --function-name "${FUNCTION_NAME}" --region "${REGION}" --query 'Environment.Variables.GEMINI_IMAGE_API_VERSION' --output text 2>/dev/null || true)"
   if [ -n "${CURRENT_GEMINI_IMAGE_API_VERSION}" ] && [ "${CURRENT_GEMINI_IMAGE_API_VERSION}" != "None" ] && [ "${CURRENT_GEMINI_IMAGE_API_VERSION}" != "null" ]; then
     GEMINI_IMAGE_API_VERSION="${CURRENT_GEMINI_IMAGE_API_VERSION}"
+  fi
+fi
+
+if [ -z "${GEMINI_ENABLED}" ]; then
+  CURRENT_GEMINI_ENABLED="$(aws lambda get-function-configuration --function-name "${FUNCTION_NAME}" --region "${REGION}" --query 'Environment.Variables.GEMINI' --output text 2>/dev/null || true)"
+  if [ "${CURRENT_GEMINI_ENABLED}" = "true" ] || [ "${CURRENT_GEMINI_ENABLED}" = "false" ]; then
+    GEMINI_ENABLED="${CURRENT_GEMINI_ENABLED}"
+  else
+    GEMINI_ENABLED="false"
+  fi
+fi
+
+if [ -z "${GEMINI_IMAGES_ENABLED}" ]; then
+  CURRENT_GEMINI_IMAGES_ENABLED="$(aws lambda get-function-configuration --function-name "${FUNCTION_NAME}" --region "${REGION}" --query 'Environment.Variables.GEMINI_IMAGES' --output text 2>/dev/null || true)"
+  if [ "${CURRENT_GEMINI_IMAGES_ENABLED}" = "true" ] || [ "${CURRENT_GEMINI_IMAGES_ENABLED}" = "false" ]; then
+    GEMINI_IMAGES_ENABLED="${CURRENT_GEMINI_IMAGES_ENABLED}"
+  else
+    GEMINI_IMAGES_ENABLED="false"
   fi
 fi
 
@@ -255,6 +280,10 @@ CFN_DEPLOY_ARGS+=(
     GeminiImageApiVersion="${GEMINI_IMAGE_API_VERSION}"
     GeminiImageModel="${GEMINI_IMAGE_MODEL}"
     GeminiTextModel="${GEMINI_TEXT_MODEL}"
+    GeminiEnabled="${GEMINI_ENABLED}"
+    GeminiImagesEnabled="${GEMINI_IMAGES_ENABLED}"
+    GeminiDailyRequestLimit="${GEMINI_DAILY_REQUEST_LIMIT}"
+    GeminiUsageTableName="${GEMINI_USAGE_TABLE_NAME}"
     SlackWebhookUrl="${SLACK_WEBHOOK_URL}"
     Scouts2SqsFunctionUrl="${SCOUTS2SQS_FUNCTION_URL}"
     ProcessingQueueUrl="${QUEUE_URL}"
@@ -267,9 +296,9 @@ CFN_DEPLOY_ARGS+=(
 aws cloudformation deploy \
   "${CFN_DEPLOY_ARGS[@]}"
 
-put_standard_secure_parameter "${SLACK_SIGNING_SECRET_PARAMETER}" "${SLACK_SIGNING_SECRET}"
-put_standard_secure_parameter "${SLACK_BOT_TOKEN_PARAMETER}" "${SLACK_BOT_TOKEN}"
-put_standard_secure_parameter "${GEMINI_API_KEY_PARAMETER}" "${GEMINI_API_KEY}"
+if [ -n "${SLACK_SIGNING_SECRET}" ]; then put_standard_secure_parameter "${SLACK_SIGNING_SECRET_PARAMETER}" "${SLACK_SIGNING_SECRET}"; fi
+if [ -n "${SLACK_BOT_TOKEN}" ]; then put_standard_secure_parameter "${SLACK_BOT_TOKEN_PARAMETER}" "${SLACK_BOT_TOKEN}"; fi
+if [ -n "${GEMINI_API_KEY}" ]; then put_standard_secure_parameter "${GEMINI_API_KEY_PARAMETER}" "${GEMINI_API_KEY}"; fi
 
 echo -e "\n${YELLOW}Step 5: Read stack outputs...${NC}"
 aws cloudformation describe-stacks \
