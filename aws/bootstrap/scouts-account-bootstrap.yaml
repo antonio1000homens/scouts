@@ -302,6 +302,7 @@ Resources:
                   - dynamodb:UpdateTimeToLive
                 Resource:
                   - !Sub arn:aws:dynamodb:eu-west-2:${AWS::AccountId}:table/scouts-gemini-usage
+                  - !Sub arn:aws:dynamodb:eu-west-2:${AWS::AccountId}:table/scouts-enrichment-state
               - Sid: GeminiAlarmManagement
                 Effect: Allow
                 Action:
