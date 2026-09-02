@@ -89,6 +89,28 @@ Parameters:
   GeminiUsageTableName:
     Type: String
     Default: scouts-gemini-usage
+  GeminiEnrichmentStateTableName:
+    Type: String
+    Default: scouts-enrichment-state
+  GeminiMaxAttemptsPerStage:
+    Type: Number
+    Default: 3
+    MinValue: 1
+  GeminiRetryDelayAttempt2Seconds:
+    Type: Number
+    Default: 3600
+    MinValue: 0
+  GeminiRetryDelayAttempt3Seconds:
+    Type: Number
+    Default: 21600
+    MinValue: 0
+  GeminiInProgressLeaseSeconds:
+    Type: Number
+    Default: 1800
+    MinValue: 60
+  GeminiPromptVersion:
+    Type: String
+    Default: '1'
   SlackWebhookUrl:
     Type: String
     Default: https://slack.com/api/chat.postMessage
@@ -123,6 +145,25 @@ Resources:
         - AttributeName: usageDay
           KeyType: HASH
         - AttributeName: usageScope
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  GeminiEnrichmentStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref GeminiEnrichmentStateTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: hex
+          AttributeType: S
+        - AttributeName: stage
+          AttributeType: S
+      KeySchema:
+        - AttributeName: hex
+          KeyType: HASH
+        - AttributeName: stage
           KeyType: RANGE
       TimeToLiveSpecification:
         AttributeName: expiresAt
@@ -187,8 +228,12 @@ Resources:
                 Resource: '*'
               - Effect: Allow
                 Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
                   - dynamodb:UpdateItem
-                Resource: !GetAtt GeminiUsageTable.Arn
+                Resource:
+                  - !GetAtt GeminiUsageTable.Arn
+                  - !GetAtt GeminiEnrichmentStateTable.Arn
               - Effect: Allow
                 Action:
                   - ssm:GetParameter
@@ -221,6 +266,12 @@ Resources:
           GEMINI_IMAGES: !Ref GeminiImagesEnabled
           GEMINI_DAILY_REQUEST_LIMIT: !Ref GeminiDailyRequestLimit
           GEMINI_USAGE_TABLE_NAME: !Ref GeminiUsageTableName
+          GEMINI_ENRICHMENT_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
+          GEMINI_MAX_ATTEMPTS_PER_STAGE: !Ref GeminiMaxAttemptsPerStage
+          GEMINI_RETRY_DELAY_ATTEMPT_2_SECONDS: !Ref GeminiRetryDelayAttempt2Seconds
+          GEMINI_RETRY_DELAY_ATTEMPT_3_SECONDS: !Ref GeminiRetryDelayAttempt3Seconds
+          GEMINI_IN_PROGRESS_LEASE_SECONDS: !Ref GeminiInProgressLeaseSeconds
+          GEMINI_PROMPT_VERSION: !Ref GeminiPromptVersion
           SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
           SCOUTS2SQS_FUNCTION_URL: !Ref Scouts2SqsFunctionUrl
           SCOUTS_DECISION_QUEUE_URL: !Ref ScoutsDecisionQueueUrl
@@ -276,6 +327,34 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
 
+  GeminiEnrichmentQuarantineAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: scouts-gemini-enrichment-quarantined
+      AlarmDescription: A HEX and enrichment stage entered manual review after bounded retries or a permanent error.
+      Namespace: Scouts/Gemini
+      MetricName: EnrichmentQuarantined
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  GeminiEnrichmentRetryBurstAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: scouts-gemini-enrichment-retry-burst
+      AlarmDescription: Unexpected Gemini enrichment retries in the last hour.
+      Namespace: Scouts/Gemini
+      MetricName: EnrichmentRetry
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
 Outputs:
   FunctionArn:
     Value: !GetAtt Sqs2ScoutsFunction.Arn
@@ -285,3 +364,5 @@ Outputs:
     Value: !Ref Sqs2ScoutsEventSourceMapping
   GeminiUsageTableName:
     Value: !Ref GeminiUsageTable
+  GeminiEnrichmentStateTableName:
+    Value: !Ref GeminiEnrichmentStateTable
