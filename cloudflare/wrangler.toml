@@ -1,0 +1,19 @@
+# Compatibility manifest for the Cloudflare Workers Builds project whose root
+# directory is `cloudflare`. The canonical admin-proxy configuration remains
+# in `cloudflare/scouts-admin-proxy/wrangler.toml`; this manifest keeps the
+# existing Workers Builds integration valid after the worker was moved into its
+# own subdirectory.
+name = "scouts-admin-proxy"
+main = "scouts-admin-proxy/worker.js"
+compatibility_date = "2026-03-03"
+account_id = "9a5523112f1460d0f77c9ba239d00029"
+
+routes = [
+  { pattern = "2ndtolworth.org.uk/admin-api/*", zone_name = "2ndtolworth.org.uk" },
+  { pattern = "2ndtolworth.org.uk/api/contact", zone_name = "2ndtolworth.org.uk" }
+]
+
+[vars]
+REQUIRE_CF_ACCESS = "true"
+SCOUTS_URL = "https://w6yfull3fisjxefw2lknyblezu0kbokv.lambda-url.eu-west-2.on.aws/"
+IFTTT_EVENT_NAME = "scoutsContactForm"
