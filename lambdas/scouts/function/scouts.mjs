@@ -9,8 +9,14 @@ import {
 } from '@aws-sdk/client-s3';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SFNClient, DescribeExecutionCommand, ListExecutionsCommand } from '@aws-sdk/client-sfn';
+import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { randomUUID } from 'crypto';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
+import {
+  getEnrichmentState,
+  evaluateEnrichmentEligibility,
+  buildGenerationId,
+} from '/opt/nodejs/enrichment-state.mjs';
 // Updated: Testing CI deployment mode to bypass environment parsing issues
 
 const {
@@ -946,8 +952,11 @@ function buildSortKey(value) {
 const s3 = new S3Client({ region: process.env.AWS_REGION || 'eu-west-2' });
 const sqs = new SQSClient({ region: process.env.AWS_REGION || 'eu-west-2' });
 const sfn = new SFNClient({ region: process.env.AWS_REGION || 'eu-west-2' });
+const dynamo = new DynamoDBClient({ region: process.env.AWS_REGION || 'eu-west-2' });
 const SCOUTS_REQUESTS_QUEUE_URL = SCOUTS_REQUESTS_QUEUE_URL_ENV || "https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests";
 const ACTIVE_EXECUTIONS_LIMIT = 20;
+const GEMINI_USAGE_TABLE_NAME = String(process.env.GEMINI_USAGE_TABLE_NAME || '').trim();
+const GEMINI_DAILY_REQUEST_LIMIT = Math.max(0, Math.floor(Number(process.env.GEMINI_DAILY_REQUEST_LIMIT || 0)));
 
 function buildImageEnrichRuntimeStageIndex(runtimeQueueSnapshots = {}) {
   const stageIndex = new Map();
@@ -1808,6 +1817,57 @@ function deriveProcessingRealmFromEvent(event, isEligibleForImageProcessing = tr
   if (isEligibleForImageProcessing && !getEventImageTheme(event)) return 'imageTheme';
   if (isEligibleForImageProcessing && !getEventImageUrl(event)) return 'image';
   return null;
+}
+
+async function isGeminiCircuitOpen(now = new Date()) {
+  if (GEMINI_DAILY_REQUEST_LIMIT <= 0 || !GEMINI_USAGE_TABLE_NAME) {
+    return { open: true, reason: 'budget_circuit_open' };
+  }
+  const day = now.toISOString().slice(0, 10);
+  try {
+    const response = await dynamo.send(new GetItemCommand({
+      TableName: GEMINI_USAGE_TABLE_NAME,
+      Key: { usageDay: { S: day }, usageScope: { S: 'requests' } },
+      ConsistentRead: true,
+    }));
+    const count = Number(response?.Item?.requestCount?.N || 0);
+    return count >= GEMINI_DAILY_REQUEST_LIMIT
+      ? { open: true, reason: 'budget_circuit_open', count }
+      : { open: false, count };
+  } catch (error) {
+    console.warn('[Enrichment] Failed to read Gemini daily circuit; skipping automatic enqueue:', error?.message || error);
+    return { open: true, reason: 'budget_circuit_unavailable' };
+  }
+}
+
+async function checkEnrichmentEligibility(hex, stage, context = {}) {
+  const circuit = await isGeminiCircuitOpen();
+  if (circuit.open) {
+    console.log(JSON.stringify({ hex, stage, skipReason: circuit.reason, attemptCount: null, nextRetryAt: null }));
+    return { eligible: false, reason: circuit.reason };
+  }
+  try {
+    const state = await getEnrichmentState(hex, stage);
+    const generationId = context.event
+      ? buildGenerationId(hex, stage, context.event)
+      : null;
+    const evaluation = evaluateEnrichmentEligibility(state, new Date(), generationId);
+    if (!evaluation.eligible) {
+      console.log(JSON.stringify({
+        hex,
+        stage,
+        state: state?.state || null,
+        attemptCount: Number(state?.attemptCount || 0),
+        nextRetryAt: state?.nextRetryAt || null,
+        skipReason: evaluation.reason,
+        requestId: context.requestId || null,
+      }));
+    }
+    return { ...evaluation, state };
+  } catch (error) {
+    console.warn('[Enrichment] Failed to read per-stage state; skipping automatic enqueue:', error?.message || error);
+    return { eligible: false, reason: 'state_store_unavailable' };
+  }
 }
 
 function mergeProcessingSnapshotIntoIndex(snapshot, index, eventByHex) {
@@ -2767,8 +2827,21 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
             console.log(`[HEX] Create-only mode: skipping rewrite for existing HEX ${titleHex}`);
           }
 
-          // Queue notifications without rewriting existing HEX files.
-          canQueueRequest = true;
+          // Queue notifications without rewriting existing HEX files. The
+          // per-HEX/per-stage state and global budget circuit are checked
+          // before publishing so cooldown/quarantined work never churns SQS.
+          const eligibility = await checkEnrichmentEligibility(titleHex, updatedRealm, {
+            requestId: baseEvent.requestId,
+            event: hexFileData,
+          });
+          canQueueRequest = eligibility.eligible;
+          if (!canQueueRequest) {
+            console.log('[Enrichment] Skipping automatic request', {
+              hex: titleHex,
+              stage: updatedRealm,
+              skipReason: eligibility.reason,
+            });
+          }
         } catch (writeErr) {
           console.error(`[HEX] Failed to create missing HEX file for ${titleHex}:`, writeErr.message);
         }
@@ -2815,6 +2888,11 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
       }
       
       try {
+        const retryStage = deriveProcessingRealmFromEvent(item.hexFileData);
+        const eligibility = await checkEnrichmentEligibility(item.hex, retryStage || 'tagline', { event: item.hexFileData });
+        if (!eligibility.eligible) {
+          continue;
+        }
         await postToScoutsRequestsQueue(
           {
             realm: 'scoutsRequest',
