@@ -15,7 +15,7 @@ if [ -f "${ROOT_DIR}/.env" ]; then
 fi
 
 REGION="${AWS_REGION:-eu-west-2}"
-STACK_NAME="${STACK_NAME:-scouts-full-enrich}"
+STACK_NAME="${STACK_NAME:-scouts-full-enrich-managed-poc}"
 EXPECTED_AWS_ACCOUNT="${EXPECTED_AWS_ACCOUNT:-553490163883}"
 CLOUDFORMATION_ROLE_ARN="${CLOUDFORMATION_ROLE_ARN:-}"
 
@@ -23,7 +23,9 @@ if [ -z "${AWS_ACCESS_KEY_ID:-}" ] && [ -z "${AWS_WEB_IDENTITY_TOKEN_FILE:-}" ] 
   export AWS_PROFILE="${AWS_PROFILE_NAME:-${AWS_PROFILE:-scouts}}"
 fi
 
-STATE_MACHINE_NAME="${STATE_MACHINE_NAME:-scouts-full-enrich}"
+# AWS already contains an unmanaged scouts-full-enrich POC. Use a distinct
+# CloudFormation-managed name so this source-controlled POC is non-destructive.
+STATE_MACHINE_NAME="${STATE_MACHINE_NAME:-scouts-full-enrich-managed-poc}"
 REQUESTS_QUEUE_URL="${REQUESTS_QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests}"
 REQUESTS_QUEUE_ARN="${REQUESTS_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsRequests}"
 STAGE_TIMEOUT_SECONDS="${STAGE_TIMEOUT_SECONDS:-900}"
@@ -107,7 +109,7 @@ cat <<'EOF'
 aws stepfunctions start-execution \
   --region eu-west-2 \
   --state-machine-arn <StateMachineArn output> \
-  --input '{"requestId":"manual-test-001","requestHex":"<hex>","hex":"<hex>","requestMode":"manual","approvalMode":"auto","stageResults":{}}'
+  --input '{"requestId":"manual-test-001","requestHex":"<hex>","hex":"<hex>","requestMode":"manual","approvalMode":"auto"}'
 EOF
 
 echo -e "\n${GREEN}Deployment complete.${NC}"
