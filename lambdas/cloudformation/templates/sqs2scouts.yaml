@@ -25,10 +25,10 @@ Parameters:
     Default: nodejs24.x
   Handler:
     Type: String
-    Default: sqs2scouts.lambdaHandler
+    Default: full-enrich-adapter.lambdaHandler
   Timeout:
     Type: Number
-    Default: 30
+    Default: 90
   MemorySize:
     Type: Number
     Default: 256
@@ -46,7 +46,7 @@ Parameters:
     Default: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessingDLQ
   DlqUrl:
     Type: String
-    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883:scoutsProcessingDLQ
   ProcessingQueueUrl:
     Type: String
     Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
@@ -111,6 +111,24 @@ Parameters:
   GeminiPromptVersion:
     Type: String
     Default: '1'
+  ImageGenerationDailyRequestLimit:
+    Type: Number
+    Default: 10
+    MinValue: 0
+  CloudflareAccountId:
+    Type: String
+    Default: ''
+  CloudflareAiApiTokenParameter:
+    Type: String
+    Default: /scouts/sqs2scouts/cloudflare-ai-api-token
+  CloudflareAiModel:
+    Type: String
+    Default: '@cf/black-forest-labs/flux-1-schnell'
+  CloudflareAiSteps:
+    Type: Number
+    Default: 4
+    MinValue: 1
+    MaxValue: 8
   SlackWebhookUrl:
     Type: String
     Default: https://slack.com/api/chat.postMessage
@@ -241,6 +259,7 @@ Resources:
                   - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/shared/slack-signing-secret
                   - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/shared/slack-bot-token
                   - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/sqs2scouts/gemini-api-key
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${CloudflareAiApiTokenParameter}
 
   Sqs2ScoutsFunction:
     Type: AWS::Lambda::Function
@@ -272,6 +291,11 @@ Resources:
           GEMINI_RETRY_DELAY_ATTEMPT_3_SECONDS: !Ref GeminiRetryDelayAttempt3Seconds
           GEMINI_IN_PROGRESS_LEASE_SECONDS: !Ref GeminiInProgressLeaseSeconds
           GEMINI_PROMPT_VERSION: !Ref GeminiPromptVersion
+          IMAGE_GENERATION_DAILY_REQUEST_LIMIT: !Ref ImageGenerationDailyRequestLimit
+          CLOUDFLARE_ACCOUNT_ID: !Ref CloudflareAccountId
+          CLOUDFLARE_AI_API_TOKEN_PARAMETER: !Ref CloudflareAiApiTokenParameter
+          CLOUDFLARE_AI_MODEL: !Ref CloudflareAiModel
+          CLOUDFLARE_AI_STEPS: !Ref CloudflareAiSteps
           SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
           SCOUTS2SQS_FUNCTION_URL: !Ref Scouts2SqsFunctionUrl
           SCOUTS_DECISION_QUEUE_URL: !Ref ScoutsDecisionQueueUrl
