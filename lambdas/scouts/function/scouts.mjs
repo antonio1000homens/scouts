@@ -2615,6 +2615,7 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
 
   // Collect events that reach run threshold for batched notification
   const hexNotifications = new Map(); // Map<hexValue, { realm, title }>
+  const eventsAtThreshold = [];
   const processedTitles = new Set(); // Track processed titles to avoid duplicates
   const liveQueuedProcessingByHex = new Map(); // Map<hexValue, Array<'tagline'|'imageTheme'|'image'>>
 
