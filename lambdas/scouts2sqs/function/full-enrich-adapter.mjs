@@ -154,7 +154,8 @@ export function buildFullEnrichExecutionInput(message, event, name = null) {
   const imageProvider = normaliseImageProvider(message?.imageProvider || DEFAULT_IMAGE_PROVIDER);
   const prefix = executionPrefix(hex, event);
   return {
-    requestId: name || text(message?.requestId) || executionName(prefix),
+    requestId: text(message?.requestId) || name || executionName(prefix),
+    executionName: name || null,
     hex,
     requestHex: hex,
     source: text(message?.source) || 'scouts2sqs',
@@ -206,27 +207,30 @@ async function startFullEnrich(message) {
 
   const input = buildFullEnrichExecutionInput(message, event);
   if (input.startStage === 'complete') {
-    console.log('[FullEnrich] Event already complete; no execution required', { hex });
+    console.log('[FullEnrich] Event already complete; no execution required', { hex, requestId: input.requestId });
     return { status: 'complete', input, reused: false };
   }
   if (input.imageProvider === 'disabled' && input.startStage === 'image') {
-    console.warn('[FullEnrich] Image provider disabled; image-only enrichment is intentionally blocked', { hex, startStage: input.startStage });
+    console.warn('[FullEnrich] Image provider disabled; image-only enrichment is intentionally blocked', { hex, startStage: input.startStage, requestId: input.requestId });
     return { status: 'blocked', reason: 'image_provider_disabled', input, reused: false };
   }
 
   const prefix = executionPrefix(hex, event);
   const active = await findActiveExecution(prefix);
   if (active) {
+    const reusedInput = { ...input, executionName: active.name || null };
     console.log('[FullEnrich] Reusing active execution', {
       hex,
       executionArn: active.executionArn || null,
       generationKey: input.generationKey,
+      requestId: input.requestId,
+      executionName: active.name || null,
     });
-    return { status: 'running', executionArn: active.executionArn || null, input, reused: true };
+    return { status: 'running', executionArn: active.executionArn || null, input: reusedInput, reused: true };
   }
 
   const name = executionName(prefix);
-  const finalInput = { ...input, requestId: name };
+  const finalInput = { ...input, executionName: name };
   const response = await sfn.send(new StartExecutionCommand({
     stateMachineArn: FULL_ENRICH_STATE_MACHINE_ARN,
     name,
@@ -235,6 +239,8 @@ async function startFullEnrich(message) {
   console.log('[FullEnrich] Started execution', {
     hex,
     executionArn: response.executionArn || null,
+    executionName: name,
+    requestId: finalInput.requestId,
     startStage: finalInput.startStage,
     imageProvider: finalInput.imageProvider,
     generationKey: finalInput.generationKey,
@@ -249,6 +255,7 @@ async function forwardStageRequest(message) {
     hex: translated.hex,
     stage: translated.orchestrationStep,
     provider: translated.imageProvider || null,
+    requestId: translated.requestId || null,
   });
 }
 
@@ -291,7 +298,7 @@ async function isAuthorisedHttpRequest(event) {
 async function handleMessage(message) {
   if (isFullEnrichStageRequest(message)) {
     await forwardStageRequest(message);
-    return { intercepted: true, result: { status: 'forwarded' } };
+    return { intercepted: true, result: { status: 'forwarded', requestId: text(message?.requestId) } };
   }
   if (isFullEnrichStartRequest(message)) {
     return { intercepted: true, result: await startFullEnrich(message) };
@@ -317,6 +324,7 @@ export async function lambdaHandler(event) {
           error: error?.message || String(error),
           action: message?.action || null,
           hex: getHexFromMessage(message),
+          requestId: text(message?.requestId),
         });
         throw error;
       }
