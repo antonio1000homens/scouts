@@ -224,6 +224,8 @@ jobs:
 
       - name: Run retry policy unit tests
         if: steps.plan.outputs.retry_safety == 'true'
+        env:
+          GEMINI_ENRICHMENT_STATE_TABLE_NAME: scouts-enrichment-state-test
         run: node --test lambdas/shared-layer/nodejs/enrichment-state.test.mjs
 
       - name: Run retry state integration tests
