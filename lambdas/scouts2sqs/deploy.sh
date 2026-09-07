@@ -37,6 +37,7 @@ S3_PREFIX="${S3_PREFIX:-lambdas/scouts2sqs}"
 NPM_CACHE_DIR="${NPM_CACHE_DIR:-${HOME}/.npm}"
 
 FUNCTION_NAME="${FUNCTION_NAME:-scouts2sqs}"
+SQS2SCOUTS_FUNCTION_NAME="${SQS2SCOUTS_FUNCTION_NAME:-sqs2scouts}"
 LAYER_NAME="${LAYER_NAME:-scouts-shared}"
 ROLE_NAME="${ROLE_NAME:-scouts2sqs-lambda-role}"
 RUNTIME="${RUNTIME:-nodejs24.x}"
@@ -158,6 +159,28 @@ fi
 if [ -z "${FULL_ENRICH_STATE_MACHINE_ARN}" ]; then
   echo -e "${RED}FULL_ENRICH_STATE_MACHINE_ARN could not be discovered. Deploy scouts-full-enrich before scouts2sqs.${NC}"
   exit 1
+fi
+
+# The ingress adapter must not begin creating fullEnrich executions until the
+# downstream callback-compatible worker is active. CI may schedule these jobs
+# concurrently, so wait for sqs2scouts to expose the production adapter first.
+if [ "${HANDLER}" = "full-enrich-adapter.lambdaHandler" ]; then
+  WORKER_HANDLER=''
+  for _ in $(seq 1 60); do
+    WORKER_HANDLER="$(aws lambda get-function-configuration \
+      --function-name "${SQS2SCOUTS_FUNCTION_NAME}" \
+      --region "${REGION}" \
+      --query 'Handler' \
+      --output text 2>/dev/null || true)"
+    if [ "${WORKER_HANDLER}" = "full-enrich-adapter.lambdaHandler" ]; then
+      break
+    fi
+    sleep 5
+  done
+  if [ "${WORKER_HANDLER}" != "full-enrich-adapter.lambdaHandler" ]; then
+    echo -e "${RED}${SQS2SCOUTS_FUNCTION_NAME} is not running full-enrich-adapter.lambdaHandler. Deploy sqs2scouts before enabling the full-enrich ingress adapter.${NC}"
+    exit 1
+  fi
 fi
 
 case "${IMAGE_GENERATION_PROVIDER}" in
