@@ -233,7 +233,11 @@ async function readUsage(scope, now = new Date()) {
 }
 
 async function imageApplicationCapOpen(now = new Date()) {
-  if (IMAGE_DAILY_REQUEST_LIMIT <= 0) return { open: true, reason: 'application_cap_disabled' };
+  // A configured limit of zero intentionally means zero external image calls.
+  // This is fail-closed billing safety, not an "unlimited/disabled cap" mode.
+  if (IMAGE_DAILY_REQUEST_LIMIT <= 0) {
+    return { open: true, reason: 'application_daily_cap', blockedUntil: nextProviderReset(now) };
+  }
   const usage = await readUsage('image-requests', now);
   return usage.requestCount >= IMAGE_DAILY_REQUEST_LIMIT
     ? { open: true, reason: 'application_daily_cap', blockedUntil: nextProviderReset(now) }
