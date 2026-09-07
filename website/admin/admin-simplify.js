@@ -59,10 +59,12 @@
 
     function normalizeStatusClasses(root) {
         root.querySelectorAll('.badge-queued-stalled, .runtime-queued-stalled').forEach((el) => {
+            if (isDiagnosticsNode(el)) return;
             el.classList.remove('badge-queued-stalled', 'runtime-queued-stalled');
             el.classList.add('badge-queued');
         });
         root.querySelectorAll('.badge-processing-stall, .runtime-processing-stall').forEach((el) => {
+            if (isDiagnosticsNode(el)) return;
             el.classList.remove('badge-processing-stall', 'runtime-processing-stall');
             el.classList.add('badge-processing');
         });
@@ -71,6 +73,7 @@
     function sanitizeRenderedStatuses(root = document) {
         normalizeStatusClasses(root);
         root.querySelectorAll('.request-card-badge, .event-badge, .status-text, .refresh-status').forEach((el) => {
+            if (isDiagnosticsNode(el)) return;
             const sanitized = sanitizeStatusText(el.textContent);
             if (sanitized && sanitized !== el.textContent.trim()) el.textContent = sanitized;
         });
@@ -555,6 +558,7 @@
 
     function hideImplementationLanguage() {
         document.querySelectorAll('[title]').forEach((el) => {
+            if (isDiagnosticsNode(el)) return;
             if (/queue publish count|max queue/i.test(el.title)) {
                 el.title = 'Runs agenda refresh and optionally starts AI enrichment for the selected number of events.';
             }
