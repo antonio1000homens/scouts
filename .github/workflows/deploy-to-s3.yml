@@ -718,9 +718,9 @@ jobs:
           CODE_BUCKET: ${{ env.CODE_BUCKET }}
           CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
           EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
-          SCOUTS_REQUEST_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883:scoutsRequests
+          SCOUTS_REQUEST_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
           SCOUTS_REQUEST_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
-          NFC_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883:scoutsRequests
+          NFC_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
           NFC_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
           TARGET_BUCKET: scouts-2ndtolworth-prod-553490163883
           SCOUTS_CONFIG_KEY: scouts.conf
