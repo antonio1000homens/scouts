@@ -60,10 +60,10 @@ test('CloudFormation provisions retry state, safe parameters, least-required Dyn
 
 test('image provider call is owned by atomic stage reservation before any provider budget or external call', () => {
   const imageFlow = sliceFunction(workerSource, 'async function processImageProvider', 'async function resultAfterLegacy');
-  const reserve = imageFlow.indexOf('await reserveEnrichmentAttempt');
-  const budget = imageFlow.indexOf("provider === 'gemini'\n    ? await reserveGeminiImageBudgets()");
-  const cloudflareCall = imageFlow.indexOf('await callCloudflare(prompt)');
-  const geminiCall = imageFlow.indexOf('await callGemini(prompt)');
+  const reserve = imageFlow.search(/await\s+reserveEnrichmentAttempt\s*\(/);
+  const budget = imageFlow.search(/await\s+(?:reserveGeminiImageBudgets|reserveImageBudget)\s*\(/);
+  const cloudflareCall = imageFlow.search(/await\s+callCloudflare\s*\(\s*prompt\s*\)/);
+  const geminiCall = imageFlow.search(/await\s+callGemini\s*\(\s*prompt\s*\)/);
   assert.ok(reserve >= 0 && budget > reserve, 'stage reservation must precede budget reservation');
   assert.ok(cloudflareCall > budget, 'Cloudflare call must occur after reservation and budget');
   assert.ok(geminiCall > budget, 'Gemini call must occur after reservation and budget');
