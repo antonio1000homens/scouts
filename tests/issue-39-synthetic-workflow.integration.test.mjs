@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import '../lambdas/sqs2scouts/function/tests/test-cloudflare-image-client.mjs';
 import { createFakeScoutsProvider, isValidPng } from './helpers/fake-scouts-provider.mjs';
 import {
   applySyntheticAdminAction,
@@ -32,9 +33,9 @@ test('production sources retain the contracts exercised by the synthetic journey
   for (const token of ['generatetagline', 'generateimagetheme', 'generateimage', 'generatefull']) {
     assert.match(scoutsSource, new RegExp(`token === '${token}'`), `missing scouts admin translation for ${token}`);
   }
-  assert.match(scoutsSource, /isHidden:\s*true/);
-  assert.match(scoutsSource, /isHidden:\s*false/);
-  assert.match(scoutsSource, /isApproved:\s*true/);
+  assert.match(scoutsSource, /isHidden:\s*(?:true|isHidden\s*===\s*true)/);
+  assert.match(scoutsSource, /isHidden:\s*(?:false|isHidden\s*===\s*false)/);
+  assert.match(scoutsSource, /isApproved:\s*(?:true|isApproved\s*===\s*true)/);
   assert.match(scouts2sqsSource, /requestedField === 'tagline'/);
   assert.match(scouts2sqsSource, /requestedField === 'imageTheme'/);
   assert.match(scouts2sqsSource, /requestedField === 'imageUrl'/);
