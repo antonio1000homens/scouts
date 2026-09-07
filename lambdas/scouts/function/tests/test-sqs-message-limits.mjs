@@ -10,6 +10,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
+
+const scoutsSource = readFileSync(new URL('../scouts.mjs', import.meta.url), 'utf8');
 
 test('SQS message limit logic', async (t) => {
   await t.test('maxScoutRequests should be 1 when triggered by SQS', () => {
@@ -113,6 +116,14 @@ test('Hex file retry skip logic', async (t) => {
     
     assert.strictEqual(shouldSkip, true, 'Runs 21 or more should be skipped');
   });
+});
+
+test('Agenda enrichment declares the threshold retry collection before use', () => {
+  assert.match(
+    scoutsSource,
+    /const eventsAtThreshold = \[\];[\s\S]*eventsAtThreshold\.push\(/,
+    'enrichEventsWithAI must initialize eventsAtThreshold before collecting retries',
+  );
 });
 
 console.log('✅ SQS message limit and retry skip tests complete!');
