@@ -50,6 +50,7 @@
                 <article class="docs-card">
                     <h3>Providers</h3>
                     <p>Gemini handles text enrichment. Image generation is explicitly selected as Cloudflare or Gemini, with no automatic provider fallback.</p>
+                    <p><a href="/website/docs/cloudflare-image-generation.html">Cloudflare image-generation operations →</a></p>
                 </article>
             </section>
 
@@ -152,11 +153,14 @@ sequenceDiagram
 
             <section class="docs-section">
                 <h2>Provider selection</h2>
-                <pre class="docs-code">IMAGE_GENERATION_PROVIDER=cloudflare | gemini | disabled
+                <pre class="docs-code">GEMINI=true
+GEMINI_IMAGES=false
+IMAGE_GENERATION_PROVIDER=cloudflare | gemini | disabled
 IMAGE_GENERATION_DAILY_REQUEST_LIMIT=10
 CLOUDFLARE_AI_MODEL=@cf/black-forest-labs/flux-1-schnell
 CLOUDFLARE_AI_STEPS=4</pre>
-                <p>When Cloudflare is selected, a Cloudflare failure does not automatically fall back to Gemini. This prevents an unexpected provider failure from turning into paid Gemini image usage.</p>
+                <p><code>disabled</code> is the safe default. When Cloudflare is selected, a Cloudflare failure does not automatically fall back to Gemini. This prevents an unexpected provider failure from turning into paid Gemini image usage.</p>
+                <p>The Cloudflare token is read from an SSM SecureString parameter; only the parameter path is provided to Lambda. The dedicated <a href="/website/docs/cloudflare-image-generation.html">Cloudflare operations guide</a> covers least-privilege token setup, Free-vs-Paid billing safety, the application daily cap, provider-quota circuit, rollout validation and explicit rollback.</p>
             </section>
 
             <section class="docs-section">
@@ -168,7 +172,7 @@ CLOUDFLARE_AI_STEPS=4</pre>
                         <tr><td>Execution waits on a stage</td><td><code>scoutsRequests</code>, then <code>scoutsProcessing</code>, then the <code>sqs2scouts</code> callback logs.</td></tr>
                         <tr><td>Repeated event is skipped</td><td>DynamoDB state for the relevant <code>HEX + stage</code>: <code>in_progress</code>, <code>retry_wait</code>, <code>succeeded</code>, or <code>manual_review</code>.</td></tr>
                         <tr><td>Provider succeeded but event is incomplete</td><td>Look for <code>persist_pending</code>; the cached result should be reused without another provider request.</td></tr>
-                        <tr><td>Image generation stopped for the day</td><td>Usage counters, provider quota state, and <code>nextRetryAt</code>.</td></tr>
+                        <tr><td>Image generation stopped for the day</td><td>Usage counters, provider quota state, <code>Scouts/ImageGeneration</code> alarms and <code>nextRetryAt</code>.</td></tr>
                     </tbody>
                 </table>
             </section>
@@ -178,7 +182,8 @@ CLOUDFLARE_AI_STEPS=4</pre>
                 <ul>
                     <li><code>lambdas/cloudformation/templates/scouts-full-enrich.yaml</code> — Step Functions definition.</li>
                     <li><code>lambdas/scouts2sqs/function/full-enrich-adapter.mjs</code> — ingress/start and callback-stage translation.</li>
-                    <li><code>lambdas/sqs2scouts/function/full-enrich-adapter.mjs</code> — worker/provider/callback handling.</li>
+                    <li><code>lambdas/sqs2scouts/function/full-enrich-adapter.mjs</code> — stable worker entrypoint.</li>
+                    <li><code>lambdas/sqs2scouts/function/image-provider-adapter.mjs</code> — Cloudflare provider safety and durable image reuse.</li>
                     <li><code>lambdas/shared-layer/nodejs/enrichment-state.mjs</code> — retry/idempotency state machine.</li>
                     <li><code>.github/workflows/deploy-to-s3.yml</code> — change detection and deployment ordering.</li>
                 </ul>
