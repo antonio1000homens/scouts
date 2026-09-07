@@ -204,6 +204,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - states:DescribeExecution
+                  - states:GetExecutionHistory
                 Resource: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:*:*
 
   ScoutsFunction:
