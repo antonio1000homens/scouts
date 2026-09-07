@@ -73,7 +73,7 @@ Resources:
                   }
                 },
                 "TimeoutSeconds": ${StageTimeoutSeconds},
-                "ResultPath": "$.stageResults.tagline",
+                "ResultPath": "$.taglineResult",
                 "Next": "GenerateImageTheme"
               },
               "GenerateImageTheme": {
@@ -99,7 +99,7 @@ Resources:
                   }
                 },
                 "TimeoutSeconds": ${StageTimeoutSeconds},
-                "ResultPath": "$.stageResults.imageTheme",
+                "ResultPath": "$.imageThemeResult",
                 "Next": "GenerateImage"
               },
               "GenerateImage": {
@@ -125,7 +125,7 @@ Resources:
                   }
                 },
                 "TimeoutSeconds": ${StageTimeoutSeconds},
-                "ResultPath": "$.stageResults.image",
+                "ResultPath": "$.imageResult",
                 "Next": "Complete"
               },
               "Complete": {
