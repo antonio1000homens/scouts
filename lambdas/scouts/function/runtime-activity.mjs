@@ -1,7 +1,7 @@
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { GetQueueAttributesCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { DescribeExecutionCommand, ListExecutionsCommand, SFNClient } from '@aws-sdk/client-sfn';
-import { buildCanonicalActivity } from './runtime-activity-model.mjs';
+import { buildCanonicalActivity } from '/opt/nodejs/runtime-activity-model.mjs';
 
 const REGION = process.env.AWS_REGION || 'eu-west-2';
 const TARGET_BUCKET = process.env.TARGET_BUCKET || 'scouts-2ndtolworth-prod-553490163883';
@@ -160,12 +160,14 @@ export async function buildRuntimeActivity(now = new Date()) {
   ]);
 
   const executions = [...imageExecutions, ...fullExecutions];
+  const queueHealthMap = Object.fromEntries(queueHealthEntries.map((entry) => [entry.name, entry]));
   const requests = buildCanonicalActivity({
     queuedSnapshot,
     processingSnapshot,
     completedSnapshot,
     durableHistories,
     executions,
+    queueHealth: queueHealthMap,
     now,
   });
   const summaries = {
@@ -179,15 +181,16 @@ export async function buildRuntimeActivity(now = new Date()) {
     result[request.state] = (result[request.state] || 0) + 1;
     return result;
   }, {});
+  const hasActiveRequests = requests.some((request) => request.state !== 'completed' && request.state !== 'needs_attention');
 
   return {
     generatedAt: now.toISOString(),
     lastSuccessfulUpdate: now.toISOString(),
     sourceUpdatedAt: newestSourceMs ? new Date(newestSourceMs).toISOString() : null,
-    stale: newestSourceMs > 0 ? (now.getTime() - newestSourceMs) > SOURCE_STALE_AFTER_MS : true,
+    stale: hasActiveRequests && newestSourceMs > 0 ? (now.getTime() - newestSourceMs) > SOURCE_STALE_AFTER_MS : false,
     counts,
     requests,
-    queueHealth: Object.fromEntries(queueHealthEntries.map((entry) => [entry.name, entry])),
+    queueHealth: queueHealthMap,
     stepFunctions: {
       imageEnrich: {
         configured: Boolean(IMAGE_ENRICH_STATE_MACHINE_ARN),
