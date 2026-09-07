@@ -252,8 +252,37 @@ async function providerQuotaCircuitOpen(now = new Date()) {
     : { open: false };
 }
 
+async function signalApplicationCapReached(now = new Date()) {
+  if (!USAGE_TABLE_NAME) return false;
+  let firstSignal = false;
+  try {
+    await dynamo.send(new UpdateItemCommand({
+      TableName: USAGE_TABLE_NAME,
+      Key: { usageDay: { S: usageDay(now) }, usageScope: { S: 'image-cap-alert' } },
+      UpdateExpression: 'SET #signalledAt = :signalledAt, #expiresAt = :expiresAt',
+      ConditionExpression: 'attribute_not_exists(#signalledAt)',
+      ExpressionAttributeNames: { '#signalledAt': 'signalledAt', '#expiresAt': 'expiresAt' },
+      ExpressionAttributeValues: {
+        ':signalledAt': { S: now.toISOString() },
+        ':expiresAt': { N: String(ttlEpoch(now)) },
+      },
+    }));
+    firstSignal = true;
+  } catch (error) {
+    if (error?.name !== 'ConditionalCheckFailedException') throw error;
+  }
+  if (firstSignal) {
+    emitImageMetric('QuotaRejected', 'cloudflare', 'quota_rejected');
+    await sendSlackText(`⚠️ Scouts image-generation daily cap reached\n\nAutomatic external image generation is paused until ${nextProviderReset(now)}.\nCached-result reuse and persistence-only retries remain allowed.`).catch(() => {});
+  }
+  return firstSignal;
+}
+
 async function reserveImageBudget(now = new Date()) {
-  if (!USAGE_TABLE_NAME || IMAGE_DAILY_REQUEST_LIMIT <= 0) return false;
+  if (!USAGE_TABLE_NAME || IMAGE_DAILY_REQUEST_LIMIT <= 0) {
+    await signalApplicationCapReached(now).catch(() => {});
+    return false;
+  }
   try {
     await dynamo.send(new UpdateItemCommand({
       TableName: USAGE_TABLE_NAME,
@@ -271,7 +300,7 @@ async function reserveImageBudget(now = new Date()) {
     return true;
   } catch (error) {
     if (error?.name === 'ConditionalCheckFailedException') {
-      emitImageMetric('QuotaRejected', 'cloudflare', 'quota_rejected');
+      await signalApplicationCapReached(now).catch(() => {});
       return false;
     }
     console.error('[ImageGeneration] Daily quota counter unavailable; blocking Cloudflare request', error?.message || error);
@@ -440,6 +469,7 @@ async function processCloudflareImage(message) {
   }
 
   if (appCap.open) {
+    await signalApplicationCapReached(now).catch(() => {});
     const state = await markImageDeferral({
       hex,
       attemptCount: currentState?.attemptCount || 0,
