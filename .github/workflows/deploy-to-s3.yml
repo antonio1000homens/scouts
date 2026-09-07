@@ -22,6 +22,7 @@ on:
           - scouts-function
           - scouts-slack-handler
           - scouts-image-enrich
+          - scouts-full-enrich
           - scouts2sqs
           - sqs2scouts
       deploy_all:
@@ -53,6 +54,7 @@ jobs:
       scouts_function: "${{ steps.changes.outputs['scouts-function'] }}"
       scouts_slack_handler: "${{ steps.changes.outputs['scouts-slack-handler'] }}"
       scouts_image_enrich: "${{ steps.changes.outputs['scouts-image-enrich'] }}"
+      scouts_full_enrich: "${{ steps.changes.outputs['scouts-full-enrich'] }}"
       scouts2sqs: "${{ steps.changes.outputs.scouts2sqs }}"
       sqs2scouts: "${{ steps.changes.outputs.sqs2scouts }}"
     steps:
@@ -101,6 +103,7 @@ jobs:
           scouts_function='false'
           scouts_slack_handler='false'
           scouts_image_enrich='false'
+          scouts_full_enrich='false'
           scouts2sqs='false'
           sqs2scouts='false'
 
@@ -111,6 +114,7 @@ jobs:
           scouts_function_files=''
           scouts_slack_handler_files=''
           scouts_image_enrich_files=''
+          scouts_full_enrich_files=''
           scouts2sqs_files=''
           sqs2scouts_files=''
 
@@ -190,6 +194,12 @@ jobs:
             esac
 
             case "${file}" in
+              lambdas/scouts-full-enrich/*|lambdas/cloudformation/templates/scouts-full-enrich.yaml)
+                mark_changed 'scouts-full-enrich' "${file}"
+                ;;
+            esac
+
+            case "${file}" in
               lambdas/scouts2sqs/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/scouts2sqs.yaml)
                 mark_changed 'scouts2sqs' "${file}"
                 ;;
@@ -218,6 +228,8 @@ jobs:
             echo "scouts-slack-handler_files=${scouts_slack_handler_files}"
             echo "scouts-image-enrich=${scouts_image_enrich}"
             echo "scouts-image-enrich_files=${scouts_image_enrich_files}"
+            echo "scouts-full-enrich=${scouts_full_enrich}"
+            echo "scouts-full-enrich_files=${scouts_full_enrich_files}"
             echo "scouts2sqs=${scouts2sqs}"
             echo "scouts2sqs_files=${scouts2sqs_files}"
             echo "sqs2scouts=${sqs2scouts}"
@@ -232,6 +244,7 @@ jobs:
           echo "scouts-function=${{ steps.changes.outputs['scouts-function'] }} files=${{ steps.changes.outputs['scouts-function_files'] }}"
           echo "scouts-slack-handler=${{ steps.changes.outputs['scouts-slack-handler'] }} files=${{ steps.changes.outputs['scouts-slack-handler_files'] }}"
           echo "scouts-image-enrich=${{ steps.changes.outputs['scouts-image-enrich'] }} files=${{ steps.changes.outputs['scouts-image-enrich_files'] }}"
+          echo "scouts-full-enrich=${{ steps.changes.outputs['scouts-full-enrich'] }} files=${{ steps.changes.outputs['scouts-full-enrich_files'] }}"
           echo "scouts2sqs=${{ steps.changes.outputs.scouts2sqs }} files=${{ steps.changes.outputs.scouts2sqs_files }}"
           echo "sqs2scouts=${{ steps.changes.outputs.sqs2scouts }} files=${{ steps.changes.outputs.sqs2scouts_files }}"
 
@@ -261,6 +274,33 @@ jobs:
           CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
           EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
         run: cd lambdas/scouts-image-enrich && bash ./deploy.sh
+
+  deploy-scouts-full-enrich:
+    needs: detect-changes
+    if: |
+      (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.scouts_full_enrich == 'true') ||
+      (github.event_name == 'workflow_dispatch' && (
+        github.event.inputs.deploy_all == 'true' ||
+        github.event.inputs.deploy_target == 'all' ||
+        github.event.inputs.deploy_target == 'scouts-full-enrich' ||
+        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.scouts_full_enrich == 'true')
+      ))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: scouts-full-enrich-stack-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: github-actions-scouts-deploy
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Deploy scouts full-enrich state machine POC
+        env:
+          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
+          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
+        run: cd lambdas/scouts-full-enrich && bash ./deploy.sh
 
   deploy-cloudflare:
     needs: detect-changes
