@@ -95,9 +95,6 @@ Parameters:
   Scouts2SqsFunctionUrl:
     Type: String
     Default: ''
-  ImageEnrichStateMachineArn:
-    Type: String
-    Default: ''
   FullEnrichStateMachineArn:
     Type: String
     Default: ''
@@ -115,7 +112,6 @@ Parameters:
 Conditions:
   ShouldCreateDataBucket: !Equals [!Ref CreateDataBucket, 'true']
   IsPublicFunctionUrl: !Equals [!Ref FunctionUrlAuthType, 'NONE']
-  HasImageEnrichStateMachineArn: !Not [!Equals [!Ref ImageEnrichStateMachineArn, '']]
   HasFullEnrichStateMachineArn: !Not [!Equals [!Ref FullEnrichStateMachineArn, '']]
 
 Resources:
@@ -188,13 +184,6 @@ Resources:
                   - ssm:GetParameter
                 Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/shared/required-api-key
               - !If
-                - HasImageEnrichStateMachineArn
-                - Effect: Allow
-                  Action:
-                    - states:ListExecutions
-                  Resource: !Ref ImageEnrichStateMachineArn
-                - !Ref AWS::NoValue
-              - !If
                 - HasFullEnrichStateMachineArn
                 - Effect: Allow
                   Action:
@@ -202,36 +191,14 @@ Resources:
                   Resource: !Ref FullEnrichStateMachineArn
                 - !Ref AWS::NoValue
               - !If
-                - HasImageEnrichStateMachineArn
-                - Effect: Allow
-                  Action:
-                    - states:DescribeExecution
-                    - states:GetExecutionHistory
-                  Resource:
-                    - !Sub
-                      - arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${StateMachineName}:*
-                      - StateMachineName:
-                          Fn::Select:
-                            - 6
-                            - Fn::Split:
-                                - ':'
-                                - !Ref ImageEnrichStateMachineArn
-                - !Ref AWS::NoValue
-              - !If
                 - HasFullEnrichStateMachineArn
                 - Effect: Allow
                   Action:
                     - states:DescribeExecution
                     - states:GetExecutionHistory
-                  Resource:
-                    - !Sub
-                      - arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${StateMachineName}:*
-                      - StateMachineName:
-                          Fn::Select:
-                            - 6
-                            - Fn::Split:
-                                - ':'
-                                - !Ref FullEnrichStateMachineArn
+                  Resource: !Sub
+                    - arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:${FullEnrichStateMachineName}:*
+                    - FullEnrichStateMachineName: !Select [6, !Split [':', !Ref FullEnrichStateMachineArn]]
                 - !Ref AWS::NoValue
 
   ScoutsFunction:
@@ -257,7 +224,6 @@ Resources:
           TARGET_BUCKET: !Ref DataBucketName
           SCOUTS_REQUESTS_QUEUE_URL: !Ref ScoutsRequestsQueueUrl
           SCOUTS2SQS_FUNCTION_URL: !Ref Scouts2SqsFunctionUrl
-          IMAGE_ENRICH_STATE_MACHINE_ARN: !Ref ImageEnrichStateMachineArn
           FULL_ENRICH_STATE_MACHINE_ARN: !Ref FullEnrichStateMachineArn
           GEMINI_DAILY_REQUEST_LIMIT: !Ref GeminiDailyRequestLimit
           GEMINI_USAGE_TABLE_NAME: !Ref GeminiUsageTableName
