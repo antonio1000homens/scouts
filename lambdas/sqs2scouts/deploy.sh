@@ -193,6 +193,7 @@ case "${IMAGE_GENERATION_PROVIDER}" in
 esac
 
 if [ "${IMAGE_GENERATION_PROVIDER}" = "cloudflare" ]; then
+  GEMINI_IMAGES_ENABLED='false'
   if [ -z "${CLOUDFLARE_ACCOUNT_ID}" ]; then
     echo -e "${RED}CLOUDFLARE_ACCOUNT_ID is required when IMAGE_GENERATION_PROVIDER=cloudflare.${NC}"
     exit 1
@@ -222,7 +223,7 @@ echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
 (
   cd function
   rm -f sqs2scouts-lambda.zip
-  zip -jq sqs2scouts-lambda.zip sqs2scouts.mjs full-enrich-adapter.mjs full-enrich-helpers.mjs ../scouts.conf
+  zip -jq sqs2scouts-lambda.zip sqs2scouts.mjs full-enrich-adapter.mjs full-enrich-core.mjs full-enrich-helpers.mjs image-provider-adapter.mjs cloudflare-image-client.mjs ../scouts.conf
 )
 
 echo -e "\n${YELLOW}Step 3: Upload artifacts to S3...${NC}"
@@ -282,6 +283,7 @@ CFN_DEPLOY_ARGS+=(
     GeminiRetryDelayAttempt3Seconds="${GEMINI_RETRY_DELAY_ATTEMPT_3_SECONDS}"
     GeminiInProgressLeaseSeconds="${GEMINI_IN_PROGRESS_LEASE_SECONDS}"
     GeminiPromptVersion="${GEMINI_PROMPT_VERSION}"
+    ImageGenerationProvider="${IMAGE_GENERATION_PROVIDER}"
     ImageGenerationDailyRequestLimit="${IMAGE_GENERATION_DAILY_REQUEST_LIMIT}"
     CloudflareAccountId="${CLOUDFLARE_ACCOUNT_ID}"
     CloudflareAiApiTokenParameter="${CLOUDFLARE_AI_API_TOKEN_PARAMETER}"

@@ -34,6 +34,8 @@ This website has been completely redesigned to match the official Scouts UK bran
 
 ### Documentation
 - `website/docs/index.html` - Live technical architecture documentation
+- `CLOUDFLARE-IMAGE-GENERATION.md` - Cloudflare Workers AI rollout, billing safety, quota handling and rollback
+- `GEMINI-ENRICHMENT-RETRY.md` - Enrichment retry/idempotency safety
 - `DESIGN_IMPROVEMENTS.md` - Design overhaul details
 - `BUTTONS_AND_IMAGES.md` - Buttons and images guide
 
@@ -81,6 +83,17 @@ The workflow resumes from the first missing field, so partially enriched events 
 - Retryable failures use the bounded retry/cooldown policy: 1 hour, then 6 hours, then `manual_review` after the third failed attempt.
 - Provider/global quota deferrals do not consume a per-event attempt.
 - Cloudflare failures never automatically fall back to Gemini.
+
+Target image-provider configuration is deliberately explicit:
+
+```text
+GEMINI=true
+GEMINI_IMAGES=false
+IMAGE_GENERATION_PROVIDER=cloudflare
+IMAGE_GENERATION_DAILY_REQUEST_LIMIT=10
+```
+
+`IMAGE_GENERATION_PROVIDER=disabled` is the fail-closed default. See `CLOUDFLARE-IMAGE-GENERATION.md` for SSM token setup, Free-vs-Paid billing assumptions, Cloudflare `3036` quota handling, safe rollout and explicit Gemini rollback.
 
 The live website documentation at `/website/docs/index.html` contains a more detailed sequence diagram, provider hand-off explanation, and troubleshooting table.
 

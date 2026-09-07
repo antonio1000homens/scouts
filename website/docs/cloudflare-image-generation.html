@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <title>Cloudflare Image Generation - Scouts Technical Docs</title>
+    <link rel="icon" href="/website/images/scouts-logo-white-png.png">
+    <link rel="stylesheet" href="/website/fonts/fonts.css">
+    <link rel="stylesheet" href="/website/styles.css?v=20260308-1">
+    <style>
+        .docs-shell { max-width: 1040px; margin: 0 auto; padding: 2rem 1rem 4rem; }
+        .docs-section { margin: 2.25rem 0; }
+        .docs-note { border-left: 4px solid #ffb81c; padding: .9rem 1rem; background: #fff8e8; margin: 1rem 0; }
+        .docs-warning { border-left: 4px solid #d7263d; padding: .9rem 1rem; background: #fff0f2; margin: 1rem 0; }
+        .docs-code { background: #17202a; color: #f4f6f7; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+        .docs-table { width: 100%; border-collapse: collapse; background: #fff; }
+        .docs-table th, .docs-table td { border: 1px solid #ddd; padding: .75rem; text-align: left; vertical-align: top; }
+        .docs-table th { background: #f4f4f4; }
+        .diagram { background: #fff; border-radius: 12px; padding: 1rem; overflow-x: auto; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+    </style>
+</head>
+<body>
+    <div id="header-placeholder"></div>
+    <main>
+        <div class="docs-shell">
+            <p><a href="/website/docs/">← Technical docs</a></p>
+            <h1>Cloudflare Workers AI image generation</h1>
+            <p>Gemini remains the text provider for <code>tagline</code> and <code>imageTheme</code>. The image stage can use Cloudflare Workers AI FLUX.1 Schnell with explicit billing-safety controls and no automatic Gemini image fallback.</p>
+
+            <section class="docs-section">
+                <h2>Target configuration</h2>
+                <pre class="docs-code">GEMINI=true
+GEMINI_IMAGES=false
+IMAGE_GENERATION_PROVIDER=cloudflare
+IMAGE_GENERATION_DAILY_REQUEST_LIMIT=10
+CLOUDFLARE_AI_MODEL=@cf/black-forest-labs/flux-1-schnell
+CLOUDFLARE_AI_STEPS=4</pre>
+                <p><code>IMAGE_GENERATION_PROVIDER=disabled</code> is the fail-closed default and makes no external image-generation call.</p>
+            </section>
+
+            <section class="docs-section">
+                <h2>Request path</h2>
+                <div class="diagram"><pre class="mermaid">
+flowchart LR
+    SF[Step Functions image callback] --> Q1[(scoutsRequests)]
+    Q1 --> S2S[scouts2sqs]
+    S2S --> Q2[(scoutsProcessing)]
+    Q2 --> W[sqs2scouts]
+    W --> D[(DynamoDB retry/idempotency)]
+    W --> U[(DynamoDB image usage/circuit)]
+    W --> CF[Cloudflare Workers AI REST]
+    CF --> W
+    W --> D
+    W --> S3[(S3 image + event JSON)]
+    W --> SF
+                </pre></div>
+                <p>The worker wins the <code>HEX + image</code> conditional reservation before it consumes application image budget or calls Cloudflare. Duplicate SQS deliveries therefore do not consume another inference.</p>
+            </section>
+
+            <section class="docs-section">
+                <h2>Credentials</h2>
+                <pre class="docs-code">CLOUDFLARE_ACCOUNT_ID=&lt;account-id&gt;
+CLOUDFLARE_AI_API_TOKEN_PARAMETER=/scouts/sqs2scouts/cloudflare-ai-api-token</pre>
+                <p>The token is stored as an SSM Parameter Store <code>SecureString</code>. Only the parameter path is exposed to Lambda/CloudFormation.</p>
+                <div class="docs-note">Use a least-privilege Cloudflare API token that can invoke Workers AI for the configured account. Do not use a Cloudflare Global API Key.</div>
+            </section>
+
+            <section class="docs-section">
+                <h2>Free-plan and billing safety</h2>
+                <div class="docs-warning"><strong>Do not enable automatic Gemini image fallback.</strong> It would turn a Cloudflare failure into potentially billable Gemini image usage and defeat the purpose of this migration.</div>
+                <p>The design assumes the Cloudflare account remains on Workers Free. If the account is upgraded to Workers Paid, usage above the included allocation can become billable, so the application keeps an independent daily image request cap.</p>
+                <p>The default cap is <code>10</code> external image inference attempts per UTC day. Cached-result reuse, persistence-only retries and duplicate SQS deliveries do not consume the cap.</p>
+            </section>
+
+            <section class="docs-section">
+                <h2>Durable retry reuse</h2>
+                <p>After Cloudflare returns an image, the worker normalises it with Sharp and caches the bounded JPEG in the enrichment-state record before final S3/event persistence.</p>
+                <pre class="docs-code">Cloudflare succeeds
+→ cache generated JPEG + generationId
+→ write image/event to S3
+
+If S3 fails:
+next delivery → reuse cached JPEG → retry persistence only → no Cloudflare call</pre>
+            </section>
+
+            <section class="docs-section">
+                <h2>Cloudflare error handling</h2>
+                <table class="docs-table">
+                    <thead><tr><th>Response</th><th>Handling</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>429 / 3036</code></td><td>Provider/day quota circuit. Block until shortly after the next UTC reset; do not consume an event attempt; emit one operational alert.</td></tr>
+                        <tr><td><code>429 / 3040</code></td><td>Transient capacity/rate limit; use bounded #16 retry/cooldown.</td></tr>
+                        <tr><td><code>408</code>, timeout/reset</td><td>Retryable with bounded cooldown.</td></tr>
+                        <tr><td><code>500/502/503/504</code></td><td>Retryable with bounded cooldown.</td></tr>
+                        <tr><td><code>400</code></td><td>Deterministic invalid request; fail closed/manual review.</td></tr>
+                        <tr><td><code>401/403</code></td><td>Authentication/permission fault; fail closed.</td></tr>
+                        <tr><td><code>403 / 5035</code></td><td>Paid-plan/model configuration fault; fail closed, never fall back to Gemini.</td></tr>
+                        <tr><td><code>5007 / 3042</code></td><td>Invalid/nonexistent model; fail closed.</td></tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section class="docs-section">
+                <h2>Safe rollout</h2>
+                <ol>
+                    <li>Deploy with <code>IMAGE_GENERATION_PROVIDER=disabled</code>.</li>
+                    <li>Confirm existing Gemini text enrichment still works.</li>
+                    <li>Configure the least-privilege Workers AI token in SSM.</li>
+                    <li>Set <code>IMAGE_GENERATION_PROVIDER=cloudflare</code> and keep <code>GEMINI_IMAGES=false</code>.</li>
+                    <li>Generate one known image and confirm one Cloudflare inference plus the expected S3 update.</li>
+                    <li>Repeat the same generation and confirm cached reuse with zero additional inference.</li>
+                    <li>Force persistence failure after generation and confirm the cached JPEG is reused.</li>
+                    <li>Verify Gemini Images receives zero calls and Cloudflare usage stays within the intended Free allocation.</li>
+                </ol>
+            </section>
+
+            <section class="docs-section">
+                <h2>Rollback</h2>
+                <p>To stop all image generation:</p>
+                <pre class="docs-code">IMAGE_GENERATION_PROVIDER=disabled
+GEMINI_IMAGES=false</pre>
+                <p>To explicitly restore Gemini image generation for a controlled rollback where paid use is intentionally accepted:</p>
+                <pre class="docs-code">IMAGE_GENERATION_PROVIDER=gemini
+GEMINI_IMAGES=true</pre>
+                <p>Rollback is never automatic.</p>
+            </section>
+        </div>
+    </main>
+    <div id="footer-placeholder" data-footer-type="detailed"></div>
+    <script src="/website/scripts/mobile-menu.js"></script>
+    <script src="/website/scripts/header-loader.js"></script>
+    <script src="/website/scripts/footer-loader.js"></script>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true, theme: 'neutral', securityLevel: 'strict' });
+    </script>
+</body>
+</html>

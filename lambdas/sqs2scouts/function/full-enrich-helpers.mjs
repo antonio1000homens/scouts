@@ -30,27 +30,31 @@ export function nextUtcDay(now = new Date()) {
 export function classifyCloudflareError(error) {
   const status = Number(error?.status ?? error?.statusCode ?? error?.response?.status);
   const code = Number(error?.code ?? error?.providerCode);
+  const rawCode = error?.code ?? error?.providerCode;
   const message = String(error?.message || error || '').toLowerCase();
 
   if (code === 3036 || /daily.*neuron|neuron.*limit|free.*allocation|daily.*allocation/.test(message)) {
     return 'PROVIDER_QUOTA';
   }
-  if (code === 5035 || /paid.*plan|required.*paid|model.*plan/.test(message)) {
+  if ([5035, 5007, 3042].includes(code)
+      || /paid.*plan|required.*paid|model.*plan|no such model|invalid model/.test(message)) {
     return 'MODEL_CONFIGURATION';
   }
   if (code === 3040 || status === 429 || /capacity|rate.?limit|too many requests/.test(message)) {
     return 'RATE_LIMIT';
   }
-  if ([401, 403].includes(status) || /unauthori[sz]|api.?token|permission/.test(message)) {
+  if (status === 408 || [3007, 3008].includes(code)
+      || /timeout|timed out|aborted|socket|network|connection/.test(message)) {
+    return 'NETWORK_TIMEOUT';
+  }
+  if ([401, 403].includes(status) || /unauthori[sz]|api.?token|permission|account.*blocked/.test(message)) {
     return 'AUTH_FAILURE';
   }
   if ([500, 502, 503, 504].includes(status) || /temporar|unavailable|internal server/.test(message)) {
     return 'PROVIDER_5XX';
   }
-  if (/timeout|timed out|socket|network|connection/.test(message)) {
-    return 'NETWORK_TIMEOUT';
-  }
-  if (/invalid|missing|required|unsupported|prompt/.test(message)) {
+  if (status === 400 || rawCode === 'MALFORMED_RESPONSE'
+      || /invalid|missing|required|unsupported|prompt|malformed.*response|image data/.test(message)) {
     return 'INVALID_EVENT_DATA';
   }
   return 'UNKNOWN';

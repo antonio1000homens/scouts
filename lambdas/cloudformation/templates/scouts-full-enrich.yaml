@@ -199,6 +199,11 @@ Resources:
                     "Variable": "$.imageProvider",
                     "StringEquals": "gemini",
                     "Next": "GenerateImageGemini"
+                  },
+                  {
+                    "Variable": "$.imageProvider",
+                    "StringEquals": "disabled",
+                    "Next": "ImageGenerationDisabled"
                   }
                 ],
                 "Default": "InvalidImageProvider"
@@ -295,6 +300,10 @@ Resources:
                 ],
                 "Default": "UnexpectedFailure"
               },
+              "ImageGenerationDisabled": {
+                "Type": "Succeed",
+                "Comment": "Text enrichment may complete while image generation is deliberately disabled; no image provider is called."
+              },
               "Deferred": {
                 "Type": "Succeed",
                 "Comment": "DynamoDB retry/cooldown state remains authoritative; scheduled reconciliation may start a later eligible execution."
@@ -306,7 +315,7 @@ Resources:
               "InvalidImageProvider": {
                 "Type": "Fail",
                 "Error": "InvalidImageProvider",
-                "Cause": "imageProvider must be cloudflare or gemini for an incomplete image stage"
+                "Cause": "imageProvider must be cloudflare, gemini, or disabled"
               },
               "UnexpectedFailure": {
                 "Type": "Fail",
