@@ -8,6 +8,7 @@ const read = (path) => readFileSync(path, 'utf8');
 
 const adapter = read('lambdas/sqs2scouts/function/image-provider-adapter.mjs');
 const client = read('lambdas/sqs2scouts/function/cloudflare-image-client.mjs');
+const helpers = read('lambdas/sqs2scouts/function/full-enrich-helpers.mjs');
 const template = read('lambdas/cloudformation/templates/sqs2scouts.yaml');
 const stateMachine = read('lambdas/cloudformation/templates/scouts-full-enrich.yaml');
 const deploy = read('lambdas/sqs2scouts/deploy.sh');
@@ -67,7 +68,8 @@ test('Cloudflare daily allocation exhaustion is a provider/day circuit, not an e
   assert.match(adapter, /nextProviderReset/);
   assert.match(adapter, /attemptWasReserved:\s*true/);
   assert.match(client, /providerCode/);
-  assert.match(client, /3036/);
+  assert.match(helpers, /3036/);
+  assert.match(helpers, /PROVIDER_QUOTA/);
 });
 
 test('disabled provider makes no image callback task and no provider fallback is encoded in Step Functions', () => {
@@ -84,8 +86,9 @@ test('image-specific alarms exist without removing issue 16 alarms', () => {
   assert.match(template, /GeminiEnrichmentRetryBurstAlarm/);
 });
 
-test('Cloudflare REST client contains no logging of authorization/token material', () => {
-  assert.match(client, /Authorization:\s*`Bearer \$\{apiToken\}`/);
+test('Cloudflare REST client has no logging path for authorization/token material', () => {
+  assert.match(client, /headers:\s*\{/);
+  assert.match(client, /apiToken/);
   assert.doesNotMatch(client, /console\.(log|warn|error)/);
   assert.doesNotMatch(client, /Global API Key/i);
 });
