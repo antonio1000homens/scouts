@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SFNClient, ListExecutionsCommand, StartExecutionCommand } from '@aws-sdk/client-sfn';
+import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import { lambdaHandler as legacyHandler } from './scouts2sqs.mjs';
 
 const AWS_REGION = process.env.AWS_REGION || 'eu-west-2';
@@ -263,6 +264,33 @@ function parseHttpBody(event) {
   try { return typeof event?.body === 'string' ? JSON.parse(event.body || '{}') : (event?.body || {}); } catch { return null; }
 }
 
+function getRequestApiKey(event) {
+  const headers = event?.headers || {};
+  const queryParams = event?.queryStringParameters || {};
+  return text(
+    headers['x-api-key']
+    ?? headers['X-Api-Key']
+    ?? headers['X-API-KEY']
+    ?? headers['x_api_key']
+    ?? queryParams.apiKey
+    ?? queryParams.API_KEY
+    ?? queryParams['x-api-key']
+    ?? null,
+  );
+}
+
+function constantTimeEquals(left, right) {
+  const leftBuffer = Buffer.from(String(left ?? ''));
+  const rightBuffer = Buffer.from(String(right ?? ''));
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+async function isAuthorisedHttpRequest(event) {
+  const requiredApiKey = await getRequiredSecret('REQUIRED_API_KEY_PARAMETER');
+  return constantTimeEquals(getRequestApiKey(event), requiredApiKey);
+}
+
 async function handleMessage(message) {
   if (isFullEnrichStageRequest(message)) {
     await forwardStageRequest(message);
@@ -289,6 +317,7 @@ export async function lambdaHandler(event) {
         if (!handled.intercepted) delegatedRecords.push(record);
       } catch (error) {
         // Never fall back to the legacy image state machine after a full-enrich start failure.
+        // Rethrow so the SQS event source retries/redrives the intercepted message.
         console.error('[FullEnrich] Intercepted request failed', {
           error: error?.message || String(error),
           action: message?.action || null,
@@ -302,8 +331,15 @@ export async function lambdaHandler(event) {
   }
 
   const body = parseHttpBody(event);
-  if (body) {
+  if (body && (isFullEnrichStageRequest(body) || isFullEnrichStartRequest(body))) {
     try {
+      if (!await isAuthorisedHttpRequest(event)) {
+        return {
+          statusCode: 403,
+          headers: { 'Access-Control-Allow-Origin': '*' },
+          body: JSON.stringify({ error: 'Forbidden: Invalid API Key' }),
+        };
+      }
       const handled = await handleMessage(body);
       if (handled.intercepted) {
         return {
