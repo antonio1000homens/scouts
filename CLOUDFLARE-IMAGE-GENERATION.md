@@ -67,6 +67,8 @@ The application therefore keeps its own independent daily image request cap. The
 IMAGE_GENERATION_DAILY_REQUEST_LIMIT=10
 ```
 
+A value of `0` means **zero external image calls are permitted**; it does not mean unlimited. To disable image generation intentionally, prefer `IMAGE_GENERATION_PROVIDER=disabled` so the operating state is explicit.
+
 The cap counts **actual external image inference attempts**, not:
 
 - duplicate SQS deliveries;
