@@ -19,7 +19,7 @@ Parameters:
     Default: scoutsProcessingDLQ
   VisibilityTimeout:
     Type: Number
-    Default: 180
+    Default: 600
   MessageRetentionSeconds:
     Type: Number
     Default: 1209600
