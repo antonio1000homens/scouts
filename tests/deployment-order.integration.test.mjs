@@ -31,6 +31,10 @@ test('AWS deployment order keeps queues before sqs2scouts before scouts2sqs', ()
   assert.ok(verify < scouts2sqs, 'scouts2sqs must run only after sqs2scouts verification');
 });
 
+test('service changes still pull in the queues prerequisite', () => {
+  assert.match(workflow, /if \[ "\$\{scouts_function\}" = 'true' \] \|\| \[ "\$\{scouts2sqs\}" = 'true' \] \|\| \[ "\$\{sqs2scouts\}" = 'true' \]; then\n\s*scouts_queues=true/);
+});
+
 test('manual scouts2sqs target preserves prerequisite semantics without forcing sqs2scouts', () => {
   assert.match(workflow, /scouts2sqs\) aws_bootstrap=true; scouts_queues=true; scouts2sqs=true ;;/);
   assert.doesNotMatch(workflow, /scouts2sqs\)[^\n]*sqs2scouts=true/);
