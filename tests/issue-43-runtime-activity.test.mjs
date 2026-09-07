@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildCanonicalActivity } from '../lambdas/scouts/function/runtime-activity-model.mjs';
+import { buildCanonicalActivity } from '../lambdas/shared-layer/nodejs/runtime-activity-model.mjs';
 
 const NOW = new Date('2026-09-07T23:30:00Z');
 
@@ -126,4 +126,18 @@ test('explicit failed workflow is needs-attention instead of an age-derived stal
   assert.equal(activity[0].state, 'needs_attention');
   assert.equal(activity[0].health, 'needs_attention');
   assert.equal(activity[0].failure.type, 'FAILED');
+});
+
+test('old queued snapshot becomes explicit orphan only when live queue health proves no message remains', () => {
+  const activity = buildCanonicalActivity({
+    queuedSnapshot: snapshot('queued', [request({ requestTime: '2026-09-07T22:00:00Z' })]),
+    queueHealth: {
+      scoutsRequests: { ok: true, visible: 0, inFlight: 0, delayed: 0 },
+    },
+    now: NOW,
+  });
+  assert.equal(activity[0].state, 'needs_attention');
+  assert.equal(activity[0].stage, 'tracking_orphaned');
+  assert.equal(activity[0].failure.type, 'ORPHANED_TRACKING');
+  assert.ok(activity[0].timeline.some((entry) => entry.source === 'queue-health'));
 });
