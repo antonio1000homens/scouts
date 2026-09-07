@@ -33,3 +33,27 @@ test('agenda enrichment control is expressed as user intent', () => {
   assert.match(simplify, /10 events/);
   assert.match(simplify, /AI enrichment events/);
 });
+
+test('activity rendering uses textContent rather than interpolated innerHTML', () => {
+  assert.match(simplify, /statusEl\.textContent = sanitizeStatusText\(badge\)/);
+  assert.match(simplify, /titleEl\.textContent = sanitizeStatusText\(title\)/);
+  assert.doesNotMatch(simplify, /item\.innerHTML\s*=\s*`[^`]*\$\{sanitizeStatusText/);
+});
+
+test('diagnostics retain raw status and request detail', () => {
+  assert.match(simplify, /isDiagnosticsNode/);
+  assert.match(simplify, /#admin-diagnostics-drawer/);
+  assert.match(simplify, /if \(isDiagnosticsNode\(el\)\) return/);
+});
+
+test('observer cannot self-trigger during presentation updates', () => {
+  assert.match(simplify, /presentationRefreshInProgress/);
+  assert.match(simplify, /observer\?\.disconnect\(\)/);
+  assert.match(simplify, /observer\.observe\(document\.body, OBSERVER_OPTIONS\)/);
+});
+
+test('legacy diagnostics are hidden only after successful simplify initialization', () => {
+  assert.match(simplify, /classList\.add\('admin-simplify-ready'\)/);
+  assert.match(css, /body\.admin-simplify-ready \.events-layout > \.requests-sidebar/);
+  assert.doesNotMatch(css, /\n\.events-layout > \.requests-sidebar,/);
+});
