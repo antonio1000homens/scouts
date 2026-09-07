@@ -542,15 +542,32 @@ export async function lambdaHandler(event) {
   if (records.length === 0) return legacyHandler(event);
 
   const legacyRecords = [];
+  const batchItemFailures = [];
   for (const record of records) {
     const message = parseRecord(record);
     if (message && isFullEnrichMessage(message)) {
-      await handleFullRecord(record, message);
+      try {
+        await handleFullRecord(record, message);
+      } catch (error) {
+        // If task-failure delivery itself failed, Step Functions was not
+        // notified. Keep this message available for an SQS retry.
+        console.error('[FullEnrich] Callback delivery failed', {
+          message: error?.message || String(error),
+          messageId: record?.messageId || null,
+        });
+        if (text(record?.messageId)) batchItemFailures.push({ itemIdentifier: text(record.messageId) });
+      }
     } else {
       legacyRecords.push(record);
     }
   }
 
-  if (legacyRecords.length > 0) return legacyHandler({ ...event, Records: legacyRecords });
-  return { statusCode: 200, body: JSON.stringify({ message: 'Full enrichment stages processed' }) };
+  const legacyResult = legacyRecords.length > 0
+    ? await legacyHandler({ ...event, Records: legacyRecords })
+    : { statusCode: 200, body: JSON.stringify({ message: 'Full enrichment stages processed' }) };
+  if (batchItemFailures.length === 0) return legacyResult;
+  return {
+    ...(legacyResult && typeof legacyResult === 'object' ? legacyResult : {}),
+    batchItemFailures,
+  };
 }

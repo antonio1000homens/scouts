@@ -223,6 +223,8 @@ Resources:
     Type: AWS::Lambda::EventSourceMapping
     Properties:
       FunctionName: !Ref Scouts2SqsFunction
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
       EventSourceArn: !Ref ScoutsRequestsQueueArn
       BatchSize: !Ref BatchSize
       Enabled: true

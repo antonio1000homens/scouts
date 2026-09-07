@@ -278,6 +278,7 @@ export async function lambdaHandler(event) {
   const records = Array.isArray(event?.Records) ? event.Records : null;
   if (records) {
     const delegatedRecords = [];
+    const batchItemFailures = [];
     for (const record of records) {
       const message = parseRecord(record);
       if (!message) {
@@ -294,10 +295,17 @@ export async function lambdaHandler(event) {
           action: message?.action || null,
           hex: getHexFromMessage(message),
         });
+        if (text(record?.messageId)) batchItemFailures.push({ itemIdentifier: text(record.messageId) });
       }
     }
-    if (delegatedRecords.length > 0) return legacyHandler({ ...event, Records: delegatedRecords });
-    return { statusCode: 200, body: 'Full enrichment requests processed' };
+    const delegatedResult = delegatedRecords.length > 0
+      ? await legacyHandler({ ...event, Records: delegatedRecords })
+      : { statusCode: 200, body: 'Full enrichment requests processed' };
+    if (batchItemFailures.length === 0) return delegatedResult;
+    return {
+      ...(delegatedResult && typeof delegatedResult === 'object' ? delegatedResult : {}),
+      batchItemFailures,
+    };
   }
 
   const body = parseHttpBody(event);
