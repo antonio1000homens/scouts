@@ -4,7 +4,7 @@ Description: Scouts full enrichment Step Functions POC (tagline -> imageTheme ->
 Parameters:
   StateMachineName:
     Type: String
-    Default: scouts-full-enrich
+    Default: scouts-full-enrich-managed-poc
   RequestsQueueUrl:
     Type: String
     Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
