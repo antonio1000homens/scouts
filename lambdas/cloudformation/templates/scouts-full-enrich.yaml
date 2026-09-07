@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Scouts full enrichment Step Functions POC (tagline -> imageTheme -> image)
+Description: Scouts full enrichment Step Functions workflow (tagline -> imageTheme -> image)
 
 Parameters:
   StateMachineName:
@@ -47,9 +47,30 @@ Resources:
       DefinitionString:
         !Sub |
           {
-            "Comment": "POC: one execution owns tagline, image theme and image enrichment for one Scouts HEX record",
-            "StartAt": "GenerateTagline",
+            "Comment": "One execution owns the normal Scouts enrichment sequence while DynamoDB remains authoritative for retry/cooldown/idempotency safety.",
+            "StartAt": "DetermineStartingStage",
             "States": {
+              "DetermineStartingStage": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.startStage",
+                    "StringEquals": "complete",
+                    "Next": "Complete"
+                  },
+                  {
+                    "Variable": "$.startStage",
+                    "StringEquals": "image",
+                    "Next": "SelectImageProvider"
+                  },
+                  {
+                    "Variable": "$.startStage",
+                    "StringEquals": "imageTheme",
+                    "Next": "GenerateImageTheme"
+                  }
+                ],
+                "Default": "GenerateTagline"
+              },
               "GenerateTagline": {
                 "Type": "Task",
                 "Resource": "arn:${AWS::Partition}:states:::sqs:sendMessage.waitForTaskToken",
@@ -66,15 +87,47 @@ Resources:
                     "requestId.$": "$.requestId",
                     "requestHex.$": "$.requestHex",
                     "hex.$": "$.requestHex",
-                    "orchestrationType": "imageEnrich",
-                    "orchestrationName": "fullEnrich",
+                    "orchestrationType": "fullEnrich",
                     "orchestrationStep": "tagline",
                     "taskToken.$": "$$.Task.Token"
                   }
                 },
                 "TimeoutSeconds": ${StageTimeoutSeconds},
                 "ResultPath": "$.taglineResult",
-                "Next": "GenerateImageTheme"
+                "Catch": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "ResultPath": "$.failure",
+                    "Next": "UnexpectedFailure"
+                  }
+                ],
+                "Next": "EvaluateTaglineResult"
+              },
+              "EvaluateTaglineResult": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.taglineResult.status",
+                    "StringEquals": "succeeded",
+                    "Next": "GenerateImageTheme"
+                  },
+                  {
+                    "Variable": "$.taglineResult.status",
+                    "StringEquals": "manual_review",
+                    "Next": "ManualReview"
+                  },
+                  {
+                    "Variable": "$.taglineResult.status",
+                    "StringEquals": "retry_wait",
+                    "Next": "Deferred"
+                  },
+                  {
+                    "Variable": "$.taglineResult.status",
+                    "StringEquals": "deferred",
+                    "Next": "Deferred"
+                  }
+                ],
+                "Default": "UnexpectedFailure"
               },
               "GenerateImageTheme": {
                 "Type": "Task",
@@ -92,17 +145,65 @@ Resources:
                     "requestId.$": "$.requestId",
                     "requestHex.$": "$.requestHex",
                     "hex.$": "$.requestHex",
-                    "orchestrationType": "imageEnrich",
-                    "orchestrationName": "fullEnrich",
+                    "orchestrationType": "fullEnrich",
                     "orchestrationStep": "imageTheme",
                     "taskToken.$": "$$.Task.Token"
                   }
                 },
                 "TimeoutSeconds": ${StageTimeoutSeconds},
                 "ResultPath": "$.imageThemeResult",
-                "Next": "GenerateImage"
+                "Catch": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "ResultPath": "$.failure",
+                    "Next": "UnexpectedFailure"
+                  }
+                ],
+                "Next": "EvaluateImageThemeResult"
               },
-              "GenerateImage": {
+              "EvaluateImageThemeResult": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.imageThemeResult.status",
+                    "StringEquals": "succeeded",
+                    "Next": "SelectImageProvider"
+                  },
+                  {
+                    "Variable": "$.imageThemeResult.status",
+                    "StringEquals": "manual_review",
+                    "Next": "ManualReview"
+                  },
+                  {
+                    "Variable": "$.imageThemeResult.status",
+                    "StringEquals": "retry_wait",
+                    "Next": "Deferred"
+                  },
+                  {
+                    "Variable": "$.imageThemeResult.status",
+                    "StringEquals": "deferred",
+                    "Next": "Deferred"
+                  }
+                ],
+                "Default": "UnexpectedFailure"
+              },
+              "SelectImageProvider": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.imageProvider",
+                    "StringEquals": "cloudflare",
+                    "Next": "GenerateImageCloudflare"
+                  },
+                  {
+                    "Variable": "$.imageProvider",
+                    "StringEquals": "gemini",
+                    "Next": "GenerateImageGemini"
+                  }
+                ],
+                "Default": "InvalidImageProvider"
+              },
+              "GenerateImageCloudflare": {
                 "Type": "Task",
                 "Resource": "arn:${AWS::Partition}:states:::sqs:sendMessage.waitForTaskToken",
                 "Parameters": {
@@ -118,15 +219,99 @@ Resources:
                     "requestId.$": "$.requestId",
                     "requestHex.$": "$.requestHex",
                     "hex.$": "$.requestHex",
-                    "orchestrationType": "imageEnrich",
-                    "orchestrationName": "fullEnrich",
+                    "orchestrationType": "fullEnrich",
                     "orchestrationStep": "image",
+                    "imageProvider": "cloudflare",
                     "taskToken.$": "$$.Task.Token"
                   }
                 },
                 "TimeoutSeconds": ${StageTimeoutSeconds},
                 "ResultPath": "$.imageResult",
-                "Next": "Complete"
+                "Catch": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "ResultPath": "$.failure",
+                    "Next": "UnexpectedFailure"
+                  }
+                ],
+                "Next": "EvaluateImageResult"
+              },
+              "GenerateImageGemini": {
+                "Type": "Task",
+                "Resource": "arn:${AWS::Partition}:states:::sqs:sendMessage.waitForTaskToken",
+                "Parameters": {
+                  "QueueUrl": "${RequestsQueueUrl}",
+                  "MessageBody": {
+                    "realm": "scoutsRequest",
+                    "action": "request",
+                    "subject": "imageUrl",
+                    "subjectLabel": "imageUrl",
+                    "source": "scouts-full-enrich",
+                    "approvalMode.$": "$.approvalMode",
+                    "requestMode.$": "$.requestMode",
+                    "requestId.$": "$.requestId",
+                    "requestHex.$": "$.requestHex",
+                    "hex.$": "$.requestHex",
+                    "orchestrationType": "fullEnrich",
+                    "orchestrationStep": "image",
+                    "imageProvider": "gemini",
+                    "taskToken.$": "$$.Task.Token"
+                  }
+                },
+                "TimeoutSeconds": ${StageTimeoutSeconds},
+                "ResultPath": "$.imageResult",
+                "Catch": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "ResultPath": "$.failure",
+                    "Next": "UnexpectedFailure"
+                  }
+                ],
+                "Next": "EvaluateImageResult"
+              },
+              "EvaluateImageResult": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.imageResult.status",
+                    "StringEquals": "succeeded",
+                    "Next": "Complete"
+                  },
+                  {
+                    "Variable": "$.imageResult.status",
+                    "StringEquals": "manual_review",
+                    "Next": "ManualReview"
+                  },
+                  {
+                    "Variable": "$.imageResult.status",
+                    "StringEquals": "retry_wait",
+                    "Next": "Deferred"
+                  },
+                  {
+                    "Variable": "$.imageResult.status",
+                    "StringEquals": "deferred",
+                    "Next": "Deferred"
+                  }
+                ],
+                "Default": "UnexpectedFailure"
+              },
+              "Deferred": {
+                "Type": "Succeed",
+                "Comment": "DynamoDB retry/cooldown state remains authoritative; scheduled reconciliation may start a later eligible execution."
+              },
+              "ManualReview": {
+                "Type": "Succeed",
+                "Comment": "Automatic provider work has been quarantined by the enrichment safety layer."
+              },
+              "InvalidImageProvider": {
+                "Type": "Fail",
+                "Error": "InvalidImageProvider",
+                "Cause": "imageProvider must be cloudflare or gemini for an incomplete image stage"
+              },
+              "UnexpectedFailure": {
+                "Type": "Fail",
+                "Error": "FullEnrichStageFailed",
+                "Cause": "A stage did not return a supported structured result or the callback task failed"
               },
               "Complete": {
                 "Type": "Succeed"
@@ -137,6 +322,6 @@ Resources:
 Outputs:
   StateMachineArn:
     Value: !Ref ScoutsFullEnrichStateMachine
-    Description: ARN of the source-controlled scouts-full-enrich POC state machine
+    Description: ARN of the source-controlled production full-enrichment state machine
   RoleArn:
     Value: !GetAtt ScoutsFullEnrichRole.Arn

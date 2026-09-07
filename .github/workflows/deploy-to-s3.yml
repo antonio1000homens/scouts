@@ -296,7 +296,7 @@ jobs:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           role-session-name: github-actions-scouts-deploy
           aws-region: ${{ env.AWS_REGION }}
-      - name: Deploy scouts full-enrich state machine POC
+      - name: Deploy scouts full-enrich state machine
         env:
           CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
           EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
@@ -545,11 +545,12 @@ jobs:
         run: cd lambdas/scouts-queues && bash ./deploy.sh
 
   deploy-scouts-function:
-    needs: [detect-changes, deploy-scouts-queues, deploy-scouts-image-enrich]
+    needs: [detect-changes, deploy-scouts-queues, deploy-scouts-image-enrich, deploy-scouts-full-enrich]
     if: |
       always() &&
       (needs.deploy-scouts-queues.result == 'success' || needs.deploy-scouts-queues.result == 'skipped') &&
       (needs.deploy-scouts-image-enrich.result == 'success' || needs.deploy-scouts-image-enrich.result == 'skipped') &&
+      (needs.deploy-scouts-full-enrich.result == 'success' || needs.deploy-scouts-full-enrich.result == 'skipped') &&
       (
         (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.scouts_function == 'true') ||
         (github.event_name == 'workflow_dispatch' && (
@@ -680,11 +681,12 @@ jobs:
         run: cd lambdas/scouts-slack-handler && bash ./deploy.sh
 
   deploy-scouts2sqs:
-    needs: [detect-changes, deploy-scouts-queues, deploy-scouts-image-enrich]
+    needs: [detect-changes, deploy-scouts-queues, deploy-scouts-image-enrich, deploy-scouts-full-enrich]
     if: |
       always() &&
       (needs.deploy-scouts-queues.result == 'success' || needs.deploy-scouts-queues.result == 'skipped') &&
       (needs.deploy-scouts-image-enrich.result == 'success' || needs.deploy-scouts-image-enrich.result == 'skipped') &&
+      (needs.deploy-scouts-full-enrich.result == 'success' || needs.deploy-scouts-full-enrich.result == 'skipped') &&
       (
         (github.event_name != 'workflow_dispatch' && needs.detect-changes.outputs.scouts2sqs == 'true') ||
         (github.event_name == 'workflow_dispatch' && (
@@ -744,6 +746,7 @@ jobs:
           DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
           SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
           SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+          IMAGE_GENERATION_PROVIDER: ${{ vars.IMAGE_GENERATION_PROVIDER || 'disabled' }}
         run: cd lambdas/scouts2sqs && bash ./deploy.sh
 
   deploy-sqs2scouts:
@@ -793,6 +796,13 @@ jobs:
             ${{ vars.BW_SCOUTS_SLACK_SIGNING_SECRET }} > SLACK_SIGNING_SECRET
             ${{ vars.BW_SCOUTS_SLACK_BOT_TOKEN }} > SLACK_BOT_TOKEN
             ${{ vars.BW_GEMINI_API_KEY }} > GEMINI_API_KEY
+      - name: Get Cloudflare Workers AI token from Bitwarden
+        if: ${{ vars.BW_CLOUDFLARE_AI_API_TOKEN != '' }}
+        uses: bitwarden/sm-action@v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
+            ${{ vars.BW_CLOUDFLARE_AI_API_TOKEN }} > CLOUDFLARE_AI_API_TOKEN
       - name: Deploy sqs2scouts
         env:
           CODE_BUCKET: ${{ env.CODE_BUCKET }}
@@ -811,8 +821,13 @@ jobs:
           GEMINI_IMAGE_MODEL: ${{ vars.GEMINI_IMAGE_MODEL }}
           GEMINI_TEXT_MODEL: ${{ vars.GEMINI_TEXT_MODEL }}
           REQUIRE_GEMINI_API_KEY: 'true'
+          IMAGE_GENERATION_PROVIDER: ${{ vars.IMAGE_GENERATION_PROVIDER || 'disabled' }}
+          IMAGE_GENERATION_DAILY_REQUEST_LIMIT: ${{ vars.IMAGE_GENERATION_DAILY_REQUEST_LIMIT || '10' }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_AI_MODEL: ${{ vars.CLOUDFLARE_AI_MODEL || '@cf/black-forest-labs/flux-1-schnell' }}
+          CLOUDFLARE_AI_STEPS: ${{ vars.CLOUDFLARE_AI_STEPS || '4' }}
         run: cd lambdas/sqs2scouts && bash ./deploy.sh
-      - name: Verify sqs2scouts GEMINI_API_KEY
+      - name: Verify sqs2scouts secret parameters and adapter
         run: |
           VALUE="$(aws lambda get-function-configuration \
             --function-name sqs2scouts \
@@ -823,4 +838,13 @@ jobs:
             echo "GEMINI_API_KEY_PARAMETER is not set on sqs2scouts after deploy"
             exit 1
           fi
-          echo "GEMINI_API_KEY_PARAMETER is set on sqs2scouts"
+          HANDLER="$(aws lambda get-function-configuration \
+            --function-name sqs2scouts \
+            --region "${AWS_REGION}" \
+            --query 'Handler' \
+            --output text)"
+          if [ "$HANDLER" != "full-enrich-adapter.lambdaHandler" ]; then
+            echo "Unexpected sqs2scouts handler after deploy: $HANDLER"
+            exit 1
+          fi
+          echo "sqs2scouts full-enrich adapter is active"

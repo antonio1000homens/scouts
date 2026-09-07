@@ -33,8 +33,56 @@ This website has been completely redesigned to match the official Scouts UK bran
 - `2tolworthcub_booklet_html/` - Cub Scout booklet pages
 
 ### Documentation
+- `website/docs/index.html` - Live technical architecture documentation
 - `DESIGN_IMPROVEMENTS.md` - Design overhaul details
 - `BUTTONS_AND_IMAGES.md` - Buttons and images guide
+
+## Enrichment architecture
+
+Event enrichment is orchestrated by the `scouts-full-enrich` Standard Step Functions workflow. Step Functions owns sequencing; SQS owns transport; DynamoDB owns retry/idempotency state; `sqs2scouts` owns provider calls and task-token callbacks.
+
+```mermaid
+flowchart LR
+    A[scouts Lambda\nscan / reconciliation] -->|scoutsRequest new / retry| Q1[(SQS scoutsRequests)]
+    Q1 --> B[scouts2sqs\nfull-enrich adapter]
+    B -->|StartExecution| SF[Step Functions\nscouts-full-enrich]
+
+    SF -->|waitForTaskToken\nstage request| Q1
+    Q1 --> B
+    B -->|translated callback stage| Q2[(SQS scoutsProcessing)]
+    Q2 --> W[sqs2scouts\nfull-enrich adapter]
+
+    W --> D[(DynamoDB\nHEX + stage state)]
+    W -->|tagline / imageTheme| GT[Gemini text]
+    W -->|image| IP{Configured image provider}
+    IP --> CF[Cloudflare Workers AI]
+    IP --> GI[Gemini image]
+    W --> S3[(S3 event + image persistence)]
+    W -->|SendTaskSuccess / SendTaskFailure| SF
+
+    D -. cooldown / lease / cache / quarantine .-> W
+```
+
+Normal stage progression is:
+
+```text
+tagline -> imageTheme -> image -> complete
+```
+
+The workflow resumes from the first missing field, so partially enriched events do not regenerate completed stages. Each callback stage is handed from Step Functions to `scoutsRequests`, translated by `scouts2sqs`, forwarded to `scoutsProcessing`, then processed by `sqs2scouts`.
+
+### Retry and cost-safety boundary
+
+- DynamoDB state is keyed by `HEX + stage`.
+- A conditional `in_progress` lease ensures only one delivery owns a provider call.
+- Duplicate deliveries that see an active reservation are acknowledged without completing the shared Step Functions task token; the reservation owner remains responsible for the callback.
+- Provider/global image budget is reserved only after the stage reservation is won.
+- Successful generated output is cached before downstream S3 event persistence, so a persistence retry does not call the provider again.
+- Retryable failures use the bounded retry/cooldown policy: 1 hour, then 6 hours, then `manual_review` after the third failed attempt.
+- Provider/global quota deferrals do not consume a per-event attempt.
+- Cloudflare failures never automatically fall back to Gemini.
+
+The live website documentation at `/website/docs/index.html` contains a more detailed sequence diagram, provider hand-off explanation, and troubleshooting table.
 
 ## Features
 
@@ -111,7 +159,10 @@ To customize for your specific scout group:
 
 - HTML5
 - CSS3
-- No JavaScript dependencies - pure HTML/CSS for maximum compatibility and performance
+- JavaScript for shared website components and admin/runtime features
+- AWS Lambda, SQS, Step Functions, DynamoDB and S3 for event enrichment
+- Gemini for text enrichment
+- Cloudflare Workers AI or Gemini for explicitly selected image generation
 
 ## Event Tagline Compatibility
 
