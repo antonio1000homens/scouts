@@ -120,6 +120,10 @@ test('Scouts status deployment includes both enrichment state machines and activ
   assert.match(scoutsTemplate, /Default: scouts-entry\.handler/);
   assert.match(scoutsTemplate, /states:DescribeExecution/);
   assert.match(scoutsTemplate, /states:GetExecutionHistory/);
+  assert.equal(scoutsTemplate.includes('execution:*:*'), false);
+  assert.equal((scoutsTemplate.match(/execution:\$\{StateMachineName\}:\*/g) || []).length, 2);
+  assert.match(scoutsTemplate, /Fn::Select:[\s\S]*- 6[\s\S]*ImageEnrichStateMachineArn/);
+  assert.match(scoutsTemplate, /Fn::Select:[\s\S]*- 6[\s\S]*FullEnrichStateMachineArn/);
   assert.match(scoutsDeploy, /scouts-entry\.handler/);
   assert.match(scoutsDeploy, /scouts-entry\.mjs runtime-activity\.mjs/);
   assert.match(scoutsDeploy, /scouts-full-enrich/);
