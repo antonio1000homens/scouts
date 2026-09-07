@@ -30,7 +30,7 @@ test('deploy packages provider modules and forces Gemini images off for Cloudfla
   assert.match(deploy, /image-provider-adapter\.mjs/);
   assert.match(deploy, /cloudflare-image-client\.mjs/);
   assert.match(deploy, /ImageGenerationProvider="\$\{IMAGE_GENERATION_PROVIDER\}"/);
-  assert.match(deploy, /IMAGE_GENERATION_PROVIDER.*cloudflare[\s\S]*?GEMINI_IMAGES_ENABLED="false"/);
+  assert.match(deploy, /IMAGE_GENERATION_PROVIDER.*cloudflare[\s\S]*?GEMINI_IMAGES_ENABLED='false'/);
 });
 
 test('stable Lambda entrypoint delegates through provider adapter', () => {
@@ -45,6 +45,11 @@ test('Cloudflare path reserves stage before application inference budget', () =>
   assert.ok(reservation >= 0, 'stage reservation must exist');
   assert.ok(budget > reservation, 'budget must be reserved after stage ownership');
   assert.ok(provider > budget, 'external provider call must occur only after both reservations');
+});
+
+test('zero image request limit is an explicit fail-closed zero-call cap', () => {
+  assert.match(adapter, /IMAGE_DAILY_REQUEST_LIMIT <= 0[\s\S]{0,260}open: true[\s\S]{0,180}reason: 'application_daily_cap'/);
+  assert.match(adapter, /configured limit of zero intentionally means zero external image calls/);
 });
 
 test('cached image is stored before final S3/event persistence', () => {
