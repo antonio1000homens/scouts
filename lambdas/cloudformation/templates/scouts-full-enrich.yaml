@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Scouts full enrichment Step Functions POC (tagline -> imageTheme -> image)
+
+Parameters:
+  StateMachineName:
+    Type: String
+    Default: scouts-full-enrich
+  RequestsQueueUrl:
+    Type: String
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+  RequestsQueueArn:
+    Type: String
+    Default: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
+  StageTimeoutSeconds:
+    Type: Number
+    Default: 900
+    MinValue: 60
+
+Resources:
+  ScoutsFullEnrichRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${StateMachineName}-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DispatchScoutsRequests
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !Ref RequestsQueueArn
+
+  ScoutsFullEnrichStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Ref StateMachineName
+      StateMachineType: STANDARD
+      RoleArn: !GetAtt ScoutsFullEnrichRole.Arn
+      DefinitionString:
+        !Sub |
+          {
+            "Comment": "POC: one execution owns tagline, image theme and image enrichment for one Scouts HEX record",
+            "StartAt": "GenerateTagline",
+            "States": {
+              "GenerateTagline": {
+                "Type": "Task",
+                "Resource": "arn:${AWS::Partition}:states:::sqs:sendMessage.waitForTaskToken",
+                "Parameters": {
+                  "QueueUrl": "${RequestsQueueUrl}",
+                  "MessageBody": {
+                    "realm": "scoutsRequest",
+                    "action": "request",
+                    "subject": "tagline",
+                    "subjectLabel": "tagline",
+                    "source": "scouts-full-enrich",
+                    "approvalMode.$": "$.approvalMode",
+                    "requestMode.$": "$.requestMode",
+                    "requestId.$": "$.requestId",
+                    "requestHex.$": "$.requestHex",
+                    "hex.$": "$.requestHex",
+                    "orchestrationType": "imageEnrich",
+                    "orchestrationName": "fullEnrich",
+                    "orchestrationStep": "tagline",
+                    "taskToken.$": "$$.Task.Token"
+                  }
+                },
+                "TimeoutSeconds": ${StageTimeoutSeconds},
+                "ResultPath": "$.stageResults.tagline",
+                "Next": "GenerateImageTheme"
+              },
+              "GenerateImageTheme": {
+                "Type": "Task",
+                "Resource": "arn:${AWS::Partition}:states:::sqs:sendMessage.waitForTaskToken",
+                "Parameters": {
+                  "QueueUrl": "${RequestsQueueUrl}",
+                  "MessageBody": {
+                    "realm": "scoutsRequest",
+                    "action": "request",
+                    "subject": "imageTheme",
+                    "subjectLabel": "imageTheme",
+                    "source": "scouts-full-enrich",
+                    "approvalMode.$": "$.approvalMode",
+                    "requestMode.$": "$.requestMode",
+                    "requestId.$": "$.requestId",
+                    "requestHex.$": "$.requestHex",
+                    "hex.$": "$.requestHex",
+                    "orchestrationType": "imageEnrich",
+                    "orchestrationName": "fullEnrich",
+                    "orchestrationStep": "imageTheme",
+                    "taskToken.$": "$$.Task.Token"
+                  }
+                },
+                "TimeoutSeconds": ${StageTimeoutSeconds},
+                "ResultPath": "$.stageResults.imageTheme",
+                "Next": "GenerateImage"
+              },
+              "GenerateImage": {
+                "Type": "Task",
+                "Resource": "arn:${AWS::Partition}:states:::sqs:sendMessage.waitForTaskToken",
+                "Parameters": {
+                  "QueueUrl": "${RequestsQueueUrl}",
+                  "MessageBody": {
+                    "realm": "scoutsRequest",
+                    "action": "request",
+                    "subject": "imageUrl",
+                    "subjectLabel": "imageUrl",
+                    "source": "scouts-full-enrich",
+                    "approvalMode.$": "$.approvalMode",
+                    "requestMode.$": "$.requestMode",
+                    "requestId.$": "$.requestId",
+                    "requestHex.$": "$.requestHex",
+                    "hex.$": "$.requestHex",
+                    "orchestrationType": "imageEnrich",
+                    "orchestrationName": "fullEnrich",
+                    "orchestrationStep": "image",
+                    "taskToken.$": "$$.Task.Token"
+                  }
+                },
+                "TimeoutSeconds": ${StageTimeoutSeconds},
+                "ResultPath": "$.stageResults.image",
+                "Next": "Complete"
+              },
+              "Complete": {
+                "Type": "Succeed"
+              }
+            }
+          }
+
+Outputs:
+  StateMachineArn:
+    Value: !Ref ScoutsFullEnrichStateMachine
+    Description: ARN of the source-controlled scouts-full-enrich POC state machine
+  RoleArn:
+    Value: !GetAtt ScoutsFullEnrichRole.Arn
