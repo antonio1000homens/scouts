@@ -57,9 +57,6 @@ export function buildGenerationId(hex, stage, event = {}, promptVersion = '1') {
     end: event?.end?.raw ?? event?.end?.sortKey ?? event?.end?.epochMillis ?? null,
     section: event?.section ?? event?.metadata?.section ?? null,
   };
-  // The generated theme is a material input only to the image stage. Including it
-  // in earlier stage IDs would make a successful tagline/imageTheme generation look
-  // stale as soon as a later stage persisted its output.
   if (normalisedStage === 'image') {
     source.imageTheme = event?.image?.theme ?? event?.metadata?.image?.theme ?? null;
   }
@@ -91,10 +88,12 @@ function asString(value) { return { S: String(value) }; }
 function asNumber(value) { return { N: String(value) }; }
 
 export async function getEnrichmentState(hex, stage) {
-  if (!TABLE_NAME || !normalise(hex) || !normaliseEnrichmentStage(stage)) return null;
+  const normalisedHex = normalise(hex).toLowerCase();
+  const normalisedStage = normaliseEnrichmentStage(stage);
+  if (!TABLE_NAME || !normalisedHex || !normalisedStage) return null;
   const response = await client.send(new GetItemCommand({
     TableName: TABLE_NAME,
-    Key: { hex: asString(normalise(hex).toLowerCase()), stage: asString(normaliseEnrichmentStage(stage)) },
+    Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
     ConsistentRead: true,
   }));
   return unmarshallItem(response?.Item);
@@ -104,12 +103,8 @@ export function evaluateEnrichmentEligibility(state, now = new Date(), generatio
   if (!state) return { eligible: true, reason: null };
   if (state.state === 'manual_review') return { eligible: false, reason: 'manual_review' };
   if (state.state === 'succeeded' && state.geminiSucceeded !== false && (!generationId || state.generationId === generationId)) return { eligible: false, reason: 'already_succeeded' };
-  if (Number(state.attemptCount || 0) >= MAX_ATTEMPTS && state.state !== 'succeeded') {
-    return { eligible: false, reason: 'max_attempts_reached' };
-  }
-  if (state.state === 'in_progress' && Number(state.inProgressExpiresAt || 0) > now.getTime()) {
-    return { eligible: false, reason: 'in_progress' };
-  }
+  if (Number(state.attemptCount || 0) >= MAX_ATTEMPTS && state.state !== 'succeeded') return { eligible: false, reason: 'max_attempts_reached' };
+  if (state.state === 'in_progress' && Number(state.inProgressExpiresAt || 0) > now.getTime()) return { eligible: false, reason: 'in_progress' };
   if (state.state === 'retry_wait' && state.nextRetryAt) {
     const next = new Date(state.nextRetryAt).getTime();
     if (Number.isFinite(next) && now.getTime() < next) return { eligible: false, reason: 'cooldown_active' };
@@ -184,10 +179,12 @@ export async function reserveEnrichmentAttempt({ hex, stage, generationId, reque
 }
 
 async function updateState(hex, stage, updateExpression, values, names, now = new Date()) {
-  if (!TABLE_NAME) return null;
+  const normalisedHex = normalise(hex).toLowerCase();
+  const normalisedStage = normaliseEnrichmentStage(stage);
+  if (!TABLE_NAME || !normalisedHex || !normalisedStage) return null;
   const response = await client.send(new UpdateItemCommand({
     TableName: TABLE_NAME,
-    Key: { hex: asString(normalise(hex).toLowerCase()), stage: asString(normaliseEnrichmentStage(stage)) },
+    Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
     UpdateExpression: updateExpression,
     ExpressionAttributeNames: names,
     ExpressionAttributeValues: { ...values, ':updatedAt': asString(now.toISOString()), ':expiresAt': asNumber(Math.floor(now.getTime() / 1000) + TTL_DAYS * 86400) },
@@ -221,11 +218,13 @@ export async function markEnrichmentFailure({ hex, stage, error, attemptCount, n
 }
 
 export async function claimEnrichmentEscalation({ hex, stage, now = new Date() }) {
-  if (!TABLE_NAME) return false;
+  const normalisedHex = normalise(hex).toLowerCase();
+  const normalisedStage = normaliseEnrichmentStage(stage);
+  if (!TABLE_NAME || !normalisedHex || !normalisedStage) return false;
   try {
     await client.send(new UpdateItemCommand({
       TableName: TABLE_NAME,
-      Key: { hex: asString(normalise(hex).toLowerCase()), stage: asString(normaliseEnrichmentStage(stage)) },
+      Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
       UpdateExpression: 'SET #escalatedAt = :escalatedAt, #updatedAt = :updatedAt, #expiresAt = :expiresAt',
       ConditionExpression: 'attribute_not_exists(#escalatedAt)',
       ExpressionAttributeNames: { '#escalatedAt': 'escalatedAt', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt' },
