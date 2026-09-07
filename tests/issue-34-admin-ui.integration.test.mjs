@@ -2,14 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-// Issue #39 journey/security coverage is imported here so it executes in the
-// existing consolidated plan-and-test lane without creating another workflow
-// or GitHub-hosted runner.
-import './issue-39-admin-actions.test.mjs';
-import './issue-39-actions-rendering.test.mjs';
-import './issue-39-synthetic-workflow.integration.test.mjs';
-import './issue-39-security-contract.test.mjs';
-
 const html = readFileSync('website/admin/index.html', 'utf8');
 const simplify = readFileSync('website/admin/admin-simplify.js', 'utf8');
 const css = readFileSync('website/admin/admin-simplify.css', 'utf8');
