@@ -131,7 +131,7 @@ jobs:
             case "${file}" in lambdas/scouts2sqs/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/scouts2sqs.yaml) scouts2sqs=true ;; esac
             case "${file}" in lambdas/sqs2scouts/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/sqs2scouts.yaml) sqs2scouts=true ;; esac
             case "${file}" in
-              lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|tests/issue-34-admin-ui.integration.test.mjs|website/admin/*|.github/workflows/deploy-to-s3.yml)
+              lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|tests/issue-34-admin-ui.integration.test.mjs|tests/issue-39-*.test.mjs|tests/issue-39-*.integration.test.mjs|tests/helpers/*|docs/TESTING-STRATEGY.md|website/admin/*|.github/workflows/deploy-to-s3.yml)
                 retry_safety=true
                 ;;
             esac
@@ -245,6 +245,15 @@ jobs:
       - name: Run issue 34 admin UI contracts
         if: steps.plan.outputs.retry_safety == 'true'
         run: node --test tests/issue-34-admin-ui.integration.test.mjs
+
+      - name: Run issue 39 workflow journey and security tests
+        if: steps.plan.outputs.retry_safety == 'true'
+        run: |
+          node --test \
+            tests/issue-39-admin-actions.test.mjs \
+            tests/issue-39-actions-rendering.test.mjs \
+            tests/issue-39-synthetic-workflow.integration.test.mjs \
+            tests/issue-39-security-contract.test.mjs
 
   deploy-web:
     needs: plan-and-test
@@ -566,7 +575,7 @@ jobs:
           TARGET_BUCKET: scouts-2ndtolworth-prod-553490163883
           QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing
           QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
-          DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
+          DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883:scoutsProcessingDLQ
           SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
           SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
           IMAGE_GENERATION_PROVIDER: ${{ vars.IMAGE_GENERATION_PROVIDER || 'disabled' }}
