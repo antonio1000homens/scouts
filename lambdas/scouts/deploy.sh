@@ -43,7 +43,7 @@ FUNCTION_NAME="${FUNCTION_NAME:-scouts}"
 LAYER_NAME="${LAYER_NAME:-scouts-shared}"
 ROLE_NAME="${ROLE_NAME:-scouts-lambda-role}"
 RUNTIME="${RUNTIME:-nodejs24.x}"
-HANDLER="${HANDLER:-scouts.handler}"
+HANDLER="${HANDLER:-scouts-entry.handler}"
 DATA_BUCKET_NAME="${DATA_BUCKET_NAME:-scouts-2ndtolworth-prod-553490163883}"
 CREATE_DATA_BUCKET="${CREATE_DATA_BUCKET:-true}"
 FUNCTION_URL_AUTH_TYPE="${FUNCTION_URL_AUTH_TYPE:-NONE}"
@@ -61,6 +61,7 @@ SCOUTS_REQUESTS_QUEUE_ARN="${SCOUTS_REQUESTS_QUEUE_ARN:-arn:aws:sqs:eu-west-2:55
 SCOUTS_REQUESTS_QUEUE_URL="${SCOUTS_REQUESTS_QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests}"
 SCOUTS2SQS_FUNCTION_URL="${SCOUTS2SQS_FUNCTION_URL:-}"
 IMAGE_ENRICH_STATE_MACHINE_ARN="${IMAGE_ENRICH_STATE_MACHINE_ARN:-}"
+FULL_ENRICH_STATE_MACHINE_ARN="${FULL_ENRICH_STATE_MACHINE_ARN:-}"
 GEMINI_DAILY_REQUEST_LIMIT="${GEMINI_DAILY_REQUEST_LIMIT:-10}"
 GEMINI_USAGE_TABLE_NAME="${GEMINI_USAGE_TABLE_NAME:-scouts-gemini-usage}"
 GEMINI_ENRICHMENT_STATE_TABLE_NAME="${GEMINI_ENRICHMENT_STATE_TABLE_NAME:-scouts-enrichment-state}"
@@ -190,6 +191,17 @@ if [ -z "${IMAGE_ENRICH_STATE_MACHINE_ARN}" ]; then
   fi
 fi
 
+if [ -z "${FULL_ENRICH_STATE_MACHINE_ARN}" ]; then
+  DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN="$(aws cloudformation describe-stacks \
+    --region "${REGION}" \
+    --stack-name scouts-full-enrich \
+    --query "Stacks[0].Outputs[?OutputKey=='StateMachineArn'].OutputValue" \
+    --output text 2>/dev/null || true)"
+  if [ -n "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" ] && [ "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" != "None" ] && [ "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" != "null" ]; then
+    FULL_ENRICH_STATE_MACHINE_ARN="${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}"
+  fi
+fi
+
 echo -e "\n${YELLOW}Step 1: Build shared Lambda layer...${NC}"
 pushd "${SHARED_LAYER_DIR}/nodejs" >/dev/null
 if [ ! -f package.json ]; then
@@ -209,7 +221,7 @@ echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
 rm -f function/scouts-lambda.zip
 (
   cd function
-  zip -q scouts-lambda.zip scouts.mjs
+  zip -q scouts-lambda.zip scouts.mjs scouts-entry.mjs runtime-activity.mjs
 )
 
 echo -e "\n${YELLOW}Step 3: Upload artifacts to S3...${NC}"
@@ -258,6 +270,7 @@ CFN_DEPLOY_ARGS+=(
     ScoutsRequestsQueueUrl="${SCOUTS_REQUESTS_QUEUE_URL}"
     Scouts2SqsFunctionUrl="${SCOUTS2SQS_FUNCTION_URL}"
     ImageEnrichStateMachineArn="${IMAGE_ENRICH_STATE_MACHINE_ARN}"
+    FullEnrichStateMachineArn="${FULL_ENRICH_STATE_MACHINE_ARN}"
     GeminiDailyRequestLimit="${GEMINI_DAILY_REQUEST_LIMIT}"
     GeminiUsageTableName="${GEMINI_USAGE_TABLE_NAME}"
     GeminiEnrichmentStateTableName="${GEMINI_ENRICHMENT_STATE_TABLE_NAME}"
