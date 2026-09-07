@@ -33,9 +33,9 @@ test('production sources retain the contracts exercised by the synthetic journey
   for (const token of ['generatetagline', 'generateimagetheme', 'generateimage', 'generatefull']) {
     assert.match(scoutsSource, new RegExp(`token === '${token}'`), `missing scouts admin translation for ${token}`);
   }
-  assert.match(scoutsSource, /isHidden:\s*(?:true|isHidden\s*===\s*true)/);
-  assert.match(scoutsSource, /isHidden:\s*(?:false|isHidden\s*===\s*false)/);
-  assert.match(scoutsSource, /isApproved:\s*(?:true|isApproved\s*===\s*true)/);
+  assert.match(scoutsSource, /isHidden\s*===\s*true/);
+  assert.match(scoutsSource, /isApproved\s*===\s*true/);
+  assert.match(scoutsSource, /commandActionToken === 'unhide'/);
   assert.match(scouts2sqsSource, /requestedField === 'tagline'/);
   assert.match(scouts2sqsSource, /requestedField === 'imageTheme'/);
   assert.match(scouts2sqsSource, /requestedField === 'imageUrl'/);
