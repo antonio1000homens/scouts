@@ -2,6 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import './test-cloudflare-image-client.mjs';
 import '../../../../tests/issue-18-cloudflare-image.integration.test.mjs';
 import {
@@ -13,6 +14,10 @@ import {
   buildCallbackResultFromState,
   buildImageGenerationPrompt,
 } from '../full-enrich-helpers.mjs';
+
+const fullEnrichAdapter = readFileSync('lambdas/scouts2sqs/function/full-enrich-adapter.mjs', 'utf8');
+const scoutsTemplate = readFileSync('lambdas/cloudformation/templates/scouts.yaml', 'utf8');
+const scoutsDeploy = readFileSync('lambdas/scouts/deploy.sh', 'utf8');
 
 test('normaliseStage maps external imageUrl to logical image', () => {
   assert.equal(normaliseStage('tagline'), 'tagline');
@@ -99,4 +104,21 @@ test('image prompt uses the same scouts.conf placeholders', () => {
     imageGenerationPromptTemplate: 'Draw {{IMAGE_THEME}}. {{IMAGE_PROMPT_SPECIFICATIONS}}',
     imageGenerationPromptSpecifications: ['16:9', 'no text'],
   }), 'Draw campfire. 16:9, no text');
+});
+
+test('full-enrich preserves the ingress request ID separately from execution name', () => {
+  assert.match(fullEnrichAdapter, /requestId: text\(message\?\.requestId\) \|\| name \|\| executionName\(prefix\)/);
+  assert.match(fullEnrichAdapter, /executionName: name \|\| null/);
+  assert.match(fullEnrichAdapter, /const finalInput = \{ \.\.\.input, executionName: name \}/);
+  assert.doesNotMatch(fullEnrichAdapter, /const finalInput = \{ \.\.\.input, requestId: name \}/);
+});
+
+test('Scouts status deployment includes both enrichment state machines and activity entrypoint', () => {
+  assert.match(scoutsTemplate, /FullEnrichStateMachineArn/);
+  assert.match(scoutsTemplate, /FULL_ENRICH_STATE_MACHINE_ARN/);
+  assert.match(scoutsTemplate, /Default: scouts-entry\.handler/);
+  assert.match(scoutsTemplate, /states:DescribeExecution/);
+  assert.match(scoutsDeploy, /scouts-entry\.handler/);
+  assert.match(scoutsDeploy, /scouts-entry\.mjs runtime-activity\.mjs/);
+  assert.match(scoutsDeploy, /scouts-full-enrich/);
 });
