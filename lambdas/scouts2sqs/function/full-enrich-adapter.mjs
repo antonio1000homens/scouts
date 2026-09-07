@@ -117,9 +117,6 @@ export function translateFullEnrichStageRequest(message) {
 }
 
 export function eventGenerationKey(hex, event) {
-  // Only source-event identity/content belongs here. Enrichment outputs (tagline,
-  // theme, image URL) deliberately do not: they change during one execution and
-  // would otherwise make reconciliation fail to recognise that execution as active.
   const metadata = getMetadata(event);
   const source = {
     hex,
@@ -212,8 +209,8 @@ async function startFullEnrich(message) {
     console.log('[FullEnrich] Event already complete; no execution required', { hex });
     return { status: 'complete', input, reused: false };
   }
-  if (input.imageProvider === 'disabled') {
-    console.warn('[FullEnrich] Image provider disabled; not starting incomplete enrichment', { hex, startStage: input.startStage });
+  if (input.imageProvider === 'disabled' && input.startStage === 'image') {
+    console.warn('[FullEnrich] Image provider disabled; image-only enrichment is intentionally blocked', { hex, startStage: input.startStage });
     return { status: 'blocked', reason: 'image_provider_disabled', input, reused: false };
   }
 
@@ -316,8 +313,6 @@ export async function lambdaHandler(event) {
         const handled = await handleMessage(message);
         if (!handled.intercepted) delegatedRecords.push(record);
       } catch (error) {
-        // Never fall back to the legacy image state machine after a full-enrich start failure.
-        // Rethrow so the SQS event source retries/redrives the intercepted message.
         console.error('[FullEnrich] Intercepted request failed', {
           error: error?.message || String(error),
           action: message?.action || null,
