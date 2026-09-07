@@ -259,3 +259,12 @@ test('quarantine escalation is idempotent and manual reset is deliberate', async
   assert.equal(reset.generationId, undefined);
   assert.equal(reset.geminiSucceeded, undefined);
 });
+
+test('invalid stage updates are rejected without writing a null sort key', async () => {
+  const now = new Date('2026-09-07T10:00:00Z');
+  assert.equal(await markEnrichmentSucceeded({ hex: 'abcd', stage: 'unsupported', generationId: 'g1', now }), null);
+  assert.equal(await markGeminiSucceeded({ hex: 'abcd', stage: undefined, generationId: 'g1', generatedValue: { value: 'x' }, now }), null);
+  assert.equal(await claimEnrichmentEscalation({ hex: 'abcd', stage: 'unsupported', now }), false);
+  assert.equal(db.commands.length, 0);
+  assert.equal(db.items.has('abcd#null'), false);
+});
