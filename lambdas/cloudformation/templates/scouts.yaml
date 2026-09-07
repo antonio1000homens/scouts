@@ -192,7 +192,6 @@ Resources:
                 - Effect: Allow
                   Action:
                     - states:ListExecutions
-                    - states:DescribeExecution
                   Resource: !Ref ImageEnrichStateMachineArn
                 - !Ref AWS::NoValue
               - !If
@@ -200,9 +199,12 @@ Resources:
                 - Effect: Allow
                   Action:
                     - states:ListExecutions
-                    - states:DescribeExecution
                   Resource: !Ref FullEnrichStateMachineArn
                 - !Ref AWS::NoValue
+              - Effect: Allow
+                Action:
+                  - states:DescribeExecution
+                Resource: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:*:*
 
   ScoutsFunction:
     Type: AWS::Lambda::Function
