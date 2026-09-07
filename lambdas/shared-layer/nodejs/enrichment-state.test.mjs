@@ -8,7 +8,44 @@ import {
   evaluateEnrichmentEligibility,
   classifyGeminiError,
   retryDelaySeconds,
+  reserveEnrichmentAttempt,
+  resetEnrichmentStateClientForTests,
+  setEnrichmentStateClientForTests,
 } from './enrichment-state.mjs';
+
+function expressionPlaceholders(expression) {
+  return new Set(expression.match(/:[A-Za-z0-9_]+/g) || []);
+}
+
+test('attempt reservation only sends placeholders used by DynamoDB expressions', async () => {
+  const commands = [];
+  setEnrichmentStateClientForTests({
+    async send(command) {
+      commands.push(command);
+      if (command.input.Key && command.input.ConsistentRead) return {};
+      return { Attributes: {} };
+    },
+  });
+
+  try {
+    await reserveEnrichmentAttempt({
+      hex: 'ABC',
+      stage: 'image',
+      generationId: 'generation-1',
+      requestId: 'request-1',
+      now: new Date('2026-09-07T18:00:00Z'),
+    });
+
+    const update = commands.find((command) => command.input.UpdateExpression?.includes('#inProgress'));
+    assert.ok(update, 'reservation update was sent');
+    const referenced = expressionPlaceholders(`${update.input.UpdateExpression} ${update.input.ConditionExpression}`);
+    for (const placeholder of Object.keys(update.input.ExpressionAttributeValues)) {
+      assert.equal(referenced.has(placeholder), true, `${placeholder} must be referenced by the update`);
+    }
+  } finally {
+    resetEnrichmentStateClientForTests();
+  }
+});
 
 test('supported stages and states are explicit', () => {
   assert.deepEqual(ENRICHMENT_STAGES, ['tagline', 'imageTheme', 'image']);
