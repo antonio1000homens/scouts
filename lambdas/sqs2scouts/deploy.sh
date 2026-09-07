@@ -40,7 +40,7 @@ FUNCTION_NAME="${FUNCTION_NAME:-sqs2scouts}"
 LAYER_NAME="${LAYER_NAME:-scouts-shared}"
 ROLE_NAME="${ROLE_NAME:-sqs2scouts-lambda-role}"
 RUNTIME="${RUNTIME:-nodejs24.x}"
-HANDLER="${HANDLER:-image-provider-adapter.lambdaHandler}"
+HANDLER="${HANDLER:-full-enrich-adapter.lambdaHandler}"
 QUEUE_ARN="${QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing}"
 QUEUE_URL="${QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing}"
 SCOUTS_DECISION_QUEUE_ARN="${SCOUTS_DECISION_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsDecision}"
@@ -193,8 +193,6 @@ case "${IMAGE_GENERATION_PROVIDER}" in
 esac
 
 if [ "${IMAGE_GENERATION_PROVIDER}" = "cloudflare" ]; then
-  # Billing-safety invariant: selecting Cloudflare must never leave a legacy Gemini
-  # image path enabled. Text Gemini remains independent via GEMINI_ENABLED.
   GEMINI_IMAGES_ENABLED='false'
   if [ -z "${CLOUDFLARE_ACCOUNT_ID}" ]; then
     echo -e "${RED}CLOUDFLARE_ACCOUNT_ID is required when IMAGE_GENERATION_PROVIDER=cloudflare.${NC}"
@@ -225,7 +223,7 @@ echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
 (
   cd function
   rm -f sqs2scouts-lambda.zip
-  zip -jq sqs2scouts-lambda.zip sqs2scouts.mjs full-enrich-adapter.mjs full-enrich-helpers.mjs image-provider-adapter.mjs cloudflare-image-client.mjs ../scouts.conf
+  zip -jq sqs2scouts-lambda.zip sqs2scouts.mjs full-enrich-adapter.mjs full-enrich-core.mjs full-enrich-helpers.mjs image-provider-adapter.mjs cloudflare-image-client.mjs ../scouts.conf
 )
 
 echo -e "\n${YELLOW}Step 3: Upload artifacts to S3...${NC}"
