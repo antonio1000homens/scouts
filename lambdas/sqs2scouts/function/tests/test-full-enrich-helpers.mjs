@@ -36,10 +36,15 @@ test('nextUtcDay returns the next UTC midnight', () => {
   assert.equal(nextUtcDay(new Date('2026-09-07T23:59:00Z')), '2026-09-08T00:00:00.000Z');
 });
 
-test('Cloudflare free allocation exhaustion is a provider quota, not a per-event failure', () => {
+test('Cloudflare errors map to quota, retryable, and deterministic categories', () => {
   assert.equal(classifyCloudflareError({ providerCode: 3036, message: 'daily allocation exhausted' }), 'PROVIDER_QUOTA');
-  assert.equal(classifyCloudflareError({ providerCode: 3040, message: 'capacity' }), 'RATE_LIMIT');
-  assert.equal(classifyCloudflareError({ providerCode: 5035, message: 'paid plan required' }), 'MODEL_CONFIGURATION');
+  assert.equal(classifyCloudflareError({ providerCode: 3040, status: 429, message: 'capacity' }), 'RATE_LIMIT');
+  assert.equal(classifyCloudflareError({ providerCode: 5035, status: 403, message: 'paid plan required' }), 'MODEL_CONFIGURATION');
+  assert.equal(classifyCloudflareError({ providerCode: 5007, status: 400, message: 'no such model' }), 'MODEL_CONFIGURATION');
+  assert.equal(classifyCloudflareError({ providerCode: 3042, status: 404, message: 'invalid model' }), 'MODEL_CONFIGURATION');
+  assert.equal(classifyCloudflareError({ providerCode: 3007, status: 408, message: 'request timeout' }), 'NETWORK_TIMEOUT');
+  assert.equal(classifyCloudflareError({ providerCode: 3008, status: 408, message: 'aborted' }), 'NETWORK_TIMEOUT');
+  assert.equal(classifyCloudflareError({ status: 400, message: 'invalid request' }), 'INVALID_EVENT_DATA');
   assert.equal(classifyCloudflareError({ status: 503, message: 'unavailable' }), 'PROVIDER_5XX');
 });
 
