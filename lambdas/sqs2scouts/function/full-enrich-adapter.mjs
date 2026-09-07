@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import sharp from 'sharp';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
-import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, TransactWriteItemsCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { getOptionalSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import {
   buildGenerationId,
@@ -31,6 +31,10 @@ import {
 
 const AWS_REGION = process.env.AWS_REGION || 'eu-west-2';
 const TARGET_BUCKET = process.env.TARGET_BUCKET || 'scouts-2ndtolworth-prod-553490163883';
+const SCOUTS_CONFIG_KEY = text(process.env.SCOUTS_CONFIG_KEY) || 'scouts.conf';
+const SCOUTS_CONFIG_TTL_MS = Number.isFinite(Number(process.env.SCOUTS_CONFIG_TTL_MS))
+  ? Math.max(60_000, Number(process.env.SCOUTS_CONFIG_TTL_MS))
+  : 5 * 60 * 1000;
 const EVENT_IMAGE_PREFIX = 'website/eventImages/';
 const GEMINI_PROMPT_VERSION = text(process.env.GEMINI_PROMPT_VERSION) || '1';
 const USAGE_TABLE_NAME = text(process.env.GEMINI_USAGE_TABLE_NAME);
@@ -38,6 +42,19 @@ const ENRICHMENT_TABLE_NAME = text(process.env.GEMINI_ENRICHMENT_STATE_TABLE_NAM
 const IMAGE_DAILY_REQUEST_LIMIT = Number.isFinite(Number(process.env.IMAGE_GENERATION_DAILY_REQUEST_LIMIT))
   ? Math.max(0, Math.floor(Number(process.env.IMAGE_GENERATION_DAILY_REQUEST_LIMIT)))
   : 0;
+const GEMINI_DAILY_REQUEST_LIMIT = Number.isFinite(Number(process.env.GEMINI_DAILY_REQUEST_LIMIT))
+  ? Math.max(0, Math.floor(Number(process.env.GEMINI_DAILY_REQUEST_LIMIT)))
+  : 0;
+const GEMINI_IMAGE_API_VERSION = text(process.env.GEMINI_IMAGE_API_VERSION) || 'v1beta';
+const GEMINI_IMAGE_MODELS = (() => {
+  const configured = [process.env.GEMINI_IMAGE_MODELS, process.env.GEMINI_IMAGE_MODEL]
+    .filter(Boolean)
+    .join(',')
+    .split(',')
+    .map((value) => text(value))
+    .filter(Boolean);
+  return Array.from(new Set(configured.length > 0 ? configured : ['gemini-2.5-flash-image']));
+})();
 const CLOUDFLARE_ACCOUNT_ID = text(process.env.CLOUDFLARE_ACCOUNT_ID);
 const CLOUDFLARE_MODEL = text(process.env.CLOUDFLARE_AI_MODEL) || '@cf/black-forest-labs/flux-1-schnell';
 const CLOUDFLARE_STEPS = Number.isFinite(Number(process.env.CLOUDFLARE_AI_STEPS))
@@ -55,6 +72,8 @@ const SLACK_CHANNEL = '#scouts';
 const s3 = new S3Client({ region: AWS_REGION });
 const sfn = new SFNClient({ region: AWS_REGION });
 const dynamo = new DynamoDBClient({ region: AWS_REGION });
+let cachedScoutsConfig = null;
+let cachedScoutsConfigExpiresAt = 0;
 
 function usageDay(now = new Date()) {
   return now.toISOString().slice(0, 10);
@@ -79,15 +98,16 @@ function getMetadata(event) {
 }
 
 function getImageMetadata(event) {
-  const image = getMetadata(event).image;
-  return image && typeof image === 'object' ? image : {};
+  const metadataImage = getMetadata(event).image;
+  if (metadataImage && typeof metadataImage === 'object') return metadataImage;
+  return event && typeof event.image === 'object' && event.image ? event.image : {};
 }
 
 function stageFieldPresent(event, stage) {
   if (!event) return false;
-  if (stage === 'tagline') return Boolean(text(getMetadata(event).tagline));
-  if (stage === 'imageTheme') return Boolean(text(getImageMetadata(event).theme));
-  if (stage === 'image') return Boolean(text(getImageMetadata(event).url));
+  if (stage === 'tagline') return Boolean(text(getMetadata(event).tagline ?? event?.tagline ?? event?.AI));
+  if (stage === 'imageTheme') return Boolean(text(getImageMetadata(event).theme ?? event?.imageTheme));
+  if (stage === 'image') return Boolean(text(getImageMetadata(event).url ?? event?.imageUrl));
   return false;
 }
 
@@ -111,7 +131,7 @@ async function saveEvent(hex, event) {
   }));
 }
 
-function getScoutsConfig() {
+function loadBundledScoutsConfig() {
   const candidates = [new URL('./scouts.conf', import.meta.url), new URL('../scouts.conf', import.meta.url)];
   for (const candidate of candidates) {
     try {
@@ -124,10 +144,26 @@ function getScoutsConfig() {
   throw new Error('Bundled scouts.conf not found');
 }
 
-function providerGenerationId(hex, provider, event) {
-  const base = buildGenerationId(hex, 'image', event, GEMINI_PROMPT_VERSION);
-  if (provider === 'gemini') return base;
-  return crypto.createHash('sha256').update(`${base}:${provider}`).digest('hex');
+async function loadScoutsConfig(force = false) {
+  const now = Date.now();
+  if (!force && cachedScoutsConfig && cachedScoutsConfigExpiresAt > now) return cachedScoutsConfig;
+  try {
+    const response = await s3.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: SCOUTS_CONFIG_KEY }));
+    cachedScoutsConfig = JSON.parse(await response.Body.transformToString());
+    cachedScoutsConfigExpiresAt = now + SCOUTS_CONFIG_TTL_MS;
+    console.log(`[FullEnrich] Loaded scouts configuration from s3://${TARGET_BUCKET}/${SCOUTS_CONFIG_KEY}`);
+  } catch (error) {
+    console.warn('[FullEnrich] Failed to load runtime scouts.conf; using bundled fallback', error?.message || error);
+    cachedScoutsConfig = loadBundledScoutsConfig();
+    cachedScoutsConfigExpiresAt = now + 60_000;
+  }
+  return cachedScoutsConfig;
+}
+
+function providerGenerationId(hex, _provider, event) {
+  // Provider is intentionally excluded so a successfully cached image can be
+  // reused across provider migrations instead of triggering another paid call.
+  return buildGenerationId(hex, 'image', event, GEMINI_PROMPT_VERSION);
 }
 
 function emitImageMetric(provider, outcome) {
@@ -146,30 +182,34 @@ function emitImageMetric(provider, outcome) {
   }));
 }
 
+function quotaUpdate(scope, limit, now) {
+  return {
+    TableName: USAGE_TABLE_NAME,
+    Key: {
+      usageDay: { S: usageDay(now) },
+      usageScope: { S: scope },
+    },
+    UpdateExpression: 'SET #expiresAt = :expiresAt ADD #requestCount :one',
+    ConditionExpression: 'attribute_not_exists(#requestCount) OR #requestCount < :limit',
+    ExpressionAttributeNames: {
+      '#expiresAt': 'expiresAt',
+      '#requestCount': 'requestCount',
+    },
+    ExpressionAttributeValues: {
+      ':expiresAt': { N: String(ttlEpoch(now)) },
+      ':one': { N: '1' },
+      ':limit': { N: String(limit) },
+    },
+  };
+}
+
 async function reserveImageBudget(provider, now = new Date()) {
   if (!USAGE_TABLE_NAME || IMAGE_DAILY_REQUEST_LIMIT <= 0) {
     emitImageMetric(provider, 'quota_rejected');
     return false;
   }
   try {
-    await dynamo.send(new UpdateItemCommand({
-      TableName: USAGE_TABLE_NAME,
-      Key: {
-        usageDay: { S: usageDay(now) },
-        usageScope: { S: `image#${provider}` },
-      },
-      UpdateExpression: 'SET #expiresAt = :expiresAt ADD #requestCount :one',
-      ConditionExpression: 'attribute_not_exists(#requestCount) OR #requestCount < :limit',
-      ExpressionAttributeNames: {
-        '#expiresAt': 'expiresAt',
-        '#requestCount': 'requestCount',
-      },
-      ExpressionAttributeValues: {
-        ':expiresAt': { N: String(ttlEpoch(now)) },
-        ':one': { N: '1' },
-        ':limit': { N: String(IMAGE_DAILY_REQUEST_LIMIT) },
-      },
-    }));
+    await dynamo.send(new UpdateItemCommand(quotaUpdate(`image#${provider}`, IMAGE_DAILY_REQUEST_LIMIT, now)));
     emitImageMetric(provider, 'attempt');
     return true;
   } catch (error) {
@@ -179,6 +219,31 @@ async function reserveImageBudget(provider, now = new Date()) {
     }
     console.error('[ImageGeneration] Daily quota counter unavailable; blocking provider request', error?.message || error);
     emitImageMetric(provider, 'quota_counter_error');
+    return false;
+  }
+}
+
+async function reserveGeminiImageBudgets(now = new Date()) {
+  if (!USAGE_TABLE_NAME || IMAGE_DAILY_REQUEST_LIMIT <= 0 || GEMINI_DAILY_REQUEST_LIMIT <= 0) {
+    emitImageMetric('gemini', 'quota_rejected');
+    return false;
+  }
+  try {
+    await dynamo.send(new TransactWriteItemsCommand({
+      TransactItems: [
+        { Update: quotaUpdate('requests', GEMINI_DAILY_REQUEST_LIMIT, now) },
+        { Update: quotaUpdate('image#gemini', IMAGE_DAILY_REQUEST_LIMIT, now) },
+      ],
+    }));
+    emitImageMetric('gemini', 'attempt');
+    return true;
+  } catch (error) {
+    if (error?.name === 'TransactionCanceledException' || error?.name === 'ConditionalCheckFailedException') {
+      emitImageMetric('gemini', 'quota_rejected');
+      return false;
+    }
+    console.error('[ImageGeneration] Gemini quota counters unavailable; blocking provider request', error?.message || error);
+    emitImageMetric('gemini', 'quota_counter_error');
     return false;
   }
 }
@@ -289,19 +354,58 @@ async function callCloudflare(prompt) {
   return Buffer.from(image, 'base64');
 }
 
+function extractInlineImageData(response) {
+  const generatedImages = Array.isArray(response?.generatedImages) ? response.generatedImages : [];
+  for (const entry of generatedImages) {
+    const image = entry?.image ?? entry;
+    const data = image?.imageBytes ?? image?.bytesBase64Encoded ?? image?.base64Data ?? image?.data ?? null;
+    if (data) return { data, mimeType: image?.mimeType ?? image?.mediaType ?? image?.contentType ?? 'image/png' };
+  }
+  for (const candidate of Array.isArray(response?.candidates) ? response.candidates : []) {
+    for (const part of Array.isArray(candidate?.content?.parts) ? candidate.content.parts : []) {
+      const inline = part?.inlineData ?? part?.inline_data ?? null;
+      if (inline?.data) return { data: inline.data, mimeType: inline.mimeType ?? inline.mime_type ?? 'image/png' };
+    }
+  }
+  return null;
+}
+
+async function callGemini(prompt) {
+  const token = await getOptionalSecret('GEMINI_API_KEY_PARAMETER', '');
+  if (!token) throw Object.assign(new Error('Gemini API key is not configured'), { status: 401 });
+  const { GoogleGenAI } = await import('@google/genai');
+  const client = new GoogleGenAI({ apiKey: token, apiVersion: GEMINI_IMAGE_API_VERSION });
+  let lastError = null;
+  for (const model of GEMINI_IMAGE_MODELS) {
+    try {
+      const response = /^imagen-/i.test(model)
+        ? await client.models.generateImages({ model, prompt, config: { numberOfImages: 1, aspectRatio: '16:9' } })
+        : await client.models.generateContent({ model, contents: prompt });
+      const inline = extractInlineImageData(response);
+      if (!inline?.data) throw new Error(`Gemini model ${model} returned no image data`);
+      return { buffer: Buffer.from(inline.data, 'base64'), model, mimeType: inline.mimeType || 'image/png' };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (Number(error?.status ?? error?.response?.status) === 404) continue;
+      throw lastError;
+    }
+  }
+  throw lastError || new Error('No configured Gemini image model returned an image');
+}
+
 function safeKeyPart(value, fallback = 'event') {
   const result = String(value || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
   return result || fallback;
 }
 
-async function uploadCloudflareImage(buffer, { hex, requestId }) {
+async function uploadGeneratedImage(buffer, { hex, requestId, provider }) {
   const jpeg = await sharp(buffer)
     .rotate()
     .trim()
     .resize({ width: IMAGE_WIDTH, height: IMAGE_HEIGHT, fit: 'inside', withoutEnlargement: true })
     .jpeg({ mozjpeg: true, quality: 85 })
     .toBuffer();
-  const key = `${EVENT_IMAGE_PREFIX}${safeKeyPart(hex, 'hex')}-${safeKeyPart(requestId, String(Date.now()))}-cloudflare.jpg`;
+  const key = `${EVENT_IMAGE_PREFIX}${safeKeyPart(hex, 'hex')}-${safeKeyPart(requestId, String(Date.now()))}-${safeKeyPart(provider)}.jpg`;
   await s3.send(new PutObjectCommand({
     Bucket: TARGET_BUCKET,
     Key: key,
@@ -322,40 +426,32 @@ async function persistGeneratedImage({ hex, event, generatedValue, generationId 
   await markEnrichmentSucceeded({ hex, stage: 'image', generationId });
 }
 
-async function processCloudflareImage(message) {
+async function processImageProvider(message, provider) {
   const hex = getHex(message);
-  if (!hex) throw new Error('Cloudflare fullEnrich image request missing HEX');
+  if (!hex) throw new Error(`${provider} fullEnrich image request missing HEX`);
   const event = await loadEvent(hex);
   if (!event) throw new Error(`HEX ${hex} not found`);
-  const imageTheme = text(getImageMetadata(event).theme);
-  const prompt = buildImageGenerationPrompt(imageTheme, getScoutsConfig());
+  const imageTheme = text(getImageMetadata(event).theme ?? event?.imageTheme);
+  const prompt = buildImageGenerationPrompt(imageTheme, await loadScoutsConfig());
   if (!prompt) throw new Error(`HEX ${hex} is missing a valid image theme/prompt configuration`);
-  const generationId = providerGenerationId(hex, 'cloudflare', event);
+  const generationId = providerGenerationId(hex, provider, event);
 
   const reusable = await loadReusableGeneration({ hex, stage: 'image', generationId }).catch(() => null);
   if (reusable?.generatedValue?.relativeUrl) {
     await persistGeneratedImage({ hex, event, generatedValue: reusable.generatedValue, generationId });
-    emitImageMetric('cloudflare', 'reused');
+    emitImageMetric(provider, 'reused');
     const state = await getEnrichmentState(hex, 'image');
-    return buildCallbackResultFromState({ state, stage: 'image', hex, provider: 'cloudflare', generationId, fallbackStatus: 'succeeded' });
+    return buildCallbackResultFromState({ state, stage: 'image', hex, provider, generationId, fallbackStatus: 'succeeded' });
   }
 
   const currentState = await getEnrichmentState(hex, 'image').catch(() => null);
   const eligibility = evaluateEnrichmentEligibility(currentState, new Date(), generationId);
   if (!eligibility.eligible) {
-    return buildCallbackResultFromState({ state: currentState, stage: 'image', hex, provider: 'cloudflare', generationId, fallbackStatus: eligibility.reason });
+    return buildCallbackResultFromState({ state: currentState, stage: 'image', hex, provider, generationId, fallbackStatus: eligibility.reason });
   }
 
-  if (!await reserveImageBudget('cloudflare')) {
-    const state = await markQuotaDeferralWithoutAttempt({
-      hex,
-      attemptCount: currentState?.attemptCount || 0,
-      error: new Error('Image generation daily safety limit reached'),
-      errorType: 'GLOBAL_QUOTA',
-    });
-    return buildCallbackResultFromState({ state, stage: 'image', hex, provider: 'cloudflare', generationId, fallbackStatus: 'quota' });
-  }
-
+  // Own the stage before charging any global/provider budget. A duplicate delivery
+  // that loses this conditional reservation consumes no budget and sends no callback.
   const reservation = await reserveEnrichmentAttempt({
     hex,
     stage: 'image',
@@ -363,39 +459,54 @@ async function processCloudflareImage(message) {
     requestId: text(message.requestId),
   });
   if (!reservation?.reserved) {
-    return buildCallbackResultFromState({ state: reservation?.state, stage: 'image', hex, provider: 'cloudflare', generationId, fallbackStatus: reservation?.reason });
+    return buildCallbackResultFromState({ state: reservation?.state, stage: 'image', hex, provider, generationId, fallbackStatus: reservation?.reason });
+  }
+
+  const budgetAllowed = provider === 'gemini'
+    ? await reserveGeminiImageBudgets()
+    : await reserveImageBudget(provider);
+  if (!budgetAllowed) {
+    const state = await markQuotaDeferralWithoutAttempt({
+      hex,
+      attemptCount: reservation?.state?.attemptCount || 0,
+      error: new Error('Image generation daily safety limit reached'),
+      errorType: 'GLOBAL_QUOTA',
+      attemptWasReserved: true,
+    });
+    return buildCallbackResultFromState({ state, stage: 'image', hex, provider, generationId, fallbackStatus: 'quota' });
   }
 
   try {
-    const imageBuffer = await callCloudflare(prompt);
-    const relativeUrl = await uploadCloudflareImage(imageBuffer, { hex, requestId: text(message.requestId) });
+    const generated = provider === 'cloudflare'
+      ? { buffer: await callCloudflare(prompt), model: CLOUDFLARE_MODEL, mimeType: 'image/jpeg' }
+      : await callGemini(prompt);
+    const relativeUrl = await uploadGeneratedImage(generated.buffer, { hex, requestId: text(message.requestId), provider });
     const generatedValue = {
       relativeUrl,
       mimeType: 'image/jpeg',
       prompt,
-      provider: 'cloudflare',
-      model: CLOUDFLARE_MODEL,
+      provider,
+      model: generated.model,
     };
 
     // Cache provider success before updating the event JSON. If persistence fails,
-    // the next eligible execution reuses this value rather than calling Cloudflare again.
+    // the next delivery reuses this value rather than calling a provider again.
     await markGeminiSucceeded({ hex, stage: 'image', generationId, generatedValue });
     try {
       await persistGeneratedImage({ hex, event, generatedValue, generationId });
     } catch (persistenceError) {
-      console.error('[CloudflareImage] Provider succeeded but event persistence failed', persistenceError?.message || persistenceError);
-      emitImageMetric('cloudflare', 'persistence_retry');
+      console.error(`[${provider}Image] Provider succeeded but event persistence failed`, persistenceError?.message || persistenceError);
+      emitImageMetric(provider, 'persistence_retry');
       const state = await getEnrichmentState(hex, 'image').catch(() => null);
-      return buildCallbackResultFromState({ state, stage: 'image', hex, provider: 'cloudflare', generationId, fallbackStatus: 'persistence_pending' });
+      return buildCallbackResultFromState({ state, stage: 'image', hex, provider, generationId, fallbackStatus: 'persistence_pending' });
     }
-    emitImageMetric('cloudflare', 'success');
+    emitImageMetric(provider, 'success');
     const state = await getEnrichmentState(hex, 'image').catch(() => null);
-    return buildCallbackResultFromState({ state, stage: 'image', hex, provider: 'cloudflare', generationId, fallbackStatus: 'succeeded' });
+    return buildCallbackResultFromState({ state, stage: 'image', hex, provider, generationId, fallbackStatus: 'succeeded' });
   } catch (error) {
-    emitImageMetric('cloudflare', 'failure');
-    const category = classifyCloudflareError(error);
+    emitImageMetric(provider, 'failure');
     let state;
-    if (category === 'PROVIDER_QUOTA') {
+    if (provider === 'cloudflare' && classifyCloudflareError(error) === 'PROVIDER_QUOTA') {
       state = await markQuotaDeferralWithoutAttempt({
         hex,
         attemptCount: reservation?.state?.attemptCount,
@@ -404,7 +515,7 @@ async function processCloudflareImage(message) {
         attemptWasReserved: true,
       });
     } else {
-      if (category === 'MODEL_CONFIGURATION') error.status = 404;
+      if (provider === 'cloudflare' && classifyCloudflareError(error) === 'MODEL_CONFIGURATION') error.status = 404;
       state = await markEnrichmentFailure({
         hex,
         stage: 'image',
@@ -412,58 +523,14 @@ async function processCloudflareImage(message) {
         attemptCount: reservation?.state?.attemptCount,
       }).catch(() => null);
     }
-    await notifyTransition('image', state, { hex, provider: 'cloudflare', requestId: text(message.requestId) });
-    return buildCallbackResultFromState({ state, stage: 'image', hex, provider: 'cloudflare', generationId, fallbackStatus: category });
+    await notifyTransition('image', state, { hex, provider, requestId: text(message.requestId) });
+    return buildCallbackResultFromState({ state, stage: 'image', hex, provider, generationId, fallbackStatus: provider === 'cloudflare' ? classifyCloudflareError(error) : 'provider_failure' });
   }
 }
 
-async function reserveGeminiImageBudgetIfNeeded(message) {
-  const stage = normaliseStage(message?.orchestrationStep ?? message?.realm);
-  if (stage !== 'image' || normaliseImageProvider(message?.imageProvider) !== 'gemini') return { allowed: true };
-  const hex = getHex(message);
-  if (!hex) return { allowed: false, result: { status: 'manual_review', stage: 'image', hex: null, provider: 'gemini', failureCategory: 'INVALID_EVENT_DATA', attemptCount: 0 } };
-  const event = await loadEvent(hex);
-  if (!event) return { allowed: false, result: { status: 'manual_review', stage: 'image', hex, provider: 'gemini', failureCategory: 'INVALID_EVENT_DATA', attemptCount: 0 } };
-  const generationId = providerGenerationId(hex, 'gemini', event);
-  const reusable = await loadReusableGeneration({ hex, stage: 'image', generationId }).catch(() => null);
-  if (reusable) return { allowed: true, generationId, reused: true };
-
-  const currentState = await getEnrichmentState(hex, 'image').catch(() => null);
-  const eligibility = evaluateEnrichmentEligibility(currentState, new Date(), generationId);
-  if (!eligibility.eligible) {
-    return {
-      allowed: false,
-      result: buildCallbackResultFromState({
-        state: currentState,
-        stage: 'image',
-        hex,
-        provider: 'gemini',
-        generationId,
-        fallbackStatus: eligibility.reason,
-      }),
-    };
-  }
-
-  const allowed = await reserveImageBudget('gemini');
-  if (!allowed) {
-    const state = await markQuotaDeferralWithoutAttempt({
-      hex,
-      attemptCount: currentState?.attemptCount || 0,
-      error: new Error('Image generation daily safety limit reached'),
-      errorType: 'GLOBAL_QUOTA',
-    });
-    return {
-      allowed: false,
-      result: buildCallbackResultFromState({ state, stage: 'image', hex, provider: 'gemini', generationId, fallbackStatus: 'quota' }),
-    };
-  }
-  return { allowed: true, generationId, reused: false };
-}
-
-async function resultAfterLegacy(message, response, knownGenerationId = null) {
+async function resultAfterLegacy(message, response) {
   const stage = normaliseStage(message?.orchestrationStep ?? message?.realm);
   const hex = getHex(message);
-  const provider = stage === 'image' ? normaliseImageProvider(message?.imageProvider) : null;
   const state = hex && stage ? await getEnrichmentState(hex, stage).catch(() => null) : null;
   const event = hex ? await loadEvent(hex).catch(() => null) : null;
   const statusCode = Number(response?.statusCode || 0);
@@ -471,14 +538,7 @@ async function resultAfterLegacy(message, response, knownGenerationId = null) {
   if (stageFieldPresent(event, stage)) fallbackStatus = 'succeeded';
   else if (statusCode === 202) fallbackStatus = 'quota';
   else if (statusCode >= 500 && !state) throw new Error(`Legacy ${stage || 'enrichment'} worker failed without persisted safety state`);
-  return buildCallbackResultFromState({
-    state,
-    stage,
-    hex,
-    provider,
-    generationId: knownGenerationId,
-    fallbackStatus,
-  });
+  return buildCallbackResultFromState({ state, stage, hex, fallbackStatus });
 }
 
 async function sendTaskSuccess(message, result) {
@@ -510,22 +570,16 @@ function parseRecord(record) {
 async function handleFullRecord(record, message) {
   const stage = normaliseStage(message?.orchestrationStep ?? message?.realm);
   const provider = stage === 'image' ? normaliseImageProvider(message?.imageProvider) : null;
+  let result;
+
   try {
-    let result;
-    if (stage === 'image' && provider === 'cloudflare') {
-      result = await processCloudflareImage(message);
+    if (stage === 'image') {
+      if (!provider) throw new Error(`Unsupported image provider: ${message?.imageProvider || 'missing'}`);
+      result = await processImageProvider(message, provider);
     } else {
-      if (stage === 'image' && provider !== 'gemini') throw new Error(`Unsupported image provider: ${message?.imageProvider || 'missing'}`);
-      const budget = await reserveGeminiImageBudgetIfNeeded(message);
-      if (!budget.allowed) {
-        result = budget.result;
-      } else {
-        const response = await legacyHandler({ Records: [record] });
-        result = await resultAfterLegacy(message, response, budget.generationId || null);
-      }
+      const response = await legacyHandler({ Records: [record] });
+      result = await resultAfterLegacy(message, response);
     }
-    console.log('[FullEnrich] Stage result', JSON.stringify(result));
-    await sendTaskSuccess(message, result);
   } catch (error) {
     console.error('[FullEnrich] Stage processing failed', {
       message: error?.message || String(error),
@@ -533,8 +587,25 @@ async function handleFullRecord(record, message) {
       stage,
       provider,
     });
+    // If failure-callback delivery itself fails, let it escape so SQS retries.
     await sendTaskFailure(message, error);
+    return;
   }
+
+  console.log('[FullEnrich] Stage result', JSON.stringify(result));
+  if (result?.status === 'duplicate_in_progress') {
+    console.log('[FullEnrich] Duplicate delivery acknowledged without callback; reservation owner retains task token', {
+      hex: getHex(message),
+      stage,
+      provider,
+    });
+    return;
+  }
+
+  // Success-callback transport is deliberately outside the processing catch.
+  // A transient SendTaskSuccess failure therefore retries via SQS rather than
+  // converting a successfully persisted provider result into SendTaskFailure.
+  await sendTaskSuccess(message, result);
 }
 
 export async function lambdaHandler(event) {
