@@ -25,7 +25,7 @@ Parameters:
     Default: nodejs24.x
   Handler:
     Type: String
-    Default: image-provider-adapter.lambdaHandler
+    Default: full-enrich-adapter.lambdaHandler
   Timeout:
     Type: Number
     Default: 90
