@@ -50,6 +50,10 @@ function isTerminalState(state) {
   return ['completed', 'needs_attention', 'manual_review', 'failed'].includes(state);
 }
 
+function isStepFunctionsLifecycle(entry) {
+  return Boolean(text(entry?.executionArn));
+}
+
 function normaliseSnapshotEntry(entry, state, source) {
   const requestId = requestIdOf(entry);
   const hex = hexOf(entry);
@@ -88,13 +92,30 @@ function mergeTimeline(left = [], right = []) {
 function mergeLifecycle(existing, incoming) {
   if (!existing) return incoming;
   if (!incoming) return existing;
+
+  const existingExecution = isStepFunctionsLifecycle(existing);
+  const incomingExecution = isStepFunctionsLifecycle(incoming);
   const existingPriority = lifecyclePriority(existing.state);
   const incomingPriority = lifecyclePriority(incoming.state);
   const bothTerminal = isTerminalState(existing.state) && isTerminalState(incoming.state);
-  const preferIncoming = bothTerminal
-    ? timestamp(incoming.updatedAt) >= timestamp(existing.updatedAt)
-    : incomingPriority > existingPriority
+
+  let preferIncoming;
+  if (existingExecution || incomingExecution) {
+    // Step Functions owns the end-to-end orchestration lifecycle. Runtime
+    // "completed" snapshots only mean an individual worker message finished,
+    // so they must never hide a still-running/deferred/failed execution.
+    if (existingExecution && incomingExecution) {
+      preferIncoming = timestamp(incoming.updatedAt) >= timestamp(existing.updatedAt);
+    } else {
+      preferIncoming = incomingExecution;
+    }
+  } else if (bothTerminal) {
+    preferIncoming = timestamp(incoming.updatedAt) >= timestamp(existing.updatedAt);
+  } else {
+    preferIncoming = incomingPriority > existingPriority
       || (incomingPriority === existingPriority && timestamp(incoming.updatedAt) >= timestamp(existing.updatedAt));
+  }
+
   const primary = preferIncoming ? incoming : existing;
   const secondary = preferIncoming ? existing : incoming;
   return {
@@ -107,7 +128,9 @@ function mergeLifecycle(existing, incoming) {
     realm: primary.realm || secondary.realm || null,
     operation: primary.operation || secondary.operation || null,
     createdAt: [existing.createdAt, incoming.createdAt].filter(Boolean).sort((a, b) => timestamp(a) - timestamp(b))[0] || null,
-    updatedAt: [existing.updatedAt, incoming.updatedAt].filter(Boolean).sort((a, b) => timestamp(b) - timestamp(a))[0] || null,
+    // updatedAt describes the currently selected lifecycle state, rather than
+    // whichever telemetry source happened to write most recently.
+    updatedAt: primary.updatedAt || secondary.updatedAt || null,
     queueMessageIds: { ...(existing.queueMessageIds || {}), ...(incoming.queueMessageIds || {}) },
     timeline: mergeTimeline(existing.timeline, incoming.timeline),
   };
@@ -144,9 +167,11 @@ function executionStage(execution) {
 function executionState(execution, stage) {
   const status = text(execution?.status).toUpperCase();
   if (['FAILED', 'TIMED_OUT', 'ABORTED'].includes(status)) return 'needs_attention';
-  if (status === 'SUCCEEDED') return 'completed';
+
   const normalisedStage = text(stage).toLowerCase();
+  if (normalisedStage === 'manual_review') return 'manual_review';
   if (normalisedStage === 'waiting_for_retry') return 'waiting_for_retry';
+  if (status === 'SUCCEEDED') return 'completed';
   if (normalisedStage === 'persisting') return 'persisting';
   if (normalisedStage === 'tagline') return 'waiting_for_tagline';
   if (normalisedStage === 'imagetheme') return 'waiting_for_image_theme';
@@ -182,6 +207,20 @@ function reconcileOrphanedTracking(request, queueHealth, nowMs) {
       source: 'queue-health',
     }]),
   };
+}
+
+function canCorrelateExecutionByHex(execution, request) {
+  if (!execution?.hex || execution.hex !== request?.hex) return false;
+  if (lifecyclePriority(request.state) >= lifecyclePriority('completed')) return false;
+
+  const executionStartedAt = timestamp(execution?.startDate);
+  const requestCreatedAt = timestamp(request?.createdAt || request?.updatedAt);
+  if (!executionStartedAt || !requestCreatedAt) return true;
+
+  // Legacy executions used an execution-derived request ID. Permit HEX fallback
+  // only for requests started near that execution, preventing an old execution
+  // for the same event from attaching to a newer admin request.
+  return Math.abs(executionStartedAt - requestCreatedAt) <= 6 * 60 * 60 * 1000;
 }
 
 export function buildCanonicalActivity({
@@ -221,10 +260,11 @@ export function buildCanonicalActivity({
   for (const execution of Array.isArray(executions) ? executions : []) {
     const requestId = text(execution?.requestId);
     const hex = text(execution?.hex).toLowerCase();
+    const normalisedExecution = { ...execution, requestId, hex };
     let key = requestId ? `request:${requestId}` : '';
     if (!key || !byKey.has(key)) {
       const candidates = [...byKey.entries()]
-        .filter(([, item]) => hex && item.hex === hex && lifecyclePriority(item.state) < lifecyclePriority('completed'))
+        .filter(([, item]) => canCorrelateExecutionByHex(normalisedExecution, item))
         .sort((a, b) => timestamp(b[1]?.updatedAt) - timestamp(a[1]?.updatedAt));
       key = candidates[0]?.[0] || key || `execution:${text(execution?.executionArn) || byKey.size}`;
     }
@@ -240,10 +280,11 @@ export function buildCanonicalActivity({
       state,
       stage,
       executionArn: text(execution?.executionArn) || existing?.executionArn || null,
+      executionStateName: text(execution?.stateName) || null,
       updatedAt: at,
       failure: state === 'needs_attention' ? {
-        type: text(execution?.status) || 'FAILED',
-        message: text(execution?.error || execution?.cause) || null,
+        type: text(execution?.error || execution?.status) || 'FAILED',
+        message: text(execution?.cause) || null,
       } : null,
       timeline: [{ state, stage, at, source: 'step-functions' }],
     };
