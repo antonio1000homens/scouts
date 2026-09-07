@@ -201,11 +201,38 @@ Resources:
                     - states:ListExecutions
                   Resource: !Ref FullEnrichStateMachineArn
                 - !Ref AWS::NoValue
-              - Effect: Allow
-                Action:
-                  - states:DescribeExecution
-                  - states:GetExecutionHistory
-                Resource: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:*:*
+              - !If
+                - HasImageEnrichStateMachineArn
+                - Effect: Allow
+                  Action:
+                    - states:DescribeExecution
+                    - states:GetExecutionHistory
+                  Resource:
+                    - !Sub
+                      - arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${StateMachineName}:*
+                      - StateMachineName:
+                          Fn::Select:
+                            - 6
+                            - Fn::Split:
+                                - ':'
+                                - !Ref ImageEnrichStateMachineArn
+                - !Ref AWS::NoValue
+              - !If
+                - HasFullEnrichStateMachineArn
+                - Effect: Allow
+                  Action:
+                    - states:DescribeExecution
+                    - states:GetExecutionHistory
+                  Resource:
+                    - !Sub
+                      - arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${StateMachineName}:*
+                      - StateMachineName:
+                          Fn::Select:
+                            - 6
+                            - Fn::Split:
+                                - ':'
+                                - !Ref FullEnrichStateMachineArn
+                - !Ref AWS::NoValue
 
   ScoutsFunction:
     Type: AWS::Lambda::Function
