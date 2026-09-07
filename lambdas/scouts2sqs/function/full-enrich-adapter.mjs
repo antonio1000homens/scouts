@@ -21,6 +21,16 @@ function text(value) {
   return result || null;
 }
 
+function bool(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'n', 'off'].includes(normalized)) return false;
+  return null;
+}
+
 export function normaliseImageProvider(value) {
   const provider = text(value)?.toLowerCase() || 'disabled';
   return ['cloudflare', 'gemini', 'disabled'].includes(provider) ? provider : 'disabled';
@@ -73,10 +83,29 @@ export function getHexFromMessage(message) {
   return getHexFromSubject(message?.subject);
 }
 
+function requestedField(message) {
+  return text(message?.subjectLabel ?? message?.subject);
+}
+
+function requestedStartStage(message) {
+  const field = requestedField(message);
+  if (field === 'tagline') return 'tagline';
+  if (field === 'imageTheme') return 'imageTheme';
+  if (field === 'imageUrl' || field === 'image') return 'image';
+  return null;
+}
+
 export function isFullEnrichStageRequest(message) {
   return text(message?.realm) === 'scoutsRequest'
     && text(message?.action) === 'request'
     && text(message?.orchestrationType) === 'fullEnrich';
+}
+
+export function isDirectImageEnrichRequest(message) {
+  return text(message?.realm) === 'scoutsRequest'
+    && text(message?.action) === 'request'
+    && !text(message?.orchestrationType)
+    && requestedStartStage(message) === 'image';
 }
 
 export function isFullEnrichStartRequest(message) {
@@ -84,8 +113,12 @@ export function isFullEnrichStartRequest(message) {
   return new Set(['new', 'retry', 'imageEnrich', 'fullEnrich']).has(text(message?.action));
 }
 
+export function isCompactPersistRequest(message) {
+  return text(message?.realm) === 'persist' && text(message?.action) === 'persist';
+}
+
 function requestedStage(message) {
-  const logical = text(message?.subjectLabel ?? message?.subject);
+  const logical = requestedField(message);
   if (logical === 'tagline') return { realm: 'tagline', subjectLabel: 'tagline', stage: 'tagline' };
   if (logical === 'imageTheme') return { realm: 'imageTheme', subjectLabel: 'imageTheme', stage: 'imageTheme' };
   if (logical === 'imageUrl' || logical === 'image') return { realm: 'image', subjectLabel: 'imageUrl', stage: 'image' };
@@ -94,7 +127,7 @@ function requestedStage(message) {
 
 export function translateFullEnrichStageRequest(message) {
   const stage = requestedStage(message);
-  if (!stage) throw new Error(`Unsupported fullEnrich stage: ${text(message?.subjectLabel ?? message?.subject) || 'missing'}`);
+  if (!stage) throw new Error(`Unsupported fullEnrich stage: ${requestedField(message) || 'missing'}`);
   const hex = getHexFromMessage(message);
   if (!hex) throw new Error('fullEnrich stage request missing HEX');
 
@@ -113,6 +146,49 @@ export function translateFullEnrichStageRequest(message) {
     requestMode: text(message?.requestMode) || 'auto',
     approvalMode: text(message?.approvalMode) || 'auto',
     ...(text(message?.imageProvider) ? { imageProvider: normaliseImageProvider(message.imageProvider) } : {}),
+  };
+}
+
+export function translateCompactPersistRequest(message) {
+  if (!isCompactPersistRequest(message)) throw new Error('Not a persist request');
+  const subject = message?.subject && typeof message.subject === 'object' ? message.subject : {};
+  const metadata = subject.metadata && typeof subject.metadata === 'object' ? subject.metadata : {};
+  const metadataImage = metadata.image && typeof metadata.image === 'object' ? metadata.image : {};
+  const metadataStatus = metadata.status && typeof metadata.status === 'object' ? metadata.status : {};
+  const hex = getHexFromMessage(message);
+  if (!hex) throw new Error('Persist request missing hex identifier');
+
+  const canonicalMetadata = { hex };
+  const tagline = text(metadata.tagline ?? subject.tagline ?? null);
+  if (tagline !== null) canonicalMetadata.tagline = tagline;
+
+  const imageTheme = text(metadataImage.theme ?? subject.imageTheme ?? subject.image?.theme ?? null);
+  const imageUrl = text(metadataImage.url ?? subject.imageUrl ?? subject.image?.url ?? null);
+  if (imageTheme !== null || imageUrl !== null) {
+    canonicalMetadata.image = {};
+    if (imageTheme !== null) canonicalMetadata.image.theme = imageTheme;
+    if (imageUrl !== null) canonicalMetadata.image.url = imageUrl;
+  }
+
+  const isHidden = bool(metadataStatus.isHidden ?? subject.isHidden ?? subject.hidden ?? null);
+  const isApproved = bool(metadataStatus.isApproved ?? subject.isApproved ?? subject.approved ?? null);
+  if (isHidden !== null || isApproved !== null) {
+    canonicalMetadata.status = {};
+    if (isHidden !== null) canonicalMetadata.status.isHidden = isHidden;
+    if (isApproved !== null) canonicalMetadata.status.isApproved = isApproved;
+  }
+
+  const patchFieldCount = Object.keys(canonicalMetadata).filter((key) => key !== 'hex').length;
+  if (patchFieldCount === 0) throw new Error('Persist request did not include any patchable fields');
+
+  return {
+    realm: 'persist',
+    action: 'persist',
+    subject: { metadata: canonicalMetadata },
+    hex,
+    requestHex: text(message?.requestHex) || hex,
+    requestId: text(message?.requestId),
+    source: text(message?.source) || 'scouts2sqs',
   };
 }
 
@@ -150,7 +226,8 @@ function executionName(prefix) {
 export function buildFullEnrichExecutionInput(message, event, name = null) {
   const hex = getHexFromMessage(message) || getHexFromSubject(event);
   if (!hex) throw new Error('fullEnrich request missing HEX');
-  const startStage = determineStartStage(event);
+  const explicitStart = isDirectImageEnrichRequest(message) ? requestedStartStage(message) : null;
+  const startStage = explicitStart || determineStartStage(event);
   const imageProvider = normaliseImageProvider(message?.imageProvider || DEFAULT_IMAGE_PROVIDER);
   const prefix = executionPrefix(hex, event);
   return {
@@ -259,6 +336,15 @@ async function forwardStageRequest(message) {
   });
 }
 
+async function forwardPersistRequest(message) {
+  const translated = translateCompactPersistRequest(message);
+  await sqs.send(new SendMessageCommand({ QueueUrl: PROCESSING_QUEUE_URL, MessageBody: JSON.stringify(translated) }));
+  console.log('[FullEnrich] Forwarded canonical persist patch to processing queue', {
+    hex: translated.hex,
+    requestId: translated.requestId || null,
+  });
+}
+
 function parseRecord(record) {
   if (!record || record.eventSource !== 'aws:sqs') return null;
   try { return typeof record.body === 'string' ? JSON.parse(record.body) : record.body; } catch { return null; }
@@ -296,11 +382,15 @@ async function isAuthorisedHttpRequest(event) {
 }
 
 async function handleMessage(message) {
+  if (isCompactPersistRequest(message)) {
+    await forwardPersistRequest(message);
+    return { intercepted: true, result: { status: 'forwarded', requestId: text(message?.requestId) } };
+  }
   if (isFullEnrichStageRequest(message)) {
     await forwardStageRequest(message);
     return { intercepted: true, result: { status: 'forwarded', requestId: text(message?.requestId) } };
   }
-  if (isFullEnrichStartRequest(message)) {
+  if (isDirectImageEnrichRequest(message) || isFullEnrichStartRequest(message)) {
     return { intercepted: true, result: await startFullEnrich(message) };
   }
   return { intercepted: false, result: null };
@@ -330,11 +420,16 @@ export async function lambdaHandler(event) {
       }
     }
     if (delegatedRecords.length > 0) return legacyHandler({ ...event, Records: delegatedRecords });
-    return { statusCode: 200, body: 'Full enrichment requests processed' };
+    return { statusCode: 200, body: 'Canonical Scouts requests processed' };
   }
 
   const body = parseHttpBody(event);
-  if (body && (isFullEnrichStageRequest(body) || isFullEnrichStartRequest(body))) {
+  if (body && (
+    isCompactPersistRequest(body)
+    || isFullEnrichStageRequest(body)
+    || isDirectImageEnrichRequest(body)
+    || isFullEnrichStartRequest(body)
+  )) {
     try {
       if (!await isAuthorisedHttpRequest(event)) {
         return {
