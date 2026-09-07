@@ -101,12 +101,12 @@
 .activity-status { font-weight: 700; }
 .activity-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* The detailed requests/runtime UI remains available in Diagnostics only. */
-.events-layout > .requests-sidebar,
-.admin-container > .admin-runtime-footer { display: none; }
+/* Hide the legacy runtime panels only after the simplify layer has initialized. */
+body.admin-simplify-ready .events-layout > .requests-sidebar,
+body.admin-simplify-ready .admin-container > .admin-runtime-footer { display: none; }
 
-.admin-diagnostics-body .requests-sidebar,
-.admin-diagnostics-body .admin-runtime-footer { display: block; }
+body.admin-simplify-ready .admin-diagnostics-body .requests-sidebar,
+body.admin-simplify-ready .admin-diagnostics-body .admin-runtime-footer { display: block; }
 
 /* Never use age-only stall styling in the simplified presentation. */
 .admin-primary-summary .badge-queued-stalled,
