@@ -6,8 +6,8 @@ import { loadFunctionsFromSource } from './helpers/source-function-loader.mjs';
 const processorSource = readFileSync('lambdas/sqs2scouts/function/sqs2scouts.mjs', 'utf8');
 const publicSource = readFileSync('website/scripts/event-loader.js', 'utf8');
 
-const LEGACY_S3_SITE_ORIGIN = 'https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com';
-const S3_OBJECT_BASE_URL = LEGACY_S3_SITE_ORIGIN;
+const LEGACY_S3_SITE_ORIGIN = 'https://legacy.invalid';
+const S3_OBJECT_BASE_URL = 'https://objects.invalid';
 
 test('Slack approval action IDs retain the documented processing mapping', () => {
   const { functions } = loadFunctionsFromSource(processorSource, ['mapActionId']);
