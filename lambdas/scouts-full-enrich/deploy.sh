@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Scouts full-enrich Step Functions POC deployment via CloudFormation
+# Scouts full-enrich Step Functions deployment via CloudFormation
 
 set -euo pipefail
 
@@ -15,6 +15,9 @@ if [ -f "${ROOT_DIR}/.env" ]; then
 fi
 
 REGION="${AWS_REGION:-eu-west-2}"
+# Keep the existing managed stack/name from issue #20. AWS also contains an
+# older unmanaged state machine named scouts-full-enrich, so changing to that
+# physical name here would collide rather than perform a safe cutover.
 STACK_NAME="${STACK_NAME:-scouts-full-enrich-managed-poc}"
 EXPECTED_AWS_ACCOUNT="${EXPECTED_AWS_ACCOUNT:-553490163883}"
 CLOUDFORMATION_ROLE_ARN="${CLOUDFORMATION_ROLE_ARN:-}"
@@ -23,8 +26,6 @@ if [ -z "${AWS_ACCESS_KEY_ID:-}" ] && [ -z "${AWS_WEB_IDENTITY_TOKEN_FILE:-}" ] 
   export AWS_PROFILE="${AWS_PROFILE_NAME:-${AWS_PROFILE:-scouts}}"
 fi
 
-# AWS already contains an unmanaged scouts-full-enrich POC. Use a distinct
-# CloudFormation-managed name so this source-controlled POC is non-destructive.
 STATE_MACHINE_NAME="${STATE_MACHINE_NAME:-scouts-full-enrich-managed-poc}"
 REQUESTS_QUEUE_URL="${REQUESTS_QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests}"
 REQUESTS_QUEUE_ARN="${REQUESTS_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsRequests}"
@@ -38,15 +39,13 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${BLUE}=== Scouts Full Enrich Step Functions POC Deployment ===${NC}"
+echo -e "${BLUE}=== Scouts Full Enrich Step Functions Deployment ===${NC}"
 
 cleanup_failed_stack() {
   local stack_status
-
   if ! aws cloudformation describe-stacks --region "${REGION}" --stack-name "${STACK_NAME}" >/dev/null 2>&1; then
     return 0
   fi
-
   stack_status="$(aws cloudformation describe-stacks --region "${REGION}" --stack-name "${STACK_NAME}" --query 'Stacks[0].StackStatus' --output text)"
   if [ "${stack_status}" = "ROLLBACK_COMPLETE" ]; then
     echo -e "${YELLOW}Stack ${STACK_NAME} is in ROLLBACK_COMPLETE; deleting before redeploy.${NC}"
@@ -82,11 +81,7 @@ CFN_DEPLOY_ARGS=(
   --template-file "${TEMPLATE_FILE}"
   --capabilities CAPABILITY_NAMED_IAM
 )
-
-if [ -n "${CLOUDFORMATION_ROLE_ARN}" ]; then
-  CFN_DEPLOY_ARGS+=(--role-arn "${CLOUDFORMATION_ROLE_ARN}")
-fi
-
+if [ -n "${CLOUDFORMATION_ROLE_ARN}" ]; then CFN_DEPLOY_ARGS+=(--role-arn "${CLOUDFORMATION_ROLE_ARN}"); fi
 CFN_DEPLOY_ARGS+=(
   --parameter-overrides
     StateMachineName="${STATE_MACHINE_NAME}"
@@ -94,22 +89,17 @@ CFN_DEPLOY_ARGS+=(
     RequestsQueueArn="${REQUESTS_QUEUE_ARN}"
     StageTimeoutSeconds="${STAGE_TIMEOUT_SECONDS}"
 )
-
 aws cloudformation deploy "${CFN_DEPLOY_ARGS[@]}"
 
 echo -e "\n${YELLOW}Reading stack outputs...${NC}"
-aws cloudformation describe-stacks \
-  --region "${REGION}" \
-  --stack-name "${STACK_NAME}" \
-  --query 'Stacks[0].Outputs' \
-  --output table
+aws cloudformation describe-stacks --region "${REGION}" --stack-name "${STACK_NAME}" --query 'Stacks[0].Outputs' --output table
 
-echo -e "\n${YELLOW}Manual POC execution example:${NC}"
+echo -e "\n${YELLOW}Manual execution example:${NC}"
 cat <<'EOF'
 aws stepfunctions start-execution \
   --region eu-west-2 \
   --state-machine-arn <StateMachineArn output> \
-  --input '{"requestId":"manual-test-001","requestHex":"<hex>","hex":"<hex>","requestMode":"manual","approvalMode":"auto"}'
+  --input '{"requestId":"manual-test-001","requestHex":"<hex>","hex":"<hex>","requestMode":"manual","approvalMode":"auto","startStage":"tagline","imageProvider":"cloudflare","orchestrationType":"fullEnrich"}'
 EOF
 
 echo -e "\n${GREEN}Deployment complete.${NC}"

@@ -37,10 +37,11 @@ S3_PREFIX="${S3_PREFIX:-lambdas/scouts2sqs}"
 NPM_CACHE_DIR="${NPM_CACHE_DIR:-${HOME}/.npm}"
 
 FUNCTION_NAME="${FUNCTION_NAME:-scouts2sqs}"
+SQS2SCOUTS_FUNCTION_NAME="${SQS2SCOUTS_FUNCTION_NAME:-sqs2scouts}"
 LAYER_NAME="${LAYER_NAME:-scouts-shared}"
 ROLE_NAME="${ROLE_NAME:-scouts2sqs-lambda-role}"
 RUNTIME="${RUNTIME:-nodejs24.x}"
-HANDLER="${HANDLER:-scouts2sqs.lambdaHandler}"
+HANDLER="${HANDLER:-full-enrich-adapter.lambdaHandler}"
 QUEUE_ARN="${QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing}"
 QUEUE_URL="${QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing}"
 SCOUTS_REQUESTS_QUEUE_ARN="${SCOUTS_REQUESTS_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsRequests}"
@@ -57,6 +58,8 @@ SCOUTS2SQS_PUBLISH_ENABLED="${SCOUTS2SQS_PUBLISH_ENABLED:-true}"
 DLQ_ARN="${DLQ_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsRequestsDLQ}"
 DLQ_URL="${DLQ_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequestsDLQ}"
 IMAGE_ENRICH_STATE_MACHINE_ARN="${IMAGE_ENRICH_STATE_MACHINE_ARN:-}"
+FULL_ENRICH_STATE_MACHINE_ARN="${FULL_ENRICH_STATE_MACHINE_ARN:-}"
+IMAGE_GENERATION_PROVIDER="${IMAGE_GENERATION_PROVIDER:-disabled}"
 
 TEMPLATE_FILE="${ROOT_DIR}/cloudformation/templates/scouts2sqs.yaml"
 
@@ -126,6 +129,7 @@ if [ -z "${REQUIRED_API_KEY}" ]; then
   exit 1
 fi
 
+# Keep the old image-enrich ARN available for an explicit handler rollback only.
 if [ -z "${IMAGE_ENRICH_STATE_MACHINE_ARN}" ]; then
   DISCOVERED_IMAGE_ENRICH_STATE_MACHINE_ARN="$(aws cloudformation describe-stacks \
     --region "${REGION}" \
@@ -136,6 +140,56 @@ if [ -z "${IMAGE_ENRICH_STATE_MACHINE_ARN}" ]; then
     IMAGE_ENRICH_STATE_MACHINE_ARN="${DISCOVERED_IMAGE_ENRICH_STATE_MACHINE_ARN}"
   fi
 fi
+
+if [ -z "${FULL_ENRICH_STATE_MACHINE_ARN}" ]; then
+  for candidate_stack in scouts-full-enrich-managed-poc scouts-full-enrich; do
+    DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN="$(aws cloudformation describe-stacks \
+      --region "${REGION}" \
+      --stack-name "${candidate_stack}" \
+      --query "Stacks[0].Outputs[?OutputKey=='StateMachineArn'].OutputValue" \
+      --output text 2>/dev/null || true)"
+    if [ -n "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" ] && [ "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" != "None" ] && [ "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" != "null" ]; then
+      FULL_ENRICH_STATE_MACHINE_ARN="${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}"
+      echo "Discovered full-enrich state machine from stack ${candidate_stack}"
+      break
+    fi
+  done
+fi
+
+if [ -z "${FULL_ENRICH_STATE_MACHINE_ARN}" ]; then
+  echo -e "${RED}FULL_ENRICH_STATE_MACHINE_ARN could not be discovered. Deploy scouts-full-enrich before scouts2sqs.${NC}"
+  exit 1
+fi
+
+# The ingress adapter must not begin creating fullEnrich executions until the
+# downstream callback-compatible worker is active. CI may schedule these jobs
+# concurrently, so wait for sqs2scouts to expose the production adapter first.
+if [ "${HANDLER}" = "full-enrich-adapter.lambdaHandler" ]; then
+  WORKER_HANDLER=''
+  for _ in $(seq 1 60); do
+    WORKER_HANDLER="$(aws lambda get-function-configuration \
+      --function-name "${SQS2SCOUTS_FUNCTION_NAME}" \
+      --region "${REGION}" \
+      --query 'Handler' \
+      --output text 2>/dev/null || true)"
+    if [ "${WORKER_HANDLER}" = "full-enrich-adapter.lambdaHandler" ]; then
+      break
+    fi
+    sleep 5
+  done
+  if [ "${WORKER_HANDLER}" != "full-enrich-adapter.lambdaHandler" ]; then
+    echo -e "${RED}${SQS2SCOUTS_FUNCTION_NAME} is not running full-enrich-adapter.lambdaHandler. Deploy sqs2scouts before enabling the full-enrich ingress adapter.${NC}"
+    exit 1
+  fi
+fi
+
+case "${IMAGE_GENERATION_PROVIDER}" in
+  disabled|cloudflare|gemini) ;;
+  *)
+    echo -e "${RED}IMAGE_GENERATION_PROVIDER must be disabled, cloudflare, or gemini.${NC}"
+    exit 1
+    ;;
+esac
 
 echo -e "\n${YELLOW}Step 1: Build shared Lambda layer...${NC}"
 (
@@ -152,7 +206,7 @@ echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
 (
   cd function
   rm -f scouts2sqs-lambda.zip
-  zip -q scouts2sqs-lambda.zip scouts2sqs.mjs
+  zip -q scouts2sqs-lambda.zip scouts2sqs.mjs full-enrich-adapter.mjs
 )
 
 echo -e "\n${YELLOW}Step 3: Upload artifacts to S3...${NC}"
@@ -200,10 +254,11 @@ CFN_DEPLOY_ARGS+=(
     DlqArn="${DLQ_ARN}"
     DlqUrl="${DLQ_URL}"
     ImageEnrichStateMachineArn="${IMAGE_ENRICH_STATE_MACHINE_ARN}"
+    FullEnrichStateMachineArn="${FULL_ENRICH_STATE_MACHINE_ARN}"
+    ImageGenerationProvider="${IMAGE_GENERATION_PROVIDER}"
 )
 
-aws cloudformation deploy \
-  "${CFN_DEPLOY_ARGS[@]}"
+aws cloudformation deploy "${CFN_DEPLOY_ARGS[@]}"
 
 put_standard_secure_parameter "${REQUIRED_API_KEY_PARAMETER}" "${REQUIRED_API_KEY}"
 
