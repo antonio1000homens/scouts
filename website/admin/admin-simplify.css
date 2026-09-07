@@ -1,0 +1,122 @@
+.diagnostics-open { margin-left: .5rem; }
+
+.admin-diagnostics-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: min(520px, 96vw);
+    height: 100vh;
+    background: #fff;
+    box-shadow: -8px 0 24px rgba(0,0,0,.18);
+    transform: translateX(102%);
+    transition: transform .2s ease;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+}
+
+.admin-diagnostics-drawer.open { transform: translateX(0); }
+
+.admin-diagnostics-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid #ddd;
+}
+
+.admin-diagnostics-header h2,
+.admin-diagnostics-header p { margin: 0; }
+.admin-diagnostics-header p { margin-top: .25rem; color: #666; }
+
+.admin-diagnostics-body {
+    overflow: auto;
+    padding: 1rem 1.25rem 2rem;
+}
+
+.admin-diagnostics-body .viewer-menu-shell,
+.admin-diagnostics-body .auto-invoke-header-label,
+.admin-diagnostics-body #auto-lambda-interval-seconds,
+.admin-diagnostics-body #status-polling-interval-seconds,
+.admin-diagnostics-body #status-polling-status {
+    display: inline-flex;
+    margin: 0 .5rem .75rem 0;
+}
+
+.admin-diagnostics-body .requests-sidebar,
+.admin-diagnostics-body .admin-runtime-footer {
+    width: 100%;
+    max-width: none;
+    position: static;
+    margin-top: 1rem;
+}
+
+.admin-primary-summary {
+    margin-top: 1rem;
+    display: grid;
+    grid-template-columns: minmax(220px, .8fr) minmax(320px, 2fr);
+    gap: 1rem;
+}
+
+.admin-health-card,
+.admin-activity-card {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    padding: 1rem;
+}
+
+.admin-summary-label {
+    display: block;
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: #666;
+    margin-bottom: .35rem;
+}
+
+#admin-health-text[data-tone="ok"] { color: #166534; }
+#admin-health-text[data-tone="warning"] { color: #b42318; }
+
+.admin-activity-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}
+
+.admin-activity-list { display: grid; gap: .55rem; }
+.admin-activity-list p { margin: 0; color: #666; }
+
+.admin-activity-item {
+    display: grid;
+    grid-template-columns: minmax(105px, auto) 1fr;
+    gap: .75rem;
+    align-items: center;
+    padding: .55rem .65rem;
+    background: #f7f7f7;
+    border-radius: 8px;
+}
+
+.activity-status { font-weight: 700; }
+.activity-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The detailed requests/runtime UI remains available in Diagnostics only. */
+.events-layout > .requests-sidebar,
+.admin-container > .admin-runtime-footer { display: none; }
+
+.admin-diagnostics-body .requests-sidebar,
+.admin-diagnostics-body .admin-runtime-footer { display: block; }
+
+/* Never use age-only stall styling in the simplified presentation. */
+.admin-primary-summary .badge-queued-stalled,
+.admin-primary-summary .badge-processing-stall,
+.admin-primary-summary .runtime-queued-stalled,
+.admin-primary-summary .runtime-processing-stall {
+    background: inherit;
+    color: inherit;
+}
+
+@media (max-width: 900px) {
+    .admin-primary-summary { grid-template-columns: 1fr; }
+}
