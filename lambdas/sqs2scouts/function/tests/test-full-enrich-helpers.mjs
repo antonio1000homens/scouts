@@ -2,6 +2,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import './test-cloudflare-image-client.mjs';
+import '../../../../tests/issue-18-cloudflare-image.integration.test.mjs';
 import {
   normaliseStage,
   isFullEnrichMessage,
