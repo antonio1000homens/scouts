@@ -65,6 +65,17 @@ test('callback result exposes retry and manual-review state explicitly', () => {
   assert.equal(manual.failureCategory, 'AUTH_FAILURE');
 });
 
+test('in-progress duplicate keeps callback ownership with the reserved delivery', () => {
+  const result = buildCallbackResultFromState({
+    state: { state: 'in_progress', attemptCount: 1, generationId: 'gen' },
+    stage: 'image',
+    hex: 'abcd',
+    provider: 'cloudflare',
+  });
+  assert.equal(result.status, 'duplicate_in_progress');
+  assert.equal(result.reason, 'stage_reservation_owned_elsewhere');
+});
+
 test('persistence pending returns deferred so Step Functions does not regenerate', () => {
   const result = buildCallbackResultFromState({
     state: { state: 'persist_pending', attemptCount: 1, generationId: 'gen' },
