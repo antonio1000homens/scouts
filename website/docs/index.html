@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <title>Technical Docs - Scouts Enrichment Architecture</title>
+    <link rel="icon" href="/website/images/scouts-logo-white-png.png">
+    <link rel="stylesheet" href="/website/fonts/fonts.css">
+    <link rel="stylesheet" href="/website/styles.css?v=20260308-1">
+    <style>
+        .docs-shell { max-width: 1180px; margin: 0 auto; padding: 2rem 1rem 4rem; }
+        .docs-hero { margin: 1rem 0 2rem; }
+        .docs-hero h1 { margin-bottom: .5rem; }
+        .docs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+        .docs-card { background: #fff; border-radius: 12px; padding: 1.25rem; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+        .docs-card h3 { margin-top: 0; }
+        .docs-section { margin: 2.5rem 0; }
+        .diagram { background: #fff; border-radius: 12px; padding: 1rem; overflow-x: auto; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+        .docs-note { border-left: 4px solid #ffb81c; padding: .9rem 1rem; background: #fff8e8; margin: 1rem 0; }
+        .docs-code { background: #17202a; color: #f4f6f7; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+        .docs-table { width: 100%; border-collapse: collapse; background: #fff; }
+        .docs-table th, .docs-table td { border: 1px solid #ddd; padding: .75rem; text-align: left; vertical-align: top; }
+        .docs-table th { background: #f4f4f4; }
+    </style>
+</head>
+<body>
+    <div id="header-placeholder"></div>
+
+    <main>
+        <div class="docs-shell">
+            <section class="docs-hero">
+                <h1>Technical documentation</h1>
+                <p>This section documents how event enrichment moves from the Scouts scheduler through SQS, Step Functions, the enrichment worker, DynamoDB safety state, and the configured AI providers.</p>
+                <p><a class="btn btn-primary" href="#enrichment-sequence">View enrichment sequence</a></p>
+            </section>
+
+            <section class="docs-grid">
+                <article class="docs-card">
+                    <h3>Orchestration</h3>
+                    <p><code>scouts-full-enrich</code> is the authoritative normal-path workflow for tagline, image theme, and image generation.</p>
+                </article>
+                <article class="docs-card">
+                    <h3>Transport</h3>
+                    <p><code>scoutsRequests</code> carries ingress and callback stage messages; <code>scoutsProcessing</code> carries worker jobs.</p>
+                </article>
+                <article class="docs-card">
+                    <h3>Safety state</h3>
+                    <p>DynamoDB owns per-HEX/per-stage attempts, cooldowns, leases, idempotency, cached results, and quarantine.</p>
+                </article>
+                <article class="docs-card">
+                    <h3>Providers</h3>
+                    <p>Gemini handles text enrichment. Image generation is explicitly selected as Cloudflare or Gemini, with no automatic provider fallback.</p>
+                </article>
+            </section>
+
+            <section class="docs-section" id="enrichment-sequence">
+                <h2>Enrichment flow</h2>
+                <div class="diagram">
+                    <pre class="mermaid">
+flowchart LR
+    A[scouts Lambda\nscan / reconciliation] -->|scoutsRequest new / retry| Q1[(SQS scoutsRequests)]
+    Q1 --> B[scouts2sqs\nfull-enrich adapter]
+    B -->|StartExecution| SF[Step Functions\nscouts-full-enrich]
+
+    SF -->|waitForTaskToken\ntagline / imageTheme / image| Q1
+    Q1 --> B
+    B -->|translate callback stage| Q2[(SQS scoutsProcessing)]
+    Q2 --> W[sqs2scouts\nfull-enrich adapter]
+
+    W --> D[(DynamoDB\nscouts-enrichment-state)]
+    W --> U[(DynamoDB\nusage counters)]
+    W -->|tagline + imageTheme| G[Gemini text]
+    W -->|image, provider=cloudflare| C[Cloudflare Workers AI]
+    W -->|image, provider=gemini| GI[Gemini image]
+    W --> S3[(S3 events + images)]
+    W -->|SendTaskSuccess / SendTaskFailure| SF
+
+    D -. cooldown / quarantine / cache .-> W
+    S3 -. persisted event state .-> A
+                    </pre>
+                </div>
+                <div class="docs-note"><strong>Key hand-off:</strong> Step Functions does not call the AI provider directly. It sends a callback task to <code>scoutsRequests</code>; <code>scouts2sqs</code> translates that task and places it on <code>scoutsProcessing</code>; <code>sqs2scouts</code> owns the external provider call and sends the task-token callback.</div>
+            </section>
+
+            <section class="docs-section">
+                <h2>Sequence detail</h2>
+                <div class="diagram">
+                    <pre class="mermaid">
+sequenceDiagram
+    participant S as scouts Lambda
+    participant R as scoutsRequests SQS
+    participant I as scouts2sqs
+    participant SF as scouts-full-enrich
+    participant P as scoutsProcessing SQS
+    participant W as sqs2scouts
+    participant D as DynamoDB
+    participant AI as Gemini / Cloudflare
+    participant S3 as S3
+
+    S->>R: scoutsRequest new/retry
+    R->>I: SQS event
+    I->>SF: StartExecution(startStage, imageProvider)
+    SF->>R: stage request + taskToken
+    R->>I: callback-stage message
+    I->>P: translated worker job + taskToken
+    P->>W: SQS event
+    W->>D: check eligibility / reserve HEX+stage
+    alt reservation owned
+        W->>D: reserve provider/global budget
+        W->>AI: external generation request
+        AI-->>W: generated result
+        W->>D: cache successful generation
+        W->>S3: persist event/image
+        W->>D: mark stage succeeded
+        W->>SF: SendTaskSuccess
+    else duplicate already in progress
+        W-->>P: acknowledge duplicate without callback
+        Note over W,SF: original reservation owner keeps task-token ownership
+    else retry_wait/manual_review
+        W->>SF: structured deferred/manual result
+    end
+                    </pre>
+                </div>
+            </section>
+
+            <section class="docs-section">
+                <h2>Stage progression</h2>
+                <table class="docs-table">
+                    <thead><tr><th>Stage</th><th>Provider</th><th>Persisted field</th><th>Next step</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>tagline</code></td><td>Gemini text</td><td><code>metadata.tagline</code></td><td><code>imageTheme</code></td></tr>
+                        <tr><td><code>imageTheme</code></td><td>Gemini text</td><td><code>metadata.image.theme</code></td><td><code>image</code></td></tr>
+                        <tr><td><code>image</code></td><td>Cloudflare or Gemini</td><td><code>metadata.image.url</code></td><td>Complete</td></tr>
+                    </tbody>
+                </table>
+                <p>The workflow determines the first missing stage when it starts, so partially enriched events do not regenerate fields that already exist.</p>
+            </section>
+
+            <section class="docs-section">
+                <h2>Retry, idempotency and cost controls</h2>
+                <ul>
+                    <li>State key: <code>HEX + stage</code>.</li>
+                    <li>Maximum automatic attempts per stage: 3.</li>
+                    <li>Cooldowns: 1 hour after the first failed attempt, then 6 hours after the second.</li>
+                    <li>After the third failed attempt, or a permanent configuration/authentication error, the stage enters <code>manual_review</code>.</li>
+                    <li>An <code>in_progress</code> lease prevents concurrent deliveries from both calling a provider.</li>
+                    <li>Successful provider output is cached before downstream event persistence; a later S3 failure retries persistence rather than generation.</li>
+                    <li>Daily image/provider budgets are reserved only after the worker wins the stage reservation.</li>
+                    <li>Provider/global quota deferrals do not consume a per-event attempt.</li>
+                </ul>
+            </section>
+
+            <section class="docs-section">
+                <h2>Provider selection</h2>
+                <pre class="docs-code">IMAGE_GENERATION_PROVIDER=cloudflare | gemini | disabled
+IMAGE_GENERATION_DAILY_REQUEST_LIMIT=10
+CLOUDFLARE_AI_MODEL=@cf/black-forest-labs/flux-1-schnell
+CLOUDFLARE_AI_STEPS=4</pre>
+                <p>When Cloudflare is selected, a Cloudflare failure does not automatically fall back to Gemini. This prevents an unexpected provider failure from turning into paid Gemini image usage.</p>
+            </section>
+
+            <section class="docs-section">
+                <h2>Operational troubleshooting</h2>
+                <table class="docs-table">
+                    <thead><tr><th>Symptom</th><th>Check</th></tr></thead>
+                    <tbody>
+                        <tr><td>No full-enrich execution starts</td><td><code>scouts2sqs</code> logs, full-enrich ARN, <code>states:ListExecutions</code>/<code>StartExecution</code>, and current image-provider setting.</td></tr>
+                        <tr><td>Execution waits on a stage</td><td><code>scoutsRequests</code>, then <code>scoutsProcessing</code>, then the <code>sqs2scouts</code> callback logs.</td></tr>
+                        <tr><td>Repeated event is skipped</td><td>DynamoDB state for the relevant <code>HEX + stage</code>: <code>in_progress</code>, <code>retry_wait</code>, <code>succeeded</code>, or <code>manual_review</code>.</td></tr>
+                        <tr><td>Provider succeeded but event is incomplete</td><td>Look for <code>persist_pending</code>; the cached result should be reused without another provider request.</td></tr>
+                        <tr><td>Image generation stopped for the day</td><td>Usage counters, provider quota state, and <code>nextRetryAt</code>.</td></tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section class="docs-section">
+                <h2>Source locations</h2>
+                <ul>
+                    <li><code>lambdas/cloudformation/templates/scouts-full-enrich.yaml</code> — Step Functions definition.</li>
+                    <li><code>lambdas/scouts2sqs/function/full-enrich-adapter.mjs</code> — ingress/start and callback-stage translation.</li>
+                    <li><code>lambdas/sqs2scouts/function/full-enrich-adapter.mjs</code> — worker/provider/callback handling.</li>
+                    <li><code>lambdas/shared-layer/nodejs/enrichment-state.mjs</code> — retry/idempotency state machine.</li>
+                    <li><code>.github/workflows/deploy-to-s3.yml</code> — change detection and deployment ordering.</li>
+                </ul>
+                <p><a class="btn btn-secondary" href="https://github.com/antonio1000homens/scouts">View repository</a></p>
+            </section>
+        </div>
+    </main>
+
+    <div id="footer-placeholder" data-footer-type="detailed"></div>
+    <script src="/website/scripts/mobile-menu.js"></script>
+    <script src="/website/scripts/header-loader.js"></script>
+    <script src="/website/scripts/footer-loader.js"></script>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true, theme: 'neutral', securityLevel: 'strict' });
+    </script>
+</body>
+</html>
