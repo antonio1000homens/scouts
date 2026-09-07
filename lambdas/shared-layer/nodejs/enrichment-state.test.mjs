@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
+
+// enrichment-state.mjs captures the table name at module initialization. Give
+// unit tests an inert table name before importing it; the client is replaced
+// with an in-memory test double before any reservation call is made.
+process.env.GEMINI_ENRICHMENT_STATE_TABLE_NAME ||= 'test-table';
+
+const {
   ENRICHMENT_STAGES,
   ENRICHMENT_STATES,
   buildGenerationId,
@@ -11,7 +17,7 @@ import {
   reserveEnrichmentAttempt,
   resetEnrichmentStateClientForTests,
   setEnrichmentStateClientForTests,
-} from './enrichment-state.mjs';
+} = await import('./enrichment-state.mjs');
 
 function expressionPlaceholders(expression) {
   return new Set(expression.match(/:[A-Za-z0-9_]+/g) || []);
