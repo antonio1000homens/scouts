@@ -12,7 +12,8 @@ const RETRY_DELAY_ATTEMPT_2_SECONDS = Math.max(0, Math.floor(Number(process.env.
 const RETRY_DELAY_ATTEMPT_3_SECONDS = Math.max(0, Math.floor(Number(process.env.GEMINI_RETRY_DELAY_ATTEMPT_3_SECONDS || 21600)));
 const LEASE_SECONDS = Math.max(60, Math.floor(Number(process.env.GEMINI_IN_PROGRESS_LEASE_SECONDS || 1800)));
 const TTL_DAYS = 90;
-const client = new DynamoDBClient({ region: REGION });
+const defaultClient = new DynamoDBClient({ region: REGION });
+let client = defaultClient;
 
 export const ENRICHMENT_STAGES = Object.freeze(['tagline', 'imageTheme', 'image']);
 export const ENRICHMENT_STATES = Object.freeze([
@@ -28,6 +29,17 @@ function normalise(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+export function setEnrichmentStateClientForTests(nextClient) {
+  if (!nextClient || typeof nextClient.send !== 'function') {
+    throw new TypeError('Enrichment-state test client must expose send(command)');
+  }
+  client = nextClient;
+}
+
+export function resetEnrichmentStateClientForTests() {
+  client = defaultClient;
+}
+
 export function normaliseEnrichmentStage(stage) {
   const candidate = normalise(stage);
   if (candidate === 'imageUrl') return 'image';
@@ -37,19 +49,22 @@ export function normaliseEnrichmentStage(stage) {
 export function buildGenerationId(hex, stage, event = {}, promptVersion = '1') {
   const normalisedHex = normalise(hex).toLowerCase();
   const normalisedStage = normaliseEnrichmentStage(stage) || normalise(stage);
+  const source = {
+    title: event?.title ?? event?.summary ?? event?.name ?? null,
+    description: event?.description ?? event?.details ?? null,
+    location: event?.location ?? null,
+    start: event?.start?.raw ?? event?.start?.sortKey ?? event?.start?.epochMillis ?? null,
+    end: event?.end?.raw ?? event?.end?.sortKey ?? event?.end?.epochMillis ?? null,
+    section: event?.section ?? event?.metadata?.section ?? null,
+  };
+  if (normalisedStage === 'image') {
+    source.imageTheme = event?.image?.theme ?? event?.metadata?.image?.theme ?? null;
+  }
   const input = {
     hex: normalisedHex,
     stage: normalisedStage,
     promptVersion: normalise(promptVersion) || '1',
-    source: {
-      title: event?.title ?? event?.summary ?? event?.name ?? null,
-      description: event?.description ?? event?.details ?? null,
-      location: event?.location ?? null,
-      start: event?.start?.raw ?? event?.start?.sortKey ?? event?.start?.epochMillis ?? null,
-      end: event?.end?.raw ?? event?.end?.sortKey ?? event?.end?.epochMillis ?? null,
-      section: event?.section ?? event?.metadata?.section ?? null,
-      imageTheme: event?.image?.theme ?? event?.metadata?.image?.theme ?? null,
-    },
+    source,
   };
   return crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
 }
@@ -73,10 +88,12 @@ function asString(value) { return { S: String(value) }; }
 function asNumber(value) { return { N: String(value) }; }
 
 export async function getEnrichmentState(hex, stage) {
-  if (!TABLE_NAME || !normalise(hex) || !normaliseEnrichmentStage(stage)) return null;
+  const normalisedHex = normalise(hex).toLowerCase();
+  const normalisedStage = normaliseEnrichmentStage(stage);
+  if (!TABLE_NAME || !normalisedHex || !normalisedStage) return null;
   const response = await client.send(new GetItemCommand({
     TableName: TABLE_NAME,
-    Key: { hex: asString(normalise(hex).toLowerCase()), stage: asString(normaliseEnrichmentStage(stage)) },
+    Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
     ConsistentRead: true,
   }));
   return unmarshallItem(response?.Item);
@@ -86,12 +103,8 @@ export function evaluateEnrichmentEligibility(state, now = new Date(), generatio
   if (!state) return { eligible: true, reason: null };
   if (state.state === 'manual_review') return { eligible: false, reason: 'manual_review' };
   if (state.state === 'succeeded' && state.geminiSucceeded !== false && (!generationId || state.generationId === generationId)) return { eligible: false, reason: 'already_succeeded' };
-  if (Number(state.attemptCount || 0) >= MAX_ATTEMPTS && state.state !== 'succeeded') {
-    return { eligible: false, reason: 'max_attempts_reached' };
-  }
-  if (state.state === 'in_progress' && Number(state.inProgressExpiresAt || 0) > now.getTime()) {
-    return { eligible: false, reason: 'in_progress' };
-  }
+  if (Number(state.attemptCount || 0) >= MAX_ATTEMPTS && state.state !== 'succeeded') return { eligible: false, reason: 'max_attempts_reached' };
+  if (state.state === 'in_progress' && Number(state.inProgressExpiresAt || 0) > now.getTime()) return { eligible: false, reason: 'in_progress' };
   if (state.state === 'retry_wait' && state.nextRetryAt) {
     const next = new Date(state.nextRetryAt).getTime();
     if (Number.isFinite(next) && now.getTime() < next) return { eligible: false, reason: 'cooldown_active' };
@@ -165,12 +178,13 @@ export async function reserveEnrichmentAttempt({ hex, stage, generationId, reque
   }
 }
 
-async function updateState(hex, stage, updateExpression, values, names) {
-  if (!TABLE_NAME) return null;
-  const now = new Date();
+async function updateState(hex, stage, updateExpression, values, names, now = new Date()) {
+  const normalisedHex = normalise(hex).toLowerCase();
+  const normalisedStage = normaliseEnrichmentStage(stage);
+  if (!TABLE_NAME || !normalisedHex || !normalisedStage) return null;
   const response = await client.send(new UpdateItemCommand({
     TableName: TABLE_NAME,
-    Key: { hex: asString(normalise(hex).toLowerCase()), stage: asString(normaliseEnrichmentStage(stage)) },
+    Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
     UpdateExpression: updateExpression,
     ExpressionAttributeNames: names,
     ExpressionAttributeValues: { ...values, ':updatedAt': asString(now.toISOString()), ':expiresAt': asNumber(Math.floor(now.getTime() / 1000) + TTL_DAYS * 86400) },
@@ -179,36 +193,38 @@ async function updateState(hex, stage, updateExpression, values, names) {
   return unmarshallItem(response?.Attributes);
 }
 
-export async function markGeminiSucceeded({ hex, stage, generationId, generatedValue }) {
+export async function markGeminiSucceeded({ hex, stage, generationId, generatedValue, now = new Date() }) {
   return updateState(hex, stage, 'SET #state = :state, #geminiSucceeded = :true, #generatedValue = :generatedValue, #generationId = :generationId, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #inProgressExpiresAt, #nextRetryAt, #lastErrorType, #lastErrorMessage', {
     ':state': asString('persist_pending'), ':true': { BOOL: true }, ':generatedValue': asString(JSON.stringify(generatedValue)), ':generationId': asString(generationId),
-  }, { '#state': 'state', '#geminiSucceeded': 'geminiSucceeded', '#generatedValue': 'generatedValue', '#generationId': 'generationId', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#nextRetryAt': 'nextRetryAt', '#lastErrorType': 'lastErrorType', '#lastErrorMessage': 'lastErrorMessage' });
+  }, { '#state': 'state', '#geminiSucceeded': 'geminiSucceeded', '#generatedValue': 'generatedValue', '#generationId': 'generationId', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#nextRetryAt': 'nextRetryAt', '#lastErrorType': 'lastErrorType', '#lastErrorMessage': 'lastErrorMessage' }, now);
 }
 
-export async function markEnrichmentSucceeded({ hex, stage, generationId }) {
+export async function markEnrichmentSucceeded({ hex, stage, generationId, now = new Date() }) {
   return updateState(hex, stage, 'SET #state = :state, #generationId = :generationId, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #inProgressExpiresAt, #nextRetryAt', {
     ':state': asString('succeeded'), ':generationId': asString(generationId),
-  }, { '#state': 'state', '#generationId': 'generationId', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#nextRetryAt': 'nextRetryAt' });
+  }, { '#state': 'state', '#generationId': 'generationId', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#nextRetryAt': 'nextRetryAt' }, now);
 }
 
-export async function markEnrichmentFailure({ hex, stage, error, attemptCount }) {
+export async function markEnrichmentFailure({ hex, stage, error, attemptCount, now = new Date() }) {
   const category = classifyGeminiError(error);
   const terminal = category === 'AUTH_FAILURE' || category === 'MODEL_CONFIGURATION' || category === 'INVALID_EVENT_DATA' || category === 'PROMPT_BUILD_FAILURE' || Number(attemptCount) >= MAX_ATTEMPTS;
   const state = terminal ? 'manual_review' : 'retry_wait';
-  const nextRetryAt = terminal ? null : new Date(Date.now() + retryDelaySeconds(Number(attemptCount) || 1) * 1000).toISOString();
+  const nextRetryAt = terminal ? null : new Date(now.getTime() + retryDelaySeconds(Number(attemptCount) || 1) * 1000).toISOString();
   return updateState(hex, stage, terminal
     ? 'SET #state = :state, #lastErrorType = :errorType, #lastErrorMessage = :errorMessage, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #inProgressExpiresAt, #nextRetryAt'
     : 'SET #state = :state, #lastErrorType = :errorType, #lastErrorMessage = :errorMessage, #nextRetryAt = :nextRetryAt, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #inProgressExpiresAt', {
       ':state': asString(state), ':errorType': asString(category), ':errorMessage': asString(String(error?.message || error || '').slice(0, 500)), ...(nextRetryAt ? { ':nextRetryAt': asString(nextRetryAt) } : {}),
-    }, { '#state': 'state', '#lastErrorType': 'lastErrorType', '#lastErrorMessage': 'lastErrorMessage', '#nextRetryAt': 'nextRetryAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt' });
+    }, { '#state': 'state', '#lastErrorType': 'lastErrorType', '#lastErrorMessage': 'lastErrorMessage', '#nextRetryAt': 'nextRetryAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt' }, now);
 }
 
 export async function claimEnrichmentEscalation({ hex, stage, now = new Date() }) {
-  if (!TABLE_NAME) return false;
+  const normalisedHex = normalise(hex).toLowerCase();
+  const normalisedStage = normaliseEnrichmentStage(stage);
+  if (!TABLE_NAME || !normalisedHex || !normalisedStage) return false;
   try {
     await client.send(new UpdateItemCommand({
       TableName: TABLE_NAME,
-      Key: { hex: asString(normalise(hex).toLowerCase()), stage: asString(normaliseEnrichmentStage(stage)) },
+      Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
       UpdateExpression: 'SET #escalatedAt = :escalatedAt, #updatedAt = :updatedAt, #expiresAt = :expiresAt',
       ConditionExpression: 'attribute_not_exists(#escalatedAt)',
       ExpressionAttributeNames: { '#escalatedAt': 'escalatedAt', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt' },
@@ -227,10 +243,10 @@ export async function loadReusableGeneration({ hex, stage, generationId }) {
   return { state, generatedValue: state.generatedValue };
 }
 
-export async function resetEnrichmentState(hex, stage) {
+export async function resetEnrichmentState(hex, stage, now = new Date()) {
   return updateState(hex, stage, 'SET #state = :state, #attemptCount = :zero, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #nextRetryAt, #inProgressExpiresAt, #geminiSucceeded, #generatedValue, #generationId', {
     ':state': asString('pending'), ':zero': asNumber(0),
-  }, { '#state': 'state', '#attemptCount': 'attemptCount', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt', '#nextRetryAt': 'nextRetryAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#geminiSucceeded': 'geminiSucceeded', '#generatedValue': 'generatedValue', '#generationId': 'generationId' });
+  }, { '#state': 'state', '#attemptCount': 'attemptCount', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt', '#nextRetryAt': 'nextRetryAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#geminiSucceeded': 'geminiSucceeded', '#generatedValue': 'generatedValue', '#generationId': 'generationId' }, now);
 }
 
 export const enrichmentStateConfig = Object.freeze({ TABLE_NAME, MAX_ATTEMPTS, RETRY_DELAY_ATTEMPT_2_SECONDS, RETRY_DELAY_ATTEMPT_3_SECONDS, LEASE_SECONDS });
