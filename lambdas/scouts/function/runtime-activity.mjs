@@ -17,7 +17,6 @@ const REQUESTS_QUEUE_URL = process.env.SCOUTS_REQUESTS_QUEUE_URL || 'https://sqs
 const PROCESSING_QUEUE_URL = process.env.SCOUTS_PROCESSING_QUEUE_URL || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing';
 const REQUESTS_DLQ_URL = process.env.SCOUTS_REQUESTS_DLQ_URL || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequestsDLQ';
 const PROCESSING_DLQ_URL = process.env.SCOUTS_PROCESSING_DLQ_URL || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ';
-const IMAGE_ENRICH_STATE_MACHINE_ARN = String(process.env.IMAGE_ENRICH_STATE_MACHINE_ARN || '').trim();
 const FULL_ENRICH_STATE_MACHINE_ARN = String(process.env.FULL_ENRICH_STATE_MACHINE_ARN || '').trim();
 const MAX_DURABLE_LOOKUPS = 20;
 const SOURCE_STALE_AFTER_MS = 90 * 1000;
@@ -298,9 +297,8 @@ export async function buildRuntimeActivity(now = new Date()) {
     readJson(PROCESSING_KEY),
     readJson(COMPLETED_KEY),
   ]);
-  const [durableHistories, imageExecutions, fullExecutions, queueHealthEntries] = await Promise.all([
+  const [durableHistories, fullExecutions, queueHealthEntries] = await Promise.all([
     readDurableHistories(queuedSnapshot, processingSnapshot, completedSnapshot),
-    listExecutions(IMAGE_ENRICH_STATE_MACHINE_ARN, 'imageEnrich', now),
     listExecutions(FULL_ENRICH_STATE_MACHINE_ARN, 'fullEnrich', now),
     Promise.all([
       queueHealth('scoutsRequests', REQUESTS_QUEUE_URL),
@@ -310,14 +308,13 @@ export async function buildRuntimeActivity(now = new Date()) {
     ]),
   ]);
 
-  const executions = [...imageExecutions, ...fullExecutions];
   const queueHealthMap = Object.fromEntries(queueHealthEntries.map((entry) => [entry.name, entry]));
   const requests = buildCanonicalActivity({
     queuedSnapshot,
     processingSnapshot,
     completedSnapshot,
     durableHistories,
-    executions,
+    executions: fullExecutions,
     queueHealth: queueHealthMap,
     now,
   });
@@ -343,7 +340,6 @@ export async function buildRuntimeActivity(now = new Date()) {
     requests,
     queueHealth: queueHealthMap,
     stepFunctions: {
-      imageEnrich: workflowSummary(IMAGE_ENRICH_STATE_MACHINE_ARN, imageExecutions),
       fullEnrich: workflowSummary(FULL_ENRICH_STATE_MACHINE_ARN, fullExecutions),
     },
     rawSnapshots: summaries,
