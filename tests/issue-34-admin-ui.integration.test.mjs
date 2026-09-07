@@ -51,6 +51,13 @@ test('diagnostics split request lifecycle from queue and workflow telemetry', ()
   assert.match(simplify, /'Raw snapshots and tools'/);
 });
 
+test('presentation sanitisation never mutates diagnostics or raw snapshot detail', () => {
+  assert.match(simplify, /function isDiagnosticsNode\(el\)/);
+  assert.match(simplify, /normalizeStatusClasses[\s\S]*if \(isDiagnosticsNode\(el\)\) return;/);
+  assert.match(simplify, /sanitizeRenderedStatuses[\s\S]*if \(isDiagnosticsNode\(el\)\) return;/);
+  assert.match(simplify, /hideImplementationLanguage[\s\S]*if \(isDiagnosticsNode\(el\)\) return;/);
+});
+
 test('one authoritative status poll replaces snapshot polling for the presentation layer', () => {
   assert.match(simplify, /realm: 'runtime', subject: 'activity', action: 'status'/);
   assert.match(simplify, /pollQueueDepthSnapshots = pollAuthoritativeActivity/);
