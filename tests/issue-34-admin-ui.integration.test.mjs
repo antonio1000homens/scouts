@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import './issue-43-runtime-activity.test.mjs';
 
 const html = readFileSync('website/admin/index.html', 'utf8');
 const simplify = readFileSync('website/admin/admin-simplify.js', 'utf8');
@@ -20,10 +21,11 @@ test('default UI exposes diagnostics separately and keeps activity user-facing',
   assert.match(css, /admin-primary-summary/);
 });
 
-test('age-only stalled vocabulary is normalized out of primary presentation', () => {
-  assert.match(simplify, /Queued Stalled', 'Waiting'/);
-  assert.match(simplify, /Processing Stall', 'Processing'/);
-  assert.doesNotMatch(simplify, /60\s*\*\s*1000/);
+test('age alone is not an authoritative lifecycle state', () => {
+  assert.match(simplify, /classifyAggregateRuntimeRequestStatus = function/);
+  assert.match(simplify, /if \(hasProcessing\) return 'processing'/);
+  assert.match(simplify, /if \(hasQueued\) return 'queued'/);
+  assert.doesNotMatch(simplify, /QUEUED_STALLED_THRESHOLD_MS/);
 });
 
 test('agenda enrichment control is expressed as user intent', () => {
@@ -34,16 +36,33 @@ test('agenda enrichment control is expressed as user intent', () => {
   assert.match(simplify, /AI enrichment events/);
 });
 
-test('activity rendering uses textContent rather than interpolated innerHTML', () => {
-  assert.match(simplify, /statusEl\.textContent = sanitizeStatusText\(badge\)/);
-  assert.match(simplify, /titleEl\.textContent = sanitizeStatusText\(title\)/);
-  assert.doesNotMatch(simplify, /item\.innerHTML\s*=\s*`[^`]*\$\{sanitizeStatusText/);
+test('activity rendering uses lifecycle data and textContent rather than cloned diagnostics DOM', () => {
+  assert.match(simplify, /function renderCanonicalActivity/);
+  assert.match(simplify, /statusEl\.textContent = stateLabel\(request\)/);
+  assert.match(simplify, /titleEl\.textContent = requestTitle\(request\)/);
+  assert.doesNotMatch(simplify, /function cloneActivityCards/);
 });
 
-test('diagnostics retain raw status and request detail', () => {
-  assert.match(simplify, /isDiagnosticsNode/);
-  assert.match(simplify, /#admin-diagnostics-drawer/);
-  assert.match(simplify, /if \(isDiagnosticsNode\(el\)\) return/);
+test('diagnostics split request lifecycle from queue and workflow telemetry', () => {
+  assert.match(simplify, /Authoritative requests, infrastructure health and raw state/);
+  assert.match(simplify, /'Requests'/);
+  assert.match(simplify, /'Queue health'/);
+  assert.match(simplify, /'Step Functions'/);
+  assert.match(simplify, /'Raw snapshots and tools'/);
+});
+
+test('presentation sanitisation never mutates diagnostics or raw snapshot detail', () => {
+  assert.match(simplify, /function isDiagnosticsNode\(el\)/);
+  assert.match(simplify, /normalizeStatusClasses[\s\S]*if \(isDiagnosticsNode\(el\)\) return;/);
+  assert.match(simplify, /sanitizeRenderedStatuses[\s\S]*if \(isDiagnosticsNode\(el\)\) return;/);
+  assert.match(simplify, /hideImplementationLanguage[\s\S]*if \(isDiagnosticsNode\(el\)\) return;/);
+});
+
+test('one authoritative status poll replaces snapshot polling for the presentation layer', () => {
+  assert.match(simplify, /realm: 'runtime', subject: 'activity', action: 'status'/);
+  assert.match(simplify, /pollQueueDepthSnapshots = pollAuthoritativeActivity/);
+  assert.match(simplify, /lastActivitySuccessAt/);
+  assert.match(simplify, /retaining last good result/);
 });
 
 test('observer cannot self-trigger during presentation updates', () => {
