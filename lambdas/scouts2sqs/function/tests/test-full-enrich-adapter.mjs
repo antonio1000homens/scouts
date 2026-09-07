@@ -5,6 +5,9 @@ import {
   normaliseImageProvider,
   isFullEnrichStartRequest,
   isFullEnrichStageRequest,
+  isDirectImageEnrichRequest,
+  isCompactPersistRequest,
+  translateCompactPersistRequest,
   translateFullEnrichStageRequest,
   buildFullEnrichExecutionInput,
 } from '../full-enrich-adapter.mjs';
@@ -30,6 +33,27 @@ test('legacy start actions are aliases for the full orchestration cutover', () =
   assert.equal(isFullEnrichStartRequest({ realm: 'scoutsRequest', action: 'request' }), false);
 });
 
+test('direct admin image request is routed into full-enrich', () => {
+  const request = {
+    realm: 'scoutsRequest',
+    action: 'request',
+    subject: 'imageUrl',
+    subjectLabel: 'imageUrl',
+    hex: 'abcd',
+  };
+  assert.equal(isDirectImageEnrichRequest(request), true);
+  assert.equal(isFullEnrichStageRequest(request), false);
+
+  const input = buildFullEnrichExecutionInput(
+    request,
+    { metadata: { hex: 'abcd', tagline: 'Tag', image: { theme: 'theme', url: 'old.jpg' } } },
+    'execution-name',
+  );
+  assert.equal(input.startStage, 'image');
+  assert.equal(input.requestId, 'execution-name');
+  assert.equal(input.orchestrationType, 'fullEnrich');
+});
+
 test('full-enrich callback stage requests are recognized separately from starts', () => {
   const message = {
     realm: 'scoutsRequest',
@@ -43,6 +67,7 @@ test('full-enrich callback stage requests are recognized separately from starts'
   };
   assert.equal(isFullEnrichStageRequest(message), true);
   assert.equal(isFullEnrichStartRequest(message), false);
+  assert.equal(isDirectImageEnrichRequest(message), false);
 });
 
 test('translateFullEnrichStageRequest preserves callback and image provider metadata', () => {
@@ -73,6 +98,53 @@ test('translateFullEnrichStageRequest preserves callback and image provider meta
     requestMode: 'auto',
     approvalMode: 'auto',
     imageProvider: 'cloudflare',
+  });
+});
+
+test('compact hide persist is canonicalized without losing HEX', () => {
+  const request = {
+    realm: 'persist',
+    action: 'persist',
+    subject: { hex: 'ABCD', isHidden: true },
+    requestId: 'req-hide',
+  };
+  assert.equal(isCompactPersistRequest(request), true);
+  assert.deepEqual(translateCompactPersistRequest(request), {
+    realm: 'persist',
+    action: 'persist',
+    subject: {
+      metadata: {
+        hex: 'abcd',
+        status: { isHidden: true },
+      },
+    },
+    hex: 'abcd',
+    requestHex: 'abcd',
+    requestId: 'req-hide',
+    source: 'scouts2sqs',
+  });
+});
+
+test('compact generated-field persist is canonicalized', () => {
+  const result = translateCompactPersistRequest({
+    realm: 'persist',
+    action: 'persist',
+    subject: {
+      hex: 'ABCD',
+      tagline: 'Join us',
+      imageTheme: 'campfire',
+      imageUrl: 'website/eventImages/a.png',
+      isApproved: true,
+    },
+  });
+  assert.deepEqual(result.subject.metadata, {
+    hex: 'abcd',
+    tagline: 'Join us',
+    image: {
+      theme: 'campfire',
+      url: 'website/eventImages/a.png',
+    },
+    status: { isApproved: true },
   });
 });
 
