@@ -18,6 +18,7 @@ import {
 const fullEnrichAdapter = readFileSync('lambdas/scouts2sqs/function/full-enrich-adapter.mjs', 'utf8');
 const scoutsTemplate = readFileSync('lambdas/cloudformation/templates/scouts.yaml', 'utf8');
 const scoutsDeploy = readFileSync('lambdas/scouts/deploy.sh', 'utf8');
+const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
 
 test('normaliseStage maps external imageUrl to logical image', () => {
   assert.equal(normaliseStage('tagline'), 'tagline');
@@ -118,7 +119,18 @@ test('Scouts status deployment includes both enrichment state machines and activ
   assert.match(scoutsTemplate, /FULL_ENRICH_STATE_MACHINE_ARN/);
   assert.match(scoutsTemplate, /Default: scouts-entry\.handler/);
   assert.match(scoutsTemplate, /states:DescribeExecution/);
+  assert.match(scoutsTemplate, /states:GetExecutionHistory/);
   assert.match(scoutsDeploy, /scouts-entry\.handler/);
   assert.match(scoutsDeploy, /scouts-entry\.mjs runtime-activity\.mjs/);
   assert.match(scoutsDeploy, /scouts-full-enrich/);
+});
+
+test('activity status uses execution history for live stage and bounded recent terminal outcomes', () => {
+  assert.match(runtimeActivity, /GetExecutionHistoryCommand/);
+  assert.match(runtimeActivity, /reverseOrder:\s*true/);
+  assert.match(runtimeActivity, /stateEnteredName/);
+  assert.match(runtimeActivity, /MAX_RECENT_FAILURES/);
+  assert.match(runtimeActivity, /RECENT_FAILURE_WINDOW_MS/);
+  assert.match(runtimeActivity, /terminalExecutionCache/);
+  assert.match(runtimeActivity, /statusFilter:\s*'RUNNING'/);
 });
