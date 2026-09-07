@@ -183,34 +183,50 @@ async function reserveImageBudget(provider, now = new Date()) {
   }
 }
 
-async function markProviderQuotaWithoutAttempt({ hex, attemptCount, error, now = new Date() }) {
+async function markQuotaDeferralWithoutAttempt({
+  hex,
+  attemptCount = 0,
+  error,
+  errorType = 'PROVIDER_QUOTA',
+  attemptWasReserved = false,
+  now = new Date(),
+}) {
   if (!ENRICHMENT_TABLE_NAME) return null;
-  const previousAttemptCount = Math.max(0, Number(attemptCount || 1) - 1);
+  const persistedAttemptCount = attemptWasReserved
+    ? Math.max(0, Number(attemptCount || 0) - 1)
+    : Math.max(0, Number(attemptCount || 0));
   const nextRetryAt = nextUtcDay(now);
-  await dynamo.send(new UpdateItemCommand({
-    TableName: ENRICHMENT_TABLE_NAME,
-    Key: { hex: { S: hex }, stage: { S: 'image' } },
-    UpdateExpression: 'SET #state = :state, #attemptCount = :attemptCount, #lastErrorType = :errorType, #lastErrorMessage = :errorMessage, #nextRetryAt = :nextRetryAt, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #inProgressExpiresAt',
-    ExpressionAttributeNames: {
-      '#state': 'state',
-      '#attemptCount': 'attemptCount',
-      '#lastErrorType': 'lastErrorType',
-      '#lastErrorMessage': 'lastErrorMessage',
-      '#nextRetryAt': 'nextRetryAt',
-      '#updatedAt': 'updatedAt',
-      '#expiresAt': 'expiresAt',
-      '#inProgressExpiresAt': 'inProgressExpiresAt',
-    },
-    ExpressionAttributeValues: {
-      ':state': { S: 'retry_wait' },
-      ':attemptCount': { N: String(previousAttemptCount) },
-      ':errorType': { S: 'PROVIDER_QUOTA' },
-      ':errorMessage': { S: String(error?.message || error || 'Cloudflare daily provider quota exhausted').slice(0, 500) },
-      ':nextRetryAt': { S: nextRetryAt },
-      ':updatedAt': { S: now.toISOString() },
-      ':expiresAt': { N: String(ttlEpoch(now)) },
-    },
-  }));
+  try {
+    await dynamo.send(new UpdateItemCommand({
+      TableName: ENRICHMENT_TABLE_NAME,
+      Key: { hex: { S: hex }, stage: { S: 'image' } },
+      UpdateExpression: 'SET #state = :state, #attemptCount = :attemptCount, #lastErrorType = :errorType, #lastErrorMessage = :errorMessage, #nextRetryAt = :nextRetryAt, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #inProgressExpiresAt',
+      ConditionExpression: 'attribute_not_exists(#state) OR (#state <> :manualReview AND #state <> :succeeded)',
+      ExpressionAttributeNames: {
+        '#state': 'state',
+        '#attemptCount': 'attemptCount',
+        '#lastErrorType': 'lastErrorType',
+        '#lastErrorMessage': 'lastErrorMessage',
+        '#nextRetryAt': 'nextRetryAt',
+        '#updatedAt': 'updatedAt',
+        '#expiresAt': 'expiresAt',
+        '#inProgressExpiresAt': 'inProgressExpiresAt',
+      },
+      ExpressionAttributeValues: {
+        ':state': { S: 'retry_wait' },
+        ':manualReview': { S: 'manual_review' },
+        ':succeeded': { S: 'succeeded' },
+        ':attemptCount': { N: String(persistedAttemptCount) },
+        ':errorType': { S: errorType },
+        ':errorMessage': { S: String(error?.message || error || 'Image provider quota exhausted').slice(0, 500) },
+        ':nextRetryAt': { S: nextRetryAt },
+        ':updatedAt': { S: now.toISOString() },
+        ':expiresAt': { N: String(ttlEpoch(now)) },
+      },
+    }));
+  } catch (updateError) {
+    if (updateError?.name !== 'ConditionalCheckFailedException') throw updateError;
+  }
   return getEnrichmentState(hex, 'image');
 }
 
@@ -331,7 +347,13 @@ async function processCloudflareImage(message) {
   }
 
   if (!await reserveImageBudget('cloudflare')) {
-    return buildCallbackResultFromState({ state: null, stage: 'image', hex, provider: 'cloudflare', generationId, fallbackStatus: 'quota' });
+    const state = await markQuotaDeferralWithoutAttempt({
+      hex,
+      attemptCount: currentState?.attemptCount || 0,
+      error: new Error('Image generation daily safety limit reached'),
+      errorType: 'GLOBAL_QUOTA',
+    });
+    return buildCallbackResultFromState({ state, stage: 'image', hex, provider: 'cloudflare', generationId, fallbackStatus: 'quota' });
   }
 
   const reservation = await reserveEnrichmentAttempt({
@@ -374,7 +396,13 @@ async function processCloudflareImage(message) {
     const category = classifyCloudflareError(error);
     let state;
     if (category === 'PROVIDER_QUOTA') {
-      state = await markProviderQuotaWithoutAttempt({ hex, attemptCount: reservation?.state?.attemptCount, error });
+      state = await markQuotaDeferralWithoutAttempt({
+        hex,
+        attemptCount: reservation?.state?.attemptCount,
+        error,
+        errorType: 'PROVIDER_QUOTA',
+        attemptWasReserved: true,
+      });
     } else {
       if (category === 'MODEL_CONFIGURATION') error.status = 404;
       state = await markEnrichmentFailure({
@@ -399,11 +427,34 @@ async function reserveGeminiImageBudgetIfNeeded(message) {
   const generationId = providerGenerationId(hex, 'gemini', event);
   const reusable = await loadReusableGeneration({ hex, stage: 'image', generationId }).catch(() => null);
   if (reusable) return { allowed: true, generationId, reused: true };
-  const allowed = await reserveImageBudget('gemini');
-  if (!allowed) {
+
+  const currentState = await getEnrichmentState(hex, 'image').catch(() => null);
+  const eligibility = evaluateEnrichmentEligibility(currentState, new Date(), generationId);
+  if (!eligibility.eligible) {
     return {
       allowed: false,
-      result: buildCallbackResultFromState({ state: null, stage: 'image', hex, provider: 'gemini', generationId, fallbackStatus: 'quota' }),
+      result: buildCallbackResultFromState({
+        state: currentState,
+        stage: 'image',
+        hex,
+        provider: 'gemini',
+        generationId,
+        fallbackStatus: eligibility.reason,
+      }),
+    };
+  }
+
+  const allowed = await reserveImageBudget('gemini');
+  if (!allowed) {
+    const state = await markQuotaDeferralWithoutAttempt({
+      hex,
+      attemptCount: currentState?.attemptCount || 0,
+      error: new Error('Image generation daily safety limit reached'),
+      errorType: 'GLOBAL_QUOTA',
+    });
+    return {
+      allowed: false,
+      result: buildCallbackResultFromState({ state, stage: 'image', hex, provider: 'gemini', generationId, fallbackStatus: 'quota' }),
     };
   }
   return { allowed: true, generationId, reused: false };
