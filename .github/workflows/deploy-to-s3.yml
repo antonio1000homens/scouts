@@ -137,6 +137,12 @@ jobs:
             esac
           done <<< "${changed_files}"
 
+          # Preserve the old graph's implicit queue prerequisite: these services
+          # always deployed the queue stack first when they were selected by changes.
+          if [ "${scouts_function}" = 'true' ] || [ "${scouts2sqs}" = 'true' ] || [ "${sqs2scouts}" = 'true' ]; then
+            scouts_queues=true
+          fi
+
           if [ "${EVENT_NAME}" = 'workflow_dispatch' ]; then
             retry_safety=true
             if [ "${DEPLOY_ALL}" = 'true' ] || [ "${DEPLOY_TARGET}" = 'all' ]; then
