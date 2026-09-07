@@ -45,94 +45,58 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
-  detect-changes:
+  plan-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     outputs:
-      aws_bootstrap: "${{ steps.changes.outputs['aws-bootstrap'] }}"
-      website: "${{ steps.changes.outputs.website }}"
-      cloudflare: "${{ steps.changes.outputs.cloudflare }}"
-      scouts_queues: "${{ steps.changes.outputs['scouts-queues'] }}"
-      scouts_function: "${{ steps.changes.outputs['scouts-function'] }}"
-      scouts_slack_handler: "${{ steps.changes.outputs['scouts-slack-handler'] }}"
-      scouts_image_enrich: "${{ steps.changes.outputs['scouts-image-enrich'] }}"
-      scouts_full_enrich: "${{ steps.changes.outputs['scouts-full-enrich'] }}"
-      scouts2sqs: "${{ steps.changes.outputs.scouts2sqs }}"
-      sqs2scouts: "${{ steps.changes.outputs.sqs2scouts }}"
-      retry_safety: "${{ steps.changes.outputs['retry-safety'] }}"
+      aws_bootstrap: ${{ steps.plan.outputs.aws_bootstrap }}
+      website: ${{ steps.plan.outputs.website }}
+      cloudflare: ${{ steps.plan.outputs.cloudflare }}
+      scouts_queues: ${{ steps.plan.outputs.scouts_queues }}
+      scouts_function: ${{ steps.plan.outputs.scouts_function }}
+      scouts_slack_handler: ${{ steps.plan.outputs.scouts_slack_handler }}
+      scouts_image_enrich: ${{ steps.plan.outputs.scouts_image_enrich }}
+      scouts_full_enrich: ${{ steps.plan.outputs.scouts_full_enrich }}
+      scouts2sqs: ${{ steps.plan.outputs.scouts2sqs }}
+      sqs2scouts: ${{ steps.plan.outputs.sqs2scouts }}
+      retry_safety: ${{ steps.plan.outputs.retry_safety }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Detect changed targets
-        id: changes
+
+      - name: Plan changed deployment targets
+        id: plan
         env:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_BEFORE: ${{ github.event.before }}
           EVENT_SHA: ${{ github.sha }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DEPLOY_TARGET: ${{ github.event.inputs.deploy_target || 'changed' }}
+          DEPLOY_ALL: ${{ github.event.inputs.deploy_all || 'false' }}
         run: |
           set -euo pipefail
 
-          normalize_output_name() {
-            printf '%s' "$1" | tr '-' '_'
-          }
-
-          append_file() {
-            local key="$1"
-            local file="$2"
-            local var_name
-            var_name="$(normalize_output_name "${key}")_files"
-            local current_value="${!var_name:-}"
-            if [ -n "${current_value}" ]; then
-              printf -v "${var_name}" '%s %s' "${current_value}" "${file}"
-            else
-              printf -v "${var_name}" '%s' "${file}"
-            fi
-          }
-
-          mark_changed() {
-            local key="$1"
-            local file="$2"
-            local var_name
-            var_name="$(normalize_output_name "${key}")"
-            printf -v "${var_name}" 'true'
-            append_file "${key}" "${file}"
-          }
-
-          aws_bootstrap='false'
-          website='false'
-          cloudflare='false'
-          scouts_queues='false'
-          scouts_function='false'
-          scouts_slack_handler='false'
-          scouts_image_enrich='false'
-          scouts_full_enrich='false'
-          scouts2sqs='false'
-          sqs2scouts='false'
-          retry_safety='false'
-
-          aws_bootstrap_files=''
-          website_files=''
-          cloudflare_files=''
-          scouts_queues_files=''
-          scouts_function_files=''
-          scouts_slack_handler_files=''
-          scouts_image_enrich_files=''
-          scouts_full_enrich_files=''
-          scouts2sqs_files=''
-          sqs2scouts_files=''
-          retry_safety_files=''
+          aws_bootstrap=false
+          website=false
+          cloudflare=false
+          scouts_queues=false
+          scouts_function=false
+          scouts_slack_handler=false
+          scouts_image_enrich=false
+          scouts_full_enrich=false
+          scouts2sqs=false
+          sqs2scouts=false
+          retry_safety=false
 
           base_ref=''
-          changed_files=''
-
           if [ "${EVENT_NAME}" = 'pull_request' ]; then
             base_ref="${PR_BASE_SHA:-}"
             if [ -n "${base_ref}" ] && ! git cat-file -e "${base_ref}^{commit}" 2>/dev/null; then
               git fetch --no-tags origin "${base_ref}" --depth=1
             fi
           elif [ "${EVENT_NAME}" = 'push' ]; then
-            if [ -n "${EVENT_BEFORE}" ] && [ "${EVENT_BEFORE}" != '0000000000000000000000000000000000000000' ]; then
+            if [ -n "${EVENT_BEFORE:-}" ] && [ "${EVENT_BEFORE}" != '0000000000000000000000000000000000000000' ]; then
               base_ref="${EVENT_BEFORE}"
               if ! git cat-file -e "${base_ref}^{commit}" 2>/dev/null; then
                 git fetch --no-tags origin "${base_ref}" --depth=1
@@ -152,225 +116,148 @@ jobs:
 
           echo "Base ref: ${base_ref:-<none>}"
           echo "Changed files:"
-          if [ -n "${changed_files}" ]; then
-            printf '%s\n' "${changed_files}"
-          else
-            echo "<none>"
-          fi
+          printf '%s\n' "${changed_files:-<none>}"
 
           while IFS= read -r file; do
             [ -n "${file}" ] || continue
-
-            case "${file}" in
-              aws/bootstrap/*)
-                mark_changed 'aws-bootstrap' "${file}"
-                ;;
-            esac
-
-            case "${file}" in
-              index.html|deploy-manual.sh|.github/workflows/deploy-to-s3.yml|lambdas/sqs2scouts/scouts.conf|website/*)
-                mark_changed 'website' "${file}"
-                ;;
-            esac
-
-            case "${file}" in
-              cloudflare/*|.github/workflows/deploy-to-s3.yml)
-                mark_changed 'cloudflare' "${file}"
-                ;;
-            esac
-
-            case "${file}" in
-              lambdas/scouts-queues/*|lambdas/cloudformation/templates/scouts-queues.yaml)
-                mark_changed 'scouts-queues' "${file}"
-                ;;
-            esac
-
-            case "${file}" in
-              lambdas/scouts/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/scouts.yaml)
-                mark_changed 'scouts-function' "${file}"
-                ;;
-            esac
-
-            case "${file}" in
-              lambdas/scouts-slack-handler/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/slack-handler.yaml)
-                mark_changed 'scouts-slack-handler' "${file}"
-                ;;
-            esac
-
-            case "${file}" in
-              lambdas/scouts-image-enrich/*|lambdas/cloudformation/templates/scouts-image-enrich.yaml)
-                mark_changed 'scouts-image-enrich' "${file}"
-                ;;
-            esac
-
-            case "${file}" in
-              lambdas/scouts-full-enrich/*|lambdas/cloudformation/templates/scouts-full-enrich.yaml)
-                mark_changed 'scouts-full-enrich' "${file}"
-                ;;
-            esac
-
-            case "${file}" in
-              lambdas/scouts2sqs/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/scouts2sqs.yaml)
-                mark_changed 'scouts2sqs' "${file}"
-                ;;
-            esac
-
-            case "${file}" in
-              lambdas/sqs2scouts/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/sqs2scouts.yaml)
-                mark_changed 'sqs2scouts' "${file}"
-                ;;
-            esac
-
+            case "${file}" in aws/bootstrap/*) aws_bootstrap=true ;; esac
+            case "${file}" in index.html|deploy-manual.sh|.github/workflows/deploy-to-s3.yml|lambdas/sqs2scouts/scouts.conf|website/*) website=true ;; esac
+            case "${file}" in cloudflare/*|.github/workflows/deploy-to-s3.yml) cloudflare=true ;; esac
+            case "${file}" in lambdas/scouts-queues/*|lambdas/cloudformation/templates/scouts-queues.yaml) scouts_queues=true ;; esac
+            case "${file}" in lambdas/scouts/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/scouts.yaml) scouts_function=true ;; esac
+            case "${file}" in lambdas/scouts-slack-handler/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/slack-handler.yaml) scouts_slack_handler=true ;; esac
+            case "${file}" in lambdas/scouts-image-enrich/*|lambdas/cloudformation/templates/scouts-image-enrich.yaml) scouts_image_enrich=true ;; esac
+            case "${file}" in lambdas/scouts-full-enrich/*|lambdas/cloudformation/templates/scouts-full-enrich.yaml) scouts_full_enrich=true ;; esac
+            case "${file}" in lambdas/scouts2sqs/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/scouts2sqs.yaml) scouts2sqs=true ;; esac
+            case "${file}" in lambdas/sqs2scouts/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/sqs2scouts.yaml) sqs2scouts=true ;; esac
             case "${file}" in
               lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|tests/issue-34-admin-ui.integration.test.mjs|website/admin/*|.github/workflows/deploy-to-s3.yml)
-                mark_changed 'retry-safety' "${file}"
+                retry_safety=true
                 ;;
             esac
-
           done <<< "${changed_files}"
 
-          {
-            echo "aws-bootstrap=${aws_bootstrap}"
-            echo "aws-bootstrap_files=${aws_bootstrap_files}"
-            echo "website=${website}"
-            echo "website_files=${website_files}"
-            echo "cloudflare=${cloudflare}"
-            echo "cloudflare_files=${cloudflare_files}"
-            echo "scouts-queues=${scouts_queues}"
-            echo "scouts-queues_files=${scouts_queues_files}"
-            echo "scouts-function=${scouts_function}"
-            echo "scouts-function_files=${scouts_function_files}"
-            echo "scouts-slack-handler=${scouts_slack_handler}"
-            echo "scouts-slack-handler_files=${scouts_slack_handler_files}"
-            echo "scouts-image-enrich=${scouts_image_enrich}"
-            echo "scouts-image-enrich_files=${scouts_image_enrich_files}"
-            echo "scouts-full-enrich=${scouts_full_enrich}"
-            echo "scouts-full-enrich_files=${scouts_full_enrich_files}"
-            echo "scouts2sqs=${scouts2sqs}"
-            echo "scouts2sqs_files=${scouts2sqs_files}"
-            echo "sqs2scouts=${sqs2scouts}"
-            echo "sqs2scouts_files=${sqs2scouts_files}"
-            echo "retry-safety=${retry_safety}"
-            echo "retry-safety_files=${retry_safety_files}"
-          } >> "${GITHUB_OUTPUT}"
-      - name: Debug detected changes
-        run: |
-          echo "aws-bootstrap=${{ steps.changes.outputs['aws-bootstrap'] }} files=${{ steps.changes.outputs['aws-bootstrap_files'] }}"
-          echo "website=${{ steps.changes.outputs.website }} files=${{ steps.changes.outputs.website_files }}"
-          echo "cloudflare=${{ steps.changes.outputs.cloudflare }} files=${{ steps.changes.outputs.cloudflare_files }}"
-          echo "scouts-queues=${{ steps.changes.outputs['scouts-queues'] }} files=${{ steps.changes.outputs['scouts-queues_files'] }}"
-          echo "scouts-function=${{ steps.changes.outputs['scouts-function'] }} files=${{ steps.changes.outputs['scouts-function_files'] }}"
-          echo "scouts-slack-handler=${{ steps.changes.outputs['scouts-slack-handler'] }} files=${{ steps.changes.outputs['scouts-slack-handler_files'] }}"
-          echo "scouts-image-enrich=${{ steps.changes.outputs['scouts-image-enrich'] }} files=${{ steps.changes.outputs['scouts-image-enrich_files'] }}"
-          echo "scouts-full-enrich=${{ steps.changes.outputs['scouts-full-enrich'] }} files=${{ steps.changes.outputs['scouts-full-enrich_files'] }}"
-          echo "scouts2sqs=${{ steps.changes.outputs.scouts2sqs }} files=${{ steps.changes.outputs.scouts2sqs_files }}"
-          echo "sqs2scouts=${{ steps.changes.outputs.sqs2scouts }} files=${{ steps.changes.outputs.sqs2scouts_files }}"
-          echo "retry-safety=${{ steps.changes.outputs['retry-safety'] }} files=${{ steps.changes.outputs['retry-safety_files'] }}"
+          if [ "${EVENT_NAME}" = 'workflow_dispatch' ]; then
+            retry_safety=true
+            if [ "${DEPLOY_ALL}" = 'true' ] || [ "${DEPLOY_TARGET}" = 'all' ]; then
+              aws_bootstrap=true
+              website=true
+              cloudflare=true
+              scouts_queues=true
+              scouts_function=true
+              scouts_slack_handler=true
+              scouts_image_enrich=true
+              scouts_full_enrich=true
+              scouts2sqs=true
+              sqs2scouts=true
+            elif [ "${DEPLOY_TARGET}" != 'changed' ]; then
+              aws_bootstrap=false
+              website=false
+              cloudflare=false
+              scouts_queues=false
+              scouts_function=false
+              scouts_slack_handler=false
+              scouts_image_enrich=false
+              scouts_full_enrich=false
+              scouts2sqs=false
+              sqs2scouts=false
+              case "${DEPLOY_TARGET}" in
+                aws-bootstrap) aws_bootstrap=true ;;
+                website) website=true ;;
+                cloudflare) cloudflare=true ;;
+                scouts-queues) aws_bootstrap=true; scouts_queues=true ;;
+                scouts-function) aws_bootstrap=true; scouts_queues=true; scouts_function=true ;;
+                scouts-slack-handler) scouts_slack_handler=true ;;
+                scouts-image-enrich) scouts_image_enrich=true ;;
+                scouts-full-enrich) scouts_full_enrich=true ;;
+                scouts2sqs) aws_bootstrap=true; scouts_queues=true; scouts2sqs=true ;;
+                sqs2scouts) aws_bootstrap=true; scouts_queues=true; sqs2scouts=true ;;
+                *) echo "Unknown deploy target: ${DEPLOY_TARGET}"; exit 1 ;;
+              esac
+            fi
+          fi
 
-  retry-safety:
-    needs: detect-changes
-    if: github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.retry_safety == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6
+          {
+            echo "aws_bootstrap=${aws_bootstrap}"
+            echo "website=${website}"
+            echo "cloudflare=${cloudflare}"
+            echo "scouts_queues=${scouts_queues}"
+            echo "scouts_function=${scouts_function}"
+            echo "scouts_slack_handler=${scouts_slack_handler}"
+            echo "scouts_image_enrich=${scouts_image_enrich}"
+            echo "scouts_full_enrich=${scouts_full_enrich}"
+            echo "scouts2sqs=${scouts2sqs}"
+            echo "sqs2scouts=${sqs2scouts}"
+            echo "retry_safety=${retry_safety}"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "Deployment plan:"
+          printf '  %-24s %s\n' aws-bootstrap "${aws_bootstrap}"
+          printf '  %-24s %s\n' website "${website}"
+          printf '  %-24s %s\n' cloudflare "${cloudflare}"
+          printf '  %-24s %s\n' scouts-queues "${scouts_queues}"
+          printf '  %-24s %s\n' scouts-function "${scouts_function}"
+          printf '  %-24s %s\n' scouts-slack-handler "${scouts_slack_handler}"
+          printf '  %-24s %s\n' scouts-image-enrich "${scouts_image_enrich}"
+          printf '  %-24s %s\n' scouts-full-enrich "${scouts_full_enrich}"
+          printf '  %-24s %s\n' scouts2sqs "${scouts2sqs}"
+          printf '  %-24s %s\n' sqs2scouts "${sqs2scouts}"
+          printf '  %-24s %s\n' retry-safety "${retry_safety}"
+
       - uses: actions/setup-node@v6
+        if: steps.plan.outputs.retry_safety == 'true'
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: lambdas/shared-layer/nodejs/package-lock.json
+
       - name: Install shared-layer dependencies
+        if: steps.plan.outputs.retry_safety == 'true'
         working-directory: lambdas/shared-layer/nodejs
         run: npm ci
+
       - name: Run retry policy unit tests
+        if: steps.plan.outputs.retry_safety == 'true'
         run: node --test lambdas/shared-layer/nodejs/enrichment-state.test.mjs
+
       - name: Run retry state integration tests
+        if: steps.plan.outputs.retry_safety == 'true'
         run: node --test lambdas/shared-layer/nodejs/enrichment-state.integration.test.mjs
+
       - name: Run full-enrich callback policy tests
+        if: steps.plan.outputs.retry_safety == 'true'
         run: node --test lambdas/sqs2scouts/function/tests/test-full-enrich-helpers.mjs
+
       - name: Run issue 16 pipeline integration contracts
+        if: steps.plan.outputs.retry_safety == 'true'
         run: node --test tests/issue-16-pipeline.integration.test.mjs
+
       - name: Run deployment ordering contract tests
+        if: steps.plan.outputs.retry_safety == 'true'
         run: node --test tests/deployment-order.integration.test.mjs
+
       - name: Run issue 34 admin UI contracts
+        if: steps.plan.outputs.retry_safety == 'true'
         run: node --test tests/issue-34-admin-ui.integration.test.mjs
 
-  deploy-scouts-image-enrich:
-    needs: detect-changes
-    if: |
-      (github.event_name == 'push' && needs.detect-changes.outputs.scouts_image_enrich == 'true') ||
-      (github.event_name == 'workflow_dispatch' && (
-        github.event.inputs.deploy_all == 'true' ||
-        github.event.inputs.deploy_target == 'all' ||
-        github.event.inputs.deploy_target == 'scouts-image-enrich' ||
-        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.scouts_image_enrich == 'true')
-      ))
+  deploy-web:
+    needs: plan-and-test
+    if: github.event_name != 'pull_request' && (needs.plan-and-test.outputs.website == 'true' || needs.plan-and-test.outputs.cloudflare == 'true')
     runs-on: ubuntu-latest
     concurrency:
-      group: scouts-image-enrich-stack-${{ github.ref }}
+      group: scouts-web-${{ github.ref }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v6
-      - uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
-          role-session-name: github-actions-scouts-deploy
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Deploy scouts image-enrich state machine
-        env:
-          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
-          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
-        run: cd lambdas/scouts-image-enrich && bash ./deploy.sh
 
-  deploy-scouts-full-enrich:
-    needs: detect-changes
-    if: |
-      (github.event_name == 'push' && needs.detect-changes.outputs.scouts_full_enrich == 'true') ||
-      (github.event_name == 'workflow_dispatch' && (
-        github.event.inputs.deploy_all == 'true' ||
-        github.event.inputs.deploy_target == 'all' ||
-        github.event.inputs.deploy_target == 'scouts-full-enrich' ||
-        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.scouts_full_enrich == 'true')
-      ))
-    runs-on: ubuntu-latest
-    concurrency:
-      group: scouts-full-enrich-stack-${{ github.ref }}
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v6
-      - uses: aws-actions/configure-aws-credentials@v6
+      - uses: actions/setup-node@v6
+        if: needs.plan-and-test.outputs.cloudflare == 'true'
         with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
-          role-session-name: github-actions-scouts-deploy
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Deploy scouts full-enrich state machine
-        env:
-          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
-          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
-        run: cd lambdas/scouts-full-enrich && bash ./deploy.sh
-
-  deploy-cloudflare:
-    needs: detect-changes
-    if: |
-      (github.event_name == 'push' && needs.detect-changes.outputs.cloudflare == 'true') ||
-      (github.event_name == 'workflow_dispatch' && (
-        github.event.inputs.deploy_all == 'true' ||
-        github.event.inputs.deploy_target == 'all' ||
-        github.event.inputs.deploy_target == 'cloudflare' ||
-        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.cloudflare == 'true')
-      ))
-    runs-on: ubuntu-latest
-    concurrency:
-      group: scouts-cloudflare-${{ github.ref }}
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v6
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
+          node-version: '24'
           package-manager-cache: false
-      - name: Get secrets from Bitwarden Secrets Manager
+
+      - name: Get Cloudflare deployment secrets from Bitwarden
+        if: needs.plan-and-test.outputs.cloudflare == 'true'
         id: fetch_cloudflare_secrets
         continue-on-error: true
         uses: bitwarden/sm-action@v2.2.0
@@ -379,40 +266,37 @@ jobs:
           secrets: |
             ${{ vars.BW_SECRET_ID_CF_DEPLOY_API_TOKEN || vars.BW_SCOUTS_CF_DEPLOY }} > CF_DEPLOY_API_TOKEN
             ${{ vars.BW_SCOUTS_SLACK_HANDLER_URL }} > SCOUTS_SLACK_HANDLER_URL
-      - name: Retry secrets from Bitwarden Secrets Manager
-        if: steps.fetch_cloudflare_secrets.outcome == 'failure'
+
+      - name: Retry Cloudflare deployment secrets
+        if: needs.plan-and-test.outputs.cloudflare == 'true' && steps.fetch_cloudflare_secrets.outcome == 'failure'
         uses: bitwarden/sm-action@v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
             ${{ vars.BW_SECRET_ID_CF_DEPLOY_API_TOKEN || vars.BW_SCOUTS_CF_DEPLOY }} > CF_DEPLOY_API_TOKEN
             ${{ vars.BW_SCOUTS_SLACK_HANDLER_URL }} > SCOUTS_SLACK_HANDLER_URL
+
       - name: Install Wrangler
+        if: needs.plan-and-test.outputs.cloudflare == 'true'
         run: npm install --global wrangler@4
+
       - name: Deploy admin proxy worker
+        if: needs.plan-and-test.outputs.cloudflare == 'true'
         run: bash cloudflare/scouts-admin-proxy/deploy-ci.sh
-      - name: Deploy slack handler worker
+
+      - name: Deploy Slack handler worker
+        if: needs.plan-and-test.outputs.cloudflare == 'true'
         run: bash cloudflare/scouts-slack-handler/deploy-ci.sh
 
-  deploy-website:
-    needs: detect-changes
-    if: |
-      (github.event_name == 'push' && needs.detect-changes.outputs.website == 'true') ||
-      (github.event_name == 'workflow_dispatch' && (
-        github.event.inputs.deploy_all == 'true' ||
-        github.event.inputs.deploy_target == 'all' ||
-        github.event.inputs.deploy_target == 'website' ||
-        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.website == 'true')
-      ))
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
       - uses: aws-actions/configure-aws-credentials@v6
+        if: needs.plan-and-test.outputs.website == 'true'
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
-          role-session-name: github-actions-scouts-deploy
-      - name: Get CloudFront distribution ID from Bitwarden Secrets Manager
+          role-session-name: github-actions-scouts-web-deploy
+
+      - name: Get CloudFront distribution ID from Bitwarden
+        if: needs.plan-and-test.outputs.website == 'true'
         id: fetch_cloudfront_distribution_id
         continue-on-error: true
         uses: bitwarden/sm-action@v2.2.0
@@ -420,41 +304,43 @@ jobs:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
             ${{ vars.BW_CLOUDFRONT_DISTRIBUTION_ID }} > CLOUDFRONT_DISTRIBUTION_ID
-      - name: Retry CloudFront distribution ID from Bitwarden Secrets Manager
-        if: steps.fetch_cloudfront_distribution_id.outcome == 'failure'
+
+      - name: Retry CloudFront distribution ID
+        if: needs.plan-and-test.outputs.website == 'true' && steps.fetch_cloudfront_distribution_id.outcome == 'failure'
         uses: bitwarden/sm-action@v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
             ${{ vars.BW_CLOUDFRONT_DISTRIBUTION_ID }} > CLOUDFRONT_DISTRIBUTION_ID
-      - name: Configure S3 bucket for static website hosting
+
+      - name: Configure S3 static website hosting
+        if: needs.plan-and-test.outputs.website == 'true'
         run: |
-          aws s3 website "s3://${WEBSITE_BUCKET}/" \
-            --index-document index.html \
-            --error-document index.html
+          aws s3 website "s3://${WEBSITE_BUCKET}/" --index-document index.html --error-document index.html
           aws s3api put-public-access-block \
             --bucket "${WEBSITE_BUCKET}" \
-            --public-access-block-configuration \
-              BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false
-      - name: Set S3 bucket policy for public read access
+            --public-access-block-configuration BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false
+
+      - name: Set S3 public-read bucket policy
+        if: needs.plan-and-test.outputs.website == 'true'
         run: |
           cat > bucket-policy.json << 'EOF'
           {
             "Version": "2012-10-17",
-            "Statement": [
-              {
-                "Sid": "PublicReadGetObject",
-                "Effect": "Allow",
-                "Principal": "*",
-                "Action": "s3:GetObject",
-                "Resource": "arn:aws:s3:::WEBSITE_BUCKET_PLACEHOLDER/*"
-              }
-            ]
+            "Statement": [{
+              "Sid": "PublicReadGetObject",
+              "Effect": "Allow",
+              "Principal": "*",
+              "Action": "s3:GetObject",
+              "Resource": "arn:aws:s3:::WEBSITE_BUCKET_PLACEHOLDER/*"
+            }]
           }
           EOF
           sed "s/WEBSITE_BUCKET_PLACEHOLDER/${WEBSITE_BUCKET}/g" bucket-policy.json > bucket-policy.rendered.json
           aws s3api put-bucket-policy --bucket "${WEBSITE_BUCKET}" --policy file://bucket-policy.rendered.json
-      - name: Generate admin runtime config for Cloudflare proxy
+
+      - name: Generate admin runtime config
+        if: needs.plan-and-test.outputs.website == 'true'
         env:
           ADMIN_API_BASE: ${{ vars.ADMIN_API_BASE }}
           SCOUTS_AUTH_STATUS_URL: ${{ vars['SCOUTS_AUTH_STATUS_URL'] }}
@@ -465,238 +351,97 @@ jobs:
           {
             echo "// Generated during CI deploy for Cloudflare proxy mode."
             echo "window.ADMIN_API_BASE = '${ADMIN_API_BASE_VALUE}';"
-            if [ -n "${SCOUTS_AUTH_STATUS_URL:-}" ]; then
-              echo "window.SCOUTS_AUTH_STATUS_URL = '${SCOUTS_AUTH_STATUS_URL}';"
-            fi
-            if [ -n "${SCOUTS_URL:-}" ]; then
-              echo "window.SCOUTS_URL = '${SCOUTS_URL}';"
-            fi
-            if [ -n "${SCOUTS_CONFIG_URL:-}" ]; then
-              echo "window.SCOUTS_CONFIG_URL = '${SCOUTS_CONFIG_URL}';"
-            fi
+            [ -z "${SCOUTS_AUTH_STATUS_URL:-}" ] || echo "window.SCOUTS_AUTH_STATUS_URL = '${SCOUTS_AUTH_STATUS_URL}';"
+            [ -z "${SCOUTS_URL:-}" ] || echo "window.SCOUTS_URL = '${SCOUTS_URL}';"
+            [ -z "${SCOUTS_CONFIG_URL:-}" ] || echo "window.SCOUTS_CONFIG_URL = '${SCOUTS_CONFIG_URL}';"
           } > website/admin/admin-config.js
+
       - name: Deploy website to S3
+        if: needs.plan-and-test.outputs.website == 'true'
         run: |
           legacy_dirs=(beavers badges contact cubs fonts hiringtheden images history location scouts-page volunteering welcome)
           for dir in "${legacy_dirs[@]}"; do
-            echo "Removing legacy path s3://${WEBSITE_BUCKET}/${dir} (if any)"
             aws s3 rm "s3://${WEBSITE_BUCKET}/${dir}" --recursive --quiet >/dev/null 2>&1 || true
           done
-          aws s3 sync . "s3://${WEBSITE_BUCKET}/" --exclude "*" --include "index.html" \
-            --cache-control "max-age=0, no-cache, no-store, must-revalidate"
-          aws s3 sync website/ "s3://${WEBSITE_BUCKET}/website/" \
-            --delete \
-            --exclude "eventImages/*" \
-            --exclude "eventImages/**" \
-            --cache-control "max-age=0, no-cache, no-store, must-revalidate"
+          aws s3 sync . "s3://${WEBSITE_BUCKET}/" --exclude "*" --include "index.html" --cache-control "max-age=0, no-cache, no-store, must-revalidate"
+          aws s3 sync website/ "s3://${WEBSITE_BUCKET}/website/" --delete --exclude "eventImages/*" --exclude "eventImages/**" --cache-control "max-age=0, no-cache, no-store, must-revalidate"
           if [ -d website/eventImages ]; then
-            aws s3 sync website/eventImages/ "s3://${WEBSITE_BUCKET}/website/eventImages/" \
-              --cache-control "max-age=0, no-cache, no-store, must-revalidate"
+            aws s3 sync website/eventImages/ "s3://${WEBSITE_BUCKET}/website/eventImages/" --cache-control "max-age=0, no-cache, no-store, must-revalidate"
           fi
+
       - name: Upload scouts.conf to S3 root
+        if: needs.plan-and-test.outputs.website == 'true'
         run: |
           if [ -f lambdas/sqs2scouts/scouts.conf ]; then
-            echo "Uploading lambdas/sqs2scouts/scouts.conf to s3://${WEBSITE_BUCKET}/scouts.conf"
-            aws s3 cp lambdas/sqs2scouts/scouts.conf "s3://${WEBSITE_BUCKET}/scouts.conf" \
-              --cache-control "max-age=0, no-cache, no-store, must-revalidate"
-          else
-            echo "No scouts.conf found in lambdas/sqs2scouts/, skipping"
+            aws s3 cp lambdas/sqs2scouts/scouts.conf "s3://${WEBSITE_BUCKET}/scouts.conf" --cache-control "max-age=0, no-cache, no-store, must-revalidate"
           fi
+
       - name: Invalidate CloudFront cache
+        if: needs.plan-and-test.outputs.website == 'true'
         run: |
-          if [ -n "${CLOUDFRONT_DISTRIBUTION_ID:-}" ]; then
-            if aws cloudfront get-distribution --id "${CLOUDFRONT_DISTRIBUTION_ID}" >/dev/null 2>&1; then
-              echo "Invalidating CloudFront distribution ${CLOUDFRONT_DISTRIBUTION_ID}..."
-              aws cloudfront create-invalidation \
-                --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
-                --paths "/index.html" "/scouts.conf" "/website/*" "/agenda.json" "/runtime/*" "/events/*"
-            else
-              echo "CloudFront distribution ${CLOUDFRONT_DISTRIBUTION_ID} not found in this account; skipping invalidation."
-            fi
-          else
-            echo "No CloudFront distribution ID loaded from Bitwarden; skipping invalidation."
+          if [ -n "${CLOUDFRONT_DISTRIBUTION_ID:-}" ] && aws cloudfront get-distribution --id "${CLOUDFRONT_DISTRIBUTION_ID}" >/dev/null 2>&1; then
+            aws cloudfront create-invalidation --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" --paths "/index.html" "/scouts.conf" "/website/*" "/agenda.json" "/runtime/*" "/events/*"
           fi
 
-  deploy-aws-bootstrap:
-    needs: detect-changes
-    if: |
-      (github.event_name == 'push' && needs.detect-changes.outputs.aws_bootstrap == 'true') ||
-      (github.event_name == 'workflow_dispatch' && (
-        github.event.inputs.deploy_all == 'true' ||
-        github.event.inputs.deploy_target == 'all' ||
-        github.event.inputs.deploy_target == 'aws-bootstrap' ||
-        github.event.inputs.deploy_target == 'scouts-queues' ||
-        github.event.inputs.deploy_target == 'scouts-function' ||
-        github.event.inputs.deploy_target == 'scouts2sqs' ||
-        github.event.inputs.deploy_target == 'sqs2scouts' ||
-        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.aws_bootstrap == 'true')
-      ))
+  deploy-aws:
+    needs: plan-and-test
+    if: >-
+      github.event_name != 'pull_request' &&
+      (needs.plan-and-test.outputs.aws_bootstrap == 'true' ||
+       needs.plan-and-test.outputs.scouts_queues == 'true' ||
+       needs.plan-and-test.outputs.scouts_image_enrich == 'true' ||
+       needs.plan-and-test.outputs.scouts_full_enrich == 'true' ||
+       needs.plan-and-test.outputs.sqs2scouts == 'true' ||
+       needs.plan-and-test.outputs.scouts2sqs == 'true' ||
+       needs.plan-and-test.outputs.scouts_function == 'true' ||
+       needs.plan-and-test.outputs.scouts_slack_handler == 'true')
     runs-on: ubuntu-latest
     concurrency:
-      group: scouts-aws-bootstrap-stack-${{ github.ref }}
+      group: scouts-aws-${{ github.ref }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v6
-      - uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
-          role-session-name: github-actions-scouts-deploy
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Deploy Scouts AWS bootstrap
-        env:
-          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
-        run: cd aws/bootstrap && bash ./deploy.sh
 
-  deploy-scouts-queues:
-    needs: [detect-changes, deploy-aws-bootstrap]
-    if: |
-      always() &&
-      (needs.deploy-aws-bootstrap.result == 'success' || needs.deploy-aws-bootstrap.result == 'skipped') &&
-      (
-        (github.event_name == 'push' && (
-          needs.detect-changes.outputs.scouts_queues == 'true' ||
-          needs.detect-changes.outputs.scouts_function == 'true' ||
-          needs.detect-changes.outputs.scouts2sqs == 'true' ||
-          needs.detect-changes.outputs.sqs2scouts == 'true'
-        )) ||
-        (github.event_name == 'workflow_dispatch' && (
-          github.event.inputs.deploy_all == 'true' ||
-          github.event.inputs.deploy_target == 'all' ||
-          github.event.inputs.deploy_target == 'scouts-queues' ||
-          github.event.inputs.deploy_target == 'scouts-function' ||
-          github.event.inputs.deploy_target == 'scouts2sqs' ||
-          github.event.inputs.deploy_target == 'sqs2scouts' ||
-          (github.event.inputs.deploy_target == 'changed' && (
-            needs.detect-changes.outputs.scouts_queues == 'true' ||
-            needs.detect-changes.outputs.scouts_function == 'true' ||
-            needs.detect-changes.outputs.scouts2sqs == 'true' ||
-            needs.detect-changes.outputs.sqs2scouts == 'true'
-          ))
-        ))
-      )
-    runs-on: ubuntu-latest
-    concurrency:
-      group: scouts-queues-stack-${{ github.ref }}
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v6
-      - uses: aws-actions/configure-aws-credentials@v6
+      - uses: actions/setup-node@v6
         with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
-          role-session-name: github-actions-scouts-deploy
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Deploy scouts queues
-        env:
-          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
-          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
-        run: cd lambdas/scouts-queues && bash ./deploy.sh
+          node-version: '24'
+          package-manager-cache: false
 
-  deploy-scouts-function:
-    needs: [detect-changes, retry-safety, deploy-scouts-queues, deploy-scouts-image-enrich, deploy-scouts-full-enrich]
-    if: |
-      always() &&
-      needs.retry-safety.result == 'success' &&
-      (needs.deploy-scouts-queues.result == 'success' || needs.deploy-scouts-queues.result == 'skipped') &&
-      (needs.deploy-scouts-image-enrich.result == 'success' || needs.deploy-scouts-image-enrich.result == 'skipped') &&
-      (needs.deploy-scouts-full-enrich.result == 'success' || needs.deploy-scouts-full-enrich.result == 'skipped') &&
-      (
-        (github.event_name == 'push' && needs.detect-changes.outputs.scouts_function == 'true') ||
-        (github.event_name == 'workflow_dispatch' && (
-          github.event.inputs.deploy_all == 'true' ||
-          github.event.inputs.deploy_target == 'all' ||
-          github.event.inputs.deploy_target == 'scouts-function' ||
-          (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.scouts_function == 'true')
-        ))
-      )
-    runs-on: ubuntu-latest
-    concurrency:
-      group: scouts-function-stack-${{ github.ref }}
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v6
-      - name: Restore npm cache for scouts shared layer
+      - name: Restore npm cache for shared layer
         uses: actions/cache@v4
         with:
           path: ~/.npm
           key: ${{ runner.os }}-npm-scouts-shared-layer-${{ hashFiles('lambdas/shared-layer/nodejs/package-lock.json') }}
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Ensure jq is available
+        run: command -v jq >/dev/null || { sudo apt-get update && sudo apt-get install -y jq; }
+
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
-          role-session-name: github-actions-scouts-deploy
+          role-session-name: github-actions-scouts-aws-deploy
           aws-region: ${{ env.AWS_REGION }}
-      - name: Get scouts API key from Bitwarden Secrets Manager
-        id: fetch_scouts_api_key
+
+      - name: Get required Scouts API key
+        if: needs.plan-and-test.outputs.scouts_function == 'true' || needs.plan-and-test.outputs.scouts2sqs == 'true' || needs.plan-and-test.outputs.scouts_slack_handler == 'true'
+        id: fetch_required_api_key
         continue-on-error: true
         uses: bitwarden/sm-action@v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
             ${{ vars.BW_SCOUTS_REQUIRED_API_KEY }} > SCOUTS_REQUIRED_API_KEY
-      - name: Retry scouts API key from Bitwarden Secrets Manager
-        if: steps.fetch_scouts_api_key.outcome == 'failure'
+
+      - name: Retry required Scouts API key
+        if: (needs.plan-and-test.outputs.scouts_function == 'true' || needs.plan-and-test.outputs.scouts2sqs == 'true' || needs.plan-and-test.outputs.scouts_slack_handler == 'true') && steps.fetch_required_api_key.outcome == 'failure'
         uses: bitwarden/sm-action@v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
             ${{ vars.BW_SCOUTS_REQUIRED_API_KEY }} > SCOUTS_REQUIRED_API_KEY
-      - name: Verify scouts API key is loaded
-        run: |
-          if [ -z "${SCOUTS_REQUIRED_API_KEY:-}" ]; then
-            echo "SCOUTS_REQUIRED_API_KEY was not loaded from Bitwarden"
-            exit 1
-          fi
-      - name: Deploy scouts function
-        env:
-          CODE_BUCKET: ${{ env.CODE_BUCKET }}
-          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
-          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
-          DATA_BUCKET_NAME: scouts-2ndtolworth-prod-553490163883
-          CREATE_DATA_BUCKET: 'true'
-          SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
-          SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
-          CUBS_EVENTS_CALENDAR_URL: ${{ vars.CUBS_EVENTS_CALENDAR_URL }}
-          CUBS_PROGRAMME_CALENDAR_URL: ${{ vars.CUBS_PROGRAMME_CALENDAR_URL }}
-          CUBS_PROGRAME_CALENDAR_URL: ${{ vars.CUBS_PROGRAME_CALENDAR_URL }}
-          SCOUTS_EVENTS_CALENDAR_URL: ${{ vars.SCOUTS_EVENTS_CALENDAR_URL }}
-          SCOUTS_PROGRAMME_CALENDAR_URL: ${{ vars.SCOUTS_PROGRAMME_CALENDAR_URL }}
-          BEAVERS_EVENTS_CALENDAR_URL: ${{ vars.BEAVERS_EVENTS_CALENDAR_URL }}
-          BEAVERS_PROGRAMME_CALENDAR_URL: ${{ vars.BEAVERS_PROGRAMME_CALENDAR_URL }}
-        run: cd lambdas/scouts && bash ./deploy.sh
 
-  deploy-scouts-slack-handler:
-    needs: detect-changes
-    if: |
-      (github.event_name == 'push' && needs.detect-changes.outputs.scouts_slack_handler == 'true') ||
-      (github.event_name == 'workflow_dispatch' && (
-        github.event.inputs.deploy_all == 'true' ||
-        github.event.inputs.deploy_target == 'all' ||
-        github.event.inputs.deploy_target == 'scouts-slack-handler' ||
-        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.scouts_slack_handler == 'true')
-      ))
-    runs-on: ubuntu-latest
-    concurrency:
-      group: scouts-slack-handler-stack-${{ github.ref }}
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v6
-      - name: Restore npm cache for scouts shared layer
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-npm-scouts-shared-layer-${{ hashFiles('lambdas/shared-layer/nodejs/package-lock.json') }}
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          package-manager-cache: false
-      - uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
-          role-session-name: github-actions-scouts-deploy
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Get Slack signing secret from Bitwarden Secrets Manager
+      - name: Get Slack handler secrets
+        if: needs.plan-and-test.outputs.scouts_slack_handler == 'true'
         id: fetch_slack_handler_secrets
         continue-on-error: true
         uses: bitwarden/sm-action@v2.2.0
@@ -705,132 +450,18 @@ jobs:
           secrets: |
             ${{ vars.BW_SCOUTS_SLACK_SIGNING_SECRET }} > SLACK_SIGNING_SECRET
             ${{ vars.BW_SCOUTS_SLACK_BOT_TOKEN }} > SLACK_BOT_TOKEN
-            ${{ vars.BW_SCOUTS_REQUIRED_API_KEY }} > REQUIRED_API_KEY
-      - name: Retry Slack signing secret from Bitwarden Secrets Manager
-        if: steps.fetch_slack_handler_secrets.outcome == 'failure'
+
+      - name: Retry Slack handler secrets
+        if: needs.plan-and-test.outputs.scouts_slack_handler == 'true' && steps.fetch_slack_handler_secrets.outcome == 'failure'
         uses: bitwarden/sm-action@v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
             ${{ vars.BW_SCOUTS_SLACK_SIGNING_SECRET }} > SLACK_SIGNING_SECRET
             ${{ vars.BW_SCOUTS_SLACK_BOT_TOKEN }} > SLACK_BOT_TOKEN
-            ${{ vars.BW_SCOUTS_REQUIRED_API_KEY }} > REQUIRED_API_KEY
-      - name: Deploy scouts slack-handler
-        env:
-          CODE_BUCKET: ${{ env.CODE_BUCKET }}
-          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
-          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
-          SCOUTS_REQUEST_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
-          SCOUTS_REQUEST_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
-          NFC_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
-          NFC_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
-          TARGET_BUCKET: scouts-2ndtolworth-prod-553490163883
-          SCOUTS_CONFIG_KEY: scouts.conf
-        run: cd lambdas/scouts-slack-handler && bash ./deploy.sh
 
-  deploy-scouts2sqs:
-    needs: [detect-changes, retry-safety, deploy-scouts-queues, deploy-scouts-image-enrich, deploy-scouts-full-enrich, deploy-sqs2scouts]
-    if: |
-      always() &&
-      needs.retry-safety.result == 'success' &&
-      (needs.deploy-scouts-queues.result == 'success' || needs.deploy-scouts-queues.result == 'skipped') &&
-      (needs.deploy-scouts-image-enrich.result == 'success' || needs.deploy-scouts-image-enrich.result == 'skipped') &&
-      (needs.deploy-scouts-full-enrich.result == 'success' || needs.deploy-scouts-full-enrich.result == 'skipped') &&
-      (needs.deploy-sqs2scouts.result == 'success' || needs.deploy-sqs2scouts.result == 'skipped') &&
-      (
-        (github.event_name == 'push' && needs.detect-changes.outputs.scouts2sqs == 'true') ||
-        (github.event_name == 'workflow_dispatch' && (
-          github.event.inputs.deploy_all == 'true' ||
-          github.event.inputs.deploy_target == 'all' ||
-          github.event.inputs.deploy_target == 'scouts2sqs' ||
-          (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.scouts2sqs == 'true')
-        ))
-      )
-    runs-on: ubuntu-latest
-    concurrency:
-      group: scouts2sqs-stack-${{ github.ref }}
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v6
-      - name: Restore npm cache for scouts shared layer
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-npm-scouts-shared-layer-${{ hashFiles('lambdas/shared-layer/nodejs/package-lock.json') }}
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-      - uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
-          role-session-name: github-actions-scouts-deploy
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Get scouts API key from Bitwarden Secrets Manager
-        id: fetch_scouts2sqs_api_key
-        continue-on-error: true
-        uses: bitwarden/sm-action@v2.2.0
-        with:
-          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
-          secrets: |
-            ${{ vars.BW_SCOUTS_REQUIRED_API_KEY }} > SCOUTS_REQUIRED_API_KEY
-      - name: Retry scouts API key from Bitwarden Secrets Manager
-        if: steps.fetch_scouts2sqs_api_key.outcome == 'failure'
-        uses: bitwarden/sm-action@v2.2.0
-        with:
-          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
-          secrets: |
-            ${{ vars.BW_SCOUTS_REQUIRED_API_KEY }} > SCOUTS_REQUIRED_API_KEY
-      - name: Verify scouts API key is loaded
-        run: |
-          if [ -z "${SCOUTS_REQUIRED_API_KEY:-}" ]; then
-            echo "SCOUTS_REQUIRED_API_KEY was not loaded from Bitwarden"
-            exit 1
-          fi
-      - name: Deploy scouts2sqs
-        env:
-          CODE_BUCKET: ${{ env.CODE_BUCKET }}
-          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
-          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
-          TARGET_BUCKET: scouts-2ndtolworth-prod-553490163883
-          QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing
-          QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
-          DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
-          SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
-          SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
-          IMAGE_GENERATION_PROVIDER: ${{ vars.IMAGE_GENERATION_PROVIDER || 'disabled' }}
-        run: cd lambdas/scouts2sqs && bash ./deploy.sh
-
-  deploy-sqs2scouts:
-    needs: [detect-changes, retry-safety, deploy-scouts-queues]
-    if: |
-      always() &&
-      needs.retry-safety.result == 'success' &&
-      (needs.deploy-scouts-queues.result == 'success' || needs.deploy-scouts-queues.result == 'skipped') &&
-      ((github.event_name == 'push' && needs.detect-changes.outputs.sqs2scouts == 'true') ||
-      (github.event_name == 'workflow_dispatch' && (
-        github.event.inputs.deploy_all == 'true' ||
-        github.event.inputs.deploy_target == 'all' ||
-        github.event.inputs.deploy_target == 'sqs2scouts' ||
-        (github.event.inputs.deploy_target == 'changed' && needs.detect-changes.outputs.sqs2scouts == 'true')
-      )))
-    runs-on: ubuntu-latest
-    concurrency:
-      group: sqs2scouts-stack-${{ github.ref }}
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v6
-      - name: Restore npm cache for scouts shared layer
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-npm-scouts-shared-layer-${{ hashFiles('lambdas/shared-layer/nodejs/package-lock.json') }}
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-      - uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
-          role-session-name: github-actions-scouts-deploy
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Get Slack secrets from Bitwarden Secrets Manager
+      - name: Get sqs2scouts provider secrets
+        if: needs.plan-and-test.outputs.sqs2scouts == 'true'
         id: fetch_sqs2scouts_secrets
         continue-on-error: true
         uses: bitwarden/sm-action@v2.2.0
@@ -840,8 +471,9 @@ jobs:
             ${{ vars.BW_SCOUTS_SLACK_SIGNING_SECRET }} > SLACK_SIGNING_SECRET
             ${{ vars.BW_SCOUTS_SLACK_BOT_TOKEN }} > SLACK_BOT_TOKEN
             ${{ vars.BW_GEMINI_API_KEY }} > GEMINI_API_KEY
-      - name: Retry Slack secrets from Bitwarden Secrets Manager
-        if: steps.fetch_sqs2scouts_secrets.outcome == 'failure'
+
+      - name: Retry sqs2scouts provider secrets
+        if: needs.plan-and-test.outputs.sqs2scouts == 'true' && steps.fetch_sqs2scouts_secrets.outcome == 'failure'
         uses: bitwarden/sm-action@v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
@@ -849,14 +481,44 @@ jobs:
             ${{ vars.BW_SCOUTS_SLACK_SIGNING_SECRET }} > SLACK_SIGNING_SECRET
             ${{ vars.BW_SCOUTS_SLACK_BOT_TOKEN }} > SLACK_BOT_TOKEN
             ${{ vars.BW_GEMINI_API_KEY }} > GEMINI_API_KEY
-      - name: Get Cloudflare Workers AI token from Bitwarden
-        if: ${{ vars.BW_CLOUDFLARE_AI_API_TOKEN != '' }}
+
+      - name: Get Cloudflare Workers AI token
+        if: needs.plan-and-test.outputs.sqs2scouts == 'true' && vars.BW_CLOUDFLARE_AI_API_TOKEN != ''
         uses: bitwarden/sm-action@v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
             ${{ vars.BW_CLOUDFLARE_AI_API_TOKEN }} > CLOUDFLARE_AI_API_TOKEN
+
+      - name: Deploy AWS bootstrap
+        if: needs.plan-and-test.outputs.aws_bootstrap == 'true'
+        env:
+          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
+        run: cd aws/bootstrap && bash ./deploy.sh
+
+      - name: Deploy Scouts queues
+        if: needs.plan-and-test.outputs.scouts_queues == 'true'
+        env:
+          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
+          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
+        run: cd lambdas/scouts-queues && bash ./deploy.sh
+
+      - name: Deploy image-enrich state machine
+        if: needs.plan-and-test.outputs.scouts_image_enrich == 'true'
+        env:
+          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
+          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
+        run: cd lambdas/scouts-image-enrich && bash ./deploy.sh
+
+      - name: Deploy full-enrich state machine
+        if: needs.plan-and-test.outputs.scouts_full_enrich == 'true'
+        env:
+          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
+          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
+        run: cd lambdas/scouts-full-enrich && bash ./deploy.sh
+
       - name: Deploy sqs2scouts
+        if: needs.plan-and-test.outputs.sqs2scouts == 'true'
         env:
           CODE_BUCKET: ${{ env.CODE_BUCKET }}
           CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
@@ -880,24 +542,60 @@ jobs:
           CLOUDFLARE_AI_MODEL: ${{ vars.CLOUDFLARE_AI_MODEL || '@cf/black-forest-labs/flux-1-schnell' }}
           CLOUDFLARE_AI_STEPS: ${{ vars.CLOUDFLARE_AI_STEPS || '4' }}
         run: cd lambdas/sqs2scouts && bash ./deploy.sh
-      - name: Verify sqs2scouts secret parameters and adapter
+
+      - name: Verify sqs2scouts adapter
+        if: needs.plan-and-test.outputs.sqs2scouts == 'true'
         run: |
-          VALUE="$(aws lambda get-function-configuration \
-            --function-name sqs2scouts \
-            --region "${AWS_REGION}" \
-            --query 'Environment.Variables.GEMINI_API_KEY_PARAMETER' \
-            --output text)"
-          if [ -z "$VALUE" ] || [ "$VALUE" = "None" ] || [ "$VALUE" = "null" ]; then
-            echo "GEMINI_API_KEY_PARAMETER is not set on sqs2scouts after deploy"
-            exit 1
-          fi
-          HANDLER="$(aws lambda get-function-configuration \
-            --function-name sqs2scouts \
-            --region "${AWS_REGION}" \
-            --query 'Handler' \
-            --output text)"
-          if [ "$HANDLER" != "full-enrich-adapter.lambdaHandler" ]; then
-            echo "Unexpected sqs2scouts handler after deploy: $HANDLER"
-            exit 1
-          fi
-          echo "sqs2scouts full-enrich adapter is active"
+          VALUE="$(aws lambda get-function-configuration --function-name sqs2scouts --region "${AWS_REGION}" --query 'Environment.Variables.GEMINI_API_KEY_PARAMETER' --output text)"
+          [ -n "$VALUE" ] && [ "$VALUE" != "None" ] && [ "$VALUE" != "null" ] || { echo "GEMINI_API_KEY_PARAMETER is not set"; exit 1; }
+          HANDLER="$(aws lambda get-function-configuration --function-name sqs2scouts --region "${AWS_REGION}" --query 'Handler' --output text)"
+          [ "$HANDLER" = "full-enrich-adapter.lambdaHandler" ] || { echo "Unexpected sqs2scouts handler: $HANDLER"; exit 1; }
+
+      - name: Deploy scouts2sqs
+        if: needs.plan-and-test.outputs.scouts2sqs == 'true'
+        env:
+          CODE_BUCKET: ${{ env.CODE_BUCKET }}
+          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
+          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
+          TARGET_BUCKET: scouts-2ndtolworth-prod-553490163883
+          QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing
+          QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
+          DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
+          SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
+          SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+          IMAGE_GENERATION_PROVIDER: ${{ vars.IMAGE_GENERATION_PROVIDER || 'disabled' }}
+        run: cd lambdas/scouts2sqs && bash ./deploy.sh
+
+      - name: Deploy Scouts function
+        if: needs.plan-and-test.outputs.scouts_function == 'true'
+        env:
+          CODE_BUCKET: ${{ env.CODE_BUCKET }}
+          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
+          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
+          DATA_BUCKET_NAME: scouts-2ndtolworth-prod-553490163883
+          CREATE_DATA_BUCKET: 'true'
+          SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
+          SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+          CUBS_EVENTS_CALENDAR_URL: ${{ vars.CUBS_EVENTS_CALENDAR_URL }}
+          CUBS_PROGRAMME_CALENDAR_URL: ${{ vars.CUBS_PROGRAMME_CALENDAR_URL }}
+          CUBS_PROGRAME_CALENDAR_URL: ${{ vars.CUBS_PROGRAME_CALENDAR_URL }}
+          SCOUTS_EVENTS_CALENDAR_URL: ${{ vars.SCOUTS_EVENTS_CALENDAR_URL }}
+          SCOUTS_PROGRAMME_CALENDAR_URL: ${{ vars.SCOUTS_PROGRAMME_CALENDAR_URL }}
+          BEAVERS_EVENTS_CALENDAR_URL: ${{ vars.BEAVERS_EVENTS_CALENDAR_URL }}
+          BEAVERS_PROGRAMME_CALENDAR_URL: ${{ vars.BEAVERS_PROGRAMME_CALENDAR_URL }}
+        run: cd lambdas/scouts && bash ./deploy.sh
+
+      - name: Deploy Scouts Slack handler
+        if: needs.plan-and-test.outputs.scouts_slack_handler == 'true'
+        env:
+          CODE_BUCKET: ${{ env.CODE_BUCKET }}
+          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
+          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
+          REQUIRED_API_KEY: ${{ env.SCOUTS_REQUIRED_API_KEY }}
+          SCOUTS_REQUEST_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+          SCOUTS_REQUEST_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
+          NFC_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+          NFC_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
+          TARGET_BUCKET: scouts-2ndtolworth-prod-553490163883
+          SCOUTS_CONFIG_KEY: scouts.conf
+        run: cd lambdas/scouts-slack-handler && bash ./deploy.sh
