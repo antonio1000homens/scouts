@@ -25,7 +25,7 @@ Parameters:
     Default: nodejs24.x
   Handler:
     Type: String
-    Default: scouts.handler
+    Default: scouts-entry.handler
   DataBucketName:
     Type: String
     Default: scouts-2ndtolworth-prod-553490163883
@@ -98,6 +98,9 @@ Parameters:
   ImageEnrichStateMachineArn:
     Type: String
     Default: ''
+  FullEnrichStateMachineArn:
+    Type: String
+    Default: ''
   GeminiDailyRequestLimit:
     Type: Number
     Default: 10
@@ -113,6 +116,7 @@ Conditions:
   ShouldCreateDataBucket: !Equals [!Ref CreateDataBucket, 'true']
   IsPublicFunctionUrl: !Equals [!Ref FunctionUrlAuthType, 'NONE']
   HasImageEnrichStateMachineArn: !Not [!Equals [!Ref ImageEnrichStateMachineArn, '']]
+  HasFullEnrichStateMachineArn: !Not [!Equals [!Ref FullEnrichStateMachineArn, '']]
 
 Resources:
   ScoutsDataBucket:
@@ -167,6 +171,14 @@ Resources:
                 Resource: !Ref ScoutsRequestsQueueArn
               - Effect: Allow
                 Action:
+                  - sqs:GetQueueAttributes
+                Resource:
+                  - !Ref ScoutsRequestsQueueArn
+                  - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsProcessing
+                  - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsRequestsDLQ
+                  - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsProcessingDLQ
+              - Effect: Allow
+                Action:
                   - dynamodb:GetItem
                 Resource:
                   - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${GeminiUsageTableName}
@@ -182,6 +194,14 @@ Resources:
                     - states:ListExecutions
                     - states:DescribeExecution
                   Resource: !Ref ImageEnrichStateMachineArn
+                - !Ref AWS::NoValue
+              - !If
+                - HasFullEnrichStateMachineArn
+                - Effect: Allow
+                  Action:
+                    - states:ListExecutions
+                    - states:DescribeExecution
+                  Resource: !Ref FullEnrichStateMachineArn
                 - !Ref AWS::NoValue
 
   ScoutsFunction:
@@ -208,6 +228,7 @@ Resources:
           SCOUTS_REQUESTS_QUEUE_URL: !Ref ScoutsRequestsQueueUrl
           SCOUTS2SQS_FUNCTION_URL: !Ref Scouts2SqsFunctionUrl
           IMAGE_ENRICH_STATE_MACHINE_ARN: !Ref ImageEnrichStateMachineArn
+          FULL_ENRICH_STATE_MACHINE_ARN: !Ref FullEnrichStateMachineArn
           GEMINI_DAILY_REQUEST_LIMIT: !Ref GeminiDailyRequestLimit
           GEMINI_USAGE_TABLE_NAME: !Ref GeminiUsageTableName
           GEMINI_ENRICHMENT_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
