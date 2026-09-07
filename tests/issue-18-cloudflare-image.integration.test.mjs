@@ -73,7 +73,7 @@ test('Cloudflare daily allocation exhaustion is a provider/day circuit, not an e
 });
 
 test('disabled provider makes no image callback task and no provider fallback is encoded in Step Functions', () => {
-  assert.match(stateMachine, /"StringEquals": "disabled", "Next": "ImageGenerationDisabled"/);
+  assert.match(stateMachine, /"StringEquals":\s*"disabled"[\s\S]{0,120}?"Next":\s*"ImageGenerationDisabled"/);
   assert.match(stateMachine, /"ImageGenerationDisabled"/);
   assert.doesNotMatch(stateMachine, /Cloudflare[\s\S]{0,300}(Fallback|fallback)[\s\S]{0,300}Gemini/);
 });
