@@ -25,7 +25,7 @@ Parameters:
     Default: nodejs24.x
   Handler:
     Type: String
-    Default: scouts2sqs.lambdaHandler
+    Default: full-enrich-adapter.lambdaHandler
   Timeout:
     Type: Number
     Default: 30
@@ -90,10 +90,23 @@ Parameters:
   ImageEnrichStateMachineArn:
     Type: String
     Default: ''
+    Description: Legacy rollback-only image-enrich state machine ARN.
+  FullEnrichStateMachineArn:
+    Type: String
+    Default: ''
+    Description: Production full enrichment state machine ARN.
+  ImageGenerationProvider:
+    Type: String
+    Default: disabled
+    AllowedValues:
+      - disabled
+      - cloudflare
+      - gemini
 
 Conditions:
   IsPublicFunctionUrl: !Equals [!Ref FunctionUrlAuthType, 'NONE']
   HasImageEnrichStateMachineArn: !Not [!Equals [!Ref ImageEnrichStateMachineArn, '']]
+  HasFullEnrichStateMachineArn: !Not [!Equals [!Ref FullEnrichStateMachineArn, '']]
 
 Resources:
   Scouts2SqsLayer:
@@ -149,6 +162,14 @@ Resources:
                   - s3:PutObject
                 Resource: !Sub arn:aws:s3:::${TargetBucket}/*
               - !If
+                - HasFullEnrichStateMachineArn
+                - Effect: Allow
+                  Action:
+                    - states:StartExecution
+                    - states:ListExecutions
+                  Resource: !Ref FullEnrichStateMachineArn
+                - !Ref AWS::NoValue
+              - !If
                 - HasImageEnrichStateMachineArn
                 - Effect: Allow
                   Action:
@@ -181,6 +202,8 @@ Resources:
           SQS_QUEUE_URL: !Ref ProcessingQueueUrl
           DLQ_URL: !Ref DlqUrl
           IMAGE_ENRICH_STATE_MACHINE_ARN: !Ref ImageEnrichStateMachineArn
+          FULL_ENRICH_STATE_MACHINE_ARN: !Ref FullEnrichStateMachineArn
+          IMAGE_GENERATION_PROVIDER: !Ref ImageGenerationProvider
       Code:
         S3Bucket: !Ref CodeBucket
         S3Key: !Ref FunctionCodeKey
