@@ -1,0 +1,53 @@
+name: Retry safety tests
+
+on:
+  pull_request:
+    paths:
+      - 'lambdas/shared-layer/**'
+      - 'lambdas/scouts/**'
+      - 'lambdas/sqs2scouts/**'
+      - 'lambdas/cloudformation/templates/scouts.yaml'
+      - 'lambdas/cloudformation/templates/sqs2scouts.yaml'
+      - 'GEMINI-ENRICHMENT-RETRY.md'
+      - 'tests/issue-16-pipeline.integration.test.mjs'
+      - '.github/workflows/test-retry-safety.yml'
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'lambdas/shared-layer/**'
+      - 'lambdas/scouts/**'
+      - 'lambdas/sqs2scouts/**'
+      - 'lambdas/cloudformation/templates/scouts.yaml'
+      - 'lambdas/cloudformation/templates/sqs2scouts.yaml'
+      - 'GEMINI-ENRICHMENT-RETRY.md'
+      - 'tests/issue-16-pipeline.integration.test.mjs'
+      - '.github/workflows/test-retry-safety.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  retry-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: lambdas/shared-layer/nodejs/package-lock.json
+      - name: Install shared-layer dependencies
+        working-directory: lambdas/shared-layer/nodejs
+        run: npm ci
+      - name: Run retry policy unit tests
+        run: node --test lambdas/shared-layer/nodejs/enrichment-state.test.mjs
+      - name: Run retry state integration tests
+        run: node --test lambdas/shared-layer/nodejs/enrichment-state.integration.test.mjs
+      - name: Run full-enrich callback policy tests
+        run: node --test lambdas/sqs2scouts/function/tests/test-full-enrich-helpers.mjs
+      - name: Run issue 16 pipeline integration contracts
+        run: node --test tests/issue-16-pipeline.integration.test.mjs
