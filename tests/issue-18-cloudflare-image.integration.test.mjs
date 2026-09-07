@@ -53,6 +53,17 @@ test('zero image request limit is an explicit fail-closed zero-call cap', () => 
   assert.match(adapter, /configured limit of zero intentionally means zero external image calls/);
 });
 
+test('application cap emits one daily signal without consuming an event attempt', () => {
+  assert.match(adapter, /usageScope:\s*\{ S: 'image-cap-alert' \}/);
+  assert.match(adapter, /ConditionExpression:\s*'attribute_not_exists\(#signalledAt\)'/);
+  assert.match(adapter, /emitImageMetric\('QuotaRejected'/);
+  assert.match(adapter, /Scouts image-generation daily cap reached/);
+  const precheck = adapter.indexOf('if (appCap.open)');
+  const signal = adapter.indexOf('await signalApplicationCapReached(now)', precheck);
+  const reservation = adapter.indexOf('await reserveEnrichmentAttempt', precheck);
+  assert.ok(precheck >= 0 && signal > precheck && reservation > signal, 'cap signal/deferral must occur before any stage/provider reservation');
+});
+
 test('cached image is stored before final S3/event persistence', () => {
   const provider = adapter.indexOf('await generateCloudflareImageAsset');
   const cache = adapter.indexOf('await markGeminiSucceeded', provider);
