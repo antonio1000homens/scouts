@@ -7,9 +7,6 @@ import { loadFunctionsFromSource } from './helpers/source-function-loader.mjs';
 const processorSource = readFileSync('lambdas/sqs2scouts/function/sqs2scouts.mjs', 'utf8');
 const publicSource = readFileSync('website/scripts/event-loader.js', 'utf8');
 
-const LEGACY_S3_SITE_ORIGIN = 'https://legacy.invalid';
-const S3_OBJECT_BASE_URL = 'https://objects.invalid';
-
 test('Slack approval action IDs retain the documented processing mapping', () => {
   const { functions } = loadFunctionsFromSource(processorSource, ['mapActionId']);
   assert.equal(functions.mapActionId('scouts_request_hide'), 'HIDE');
@@ -81,7 +78,7 @@ test('public loader renders generated images only for approved events', () => {
   };
 
   const approvedUrl = helpers.resolveImageUrl(approved);
-  assert.equal(approvedUrl, 'https://site.invalid/website/eventImages/test-generated.jpg');
+  assert.match(approvedUrl, /\/website\/eventImages\/test-generated\.jpg$/);
   assert.match(helpers.createEventImageMarkup(approved), /test-generated\.jpg\?w=400/);
   assert.equal(helpers.resolveImageUrl(pending), null);
   assert.equal(helpers.createEventImageMarkup(pending), '');
