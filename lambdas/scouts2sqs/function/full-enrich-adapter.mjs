@@ -294,6 +294,7 @@ export async function lambdaHandler(event) {
           action: message?.action || null,
           hex: getHexFromMessage(message),
         });
+        throw error;
       }
     }
     if (delegatedRecords.length > 0) return legacyHandler({ ...event, Records: delegatedRecords });
