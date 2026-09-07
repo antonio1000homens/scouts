@@ -93,9 +93,7 @@ function requestedStage(message) {
 
 export function translateFullEnrichStageRequest(message) {
   const stage = requestedStage(message);
-  if (!stage) {
-    throw new Error(`Unsupported fullEnrich stage: ${text(message?.subjectLabel ?? message?.subject) || 'missing'}`);
-  }
+  if (!stage) throw new Error(`Unsupported fullEnrich stage: ${text(message?.subjectLabel ?? message?.subject) || 'missing'}`);
   const hex = getHexFromMessage(message);
   if (!hex) throw new Error('fullEnrich stage request missing HEX');
 
@@ -117,16 +115,20 @@ export function translateFullEnrichStageRequest(message) {
   };
 }
 
-function eventGenerationKey(hex, event) {
+export function eventGenerationKey(hex, event) {
+  // Only source-event identity/content belongs here. Enrichment outputs (tagline,
+  // theme, image URL) deliberately do not: they change during one execution and
+  // would otherwise make reconciliation fail to recognise that execution as active.
   const metadata = getMetadata(event);
   const source = {
     hex,
+    uid: event?.uid ?? event?.originalUid ?? metadata?.uid ?? null,
     title: event?.title ?? event?.summary ?? event?.name ?? null,
-    lastModified: event?.lastModified ?? metadata?.lastModified ?? null,
+    description: event?.description ?? event?.details ?? null,
+    location: event?.location ?? metadata?.location ?? null,
     start: event?.start?.raw ?? event?.start?.sortKey ?? event?.dtstart ?? null,
-    tagline: getTagline(event),
-    imageTheme: getImageTheme(event),
-    imageUrl: getImageUrl(event),
+    end: event?.end?.raw ?? event?.end?.sortKey ?? event?.dtend ?? null,
+    section: event?.section ?? metadata?.section ?? null,
   };
   return crypto.createHash('sha256').update(JSON.stringify(source)).digest('hex').slice(0, 12);
 }
@@ -169,12 +171,8 @@ export function buildFullEnrichExecutionInput(message, event, name = null) {
 
 async function loadEvent(hex, fallback = null) {
   try {
-    const response = await s3.send(new GetObjectCommand({
-      Bucket: TARGET_BUCKET,
-      Key: `events/${hex}.json`,
-    }));
-    const body = await response.Body.transformToString();
-    return JSON.parse(body);
+    const response = await s3.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: `events/${hex}.json` }));
+    return JSON.parse(await response.Body.transformToString());
   } catch (error) {
     if (error?.name === 'NoSuchKey' || error?.name === 'NotFound' || error?.$metadata?.httpStatusCode === 404) {
       return fallback && typeof fallback === 'object' ? fallback : null;
@@ -201,9 +199,7 @@ async function findActiveExecution(prefix) {
 }
 
 async function startFullEnrich(message) {
-  if (!FULL_ENRICH_STATE_MACHINE_ARN) {
-    throw new Error('FULL_ENRICH_STATE_MACHINE_ARN is not configured');
-  }
+  if (!FULL_ENRICH_STATE_MACHINE_ARN) throw new Error('FULL_ENRICH_STATE_MACHINE_ARN is not configured');
   const hex = getHexFromMessage(message);
   if (!hex) throw new Error('fullEnrich request missing HEX');
   const fallback = message?.subject && typeof message.subject === 'object' ? message.subject : null;
@@ -250,10 +246,7 @@ async function startFullEnrich(message) {
 
 async function forwardStageRequest(message) {
   const translated = translateFullEnrichStageRequest(message);
-  await sqs.send(new SendMessageCommand({
-    QueueUrl: PROCESSING_QUEUE_URL,
-    MessageBody: JSON.stringify(translated),
-  }));
+  await sqs.send(new SendMessageCommand({ QueueUrl: PROCESSING_QUEUE_URL, MessageBody: JSON.stringify(translated) }));
   console.log('[FullEnrich] Forwarded callback stage to processing queue', {
     hex: translated.hex,
     stage: translated.orchestrationStep,
@@ -263,19 +256,11 @@ async function forwardStageRequest(message) {
 
 function parseRecord(record) {
   if (!record || record.eventSource !== 'aws:sqs') return null;
-  try {
-    return typeof record.body === 'string' ? JSON.parse(record.body) : record.body;
-  } catch {
-    return null;
-  }
+  try { return typeof record.body === 'string' ? JSON.parse(record.body) : record.body; } catch { return null; }
 }
 
 function parseHttpBody(event) {
-  try {
-    return typeof event?.body === 'string' ? JSON.parse(event.body || '{}') : (event?.body || {});
-  } catch {
-    return null;
-  }
+  try { return typeof event?.body === 'string' ? JSON.parse(event.body || '{}') : (event?.body || {}); } catch { return null; }
 }
 
 async function handleMessage(message) {
@@ -284,8 +269,7 @@ async function handleMessage(message) {
     return { intercepted: true, result: { status: 'forwarded' } };
   }
   if (isFullEnrichStartRequest(message)) {
-    const result = await startFullEnrich(message);
-    return { intercepted: true, result };
+    return { intercepted: true, result: await startFullEnrich(message) };
   }
   return { intercepted: false, result: null };
 }
@@ -304,7 +288,7 @@ export async function lambdaHandler(event) {
         const handled = await handleMessage(message);
         if (!handled.intercepted) delegatedRecords.push(record);
       } catch (error) {
-        // Fail closed for orchestration starts: do not fall back to the legacy image state machine.
+        // Never fall back to the legacy image state machine after a full-enrich start failure.
         console.error('[FullEnrich] Intercepted request failed', {
           error: error?.message || String(error),
           action: message?.action || null,
@@ -312,9 +296,7 @@ export async function lambdaHandler(event) {
         });
       }
     }
-    if (delegatedRecords.length > 0) {
-      return legacyHandler({ ...event, Records: delegatedRecords });
-    }
+    if (delegatedRecords.length > 0) return legacyHandler({ ...event, Records: delegatedRecords });
     return { statusCode: 200, body: 'Full enrichment requests processed' };
   }
 
