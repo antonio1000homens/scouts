@@ -16,7 +16,7 @@ import {
   claimEnrichmentEscalation,
   enrichmentStateConfig,
 } from '/opt/nodejs/enrichment-state.mjs';
-import { lambdaHandler as fullEnrichHandler } from './full-enrich-adapter.mjs';
+import { lambdaHandler as fullEnrichHandler } from './full-enrich-core.mjs';
 import {
   text,
   normaliseStage,
@@ -497,9 +497,6 @@ async function processCloudflareImage(message) {
       model: generated.model,
     };
 
-    // Cache the complete normalized image in DynamoDB before any final S3/event
-    // persistence. A retry after either S3 write fails therefore reuses the bytes
-    // and cannot consume a second Cloudflare inference for this generation ID.
     await markGeminiSucceeded({ hex, stage: 'image', generationId, generatedValue });
     try {
       await persistCachedImage({ hex, event, generatedValue, generationId });
