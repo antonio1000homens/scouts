@@ -31,6 +31,23 @@ function bool(value) {
   return null;
 }
 
+function clone(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+
+function mergeSparse(target, patch) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return target;
+  for (const [key, value] of Object.entries(patch)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const child = target[key] && typeof target[key] === 'object' && !Array.isArray(target[key]) ? target[key] : {};
+      target[key] = mergeSparse(child, value);
+    } else {
+      target[key] = value;
+    }
+  }
+  return target;
+}
+
 export function normaliseImageProvider(value) {
   const provider = text(value)?.toLowerCase() || 'disabled';
   return ['cloudflare', 'gemini', 'disabled'].includes(provider) ? provider : 'disabled';
@@ -192,6 +209,16 @@ export function translateCompactPersistRequest(message) {
   };
 }
 
+export function applyCanonicalPersistPatch(existingEvent, canonicalSubject) {
+  if (!existingEvent || typeof existingEvent !== 'object' || Array.isArray(existingEvent)) {
+    throw new Error('Persist target event is missing');
+  }
+  if (!canonicalSubject || typeof canonicalSubject !== 'object' || Array.isArray(canonicalSubject)) {
+    throw new Error('Persist patch is invalid');
+  }
+  return mergeSparse(clone(existingEvent), clone(canonicalSubject));
+}
+
 export function eventGenerationKey(hex, event) {
   const metadata = getMetadata(event);
   const source = {
@@ -338,8 +365,12 @@ async function forwardStageRequest(message) {
 
 async function forwardPersistRequest(message) {
   const translated = translateCompactPersistRequest(message);
-  await sqs.send(new SendMessageCommand({ QueueUrl: PROCESSING_QUEUE_URL, MessageBody: JSON.stringify(translated) }));
-  console.log('[FullEnrich] Forwarded canonical persist patch to processing queue', {
+  const existingEvent = await loadEvent(translated.hex);
+  if (!existingEvent) throw new Error(`HEX ${translated.hex} not found for persistence`);
+  const fullEvent = applyCanonicalPersistPatch(existingEvent, translated.subject);
+  const payload = { ...translated, subject: fullEvent };
+  await sqs.send(new SendMessageCommand({ QueueUrl: PROCESSING_QUEUE_URL, MessageBody: JSON.stringify(payload) }));
+  console.log('[FullEnrich] Forwarded merged persist event to processing queue', {
     hex: translated.hex,
     requestId: translated.requestId || null,
   });
