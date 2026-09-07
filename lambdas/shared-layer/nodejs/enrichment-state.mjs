@@ -136,7 +136,6 @@ export async function reserveEnrichmentAttempt({ hex, stage, generationId, reque
   const nowIso = now.toISOString();
   const nowMs = now.getTime();
   const values = {
-    ':hex': asString(normalisedHex), ':stage': asString(normalisedStage), ':pending': asString('pending'),
     ':inProgress': asString('in_progress'), ':manual': asString('manual_review'), ':max': asNumber(MAX_ATTEMPTS),
     ':zero': asNumber(0), ':one': asNumber(1), ':now': asString(nowIso), ':nowMs': asNumber(nowMs),
     ':lease': asNumber(nowMs + LEASE_SECONDS * 1000), ':generationId': asString(generationId || ''),
