@@ -92,9 +92,9 @@ export function buildCallbackResultFromState({ state, stage, hex, provider = nul
   }
   if (state?.state === 'in_progress') {
     return {
-      status: 'deferred',
+      status: 'duplicate_in_progress',
       ...base,
-      reason: 'stage_still_in_progress',
+      reason: 'stage_reservation_owned_elsewhere',
     };
   }
   if (fallbackStatus === 'quota') {
