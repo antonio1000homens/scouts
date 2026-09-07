@@ -575,7 +575,7 @@ jobs:
           TARGET_BUCKET: scouts-2ndtolworth-prod-553490163883
           QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing
           QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
-          DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883:scoutsProcessingDLQ
+          DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
           SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
           SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
           IMAGE_GENERATION_PROVIDER: ${{ vars.IMAGE_GENERATION_PROVIDER || 'disabled' }}
