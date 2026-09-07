@@ -8,6 +8,7 @@ import {
   isDirectImageEnrichRequest,
   isCompactPersistRequest,
   translateCompactPersistRequest,
+  applyCanonicalPersistPatch,
   translateFullEnrichStageRequest,
   buildFullEnrichExecutionInput,
 } from '../full-enrich-adapter.mjs';
@@ -123,6 +124,38 @@ test('compact hide persist is canonicalized without losing HEX', () => {
     requestId: 'req-hide',
     source: 'scouts2sqs',
   });
+});
+
+test('sparse hide patch preserves existing enrichment when merged before persistence', () => {
+  const existing = {
+    metadata: {
+      hex: 'abcd',
+      tagline: 'Keep this tagline',
+      image: {
+        theme: 'Keep this theme',
+        url: 'website/eventImages/existing.jpg',
+      },
+      status: {
+        isApproved: true,
+        isHidden: false,
+      },
+    },
+    requests: [{ requestId: 'older-request', status: 'completed' }],
+  };
+  const patch = translateCompactPersistRequest({
+    realm: 'persist',
+    action: 'persist',
+    subject: { hex: 'abcd', isHidden: true },
+  }).subject;
+
+  const merged = applyCanonicalPersistPatch(existing, patch);
+  assert.equal(merged.metadata.status.isHidden, true);
+  assert.equal(merged.metadata.status.isApproved, true);
+  assert.equal(merged.metadata.tagline, 'Keep this tagline');
+  assert.equal(merged.metadata.image.theme, 'Keep this theme');
+  assert.equal(merged.metadata.image.url, 'website/eventImages/existing.jpg');
+  assert.deepEqual(merged.requests, existing.requests);
+  assert.equal(existing.metadata.status.isHidden, false, 'merge must not mutate the loaded event object');
 });
 
 test('compact generated-field persist is canonicalized', () => {
