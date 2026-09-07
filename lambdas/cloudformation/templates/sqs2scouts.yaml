@@ -249,6 +249,7 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
+                  - dynamodb:TransactWriteItems
                 Resource:
                   - !GetAtt GeminiUsageTable.Arn
                   - !GetAtt GeminiEnrichmentStateTable.Arn
