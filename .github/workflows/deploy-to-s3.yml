@@ -222,7 +222,7 @@ jobs:
             esac
 
             case "${file}" in
-              lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|.github/workflows/deploy-to-s3.yml)
+              lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|tests/issue-34-admin-ui.integration.test.mjs|website/admin/*|.github/workflows/deploy-to-s3.yml)
                 mark_changed 'retry-safety' "${file}"
                 ;;
             esac
@@ -292,6 +292,8 @@ jobs:
         run: node --test tests/issue-16-pipeline.integration.test.mjs
       - name: Run deployment ordering contract tests
         run: node --test tests/deployment-order.integration.test.mjs
+      - name: Run issue 34 admin UI contracts
+        run: node --test tests/issue-34-admin-ui.integration.test.mjs
 
   deploy-scouts-image-enrich:
     needs: detect-changes
