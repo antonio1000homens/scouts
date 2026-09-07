@@ -8,7 +8,10 @@ import vm from 'node:vm';
  * scripts: `function name(...) {}` and `async function name(...) {}`.
  */
 export function extractFunctionSource(source, functionName) {
-  const matcher = new RegExp(`(?:async\\s+)?function\\s+${functionName.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\s*\\(`);
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(functionName)) {
+    throw new Error(`Invalid function name: ${functionName}`);
+  }
+  const matcher = new RegExp(`(?:async\\s+)?function\\s+${functionName}\\s*\\(`);
   const match = matcher.exec(source);
   if (!match) throw new Error(`Unable to find function ${functionName}`);
 
