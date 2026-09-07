@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 import { loadFunctionsFromSource } from './helpers/source-function-loader.mjs';
 
@@ -21,23 +22,36 @@ test('unknown/tampered action tokens are not silently translated into an allowed
   const { functions } = loadFunctionsFromSource(processorSource, ['mapActionId']);
   const tampered = 'scouts_request_approve<script>';
   assert.equal(functions.mapActionId(tampered), tampered);
-  assert.match(processorSource, /Unsupported action:/, 'processor must retain an explicit unsupported-action path');
+  assert.match(processorSource, /const allowedRealms = new Set\(\['tagline', 'imageTheme', 'image', 'persist'\]\)/);
+  assert.match(processorSource, /Dropped unsupported realm|Dropping unsupported realm/);
 });
 
 function loadPublicHelpers() {
-  return loadFunctionsFromSource(publicSource, [
-    'getMetadataData',
-    'getStatusData',
-    'isApprovedEventImage',
-    'normaliseImagePath',
-    'resolveImageUrl',
-    'withImageWidthParam',
-    'createEventImageMarkup',
-    'isHiddenEvent',
-  ], {
-    LEGACY_S3_SITE_ORIGIN,
-    S3_OBJECT_BASE_URL,
-  }).functions;
+  const document = {
+    currentScript: { src: 'https://site.invalid/website/scripts/event-loader.js' },
+    addEventListener() {},
+    getElementById() { return null; },
+  };
+  const window = {
+    location: { href: 'https://site.invalid/' },
+    addEventListener() {},
+    requestAnimationFrame(callback) { callback(); },
+    getComputedStyle() { return { getPropertyValue: () => '', columnGap: '0', gap: '0' }; },
+  };
+  const sandbox = {
+    console: { log() {}, warn() {}, error() {} },
+    document,
+    window,
+    URL,
+    Intl,
+    Date,
+    fetch: async () => { throw new Error('network disabled in public-loader unit tests'); },
+  };
+
+  vm.runInNewContext(`${publicSource}\nthis.__publicHelpers = { getMetadataData, getStatusData, isApprovedEventImage, normaliseImagePath, resolveImageUrl, withImageWidthParam, createEventImageMarkup, isHiddenEvent };`, sandbox, {
+    timeout: 1_000,
+  });
+  return sandbox.__publicHelpers;
 }
 
 test('public loader recognises hidden events across structured and legacy status shapes', () => {
@@ -66,10 +80,8 @@ test('public loader renders generated images only for approved events', () => {
     },
   };
 
-  assert.equal(
-    helpers.resolveImageUrl(approved),
-    `${S3_OBJECT_BASE_URL}/website/eventImages/test-generated.jpg`,
-  );
+  const approvedUrl = helpers.resolveImageUrl(approved);
+  assert.equal(approvedUrl, 'https://site.invalid/website/eventImages/test-generated.jpg');
   assert.match(helpers.createEventImageMarkup(approved), /test-generated\.jpg\?w=400/);
   assert.equal(helpers.resolveImageUrl(pending), null);
   assert.equal(helpers.createEventImageMarkup(pending), '');
