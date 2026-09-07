@@ -1,0 +1,31 @@
+name: Admin UI Contract
+
+on:
+  pull_request:
+    paths:
+      - 'website/admin/**'
+      - 'tests/issue-34-admin-ui.integration.test.mjs'
+      - '.github/workflows/admin-ui-contract.yml'
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'website/admin/**'
+      - 'tests/issue-34-admin-ui.integration.test.mjs'
+      - '.github/workflows/admin-ui-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  admin-ui-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Run issue 34 admin UI contracts
+        run: node --test tests/issue-34-admin-ui.integration.test.mjs
