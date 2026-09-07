@@ -70,7 +70,7 @@ test('durable event request history completes a request after transient completi
   assert.ok(item.timeline.some((entry) => entry.source === 'event-history'));
 });
 
-test('running full-enrich execution attaches ARN and stage to the original request ID', () => {
+test('running full-enrich execution attaches ARN and actual stage to the original request ID', () => {
   const activity = buildCanonicalActivity({
     queuedSnapshot: snapshot('queued', [request({ realm: 'scoutsRequest', action: 'imageEnrich' })]),
     executions: [{
@@ -78,17 +78,100 @@ test('running full-enrich execution attaches ARN and stage to the original reque
       hex: request().hex,
       orchestrationType: 'fullEnrich',
       currentStage: 'image',
+      stateName: 'GenerateImageCloudflare',
       status: 'RUNNING',
       executionArn: 'arn:aws:states:eu-west-2:123:execution:full:one',
       startDate: '2026-09-07T23:09:12Z',
+      updatedAt: '2026-09-07T23:10:12Z',
     }],
     now: NOW,
   });
   assert.equal(activity.length, 1);
   assert.equal(activity[0].requestId, 'req-1');
-  assert.equal(activity[0].state, 'orchestrating');
+  assert.equal(activity[0].state, 'waiting_for_image');
   assert.equal(activity[0].stage, 'image');
+  assert.equal(activity[0].executionStateName, 'GenerateImageCloudflare');
   assert.equal(activity[0].executionArn, 'arn:aws:states:eu-west-2:123:execution:full:one');
+});
+
+test('live Step Functions stage overrides transient worker completed snapshot', () => {
+  const activity = buildCanonicalActivity({
+    queuedSnapshot: snapshot('queued', [request({ realm: 'scoutsRequest', action: 'imageEnrich' })]),
+    completedSnapshot: snapshot('completed', [request({
+      realm: 'scoutsRequest',
+      orchestrationType: 'fullEnrich',
+      orchestrationStep: 'imageTheme',
+      completedAt: '2026-09-07T23:10:00Z',
+    })]),
+    executions: [{
+      requestId: 'req-1',
+      hex: request().hex,
+      orchestrationType: 'fullEnrich',
+      currentStage: 'image',
+      stateName: 'GenerateImageGemini',
+      status: 'RUNNING',
+      executionArn: 'arn:running',
+      startDate: '2026-09-07T23:09:12Z',
+      updatedAt: '2026-09-07T23:10:01Z',
+    }],
+    now: NOW,
+  });
+  assert.equal(activity.length, 1);
+  assert.equal(activity[0].state, 'waiting_for_image');
+  assert.equal(activity[0].stage, 'image');
+  assert.ok(activity[0].timeline.some((entry) => entry.state === 'completed'));
+  assert.ok(activity[0].timeline.some((entry) => entry.source === 'step-functions'));
+});
+
+test('successful Deferred state remains waiting for retry rather than completed', () => {
+  const activity = buildCanonicalActivity({
+    completedSnapshot: snapshot('completed', [request({
+      realm: 'scoutsRequest',
+      orchestrationType: 'fullEnrich',
+      completedAt: '2026-09-07T23:10:00Z',
+    })]),
+    executions: [{
+      requestId: 'req-1',
+      hex: request().hex,
+      orchestrationType: 'fullEnrich',
+      currentStage: 'waiting_for_retry',
+      stateName: 'Deferred',
+      status: 'SUCCEEDED',
+      executionArn: 'arn:deferred',
+      startDate: '2026-09-07T23:09:12Z',
+      stopDate: '2026-09-07T23:10:02Z',
+      updatedAt: '2026-09-07T23:10:02Z',
+    }],
+    now: NOW,
+  });
+  assert.equal(activity[0].state, 'waiting_for_retry');
+  assert.equal(activity[0].stage, 'waiting_for_retry');
+  assert.equal(activity[0].health, 'unknown');
+});
+
+test('successful ManualReview state remains needs-attention lifecycle evidence', () => {
+  const activity = buildCanonicalActivity({
+    completedSnapshot: snapshot('completed', [request({
+      realm: 'scoutsRequest',
+      orchestrationType: 'fullEnrich',
+      completedAt: '2026-09-07T23:10:00Z',
+    })]),
+    executions: [{
+      requestId: 'req-1',
+      hex: request().hex,
+      orchestrationType: 'fullEnrich',
+      currentStage: 'manual_review',
+      stateName: 'ManualReview',
+      status: 'SUCCEEDED',
+      executionArn: 'arn:manual',
+      startDate: '2026-09-07T23:09:12Z',
+      stopDate: '2026-09-07T23:10:02Z',
+      updatedAt: '2026-09-07T23:10:02Z',
+    }],
+    now: NOW,
+  });
+  assert.equal(activity[0].state, 'manual_review');
+  assert.equal(activity[0].health, 'needs_attention');
 });
 
 test('legacy execution ID can still correlate by HEX without replacing the admin request ID', () => {
@@ -109,6 +192,32 @@ test('legacy execution ID can still correlate by HEX without replacing the admin
   assert.equal(activity[0].executionArn, 'arn:legacy');
 });
 
+test('old execution for the same HEX does not hijack a newer request ID', () => {
+  const activity = buildCanonicalActivity({
+    queuedSnapshot: snapshot('queued', [request({
+      requestId: 'req-new',
+      messageId: 'msg-new',
+      realm: 'scoutsRequest',
+      requestTime: '2026-09-07T23:09:11Z',
+    })]),
+    executions: [{
+      requestId: 'legacy-old-execution',
+      hex: request().hex,
+      orchestrationType: 'fullEnrich',
+      status: 'FAILED',
+      executionArn: 'arn:old',
+      startDate: '2026-09-06T10:00:00Z',
+      stopDate: '2026-09-06T10:05:00Z',
+      updatedAt: '2026-09-06T10:05:00Z',
+    }],
+    now: NOW,
+  });
+  const current = activity.find((entry) => entry.requestId === 'req-new');
+  const old = activity.find((entry) => entry.requestId === 'legacy-old-execution');
+  assert.equal(current.state, 'queued');
+  assert.equal(old.state, 'needs_attention');
+});
+
 test('explicit failed workflow is needs-attention instead of an age-derived stall', () => {
   const activity = buildCanonicalActivity({
     queuedSnapshot: snapshot('queued', [request({ realm: 'scoutsRequest' })]),
@@ -119,13 +228,16 @@ test('explicit failed workflow is needs-attention instead of an age-derived stal
       status: 'FAILED',
       executionArn: 'arn:failed',
       error: 'States.TaskFailed',
+      cause: 'callback failed',
       startDate: '2026-09-07T23:09:12Z',
+      updatedAt: '2026-09-07T23:09:13Z',
     }],
     now: NOW,
   });
   assert.equal(activity[0].state, 'needs_attention');
   assert.equal(activity[0].health, 'needs_attention');
-  assert.equal(activity[0].failure.type, 'FAILED');
+  assert.equal(activity[0].failure.type, 'States.TaskFailed');
+  assert.equal(activity[0].failure.message, 'callback failed');
 });
 
 test('old queued snapshot becomes explicit orphan only when live queue health proves no message remains', () => {
