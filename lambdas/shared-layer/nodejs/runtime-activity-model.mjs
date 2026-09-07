@@ -46,6 +46,10 @@ function lifecyclePriority(state) {
   return priorities[state] || 0;
 }
 
+function isTerminalState(state) {
+  return ['completed', 'needs_attention', 'manual_review', 'failed'].includes(state);
+}
+
 function normaliseSnapshotEntry(entry, state, source) {
   const requestId = requestIdOf(entry);
   const hex = hexOf(entry);
@@ -86,8 +90,11 @@ function mergeLifecycle(existing, incoming) {
   if (!incoming) return existing;
   const existingPriority = lifecyclePriority(existing.state);
   const incomingPriority = lifecyclePriority(incoming.state);
-  const preferIncoming = incomingPriority > existingPriority
-    || (incomingPriority === existingPriority && timestamp(incoming.updatedAt) >= timestamp(existing.updatedAt));
+  const bothTerminal = isTerminalState(existing.state) && isTerminalState(incoming.state);
+  const preferIncoming = bothTerminal
+    ? timestamp(incoming.updatedAt) >= timestamp(existing.updatedAt)
+    : incomingPriority > existingPriority
+      || (incomingPriority === existingPriority && timestamp(incoming.updatedAt) >= timestamp(existing.updatedAt));
   const primary = preferIncoming ? incoming : existing;
   const secondary = preferIncoming ? existing : incoming;
   return {
@@ -127,18 +134,24 @@ function findDurableCompletion(request, durableHistories) {
   return historyForHex(durableHistories, request.hex).find((entry) => text(entry?.requestId) === request.requestId) || null;
 }
 
-function executionState(execution) {
-  const status = text(execution?.status).toUpperCase();
-  if (['FAILED', 'TIMED_OUT', 'ABORTED'].includes(status)) return 'needs_attention';
-  if (status === 'SUCCEEDED') return 'completed';
-  return 'orchestrating';
-}
-
 function executionStage(execution) {
   const explicit = text(execution?.currentStage || execution?.orchestrationStep);
   if (explicit) return explicit;
   const type = text(execution?.orchestrationType);
   return type === 'fullEnrich' ? 'full-enrich' : (type === 'imageEnrich' ? 'image-enrich' : 'workflow');
+}
+
+function executionState(execution, stage) {
+  const status = text(execution?.status).toUpperCase();
+  if (['FAILED', 'TIMED_OUT', 'ABORTED'].includes(status)) return 'needs_attention';
+  if (status === 'SUCCEEDED') return 'completed';
+  const normalisedStage = text(stage).toLowerCase();
+  if (normalisedStage === 'waiting_for_retry') return 'waiting_for_retry';
+  if (normalisedStage === 'persisting') return 'persisting';
+  if (normalisedStage === 'tagline') return 'waiting_for_tagline';
+  if (normalisedStage === 'imagetheme') return 'waiting_for_image_theme';
+  if (normalisedStage === 'image') return 'waiting_for_image';
+  return 'orchestrating';
 }
 
 function queueEmpty(queue) {
@@ -216,9 +229,9 @@ export function buildCanonicalActivity({
       key = candidates[0]?.[0] || key || `execution:${text(execution?.executionArn) || byKey.size}`;
     }
     const existing = byKey.get(key) || null;
-    const state = executionState(execution);
     const stage = executionStage(execution);
-    const at = iso(execution?.updatedAt || execution?.startDate) || now.toISOString();
+    const state = executionState(execution, stage);
+    const at = iso(execution?.updatedAt || execution?.stopDate || execution?.startDate) || now.toISOString();
     const executionEntry = {
       ...(existing || {}),
       requestId: existing?.requestId || requestId || null,
