@@ -85,6 +85,27 @@
             interval.setAttribute('aria-label', 'Status polling interval in seconds');
         }
 
+        if (!section.querySelector('#browser-notifications-toggle')) {
+            const label = document.createElement('label');
+            label.className = 'auto-invoke-header-label';
+            label.htmlFor = 'browser-notifications-toggle';
+            label.title = 'Show a native browser notification when the agenda changes.';
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.id = 'browser-notifications-toggle';
+            input.checked = typeof readBrowserNotificationsPreference === 'function'
+                ? readBrowserNotificationsPreference()
+                : false;
+            input.addEventListener('change', () => {
+                if (typeof setBrowserNotificationsEnabled === 'function') {
+                    setBrowserNotificationsEnabled(input.checked);
+                }
+            });
+            label.append(input, document.createTextNode(' Browser notifications'));
+            interval?.insertAdjacentElement('afterend', label);
+        }
+        if (typeof updateBrowserNotificationsUi === 'function') updateBrowserNotificationsUi();
+
         if (!section.querySelector('.diagnostics-polling-help')) {
             const help = makeHelp('Status polling refreshes the canonical request lifecycle, queue counts and Step Functions status. It does not invoke workers, create requests or process queues, so it is safe to leave enabled.');
             help.classList.add('diagnostics-polling-help');
