@@ -94,6 +94,17 @@ test('scheduled refresh enablement is durable and fails closed before calendar w
   assert.match(scoutsEntry, /return scoutsServiceHandler\(trustedInternalEvent\)/);
 });
 
+test('scheduled refresh status stays observable when persisted state is unavailable', () => {
+  assert.match(runtimeSchedule, /export async function getScheduledRefreshStatus/);
+  assert.match(runtimeSchedule, /health: 'degraded'/);
+  assert.match(runtimeSchedule, /configSource: 'unavailable'/);
+  assert.match(runtimeSchedule, /healthDetail: errorDetail\(error\)/);
+  assert.match(runtimeSchedule, /Scheduled execution still uses getScheduledRefreshSettings\(\)/);
+  assert.match(scoutsEntry, /const schedule = await getScheduledRefreshStatus\(\)/);
+  assert.match(scoutsEntry, /status: schedule\.health === 'ok' \? 'ok' : 'degraded'/);
+  assert.match(scoutsEntry, /const schedule = await getScheduledRefreshSettings\(\);/);
+});
+
 test('status polling remains read-only and browser Auto Lambda is replaced by AWS scheduled refresh', () => {
   assert.match(adminEnhancements, /setAutoLambdaInvocationEnabled\(false, true\)/);
   assert.match(adminEnhancements, /Scheduled refresh/);
