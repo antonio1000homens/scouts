@@ -216,6 +216,7 @@ echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
   rm -f sqs2scouts-lambda.zip
   zip -jq sqs2scouts-lambda.zip \
     persistence-processor.mjs \
+    agenda-publisher.mjs \
     full-enrich-core.mjs \
     full-enrich-helpers.mjs \
     image-provider-adapter.mjs \

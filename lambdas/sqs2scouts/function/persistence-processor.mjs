@@ -6,6 +6,7 @@ import { SQSClient, SendMessageCommand, GetQueueAttributesCommand } from '@aws-s
 import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
 import sharp from 'sharp';
 import { getOptionalSecret, getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
+import { publishCanonicalEventToAgenda } from './agenda-publisher.mjs';
 import {
     buildGenerationId,
     getEnrichmentState,
@@ -1927,6 +1928,32 @@ async function saveHexEventToS3(hexValue, payload) {
     }
 }
 
+async function publishHexEventToAgenda(hexValue, event) {
+    try {
+        const result = await publishCanonicalEventToAgenda({
+            hex: hexValue,
+            event,
+            loadAgenda: async () => {
+                const response = await s3Client.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: 'agenda.json' }));
+                return JSON.parse(await readBodyStream(response.Body));
+            },
+            writeAgenda: (agenda) => s3Client.send(new PutObjectCommand({
+                Bucket: TARGET_BUCKET,
+                Key: 'agenda.json',
+                Body: JSON.stringify(agenda, null, 2),
+                ContentType: 'application/json',
+                CacheControl: 'no-store',
+            })),
+        });
+        console.log(`[Agenda] Published canonical HEX ${hexValue} to agenda.json`, result);
+        return result;
+    } catch (error) {
+        error.message = `Agenda publication failed for HEX ${hexValue}: ${error?.message || error}`;
+        console.error('[Agenda] Canonical event persisted but agenda publication failed', error.message);
+        throw error;
+    }
+}
+
 async function loadEventFromS3(uid, fallbackUid) {
     const sanitized = sanitizeEventUid(uid);
     if (!sanitized) return null;
@@ -3262,8 +3289,9 @@ export async function lambdaHandler(event) {
 
             try {
                 await saveHexEventToS3(hexValue, hexData);
+                await publishHexEventToAgenda(hexValue, hexData);
             } catch (error) {
-                emitEnrichmentMetric('PersistenceRetry', 'tagline', 's3_write_failed');
+                emitEnrichmentMetric('PersistenceRetry', 'tagline', 'publication_failed');
                 throw error;
             }
             if (result) {
@@ -3272,9 +3300,10 @@ export async function lambdaHandler(event) {
                 });
             }
             await completeImageEnrichTask(messageBody, {
+                status: 'succeeded',
                 hex: hexValue,
                 requestId: requestContext.requestId,
-                orchestrationStep: 'imageTheme',
+                orchestrationStep: 'tagline',
                 imageTheme: getImageThemeValue(hexData),
             });
 
@@ -3333,8 +3362,9 @@ export async function lambdaHandler(event) {
 
             try {
                 await saveHexEventToS3(hexValue, hexData);
+                await publishHexEventToAgenda(hexValue, hexData);
             } catch (error) {
-                emitEnrichmentMetric('PersistenceRetry', 'imageTheme', 's3_write_failed');
+                emitEnrichmentMetric('PersistenceRetry', 'imageTheme', 'publication_failed');
                 throw error;
             }
             if (result) {
@@ -3342,6 +3372,13 @@ export async function lambdaHandler(event) {
                     console.warn('[Enrichment] Failed to mark imageTheme success:', error?.message || error);
                 });
             }
+            await completeImageEnrichTask(messageBody, {
+                status: 'succeeded',
+                hex: hexValue,
+                requestId: requestContext.requestId,
+                orchestrationStep: 'imageTheme',
+                imageTheme: getImageThemeValue(hexData),
+            });
 
             const requiresApproval = hasCompleteApprovalData(hexData);
             if (!requiresApproval || autoApproval) {
@@ -3436,14 +3473,16 @@ export async function lambdaHandler(event) {
 
             try {
                 await saveHexEventToS3(hexValue, hexData);
+                await publishHexEventToAgenda(hexValue, hexData);
             } catch (error) {
-                emitEnrichmentMetric('PersistenceRetry', 'image', 's3_write_failed');
+                emitEnrichmentMetric('PersistenceRetry', 'image', 'publication_failed');
                 throw error;
             }
             await markEnrichmentSucceeded({ hex: hexValue, stage: 'image', generationId }).catch((error) => {
                 console.warn('[Enrichment] Failed to mark image success:', error?.message || error);
             });
             await completeImageEnrichTask(messageBody, {
+                status: 'succeeded',
                 hex: hexValue,
                 requestId: requestContext.requestId,
                 orchestrationStep: 'image',
@@ -3559,6 +3598,7 @@ export async function lambdaHandler(event) {
 
             // Replace the hex file content with the subject content
             await saveHexEventToS3(hexValue, event);
+            await publishHexEventToAgenda(hexValue, event);
             
             // Send Slack notification without UIDs
             const eventTitle = event.title || event.summary || event.name || 'Unknown Event';

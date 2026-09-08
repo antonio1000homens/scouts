@@ -18,6 +18,7 @@ import {
   enrichmentStateConfig,
 } from '/opt/nodejs/enrichment-state.mjs';
 import { lambdaHandler as persistenceProcessorHandler } from './persistence-processor.mjs';
+import { publishCanonicalEventToAgenda } from './agenda-publisher.mjs';
 import {
   text,
   normaliseStage,
@@ -346,6 +347,21 @@ async function persistGeneratedImage({ hex, event, generatedValue, generationId 
   event.metadata.image.url = generatedValue.relativeUrl;
   event.metadata.status.isApproved = false;
   await saveEvent(hex, event);
+  await publishCanonicalEventToAgenda({
+    hex,
+    event,
+    loadAgenda: async () => {
+      const response = await s3.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: 'agenda.json' }));
+      return JSON.parse(await response.Body.transformToString());
+    },
+    writeAgenda: (agenda) => s3.send(new PutObjectCommand({
+      Bucket: TARGET_BUCKET,
+      Key: 'agenda.json',
+      Body: JSON.stringify(agenda, null, 2),
+      ContentType: 'application/json',
+      CacheControl: 'no-store',
+    })),
+  });
   await markEnrichmentSucceeded({ hex, stage: 'image', generationId });
 }
 
