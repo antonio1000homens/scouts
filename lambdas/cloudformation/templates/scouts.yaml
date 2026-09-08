@@ -164,13 +164,23 @@ Resources:
               - Effect: Allow
                 Action:
                   - sqs:SendMessage
-                Resource: !Ref ScoutsRequestsQueueArn
+                Resource:
+                  - !Ref ScoutsRequestsQueueArn
+                  - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsProcessing
               - Effect: Allow
                 Action:
                   - sqs:GetQueueAttributes
                 Resource:
                   - !Ref ScoutsRequestsQueueArn
                   - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsProcessing
+                  - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsRequestsDLQ
+                  - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsProcessingDLQ
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:StartMessageMoveTask
+                Resource:
                   - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsRequestsDLQ
                   - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsProcessingDLQ
               - Effect: Allow
