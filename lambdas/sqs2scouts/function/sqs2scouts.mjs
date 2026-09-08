@@ -569,14 +569,20 @@ function cloneDefaultScoutsConfig() {
         ? BUNDLED_SCOUTS_CONFIG_SOURCE
         : {};
     return {
-        taglineThemePromptTemplate: toNonEmptyString(bundled.taglineThemePromptTemplate),
-        imageThemePromptTemplate: toNonEmptyString(bundled.imageThemePromptTemplate),
+        // Keep the bundled fallback compatible with the pre-schema-migration
+        // config names. Runtime S3 config is normalised below as well.
+        taglineThemePromptTemplate: toNonEmptyString(
+            bundled.taglineThemePromptTemplate ?? bundled.aiPromptTemplate
+        ),
+        imageThemePromptTemplate: toNonEmptyString(
+            bundled.imageThemePromptTemplate ?? bundled.imagePromptTemplate
+        ),
         imageGenerationPromptTemplate: toNonEmptyString(bundled.imageGenerationPromptTemplate),
         imageGenerationPromptSpecifications: Array.isArray(bundled.imageGenerationPromptSpecifications)
             ? bundled.imageGenerationPromptSpecifications.map((entry) => (typeof entry === 'string' ? entry.trim() : null)).filter(Boolean)
             : [],
-        imageThemeGuidelines: Array.isArray(bundled.imageThemeGuidelines)
-            ? bundled.imageThemeGuidelines.map((entry) => (typeof entry === 'string' ? entry.trim() : null)).filter(Boolean)
+        imageThemeGuidelines: Array.isArray(bundled.imageThemeGuidelines ?? bundled.imageTagGuidelines)
+            ? (bundled.imageThemeGuidelines ?? bundled.imageTagGuidelines).map((entry) => (typeof entry === 'string' ? entry.trim() : null)).filter(Boolean)
             : [],
         scouts2sqs: bundled.scouts2sqs === true,
         themedIcons: Array.isArray(bundled.themedIcons) ? cloneJsonValue(bundled.themedIcons) : [],
@@ -792,12 +798,14 @@ function sanitiseScoutsConfig(raw) {
         return config;
     }
 
-    if (typeof raw.taglineThemePromptTemplate === 'string' && raw.taglineThemePromptTemplate.trim()) {
-        config.taglineThemePromptTemplate = raw.taglineThemePromptTemplate;
+    const taglineTemplate = raw.taglineThemePromptTemplate ?? raw.aiPromptTemplate;
+    if (typeof taglineTemplate === 'string' && taglineTemplate.trim()) {
+        config.taglineThemePromptTemplate = taglineTemplate;
     }
 
-    if (typeof raw.imageThemePromptTemplate === 'string' && raw.imageThemePromptTemplate.trim()) {
-        config.imageThemePromptTemplate = raw.imageThemePromptTemplate;
+    const imageThemeTemplate = raw.imageThemePromptTemplate ?? raw.imagePromptTemplate;
+    if (typeof imageThemeTemplate === 'string' && imageThemeTemplate.trim()) {
+        config.imageThemePromptTemplate = imageThemeTemplate;
     }
 
     if (typeof raw.imageGenerationPromptTemplate === 'string' && raw.imageGenerationPromptTemplate.trim()) {
@@ -810,8 +818,9 @@ function sanitiseScoutsConfig(raw) {
             .filter(Boolean);
     }
 
-    if (Array.isArray(raw.imageThemeGuidelines) && raw.imageThemeGuidelines.length > 0) {
-        config.imageThemeGuidelines = raw.imageThemeGuidelines
+    const imageThemeGuidelines = raw.imageThemeGuidelines ?? raw.imageTagGuidelines;
+    if (Array.isArray(imageThemeGuidelines) && imageThemeGuidelines.length > 0) {
+        config.imageThemeGuidelines = imageThemeGuidelines
             .map((entry) => (typeof entry === 'string' ? entry.trim() : null))
             .filter(Boolean);
     }
