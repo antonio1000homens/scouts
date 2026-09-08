@@ -150,7 +150,7 @@ test('Scouts status deployment uses full-enrich activity entrypoint and least pr
   assert.equal((scoutsTemplate.match(/execution:\$\{FullEnrichStateMachineName\}:\*/g) || []).length, 1);
   assert.match(scoutsTemplate, /FullEnrichStateMachineName: !Select \[6, !Split \[':', !Ref FullEnrichStateMachineArn\]\]/);
   assert.match(scoutsDeploy, /scouts-entry\.handler/);
-  assert.match(scoutsDeploy, /scouts-entry\.mjs runtime-activity\.mjs/);
+  assert.match(scoutsDeploy, /scouts-entry\.mjs[\s\\]+runtime-activity\.mjs/);
 });
 
 test('activity status uses execution history for live stage and bounded recent terminal outcomes', () => {
