@@ -1,6 +1,6 @@
 // Operational admin enhancements: explicit DLQ inspection/redrive, clear polling
-// semantics, and a direct Request Image action when an event already has the
-// image-generation prerequisite metadata.
+// semantics, scheduled calendar refresh controls, and a direct Request Image action
+// when an event already has the image-generation prerequisite metadata.
 
 (function () {
     const DLQ_NAMES = ['scoutsRequestsDLQ', 'scoutsProcessingDLQ'];
@@ -12,6 +12,8 @@
     const dlqActionState = new Map();
     const pendingDirectImageHexes = new Set();
     let latestDlqActivity = null;
+    let scheduledRefreshSettings = null;
+    let scheduledRefreshBusy = false;
     let cardObserver = null;
 
     function text(value) {
@@ -33,15 +35,35 @@
         return help;
     }
 
-    function retireAutoLambdaHeartbeat() {
-        // The modern workflow is event-driven. Status tracking does not require
-        // periodically invoking the Scouts agenda Lambda, so disable the old
-        // browser heartbeat and persist that preference before removing its UI.
+    function replaceAutoLambdaHeartbeat() {
+        // The browser-based heartbeat is no longer responsible for periodic
+        // refresh. Disable its persisted timer and replace the header control
+        // with the durable AWS scheduled-refresh switch.
         if (typeof setAutoLambdaInvocationEnabled === 'function') {
             setAutoLambdaInvocationEnabled(false, true);
         }
-        document.querySelector('label[for="auto-lambda-toggle"]')?.remove();
-        document.getElementById('auto-lambda-interval-seconds')?.remove();
+
+        const oldLabel = document.querySelector('label[for="auto-lambda-toggle"]');
+        const oldInterval = document.getElementById('auto-lambda-interval-seconds');
+        oldInterval?.remove();
+
+        if (oldLabel && !document.getElementById('scheduled-refresh-toggle')) {
+            const label = document.createElement('label');
+            label.className = oldLabel.className;
+            label.htmlFor = 'scheduled-refresh-toggle';
+            label.title = 'Enable or disable automatic EventBridge calendar/agenda refresh.';
+
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.id = 'scheduled-refresh-toggle';
+            input.disabled = true;
+            input.addEventListener('change', () => setScheduledRefreshEnabled(input.checked));
+
+            label.append(input, document.createTextNode(' Scheduled refresh'));
+            oldLabel.replaceWith(label);
+        } else {
+            oldLabel?.remove();
+        }
     }
 
     function clarifyPollingControls() {
@@ -68,9 +90,144 @@
             help.classList.add('diagnostics-polling-help');
             section.appendChild(help);
 
-            const retired = makeHelp('Auto Lambda heartbeat has been retired from the admin page. SQS event-source mappings and the full-enrich Step Functions workflow now drive background work; periodic agenda Lambda invocation is not required for job tracking.');
+            const retired = makeHelp('The old browser Auto Lambda heartbeat has been replaced by an AWS EventBridge scheduled calendar refresh. SQS event-source mappings and full-enrich Step Functions continue to process queued jobs independently.');
             retired.classList.add('diagnostics-polling-help');
             section.appendChild(retired);
+        }
+    }
+
+    function ensureScheduledRefreshSection() {
+        let section = document.getElementById('diagnostics-scheduled-refresh');
+        if (section) return section;
+
+        const pollingSection = document.getElementById('diagnostics-polling');
+        if (!pollingSection) return null;
+
+        section = document.createElement('section');
+        section.id = 'diagnostics-scheduled-refresh';
+        section.className = 'admin-diagnostics-section';
+        section.innerHTML = `
+            <h3>Scheduled calendar refresh</h3>
+            <p class="admin-diagnostics-section-description">EventBridge refreshes all configured calendars and rebuilds agenda state on an AWS-owned schedule.</p>
+            <div id="diagnostics-scheduled-refresh-content"><p>Waiting for admin API authentication…</p></div>
+            <div class="dlq-actions">
+                <button type="button" class="btn btn-secondary requires-api" id="scheduled-refresh-run-now">Run refresh now</button>
+                <button type="button" class="btn btn-secondary requires-api" id="scheduled-refresh-status-refresh">Refresh schedule status</button>
+            </div>
+            <p class="diagnostics-help">Scheduled runs are discovery-only by default: they refresh calendars/agenda but publish 0 new enrichment jobs. Existing queued jobs continue automatically through SQS and Step Functions.</p>
+            <p class="diagnostics-help">Turning scheduled refresh off is durable. EventBridge still invokes the lightweight guard on its cadence, but the Lambda exits before calendar downloads, agenda refresh or queue publication.</p>
+        `;
+        pollingSection.insertAdjacentElement('afterend', section);
+        section.querySelector('#scheduled-refresh-run-now')?.addEventListener('click', () => runScheduledRefreshNow());
+        section.querySelector('#scheduled-refresh-status-refresh')?.addEventListener('click', () => refreshScheduledRefreshStatus(true));
+        return section;
+    }
+
+    function renderScheduledRefreshControls(statusMessage = '') {
+        const toggle = document.getElementById('scheduled-refresh-toggle');
+        if (toggle) {
+            toggle.checked = scheduledRefreshSettings?.enabled === true;
+            toggle.disabled = scheduledRefreshBusy || !apiAuthReady || !scheduledRefreshSettings;
+            toggle.title = scheduledRefreshSettings
+                ? `${scheduledRefreshSettings.enabled ? 'Enabled' : 'Disabled'} · ${scheduledRefreshSettings.scheduleExpression || 'schedule unavailable'}`
+                : 'Scheduled refresh status has not loaded yet.';
+        }
+
+        const target = document.getElementById('diagnostics-scheduled-refresh-content');
+        if (!target) return;
+        target.replaceChildren();
+
+        if (statusMessage) {
+            const status = document.createElement('p');
+            status.className = 'dlq-action-status info';
+            status.textContent = statusMessage;
+            target.appendChild(status);
+        }
+
+        if (!scheduledRefreshSettings) {
+            if (!statusMessage) {
+                const waiting = document.createElement('p');
+                waiting.textContent = apiAuthReady ? 'Scheduled refresh status not loaded.' : 'Waiting for admin API authentication…';
+                target.appendChild(waiting);
+            }
+            return;
+        }
+
+        renderDefinition(target, 'State', scheduledRefreshSettings.enabled ? 'Enabled' : 'Disabled');
+        renderDefinition(target, 'AWS cadence', scheduledRefreshSettings.scheduleExpression);
+        renderDefinition(target, 'New enrichment jobs/run', scheduledRefreshSettings.maxQueuePublishesPerRun);
+        renderDefinition(target, 'Configuration source', scheduledRefreshSettings.configSource);
+        renderDefinition(target, 'Last changed', formatDateTime(scheduledRefreshSettings.updatedAt));
+        renderDefinition(target, 'Changed by', scheduledRefreshSettings.updatedBy);
+    }
+
+    async function refreshScheduledRefreshStatus(showStatus = false) {
+        if (!apiAuthReady) {
+            renderScheduledRefreshControls();
+            return;
+        }
+        if (showStatus) renderScheduledRefreshControls('Refreshing scheduled refresh status…');
+        try {
+            const result = await sendScoutsCommand({ realm: 'runtime', subject: 'schedule', action: 'status' });
+            if (!result?.schedule) throw new Error('Scheduled refresh status payload missing');
+            scheduledRefreshSettings = result.schedule;
+            renderScheduledRefreshControls();
+        } catch (error) {
+            renderScheduledRefreshControls(`Failed to load scheduled refresh status: ${error?.message || error}`);
+        }
+    }
+
+    async function setScheduledRefreshEnabled(enabled) {
+        if (!apiAuthReady || scheduledRefreshBusy) {
+            renderScheduledRefreshControls();
+            return;
+        }
+        scheduledRefreshBusy = true;
+        renderScheduledRefreshControls(`${enabled ? 'Enabling' : 'Disabling'} scheduled refresh…`);
+        try {
+            const result = await sendScoutsCommand({
+                realm: 'runtime',
+                subject: 'schedule',
+                action: enabled ? 'enable' : 'disable',
+            });
+            if (!result?.schedule) throw new Error('Scheduled refresh update payload missing');
+            scheduledRefreshSettings = result.schedule;
+            const message = `Scheduled refresh ${scheduledRefreshSettings.enabled ? 'enabled' : 'disabled'}.`;
+            if (typeof showAdminNotification === 'function') showAdminNotification(message, 'success', 5000);
+        } catch (error) {
+            const message = `Failed to ${enabled ? 'enable' : 'disable'} scheduled refresh: ${error?.message || error}`;
+            if (typeof showAdminNotification === 'function') showAdminNotification(message, 'error', 7000);
+        } finally {
+            scheduledRefreshBusy = false;
+            await refreshScheduledRefreshStatus(false);
+        }
+    }
+
+    async function runScheduledRefreshNow() {
+        if (!apiAuthReady || scheduledRefreshBusy) return;
+        scheduledRefreshBusy = true;
+        renderScheduledRefreshControls('Refreshing all calendars now…');
+        try {
+            const result = await sendScoutsCommand({
+                realm: 'scouts',
+                subject: 'calendars',
+                action: 'refreshAllCalendars',
+                calendar: 'all',
+                maxEvents: 0,
+            });
+            const summary = typeof formatRuntimeSummary === 'function'
+                ? formatRuntimeSummary({ realm: 'scouts', subject: 'calendars' }, result)
+                : '';
+            const message = summary || 'All calendars and agenda refreshed. No new enrichment jobs were published by this manual scheduled-style run.';
+            if (typeof showAdminNotification === 'function') showAdminNotification(message, 'success', 6000);
+            if (typeof loadEvents === 'function') setTimeout(() => loadEvents({ silent: true }), 1500);
+        } catch (error) {
+            const message = `Scheduled-style refresh failed: ${error?.message || error}`;
+            if (typeof showAdminNotification === 'function') showAdminNotification(message, 'error', 7000);
+        } finally {
+            scheduledRefreshBusy = false;
+            await refreshScheduledRefreshStatus(false);
+            if (typeof pollQueueDepthSnapshots === 'function') pollQueueDepthSnapshots();
         }
     }
 
@@ -229,6 +386,16 @@
     }
 
     async function refreshDlqOverview(showStatus = false) {
+        if (!apiAuthReady) {
+            if (showStatus) {
+                DLQ_NAMES.forEach((name) => dlqActionState.set(name, {
+                    message: 'Waiting for admin API authentication…',
+                    tone: 'info',
+                }));
+                renderDlqDiagnostics();
+            }
+            return;
+        }
         try {
             if (showStatus) {
                 DLQ_NAMES.forEach((name) => setDlqState(name, { message: 'Refreshing queue counts…', tone: 'info', busy: 'refresh' }));
@@ -248,6 +415,7 @@
     }
 
     async function inspectDlq(name) {
+        if (!apiAuthReady) return;
         setDlqState(name, { message: 'Sampling up to 5 visible messages…', tone: 'info', busy: 'inspect' });
         try {
             const result = await sendScoutsCommand({
@@ -282,6 +450,7 @@
     }
 
     async function redriveDlq(name, expectedVisible) {
+        if (!apiAuthReady) return;
         const count = Number(expectedVisible || 0);
         if (count <= 0) return;
         const source = DLQ_SOURCE_LABELS[name];
@@ -376,7 +545,6 @@
             setTimeout(() => {
                 loadEvents({ silent: true });
             }, 2000);
-            // Keep the shortcut guarded while the orchestration gets established.
             setTimeout(() => {
                 pendingDirectImageHexes.delete(prerequisites.hex);
                 enhanceEventCards();
@@ -438,13 +606,31 @@
         enhanceEventCards();
     }
 
+    function refreshOperationalStatusWhenReady(attempt = 0) {
+        if (apiAuthReady) {
+            refreshDlqOverview(false);
+            refreshScheduledRefreshStatus(false);
+            enhanceEventCards();
+            return;
+        }
+        renderScheduledRefreshControls();
+        if (attempt < 60) {
+            setTimeout(() => refreshOperationalStatusWhenReady(attempt + 1), 250);
+        }
+    }
+
     function initialize() {
-        retireAutoLambdaHeartbeat();
+        replaceAutoLambdaHeartbeat();
         clarifyPollingControls();
+        ensureScheduledRefreshSection();
         ensureDlqSection();
         observeEventCards();
-        document.getElementById('diagnostics-open')?.addEventListener('click', () => refreshDlqOverview(false));
-        refreshDlqOverview(false);
+        document.getElementById('diagnostics-open')?.addEventListener('click', () => {
+            if (!apiAuthReady) return;
+            refreshDlqOverview(false);
+            refreshScheduledRefreshStatus(false);
+        });
+        refreshOperationalStatusWhenReady();
     }
 
     document.addEventListener('DOMContentLoaded', () => {
