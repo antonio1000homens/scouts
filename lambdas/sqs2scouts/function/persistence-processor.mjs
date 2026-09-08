@@ -516,20 +516,25 @@ async function writeRuntimeSnapshot(key, payload) {
     await s3Client.send(command);
 }
 
-function withRuntimeRequestStatus(entries = [], status = 'completed') {
+function withRuntimeRequestStatus(entries = [], status = 'completed', failure = null) {
     return (Array.isArray(entries) ? entries : []).map((entry) => ({
         ...entry,
         status,
         completedAt: new Date().toISOString(),
+        ...(failure ? { failure } : {}),
     }));
 }
 
-async function persistCompletedRequestsRuntimeSnapshot(records, requestIds, hexes, links, requests = []) {
+async function persistCompletedRequestsRuntimeSnapshot(records, requestIds, hexes, links, requests = [], outcome = {}) {
     const payload = {
         source: 'sqs2scouts',
         queue: 'scoutsComplete',
         updatedAt: new Date().toISOString(),
-        requests: deduplicateRuntimeRequestEntries(withRuntimeRequestStatus(requests, 'completed')),
+        requests: deduplicateRuntimeRequestEntries(withRuntimeRequestStatus(
+            requests,
+            outcome.status || 'completed',
+            outcome.failure || null,
+        )),
         requestIds: Array.from(new Set((requestIds || []).filter(Boolean))).slice(0, 50),
         hexes: Array.from(new Set((hexes || []).filter(Boolean))).slice(0, 50),
         links: Array.from(
@@ -3249,6 +3254,7 @@ export async function lambdaHandler(event) {
     const observedHexes = [];
     const observedLinks = [];
     const observedRequests = [];
+    let runtimeOutcome = { status: 'completed' };
     try {
         if (directInvocation) {
             const hints = collectRequestHints(null, event);
@@ -3793,6 +3799,13 @@ export async function lambdaHandler(event) {
         };
 
     } catch (error) {
+        runtimeOutcome = {
+            status: 'failed',
+            failure: {
+                type: error?.name || 'PROCESSING_FAILED',
+                message: error?.message || String(error),
+            },
+        };
         console.error("Exception occurred:", error.message);
         try {
             const callbackBody = event.Records?.[0]?.body ? JSON.parse(event.Records[0].body) : event;
@@ -3815,7 +3828,7 @@ export async function lambdaHandler(event) {
             body: JSON.stringify({ error: error.message })
         };
     } finally {
-        await persistCompletedRequestsRuntimeSnapshot(records, observedRequestIds, observedHexes, observedLinks, observedRequests);
+        await persistCompletedRequestsRuntimeSnapshot(records, observedRequestIds, observedHexes, observedLinks, observedRequests, runtimeOutcome);
     }
 }
 
