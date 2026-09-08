@@ -91,7 +91,7 @@ test('scheduled refresh enablement is durable and fails closed before calendar w
   assert.match(scoutsEntry, /schedule_state_unavailable/);
   assert.match(scoutsEntry, /const trustedInternalEvent/);
   assert.match(scoutsEntry, /headers: \{ 'x-api-key': requiredApiKey \}/);
-  assert.match(scoutsEntry, /return legacyHandler\(trustedInternalEvent\)/);
+  assert.match(scoutsEntry, /return scoutsServiceHandler\(trustedInternalEvent\)/);
 });
 
 test('status polling remains read-only and browser Auto Lambda is replaced by AWS scheduled refresh', () => {

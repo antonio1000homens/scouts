@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 import { loadFunctionsFromSource } from './helpers/source-function-loader.mjs';
 
-const processorSource = readFileSync('lambdas/sqs2scouts/function/sqs2scouts.mjs', 'utf8');
+const processorSource = readFileSync('lambdas/sqs2scouts/function/persistence-processor.mjs', 'utf8');
 const publicSource = readFileSync('website/scripts/event-loader.js', 'utf8');
 
 test('Slack approval action IDs retain the documented processing mapping', () => {

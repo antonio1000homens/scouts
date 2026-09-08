@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 
 const workflow = readFileSync('.github/workflows/deploy-to-s3.yml', 'utf8');
 const scoutsDeploy = readFileSync('lambdas/scouts/deploy.sh', 'utf8');
-const imageEnrichDecommission = readFileSync('lambdas/scouts-image-enrich/decommission.sh', 'utf8');
+const sqs2scoutsDeploy = readFileSync('lambdas/sqs2scouts/deploy.sh', 'utf8');
+const scouts2sqsDeploy = readFileSync('lambdas/scouts2sqs/deploy.sh', 'utf8');
 const adminIndex = readFileSync('website/admin/index.html', 'utf8');
 const adminSimplify = readFileSync('website/admin/admin-simplify.js', 'utf8');
 const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
@@ -29,7 +30,7 @@ test('deployment workflow uses consolidated runner lanes', () => {
 test('AWS deployment order keeps queues before sqs2scouts before scouts2sqs', () => {
   const queues = indexOfRequired('- name: Deploy Scouts queues', 'queues deployment step');
   const sqs2scouts = indexOfRequired('- name: Deploy sqs2scouts', 'sqs2scouts deployment step');
-  const verify = indexOfRequired('- name: Verify sqs2scouts adapter', 'sqs2scouts verification step');
+  const verify = indexOfRequired('- name: Verify sqs2scouts worker', 'sqs2scouts verification step');
   const scouts2sqs = indexOfRequired('- name: Deploy scouts2sqs', 'scouts2sqs deployment step');
 
   assert.ok(queues < sqs2scouts, 'queues must deploy before sqs2scouts');
@@ -51,20 +52,24 @@ test('PRs validate but never enter deployment lanes', () => {
   assert.match(workflow, /deploy-aws:[\s\S]*github\.event_name != 'pull_request'/);
 });
 
+test('modern cutover removes the retired image-enrich deployment target', () => {
+  assert.doesNotMatch(workflow, /scouts_image_enrich/);
+  assert.doesNotMatch(workflow, /scouts-image-enrich/);
+  assert.doesNotMatch(workflow, /Deploy image-enrich state machine/);
+});
+
+test('worker and ingress deployment handlers match the modern cutover', () => {
+  assert.match(sqs2scoutsDeploy, /HANDLER="\$\{HANDLER:-image-provider-adapter\.lambdaHandler\}"/);
+  assert.match(scouts2sqsDeploy, /HANDLER="\$\{HANDLER:-request-router\.lambdaHandler\}"/);
+  assert.match(workflow, /\[ "\$HANDLER" = "image-provider-adapter\.lambdaHandler" \]/);
+  assert.doesNotMatch(workflow, /full-enrich-adapter\.lambdaHandler/);
+});
+
 test('Scouts deployment resolves the managed full-enrich stack before historical fallback', () => {
   const managed = scoutsDeploy.indexOf('scouts-full-enrich-managed-poc scouts-full-enrich');
   assert.notEqual(managed, -1, 'managed and fallback stack lookup must be explicit');
   assert.match(scoutsDeploy, /for candidate_stack in scouts-full-enrich-managed-poc scouts-full-enrich; do/);
   assert.match(scoutsDeploy, /StateMachineArn could not be resolved from scouts-full-enrich-managed-poc or scouts-full-enrich/);
-});
-
-test('legacy image-enrich decommission resolves stack-owned ARN and fails closed', () => {
-  assert.doesNotMatch(imageEnrichDecommission, /aws stepfunctions list-state-machines/);
-  assert.match(imageEnrichDecommission, /Outputs\[\?OutputKey=='StateMachineArn'\]\.OutputValue \| \[0\]/);
-  assert.match(imageEnrichDecommission, /does not expose StateMachineArn; refusing to decommission/);
-  assert.match(imageEnrichDecommission, /--status-filter RUNNING/);
-  assert.match(imageEnrichDecommission, /--max-results 1/);
-  assert.match(imageEnrichDecommission, /Unable to verify running executions[^\n]*refusing to decommission/);
 });
 
 test('admin polling is synchronously cut over to canonical full-enrich activity', () => {
