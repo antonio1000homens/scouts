@@ -9,7 +9,6 @@ function read(relativePath) {
 const scoutsSource = read('lambdas/scouts/function/scouts-service.mjs');
 const workerSource = read('lambdas/sqs2scouts/function/image-provider-adapter.mjs');
 const workerCoreSource = read('lambdas/sqs2scouts/function/full-enrich-core.mjs');
-const workerLegacySource = read('lambdas/sqs2scouts/function/sqs2scouts.mjs');
 const scoutsTemplate = read('lambdas/cloudformation/templates/scouts.yaml');
 const workerTemplate = read('lambdas/cloudformation/templates/sqs2scouts.yaml');
 const retryDocs = read('GEMINI-ENRICHMENT-RETRY.md');
@@ -95,13 +94,6 @@ test('Slack escalation is warning-on-second-attempt and quarantine-once', () => 
   assert.match(notification, /state\.state === 'retry_wait' && attemptCount === 2/);
   assert.match(notification, /state\.state === 'manual_review'/);
   assert.match(notification, /claimEnrichmentEscalation/);
-});
-
-test('legacy Gemini worker still reserves per-stage attempts and caches success before persistence', () => {
-  assert.match(workerLegacySource, /reserveEnrichmentAttempt/);
-  assert.match(workerLegacySource, /loadReusableGeneration/);
-  assert.match(workerLegacySource, /markGeminiSucceeded/);
-  assert.match(workerLegacySource, /markEnrichmentFailure/);
 });
 
 test('manual recovery is documented and requires an explicit HEX + stage reset', () => {
