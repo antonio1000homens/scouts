@@ -104,6 +104,9 @@ Parameters:
   FullEnrichStateMachineArn:
     Type: String
     Default: ''
+  GeminiUsageTableName:
+    Type: String
+    Default: scouts-gemini-usage
   GeminiEnrichmentStateTableName:
     Type: String
     Default: scouts-enrichment-state
