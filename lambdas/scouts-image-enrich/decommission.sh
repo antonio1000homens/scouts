@@ -7,7 +7,6 @@ set -euo pipefail
 
 REGION="${AWS_REGION:-eu-west-2}"
 STACK_NAME="${STACK_NAME:-scouts-image-enrich}"
-STATE_MACHINE_NAME="${STATE_MACHINE_NAME:-scouts-image-enrich}"
 EXPECTED_AWS_ACCOUNT="${EXPECTED_AWS_ACCOUNT:-553490163883}"
 CONFIRM_DECOMMISSION="${CONFIRM_DECOMMISSION:-false}"
 
@@ -27,23 +26,40 @@ if ! aws cloudformation describe-stacks --region "${REGION}" --stack-name "${STA
   exit 0
 fi
 
-STATE_MACHINE_ARN="$(aws stepfunctions list-state-machines \
+# Resolve the exact state machine owned by the stack we are about to delete.
+# Do not fall back to list-state-machines: name lookup is paginated and could
+# accidentally fail open if permissions or pagination hide the resource.
+if ! STATE_MACHINE_ARN="$(aws cloudformation describe-stacks \
   --region "${REGION}" \
-  --query "stateMachines[?name=='${STATE_MACHINE_NAME}'].stateMachineArn | [0]" \
-  --output text 2>/dev/null || true)"
+  --stack-name "${STACK_NAME}" \
+  --query "Stacks[0].Outputs[?OutputKey=='StateMachineArn'].OutputValue | [0]" \
+  --output text)"; then
+  echo "Unable to resolve StateMachineArn from ${STACK_NAME}; refusing to decommission." >&2
+  exit 1
+fi
 
-if [ -n "${STATE_MACHINE_ARN}" ] && [ "${STATE_MACHINE_ARN}" != "None" ] && [ "${STATE_MACHINE_ARN}" != "null" ]; then
-  RUNNING_COUNT="$(aws stepfunctions list-executions \
-    --region "${REGION}" \
-    --state-machine-arn "${STATE_MACHINE_ARN}" \
-    --status-filter RUNNING \
-    --max-results 100 \
-    --query 'length(executions)' \
-    --output text)"
-  if [ "${RUNNING_COUNT}" != "0" ]; then
-    echo "Refusing to decommission ${STACK_NAME}: ${RUNNING_COUNT} legacy execution(s) still RUNNING." >&2
-    exit 2
-  fi
+if [ -z "${STATE_MACHINE_ARN}" ] || [ "${STATE_MACHINE_ARN}" = "None" ] || [ "${STATE_MACHINE_ARN}" = "null" ]; then
+  echo "Stack ${STACK_NAME} does not expose StateMachineArn; refusing to decommission." >&2
+  exit 1
+fi
+
+# We only need to know whether at least one RUNNING execution exists. Asking
+# for one result avoids any pagination ambiguity while still failing closed on
+# API/permission errors because this command is not wrapped in `|| true`.
+if ! RUNNING_COUNT="$(aws stepfunctions list-executions \
+  --region "${REGION}" \
+  --state-machine-arn "${STATE_MACHINE_ARN}" \
+  --status-filter RUNNING \
+  --max-results 1 \
+  --query 'length(executions)' \
+  --output text)"; then
+  echo "Unable to verify running executions for ${STATE_MACHINE_ARN}; refusing to decommission." >&2
+  exit 1
+fi
+
+if [ "${RUNNING_COUNT}" != "0" ]; then
+  echo "Refusing to decommission ${STACK_NAME}: at least one legacy execution is still RUNNING." >&2
+  exit 2
 fi
 
 if [ "${CONFIRM_DECOMMISSION}" != "true" ]; then
