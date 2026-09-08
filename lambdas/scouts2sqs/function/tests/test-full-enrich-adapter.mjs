@@ -8,8 +8,9 @@ import {
   isDirectImageEnrichRequest,
   isCompactPersistRequest,
   translateCompactPersistRequest,
-  applyCanonicalPersistPatch,
+  buildDownstreamPersistMessage,
   translateFullEnrichStageRequest,
+  shouldReuseActiveExecution,
   buildFullEnrichExecutionInput,
 } from '../full-enrich-adapter.mjs';
 
@@ -53,6 +54,24 @@ test('direct admin image request is routed into full-enrich', () => {
   assert.equal(input.startStage, 'image');
   assert.equal(input.requestId, 'execution-name');
   assert.equal(input.orchestrationType, 'fullEnrich');
+});
+
+test('manual image requests never reuse an older execution lifecycle', () => {
+  assert.equal(shouldReuseActiveExecution({
+    realm: 'scoutsRequest',
+    action: 'request',
+    subject: 'imageUrl',
+    subjectLabel: 'imageUrl',
+    hex: 'abcd',
+    requestId: 'req-new-image',
+  }), false);
+
+  assert.equal(shouldReuseActiveExecution({
+    realm: 'scoutsRequest',
+    action: 'new',
+    subject: { metadata: { hex: 'abcd' } },
+    requestId: 'req-auto',
+  }), true);
 });
 
 test('full-enrich callback stage requests are recognized separately from starts', () => {
@@ -126,36 +145,42 @@ test('compact hide persist is canonicalized without losing HEX', () => {
   });
 });
 
-test('sparse hide patch preserves existing enrichment when merged before persistence', () => {
-  const existing = {
+test('downstream persist handoff remains sparse and lets worker merge latest durable state', () => {
+  const payload = buildDownstreamPersistMessage({
+    realm: 'persist',
+    action: 'persist',
+    subject: { hex: 'ABCD', isHidden: true },
+    requestId: 'req-hide',
+  });
+
+  assert.equal(payload.realm, 'persist');
+  assert.equal(payload.subject, 'abcd', 'string HEX bypasses legacy subject normalization');
+  assert.equal(payload.hex, 'abcd');
+  assert.equal(payload.operation, 'persist');
+  assert.deepEqual(JSON.parse(payload.action), {
     metadata: {
       hex: 'abcd',
-      tagline: 'Keep this tagline',
-      image: {
-        theme: 'Keep this theme',
-        url: 'website/eventImages/existing.jpg',
-      },
-      status: {
-        isApproved: true,
-        isHidden: false,
-      },
+      status: { isHidden: true },
     },
-    requests: [{ requestId: 'older-request', status: 'completed' }],
-  };
-  const patch = translateCompactPersistRequest({
+  });
+  assert.equal(payload.action.includes('tagline'), false);
+  assert.equal(payload.action.includes('image'), false);
+});
+
+test('independent compact patches do not contain stale values from each other', () => {
+  const hide = buildDownstreamPersistMessage({
     realm: 'persist',
     action: 'persist',
     subject: { hex: 'abcd', isHidden: true },
-  }).subject;
+  });
+  const approve = buildDownstreamPersistMessage({
+    realm: 'persist',
+    action: 'persist',
+    subject: { hex: 'abcd', isApproved: true },
+  });
 
-  const merged = applyCanonicalPersistPatch(existing, patch);
-  assert.equal(merged.metadata.status.isHidden, true);
-  assert.equal(merged.metadata.status.isApproved, true);
-  assert.equal(merged.metadata.tagline, 'Keep this tagline');
-  assert.equal(merged.metadata.image.theme, 'Keep this theme');
-  assert.equal(merged.metadata.image.url, 'website/eventImages/existing.jpg');
-  assert.deepEqual(merged.requests, existing.requests);
-  assert.equal(existing.metadata.status.isHidden, false, 'merge must not mutate the loaded event object');
+  assert.deepEqual(JSON.parse(hide.action).metadata.status, { isHidden: true });
+  assert.deepEqual(JSON.parse(approve.action).metadata.status, { isApproved: true });
 });
 
 test('compact generated-field persist is canonicalized', () => {
