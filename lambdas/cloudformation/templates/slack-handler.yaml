@@ -10,7 +10,16 @@ Parameters:
     Description: S3 key for function zip.
   SharedLayerVersionArn:
     Type: String
+    Default: ''
     Description: Centrally published scouts-shared Lambda layer version ARN.
+  LayerCodeKey:
+    Type: String
+    Default: ''
+    Description: Deprecated compatibility alias carrying the resolved shared layer ARN.
+  LayerName:
+    Type: String
+    Default: scouts-shared
+    Description: Deprecated compatibility parameter; layer publication is centrally owned.
   FunctionName:
     Type: String
     Default: scouts-slack-handler
@@ -72,6 +81,7 @@ Conditions:
   UseProvidedRole: !Not [!Equals [!Ref RoleArn, '']]
   CreateRole: !Equals [!Ref RoleArn, '']
   IsPublicFunctionUrl: !Equals [!Ref FunctionUrlAuthType, 'NONE']
+  HasSharedLayerVersionArn: !Not [!Equals [!Ref SharedLayerVersionArn, '']]
 
 Resources:
   SlackHandlerRole:
@@ -117,7 +127,7 @@ Resources:
       Timeout: !Ref Timeout
       MemorySize: !Ref MemorySize
       Layers:
-        - !Ref SharedLayerVersionArn
+        - !If [HasSharedLayerVersionArn, !Ref SharedLayerVersionArn, !Ref LayerCodeKey]
       Environment:
         Variables:
           SLACK_SIGNING_SECRET_PARAMETER: !Ref SlackSigningSecretParameter
@@ -172,6 +182,6 @@ Outputs:
   FunctionUrl:
     Value: !GetAtt SlackHandlerFunctionUrl.FunctionUrl
   LayerVersionArn:
-    Value: !Ref SharedLayerVersionArn
+    Value: !If [HasSharedLayerVersionArn, !Ref SharedLayerVersionArn, !Ref LayerCodeKey]
   EffectiveRoleArn:
     Value: !If [UseProvidedRole, !Ref RoleArn, !GetAtt SlackHandlerRole.Arn]
