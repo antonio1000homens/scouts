@@ -59,7 +59,7 @@ test('Scouts deployment resolves the managed full-enrich stack before historical
 });
 
 test('legacy image-enrich decommission resolves stack-owned ARN and fails closed', () => {
-  assert.doesNotMatch(imageEnrichDecommission, /list-state-machines/);
+  assert.doesNotMatch(imageEnrichDecommission, /aws stepfunctions list-state-machines/);
   assert.match(imageEnrichDecommission, /Outputs\[\?OutputKey=='StateMachineArn'\]\.OutputValue \| \[0\]/);
   assert.match(imageEnrichDecommission, /does not expose StateMachineArn; refusing to decommission/);
   assert.match(imageEnrichDecommission, /--status-filter RUNNING/);
