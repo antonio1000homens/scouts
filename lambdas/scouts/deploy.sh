@@ -7,8 +7,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BWS_HELPER="${ROOT_DIR}/tools/bws-env.sh"
+SHARED_LAYER_HELPER="${ROOT_DIR}/tools/shared-layer-artifact.sh"
+CFN_HELPER="${ROOT_DIR}/tools/cloudformation-deploy.sh"
 SHARED_LAYER_DIR="${ROOT_DIR}/shared-layer"
-SHARED_LAYER_ZIP="${SHARED_LAYER_DIR}/lambda-layer.zip"
 
 if [ -f .env ]; then
   set -a
@@ -21,6 +22,10 @@ if [ -f "${BWS_HELPER}" ]; then
   # shellcheck disable=SC1090
   source "${BWS_HELPER}"
 fi
+# shellcheck disable=SC1090
+source "${SHARED_LAYER_HELPER}"
+# shellcheck disable=SC1090
+source "${CFN_HELPER}"
 
 REGION="${AWS_REGION:-eu-west-2}"
 STACK_NAME="${STACK_NAME:-scouts-lambda}"
@@ -35,7 +40,6 @@ fi
 DEPLOY_ID="${DEPLOY_ID:-$(date -u +%Y%m%d%H%M%S)}"
 S3_PREFIX="${S3_PREFIX:-lambdas/scouts}"
 NPM_CACHE_DIR="${NPM_CACHE_DIR:-${HOME}/.npm}"
-ARTIFACT_RETENTION_DAYS="${ARTIFACT_RETENTION_DAYS:-30}"
 
 FUNCTION_NAME="${FUNCTION_NAME:-scouts}"
 LAYER_NAME="${LAYER_NAME:-scouts-shared}"
@@ -148,23 +152,24 @@ if [ -z "${FULL_ENRICH_STATE_MACHINE_ARN}" ]; then
   exit 1
 fi
 
-echo -e "\n${YELLOW}Step 1: Build shared Lambda layer...${NC}"
-pushd "${SHARED_LAYER_DIR}/nodejs" >/dev/null
-if [ ! -f package.json ]; then echo -e "${RED}Error: ${SHARED_LAYER_DIR}/nodejs/package.json not found${NC}"; exit 1; fi
-npm install --production --cache "${NPM_CACHE_DIR}"
-popd >/dev/null
-rm -f "${SHARED_LAYER_ZIP}"
-( cd "${SHARED_LAYER_DIR}" && zip -qr lambda-layer.zip nodejs )
+echo -e "\n${YELLOW}Step 1: Resolve shared Lambda layer artifact...${NC}"
+prepare_shared_layer_artifact "${SHARED_LAYER_DIR}" "${CODE_BUCKET}" "${REGION}" "${NPM_CACHE_DIR}"
 
 echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
 rm -f function/scouts-lambda.zip
-( cd function && zip -q scouts-lambda.zip scouts.mjs scouts-entry.mjs runtime-activity.mjs )
+(
+  cd function
+  zip -q scouts-lambda.zip \
+    scouts-service.mjs \
+    scouts-entry.mjs \
+    runtime-activity.mjs \
+    runtime-dlq.mjs \
+    runtime-schedule.mjs
+)
 
-echo -e "\n${YELLOW}Step 3: Upload artifacts to S3...${NC}"
+echo -e "\n${YELLOW}Step 3: Upload function artifact to S3...${NC}"
 FUNCTION_CODE_KEY="${S3_PREFIX}/${DEPLOY_ID}/scouts-lambda.zip"
-LAYER_CODE_KEY="${S3_PREFIX}/${DEPLOY_ID}/scouts-shared-layer.zip"
 aws s3 cp function/scouts-lambda.zip "s3://${CODE_BUCKET}/${FUNCTION_CODE_KEY}" --region "${REGION}"
-aws s3 cp "${SHARED_LAYER_ZIP}" "s3://${CODE_BUCKET}/${LAYER_CODE_KEY}" --region "${REGION}"
 
 echo -e "\n${YELLOW}Step 4: Deploy CloudFormation stack...${NC}"
 cleanup_failed_stack
@@ -201,7 +206,7 @@ CFN_DEPLOY_ARGS+=(
     GeminiEnrichmentStateTableName="${GEMINI_ENRICH_STATE_TABLE_NAME}"
 )
 
-aws cloudformation deploy "${CFN_DEPLOY_ARGS[@]}"
+deploy_cloudformation_with_diagnostics "${STACK_NAME}" "${REGION}" "${CFN_DEPLOY_ARGS[@]}"
 put_standard_secure_parameter "${REQUIRED_API_KEY_PARAMETER}" "${REQUIRED_API_KEY}"
 
 echo -e "\n${YELLOW}Step 5: Read stack outputs...${NC}"
