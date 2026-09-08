@@ -1,0 +1,88 @@
+/* Homepage-only desktop compaction.
+ *
+ * Keep the existing mobile layout untouched, but reduce the amount of vertical
+ * space consumed by the header/hero and surface the recent + next event panels
+ * together above the fold on typical desktop displays.
+ */
+@media (min-width: 901px) {
+    .home-page header {
+        padding: 0.6rem 0;
+    }
+
+    .home-page header h1 {
+        font-size: 1.25rem;
+    }
+
+    .home-page .main-nav ul {
+        gap: 0.8rem;
+    }
+
+    .home-page .main-nav a {
+        font-size: 0.8rem;
+    }
+
+    .home-page .about.about-detail {
+        min-height: clamp(420px, 52vh, 560px);
+        margin-top: -96px;
+        padding-top: calc(3.25rem + 96px);
+        padding-bottom: 2rem;
+    }
+
+    .home-page .about.about-detail .container {
+        width: 100%;
+    }
+
+    .home-page .about.about-detail h2 {
+        top: 0;
+        margin-bottom: 1rem;
+        font-size: clamp(2rem, 3vw, 2.8rem);
+    }
+
+    .home-page .about.about-detail p {
+        max-width: 900px;
+        margin-left: auto;
+        margin-right: auto;
+        margin-bottom: 1.4rem;
+        line-height: 1.5;
+    }
+
+    .home-page .about-section-links {
+        margin-top: 1rem;
+    }
+
+    .home-page .events-section {
+        padding: 2.25rem 2rem 4rem;
+    }
+
+    .home-page .events-section > .container {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 2rem;
+        align-items: start;
+    }
+
+    .home-page .event-group,
+    .home-page .past-events,
+    .home-page .next-event {
+        min-width: 0;
+    }
+
+    .home-page .event-group + .event-group {
+        margin-top: 0;
+    }
+
+    .home-page .event-group > h2 {
+        margin-bottom: 1rem;
+        font-size: clamp(1.65rem, 2.25vw, 2.1rem);
+    }
+
+    /* The past carousel shares a row with the single next-event card, so one
+       recent card per carousel page keeps both columns balanced and readable. */
+    .home-page .past-events .event-carousel {
+        --carousel-columns: 1;
+    }
+
+    .home-page .future-events {
+        grid-column: 1 / -1;
+    }
+}
