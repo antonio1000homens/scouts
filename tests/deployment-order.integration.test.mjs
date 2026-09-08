@@ -12,6 +12,7 @@ const sharedLayerDeploy = readFileSync('lambdas/shared-layer/deploy.sh', 'utf8')
 const scoutsTemplate = readFileSync('lambdas/cloudformation/templates/scouts.yaml', 'utf8');
 const sqs2scoutsTemplate = readFileSync('lambdas/cloudformation/templates/sqs2scouts.yaml', 'utf8');
 const scouts2sqsTemplate = readFileSync('lambdas/cloudformation/templates/scouts2sqs.yaml', 'utf8');
+const bootstrapTemplate = readFileSync('aws/bootstrap/scouts-account-bootstrap.yaml', 'utf8');
 const slackTemplate = readFileSync('lambdas/cloudformation/templates/slack-handler.yaml', 'utf8');
 const adminIndex = readFileSync('website/admin/index.html', 'utf8');
 const adminScript = readFileSync('website/admin/admin-script.js', 'utf8');
@@ -199,6 +200,7 @@ test('activity ledger table and every request hop are deployed together', () => 
   assert.match(scoutsService, /recordRequestActivity/);
   assert.match(sqs2scoutsDeploy, /ScoutsRequestActivityTableName/);
   assert.match(scouts2sqsDeploy, /ScoutsRequestActivityTableName/);
+  assert.match(bootstrapTemplate, /table\/scouts-request-activity/);
 });
 
 test('calendar refresh backfills canonical agenda HEX independently of enrichment publication', () => {

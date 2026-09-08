@@ -317,6 +317,7 @@ Resources:
                 Resource:
                   - !Sub arn:aws:dynamodb:eu-west-2:${AWS::AccountId}:table/scouts-gemini-usage
                   - !Sub arn:aws:dynamodb:eu-west-2:${AWS::AccountId}:table/scouts-enrichment-state
+                  - !Sub arn:aws:dynamodb:eu-west-2:${AWS::AccountId}:table/scouts-request-activity
               - Sid: GeminiAlarmManagement
                 Effect: Allow
                 Action:
