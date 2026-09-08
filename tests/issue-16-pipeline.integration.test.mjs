@@ -6,7 +6,7 @@ function read(relativePath) {
   return readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8');
 }
 
-const scoutsSource = read('lambdas/scouts/function/scouts.mjs');
+const scoutsSource = read('lambdas/scouts/function/scouts-service.mjs');
 const workerSource = read('lambdas/sqs2scouts/function/image-provider-adapter.mjs');
 const workerCoreSource = read('lambdas/sqs2scouts/function/full-enrich-core.mjs');
 const workerLegacySource = read('lambdas/sqs2scouts/function/sqs2scouts.mjs');
