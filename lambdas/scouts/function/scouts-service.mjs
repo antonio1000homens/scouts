@@ -9,7 +9,6 @@ import {
 } from '@aws-sdk/client-s3';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SFNClient, DescribeExecutionCommand, ListExecutionsCommand } from '@aws-sdk/client-sfn';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { randomUUID } from 'crypto';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import {
@@ -952,11 +951,8 @@ function buildSortKey(value) {
 const s3 = new S3Client({ region: process.env.AWS_REGION || 'eu-west-2' });
 const sqs = new SQSClient({ region: process.env.AWS_REGION || 'eu-west-2' });
 const sfn = new SFNClient({ region: process.env.AWS_REGION || 'eu-west-2' });
-const dynamo = new DynamoDBClient({ region: process.env.AWS_REGION || 'eu-west-2' });
 const SCOUTS_REQUESTS_QUEUE_URL = SCOUTS_REQUESTS_QUEUE_URL_ENV || "https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests";
 const ACTIVE_EXECUTIONS_LIMIT = 20;
-const GEMINI_USAGE_TABLE_NAME = String(process.env.GEMINI_USAGE_TABLE_NAME || '').trim();
-const GEMINI_DAILY_REQUEST_LIMIT = Math.max(0, Math.floor(Number(process.env.GEMINI_DAILY_REQUEST_LIMIT || 0)));
 
 function buildImageEnrichRuntimeStageIndex(runtimeQueueSnapshots = {}) {
   const stageIndex = new Map();
@@ -1819,33 +1815,7 @@ function deriveProcessingRealmFromEvent(event, isEligibleForImageProcessing = tr
   return null;
 }
 
-async function isGeminiCircuitOpen(now = new Date()) {
-  if (GEMINI_DAILY_REQUEST_LIMIT <= 0 || !GEMINI_USAGE_TABLE_NAME) {
-    return { open: true, reason: 'budget_circuit_open' };
-  }
-  const day = now.toISOString().slice(0, 10);
-  try {
-    const response = await dynamo.send(new GetItemCommand({
-      TableName: GEMINI_USAGE_TABLE_NAME,
-      Key: { usageDay: { S: day }, usageScope: { S: 'requests' } },
-      ConsistentRead: true,
-    }));
-    const count = Number(response?.Item?.requestCount?.N || 0);
-    return count >= GEMINI_DAILY_REQUEST_LIMIT
-      ? { open: true, reason: 'budget_circuit_open', count }
-      : { open: false, count };
-  } catch (error) {
-    console.warn('[Enrichment] Failed to read Gemini daily circuit; skipping automatic enqueue:', error?.message || error);
-    return { open: true, reason: 'budget_circuit_unavailable' };
-  }
-}
-
 async function checkEnrichmentEligibility(hex, stage, context = {}) {
-  const circuit = await isGeminiCircuitOpen();
-  if (circuit.open) {
-    console.log(JSON.stringify({ hex, stage, skipReason: circuit.reason, attemptCount: null, nextRetryAt: null }));
-    return { eligible: false, reason: circuit.reason };
-  }
   try {
     const state = await getEnrichmentState(hex, stage);
     const generationId = context.event

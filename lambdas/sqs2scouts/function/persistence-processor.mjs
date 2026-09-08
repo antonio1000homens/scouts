@@ -4,7 +4,6 @@ import { readFileSync } from 'fs';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { SQSClient, SendMessageCommand, GetQueueAttributesCommand } from '@aws-sdk/client-sqs';
 import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
-import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import sharp from 'sharp';
 import { getOptionalSecret, getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import {
@@ -35,12 +34,7 @@ const TARGET_BUCKET = process.env.TARGET_BUCKET || DEFAULT_BUCKET;
 const EVENT_IMAGE_PREFIX = 'website/eventImages/';
 const GEMINI_API_VERSION = (process.env.GEMINI_API_VERSION || 'v1').trim() || 'v1';
 const GEMINI_IMAGE_API_VERSION = (process.env.GEMINI_IMAGE_API_VERSION || 'v1beta').trim() || 'v1beta';
-const GEMINI_TEXT_MODEL = (process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash-lite').trim() || 'gemini-2.5-flash-lite';
-const GEMINI_USAGE_TABLE_NAME = (process.env.GEMINI_USAGE_TABLE_NAME || '').trim();
-const GEMINI_DAILY_REQUEST_LIMIT = Number.isFinite(Number(process.env.GEMINI_DAILY_REQUEST_LIMIT))
-    ? Math.max(0, Math.floor(Number(process.env.GEMINI_DAILY_REQUEST_LIMIT)))
-    : 0;
-const GEMINI_USAGE_TTL_DAYS = 90;
+const GEMINI_TEXT_MODEL = (process.env.GEMINI_TEXT_MODEL || 'gemini-3.5-flash-lite').trim() || 'gemini-3.5-flash-lite';
 const GEMINI_PROMPT_VERSION = (process.env.GEMINI_PROMPT_VERSION || '1').trim() || '1';
 const GENERATED_IMAGE_WIDTH = Number.isFinite(Number(process.env.GEMINI_IMAGE_OUTPUT_WIDTH))
     ? Math.max(320, Number(process.env.GEMINI_IMAGE_OUTPUT_WIDTH))
@@ -51,7 +45,6 @@ const GENERATED_IMAGE_HEIGHT = Number.isFinite(Number(process.env.GEMINI_IMAGE_O
 const s3Client = new S3Client({ region: AWS_REGION });
 const sqsClient = new SQSClient({ region: AWS_REGION });
 const sfnClient = new SFNClient({ region: AWS_REGION });
-const dynamoDbClient = new DynamoDBClient({ region: AWS_REGION });
 const SCOUTS_DECISION_QUEUE_URL = process.env.SCOUTS_DECISION_QUEUE_URL || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsDecision';
 const SCOUTS_PROCESSING_QUEUE_URL_FALLBACK =
     process.env.SCOUTS_PROCESSING_QUEUE_URL
@@ -62,8 +55,8 @@ const S3_WEBSITE_BASE_URL = process.env.S3_WEBSITE_BASE_URL || 'https://scouts-2
 const S3_PUBLIC_ASSET_BASE_URL = (process.env.S3_PUBLIC_ASSET_BASE_URL || '').trim() ||
     (S3_WEBSITE_BASE_URL.startsWith('https://') ? S3_WEBSITE_BASE_URL : `https://${TARGET_BUCKET}.s3.${AWS_REGION}.amazonaws.com`);
 const DEFAULT_GEMINI_IMAGE_MODELS = Object.freeze([
-    // Gemini 2.5 Flash Image
-    'gemini-2.5-flash-image',
+    // Gemini 3.1 Flash Image / Nano Banana 2
+    'gemini-3.1-flash-image',
 ]);
 
 const GEMINI_IMAGE_MODEL_PREFERENCES = (() => {
@@ -93,7 +86,6 @@ const APPROVAL_PERSISTENCE_FLAG_SOURCE =
 const APPROVAL_PERSISTENCE_ENABLED = isFeatureFlagEnabled(APPROVAL_PERSISTENCE_FLAG_SOURCE, true);
 let geminiTextRuntimeDisabled = false;
 let geminiImageRuntimeDisabled = false;
-const GEMINI_QUOTA_EXHAUSTED = Object.freeze({ quotaExceeded: true });
 
 function readBundledScoutsConfigSource() {
     const candidateUrls = [
@@ -619,10 +611,6 @@ function isFeatureFlagEnabled(value, defaultValue = false) {
     return defaultValue;
 }
 
-function geminiUsageDay(now = new Date()) {
-    return now.toISOString().slice(0, 10);
-}
-
 function emitGeminiMetric(kind, outcome) {
     const timestamp = Date.now();
     console.log(JSON.stringify({
@@ -665,115 +653,6 @@ async function notifyEnrichmentTransition(stage, state, details = {}) {
     } else if (state?.state === 'manual_review' && await claimEnrichmentEscalation({ hex: details.hex, stage })) {
         await postSlackMessage({ text: `🚨 Scouts enrichment suspended\n\nHEX: ${details.hex}\nStage: ${stage}\nAutomatic enrichment has been stopped.\nAttempts: ${attemptCount}\nLast error: ${category}: ${message}\nGeneration ID: ${details.generationId || state.generationId || 'unknown'}\nRequest ID: ${details.requestId || state.lastRequestId || 'unknown'}` });
     }
-}
-
-async function notifyGeminiOnce(day, alertType, kind, text) {
-    if (!GEMINI_USAGE_TABLE_NAME) return;
-
-    try {
-        await dynamoDbClient.send(new UpdateItemCommand({
-            TableName: GEMINI_USAGE_TABLE_NAME,
-            Key: {
-                usageDay: { S: day },
-                usageScope: { S: `alert#${alertType}#${kind}` },
-            },
-            UpdateExpression: 'SET #expiresAt = :expiresAt, #createdAt = :createdAt',
-            ConditionExpression: 'attribute_not_exists(usageDay)',
-            ExpressionAttributeNames: {
-                '#expiresAt': 'expiresAt',
-                '#createdAt': 'createdAt',
-            },
-            ExpressionAttributeValues: {
-                ':expiresAt': { N: String(Math.floor(Date.now() / 1000) + (GEMINI_USAGE_TTL_DAYS * 24 * 60 * 60)) },
-                ':createdAt': { S: new Date().toISOString() },
-            },
-        }));
-    } catch (error) {
-        if (error?.name === 'ConditionalCheckFailedException') return;
-        console.error('[Gemini] Failed to claim quota alert:', error?.message || error);
-        return;
-    }
-
-    try {
-        await postSlackMessage({ text });
-    } catch (error) {
-        console.error('[Gemini] Failed to send alert to Slack:', error?.message || error);
-    }
-}
-
-async function notifyGeminiQuotaOnce(day, kind) {
-    return notifyGeminiOnce(
-        day,
-        'quota',
-        kind,
-        `Gemini daily safety limit reached: ${GEMINI_DAILY_REQUEST_LIMIT} request(s). Further ${kind} requests are blocked until ${day} ends (UTC).`,
-    );
-}
-
-async function notifyGeminiFailureOnce(kind, error) {
-    const summary = typeof error?.message === 'string' ? error.message.replace(/[\r\n]+/g, ' ').slice(0, 300) : 'unknown error';
-    return notifyGeminiOnce(
-        geminiUsageDay(),
-        'failure',
-        kind,
-        `Scouts Gemini ${kind} request failed. New Gemini requests remain limited to ${GEMINI_DAILY_REQUEST_LIMIT} per UTC day. Error: ${summary}`,
-    );
-}
-
-async function reserveGeminiRequest(kind) {
-    const day = geminiUsageDay();
-    if (GEMINI_DAILY_REQUEST_LIMIT <= 0 || !GEMINI_USAGE_TABLE_NAME) {
-        console.warn('[Gemini] Daily safety limit is not configured; blocking request.', {
-            kind,
-            limit: GEMINI_DAILY_REQUEST_LIMIT,
-            usageTableConfigured: Boolean(GEMINI_USAGE_TABLE_NAME),
-        });
-        emitGeminiMetric(kind, 'quota_rejected');
-        return false;
-    }
-
-    try {
-        await dynamoDbClient.send(new UpdateItemCommand({
-            TableName: GEMINI_USAGE_TABLE_NAME,
-            Key: {
-                usageDay: { S: day },
-                usageScope: { S: 'requests' },
-            },
-            UpdateExpression: 'SET #expiresAt = :expiresAt ADD #requestCount :one',
-            ConditionExpression: 'attribute_not_exists(#requestCount) OR #requestCount < :limit',
-            ExpressionAttributeNames: {
-                '#requestCount': 'requestCount',
-                '#expiresAt': 'expiresAt',
-            },
-            ExpressionAttributeValues: {
-                ':one': { N: '1' },
-                ':limit': { N: String(GEMINI_DAILY_REQUEST_LIMIT) },
-                ':expiresAt': { N: String(Math.floor(Date.now() / 1000) + (GEMINI_USAGE_TTL_DAYS * 24 * 60 * 60)) },
-            },
-        }));
-        emitGeminiMetric(kind, 'attempt');
-        return true;
-    } catch (error) {
-        if (error?.name === 'ConditionalCheckFailedException') {
-            console.warn('[Gemini] Daily safety limit reached; blocking request.', {
-                kind,
-                limit: GEMINI_DAILY_REQUEST_LIMIT,
-                day,
-            });
-            emitGeminiMetric(kind, 'quota_rejected');
-            await notifyGeminiQuotaOnce(day, kind);
-            return false;
-        }
-
-        // A quota system failure must not turn into unbounded paid traffic.
-        console.error('[Gemini] Usage counter unavailable; blocking request:', error?.message || error);
-        emitGeminiMetric(kind, 'quota_counter_error');
-        return false;
-    }
-}
-
-function isGeminiQuotaExhausted(value) {
-    return value === GEMINI_QUOTA_EXHAUSTED;
 }
 
 async function checkStageEligibility(hex, stage, generationId = null) {
@@ -1081,10 +960,6 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
         return { enrichmentBlocked: true, reason: stageEligibility.reason };
     }
 
-    if (!await reserveGeminiRequest('text')) {
-        return GEMINI_QUOTA_EXHAUSTED;
-    }
-
     const reservation = await reserveEnrichmentAttempt({
         hex: hexValue,
         stage,
@@ -1155,7 +1030,6 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
         await notifyEnrichmentTransition(stage, failedState, { hex: hexValue, generationId, requestId: options.requestId }).catch((notifyError) => {
             console.warn('[Enrichment] Failed to send transition alert:', notifyError?.message || notifyError);
         });
-        await notifyGeminiFailureOnce('text', error);
         console.warn(`[Gemini] Failed to generate ${mode} suggestion:`, error?.message || error);
         if (error && error.stack) console.debug(error.stack);
         if (isGeminiBillingRestrictionError(error)) {
@@ -1712,9 +1586,6 @@ async function generateGeminiImageAsset(promptText, { hexValue, eventTitle, requ
     if (!stageEligibility.eligible) {
         return { enrichmentBlocked: true, reason: stageEligibility.reason };
     }
-    if (!await reserveGeminiRequest('image')) {
-        return GEMINI_QUOTA_EXHAUSTED;
-    }
     const reservation = await reserveEnrichmentAttempt({
         hex: normalisedHexValue,
         stage: 'image',
@@ -1786,7 +1657,6 @@ async function generateGeminiImageAsset(promptText, { hexValue, eventTitle, requ
             return generatedValue;
         } catch (error) {
             emitGeminiMetric('image', 'failure');
-            await notifyGeminiFailureOnce('image', error);
             const normalizedError = normaliseGeminiImageError(error);
             if (typeof error?.status === 'number' && typeof normalizedError.status !== 'number') {
                 normalizedError.status = error.status;
@@ -3367,16 +3237,16 @@ export async function lambdaHandler(event) {
             
             const generationId = buildGenerationId(hexValue, 'tagline', hexData, GEMINI_PROMPT_VERSION);
             const result = await generateGeminiTextSuggestion(hexData, 'tagline', scoutsConfig, { hexValue, generationId, requestId: requestContext.requestId });
-            if (isGeminiQuotaExhausted(result) || result?.enrichmentBlocked) {
+            if (result?.enrichmentBlocked) {
                 await completeImageEnrichTask(messageBody, {
                     hex: hexValue,
                     requestId: requestContext.requestId,
                     orchestrationStep: 'imageTheme',
-                    skipped: 'gemini_daily_limit',
+                    skipped: result.reason || 'enrichment_unavailable',
                 });
                 return {
                     statusCode: 202,
-                    body: JSON.stringify({ message: 'Gemini daily safety limit reached; tagline enrichment deferred' }),
+                    body: JSON.stringify({ message: 'Tagline enrichment is currently deferred' }),
                 };
             }
             if (result?.tagline) {
@@ -3440,16 +3310,16 @@ export async function lambdaHandler(event) {
             
             const generationId = buildGenerationId(hexValue, 'imageTheme', hexData, GEMINI_PROMPT_VERSION);
             const result = await generateGeminiTextSuggestion(hexData, 'imageTheme', scoutsConfig, { hexValue, generationId, requestId: requestContext.requestId });
-            if (isGeminiQuotaExhausted(result) || result?.enrichmentBlocked) {
+            if (result?.enrichmentBlocked) {
                 await completeImageEnrichTask(messageBody, {
                     hex: hexValue,
                     requestId: requestContext.requestId,
                     orchestrationStep: 'imageTheme',
-                    skipped: 'gemini_daily_limit',
+                    skipped: result.reason || 'enrichment_unavailable',
                 });
                 return {
                     statusCode: 202,
-                    body: JSON.stringify({ message: 'Gemini daily safety limit reached; image theme enrichment deferred' }),
+                    body: JSON.stringify({ message: 'Image theme enrichment is currently deferred' }),
                 };
             }
             if (result?.imageTheme) {
@@ -3534,16 +3404,16 @@ export async function lambdaHandler(event) {
                 event: hexData,
                 generationId,
             });
-            if (isGeminiQuotaExhausted(generatedImage) || generatedImage?.enrichmentBlocked) {
+            if (generatedImage?.enrichmentBlocked) {
                 await completeImageEnrichTask(messageBody, {
                     hex: hexValue,
                     requestId: requestContext.requestId,
                     orchestrationStep: 'image',
-                    skipped: 'gemini_daily_limit',
+                    skipped: generatedImage.reason || 'enrichment_unavailable',
                 });
                 return {
                     statusCode: 202,
-                    body: JSON.stringify({ message: 'Gemini daily safety limit reached; image enrichment deferred' }),
+                    body: JSON.stringify({ message: 'Image enrichment is currently deferred' }),
                 };
             }
             if (!generatedImage?.relativeUrl) {
