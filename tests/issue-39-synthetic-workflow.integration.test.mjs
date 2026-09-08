@@ -11,8 +11,9 @@ import {
   translateQueueStage,
 } from './helpers/scouts-workflow-harness.mjs';
 
-const scoutsSource = readFileSync('lambdas/scouts/function/scouts.mjs', 'utf8');
-const scouts2sqsSource = readFileSync('lambdas/scouts2sqs/function/scouts2sqs.mjs', 'utf8');
+const scoutsSource = readFileSync('lambdas/scouts/function/scouts-service.mjs', 'utf8');
+const scouts2sqsSource = readFileSync('lambdas/scouts2sqs/function/request-processor.mjs', 'utf8');
+const requestRouterSource = readFileSync('lambdas/scouts2sqs/function/request-router.mjs', 'utf8');
 const imageAdapterSource = readFileSync('lambdas/sqs2scouts/function/image-provider-adapter.mjs', 'utf8');
 
 const TEST_HEX = '746573742d776f726b666c6f77';
@@ -39,6 +40,7 @@ test('production sources retain the contracts exercised by the synthetic journey
   assert.match(scouts2sqsSource, /requestedField === 'tagline'/);
   assert.match(scouts2sqsSource, /requestedField === 'imageTheme'/);
   assert.match(scouts2sqsSource, /requestedField === 'imageUrl'/);
+  assert.match(requestRouterSource, /new Set\(\['new', 'retry', 'imageEnrich', 'fullEnrich'\]\)/);
   assert.match(imageAdapterSource, /loadReusableGeneration/);
 });
 
@@ -142,7 +144,8 @@ test('tampered actions and cross-event HEX changes fail at the action boundary',
 
 test('fake provider is test-only and production provider allowlists cannot select it', () => {
   const cloudflareClient = readFileSync('lambdas/sqs2scouts/function/cloudflare-image-client.mjs', 'utf8');
-  const fullAdapter = readFileSync('lambdas/scouts2sqs/function/full-enrich-adapter.mjs', 'utf8');
+  const requestRouter = readFileSync('lambdas/scouts2sqs/function/request-router.mjs', 'utf8');
   assert.doesNotMatch(cloudflareClient, /['"]fake['"]/);
-  assert.doesNotMatch(fullAdapter, /['"]fake['"]/);
+  assert.doesNotMatch(requestRouter, /['"]fake['"]/);
+  assert.match(requestRouter, /\['cloudflare', 'gemini', 'disabled'\]/);
 });
