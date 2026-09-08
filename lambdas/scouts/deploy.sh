@@ -63,8 +63,6 @@ SCOUTS_REQUESTS_QUEUE_ARN="${SCOUTS_REQUESTS_QUEUE_ARN:-arn:aws:sqs:eu-west-2:55
 SCOUTS_REQUESTS_QUEUE_URL="${SCOUTS_REQUESTS_QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests}"
 SCOUTS2SQS_FUNCTION_URL="${SCOUTS2SQS_FUNCTION_URL:-}"
 FULL_ENRICH_STATE_MACHINE_ARN="${FULL_ENRICH_STATE_MACHINE_ARN:-}"
-GEMINI_DAILY_REQUEST_LIMIT="${GEMINI_DAILY_REQUEST_LIMIT:-10}"
-GEMINI_USAGE_TABLE_NAME="${GEMINI_USAGE_TABLE_NAME:-scouts-gemini-usage}"
 GEMINI_ENRICH_STATE_TABLE_NAME="${GEMINI_ENRICH_STATE_TABLE_NAME:-scouts-enrichment-state}"
 
 TEMPLATE_FILE="${ROOT_DIR}/cloudformation/templates/scouts.yaml"
@@ -98,6 +96,14 @@ put_standard_secure_parameter() {
   aws ssm put-parameter --region "${REGION}" --name "${name}" --type SecureString --tier Standard --overwrite --value "${value}" >/dev/null
 }
 
+require_existing_secure_parameter() {
+  local parameter_name="$1"
+  if ! aws ssm get-parameter --region "${REGION}" --name "${parameter_name}" --query 'Parameter.ARN' --output text >/dev/null; then
+    echo -e "${RED}Required SSM parameter is missing: ${parameter_name}${NC}"
+    exit 1
+  fi
+}
+
 echo -e "\n${YELLOW}AWS identity preflight...${NC}"
 CALLER_ARN="$(aws sts get-caller-identity --query 'Arn' --output text 2>/dev/null || true)"
 CALLER_ACCOUNT="$(aws sts get-caller-identity --query 'Account' --output text 2>/dev/null || true)"
@@ -115,7 +121,7 @@ if declare -F bws_export_if_unset >/dev/null 2>&1; then
   bws_export_if_unset "REQUIRED_API_KEY" "${BWS_REQUIRED_API_KEY_SECRET_ID:-${BWS_SCOUTS_REQUIRED_API_KEY_SECRET_ID:-}}" || true
 fi
 
-if [ -z "${REQUIRED_API_KEY}" ]; then echo -e "${RED}REQUIRED_API_KEY must be set before deploying.${NC}"; exit 1; fi
+if [ -z "${REQUIRED_API_KEY}" ]; then require_existing_secure_parameter "${REQUIRED_API_KEY_PARAMETER}"; fi
 
 reuse_lambda_env_if_unset() {
   local env_key="$1"
@@ -201,13 +207,11 @@ CFN_DEPLOY_ARGS+=(
     ScoutsRequestsQueueUrl="${SCOUTS_REQUESTS_QUEUE_URL}"
     Scouts2SqsFunctionUrl="${SCOUTS2SQS_FUNCTION_URL}"
     FullEnrichStateMachineArn="${FULL_ENRICH_STATE_MACHINE_ARN}"
-    GeminiDailyRequestLimit="${GEMINI_DAILY_REQUEST_LIMIT}"
-    GeminiUsageTableName="${GEMINI_USAGE_TABLE_NAME}"
     GeminiEnrichmentStateTableName="${GEMINI_ENRICH_STATE_TABLE_NAME}"
 )
 
 deploy_cloudformation_with_diagnostics "${STACK_NAME}" "${REGION}" "${CFN_DEPLOY_ARGS[@]}"
-put_standard_secure_parameter "${REQUIRED_API_KEY_PARAMETER}" "${REQUIRED_API_KEY}"
+if [ -n "${REQUIRED_API_KEY}" ]; then put_standard_secure_parameter "${REQUIRED_API_KEY_PARAMETER}" "${REQUIRED_API_KEY}"; fi
 
 echo -e "\n${YELLOW}Step 5: Read stack outputs...${NC}"
 aws cloudformation describe-stacks --region "${REGION}" --stack-name "${STACK_NAME}" --query 'Stacks[0].Outputs' --output table

@@ -88,10 +88,6 @@ Parameters:
     Type: String
     Default: 'false'
     AllowedValues: ['true', 'false']
-  GeminiDailyRequestLimit:
-    Type: Number
-    Default: 10
-    MinValue: 0
   GeminiUsageTableName:
     Type: String
     Default: scouts-gemini-usage
@@ -121,10 +117,6 @@ Parameters:
     Type: String
     Default: disabled
     AllowedValues: [disabled, cloudflare, gemini]
-  ImageGenerationDailyRequestLimit:
-    Type: Number
-    Default: 10
-    MinValue: 0
   CloudflareAccountId:
     Type: String
     Default: ''
@@ -287,7 +279,6 @@ Resources:
           GEMINI_TEXT_MODEL: !Ref GeminiTextModel
           GEMINI: !Ref GeminiEnabled
           GEMINI_IMAGES: !Ref GeminiImagesEnabled
-          GEMINI_DAILY_REQUEST_LIMIT: !Ref GeminiDailyRequestLimit
           GEMINI_USAGE_TABLE_NAME: !Ref GeminiUsageTableName
           GEMINI_ENRICHMENT_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
           GEMINI_MAX_ATTEMPTS_PER_STAGE: !Ref GeminiMaxAttemptsPerStage
@@ -296,7 +287,6 @@ Resources:
           GEMINI_IN_PROGRESS_LEASE_SECONDS: !Ref GeminiInProgressLeaseSeconds
           GEMINI_PROMPT_VERSION: !Ref GeminiPromptVersion
           IMAGE_GENERATION_PROVIDER: !Ref ImageGenerationProvider
-          IMAGE_GENERATION_DAILY_REQUEST_LIMIT: !Ref ImageGenerationDailyRequestLimit
           CLOUDFLARE_ACCOUNT_ID: !Ref CloudflareAccountId
           CLOUDFLARE_AI_API_TOKEN_PARAMETER: !Ref CloudflareAiApiTokenParameter
           CLOUDFLARE_AI_MODEL: !Ref CloudflareAiModel
@@ -321,23 +311,6 @@ Resources:
       EventSourceArn: !Ref QueueArn
       BatchSize: !Ref BatchSize
       Enabled: true
-
-  GeminiQuotaRejectedAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: scouts-gemini-daily-limit-reached
-      AlarmDescription: Gemini requests were blocked by the Scouts daily safety limit.
-      Namespace: Scouts/Gemini
-      MetricName: Requests
-      Dimensions:
-        - Name: Outcome
-          Value: quota_rejected
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 1
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: notBreaching
 
   GeminiFailureAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -381,20 +354,6 @@ Resources:
       Period: 3600
       EvaluationPeriods: 1
       Threshold: 5
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: notBreaching
-
-  ImageGenerationQuotaRejectedAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: scouts-image-generation-daily-cap-reached
-      AlarmDescription: Image generation was blocked by the application-level daily inference cap.
-      Namespace: Scouts/ImageGeneration
-      MetricName: QuotaRejected
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
 
