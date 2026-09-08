@@ -16,6 +16,9 @@ let activeRuntimeViewerKey = '';
 let pinnedRuntimeDetails = null;
 let lastLoadedEventsSummary = null;
 let adminNotificationTimer = null;
+let browserNotificationsEnabled = false;
+let agendaNotificationBaseline = null;
+let browserNotificationUnavailableShown = false;
 const MIN_RUNTIME_DETAILS_VISIBLE_MS = 5000;
 const DEFAULT_STATUS_POLL_INTERVAL_MS = 5000;
 const DEFAULT_AUTO_LAMBDA_INVOKE_INTERVAL_MS = 20000;
@@ -29,6 +32,7 @@ const STATUS_POLL_PREF_KEY = 'scouts_admin_status_poll_enabled';
 const STATUS_POLL_INTERVAL_PREF_KEY = 'scouts_admin_status_poll_interval_seconds';
 const HEX_PREVIEW_AUTO_REFRESH_PREF_KEY = 'scouts_admin_hex_preview_auto_refresh';
 const HEX_PREVIEW_INTERVAL_PREF_KEY = 'scouts_admin_hex_preview_interval_ms';
+const BROWSER_NOTIFICATIONS_PREF_KEY = 'scouts_admin_browser_notifications_enabled';
 let runtimeDetailsLastShownAt = 0;
 let runtimeDetailsLastMessage = '';
 let runtimeDetailsLastType = 'info';
@@ -126,6 +130,189 @@ function showAdminNotification(message, tone = 'info', durationMs = 5000) {
     adminNotificationTimer = setTimeout(() => {
         notificationEl.hidden = true;
     }, Math.max(1000, durationMs));
+}
+
+function readBrowserNotificationsPreference() {
+    try {
+        return window.localStorage.getItem(BROWSER_NOTIFICATIONS_PREF_KEY) === '1';
+    } catch {
+        return false;
+    }
+}
+
+function persistBrowserNotificationsPreference(enabled) {
+    try {
+        window.localStorage.setItem(BROWSER_NOTIFICATIONS_PREF_KEY, enabled ? '1' : '0');
+    } catch {
+        // Ignore storage errors; the preference remains valid for this page.
+    }
+}
+
+function updateBrowserNotificationsUi() {
+    const toggle = document.getElementById('browser-notifications-toggle');
+    if (!toggle) return;
+    toggle.checked = browserNotificationsEnabled;
+    toggle.title = browserNotificationsEnabled
+        ? 'Native browser notifications are enabled for agenda changes.'
+        : 'Enable native browser notifications for agenda changes.';
+}
+
+async function setBrowserNotificationsEnabled(enabled) {
+    if (!enabled) {
+        browserNotificationsEnabled = false;
+        persistBrowserNotificationsPreference(false);
+        updateBrowserNotificationsUi();
+        return false;
+    }
+
+    if (typeof Notification !== 'function') {
+        browserNotificationsEnabled = false;
+        persistBrowserNotificationsPreference(false);
+        updateBrowserNotificationsUi();
+        showAdminNotification('This browser does not support native notifications; in-page alerts remain available.', 'error', 7000);
+        return false;
+    }
+
+    let permission = Notification.permission;
+    if (permission === 'default') {
+        try {
+            permission = await Notification.requestPermission();
+        } catch (error) {
+            console.warn('[AdminNotifications] Permission request failed', error);
+            permission = 'denied';
+        }
+    }
+
+    browserNotificationsEnabled = permission === 'granted';
+    persistBrowserNotificationsPreference(browserNotificationsEnabled);
+    updateBrowserNotificationsUi();
+    if (!browserNotificationsEnabled) {
+        showAdminNotification(
+            permission === 'denied'
+                ? 'Browser notifications were denied; in-page alerts remain available.'
+                : 'Browser notifications were not enabled; in-page alerts remain available.',
+            'error',
+            7000,
+        );
+    } else {
+        showAdminNotification('Browser notifications enabled for agenda changes.', 'success', 4000);
+    }
+    return browserNotificationsEnabled;
+}
+
+function initializeBrowserNotificationsPreference() {
+    browserNotificationsEnabled = readBrowserNotificationsPreference()
+        && typeof Notification === 'function'
+        && Notification.permission === 'granted';
+    updateBrowserNotificationsUi();
+}
+
+function notificationEventIdentity(entry, index = 0) {
+    const event = entry?.event || entry || {};
+    const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+    const hex = String(metadata.hex || metadata.hexId || event.hex || event.hexId || '').trim().toLowerCase();
+    if (hex) return `hex:${hex}`;
+    const uid = String(event.uid || event.source?.uid || '').trim();
+    if (uid) return `uid:${uid}`;
+    const title = String(event.summary || event.title || '').trim().toLowerCase();
+    const date = String(event.dtstart || event.start || '').trim();
+    const location = String(event.location || '').trim().toLowerCase();
+    return `fallback:${title}|${date}|${location}|${index}`;
+}
+
+function notificationEventSnapshot(entry) {
+    const event = entry?.event || entry || {};
+    const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+    const image = metadata.image && typeof metadata.image === 'object' ? metadata.image : (event.image || {});
+    const status = metadata.status && typeof metadata.status === 'object' ? metadata.status : (event.status || {});
+    return {
+        title: String(event.summary || event.title || '').trim(),
+        date: String(event.dtstart || event.start || '').trim(),
+        location: String(event.location || '').trim(),
+        hidden: status.isHidden === true || event.isHidden === true || event.status === 'hidden',
+        approved: status.isApproved === true || event.approved === true || event.isApproved === true,
+        tagline: String(metadata.tagline || event.tagline || event.AI || event.ai || '').trim(),
+        imageTheme: String(image.theme || '').trim(),
+        imageUrl: String(image.url || image.src || event.imageUrl || '').trim(),
+    };
+}
+
+function buildAgendaChangeSet(previousEntries = [], currentEntries = []) {
+    const previous = new Map(previousEntries.map((entry, index) => [notificationEventIdentity(entry, index), notificationEventSnapshot(entry)]));
+    const current = new Map(currentEntries.map((entry, index) => [notificationEventIdentity(entry, index), notificationEventSnapshot(entry)]));
+    const added = [];
+    const removed = [];
+    const changed = [];
+    const fields = [
+        ['title', 'title'],
+        ['date', 'date'],
+        ['location', 'location'],
+        ['hidden', 'visibility'],
+        ['approved', 'approval'],
+        ['tagline', 'tagline'],
+        ['imageTheme', 'image theme'],
+        ['imageUrl', 'image'],
+    ];
+
+    for (const [identity, snapshot] of current) {
+        if (!previous.has(identity)) {
+            added.push({ identity, snapshot });
+            continue;
+        }
+        const before = previous.get(identity);
+        const changes = fields
+            .filter(([field]) => before[field] !== snapshot[field])
+            .map(([, label]) => label);
+        if (changes.length > 0) changed.push({ identity, snapshot, changes });
+    }
+    for (const [identity, snapshot] of previous) {
+        if (!current.has(identity)) removed.push({ identity, snapshot });
+    }
+
+    return { added, removed, changed, hasChanges: added.length > 0 || removed.length > 0 || changed.length > 0 };
+}
+
+function notificationEventLabel(change) {
+    return change?.snapshot?.title || change?.identity?.replace(/^(hex|uid|fallback):/, '') || 'unnamed event';
+}
+
+function notifyAgendaChanges(changeSet) {
+    if (!browserNotificationsEnabled || !changeSet?.hasChanges) return false;
+
+    const parts = [];
+    if (changeSet.added.length) parts.push(`${changeSet.added.length} new`);
+    if (changeSet.removed.length) parts.push(`${changeSet.removed.length} removed`);
+    if (changeSet.changed.length) parts.push(`${changeSet.changed.length} updated`);
+    const examples = [
+        ...changeSet.added.slice(0, 2).map((change) => `New: ${notificationEventLabel(change)}`),
+        ...changeSet.removed.slice(0, 2).map((change) => `Removed: ${notificationEventLabel(change)}`),
+        ...changeSet.changed.slice(0, 3).map((change) => `${notificationEventLabel(change)} (${change.changes.join(', ')})`),
+    ];
+    const body = `${parts.join(', ')} event change${parts.reduce((sum, part) => sum + Number.parseInt(part, 10), 0) === 1 ? '' : 's'}. ${examples.join(' · ')}`;
+    const notificationOptions = {
+        body,
+        tag: 'scouts-admin-agenda-change',
+        icon: '/website/images/scouts-logo-white-png.png',
+    };
+
+    try {
+        if (typeof Notification !== 'function' || Notification.permission !== 'granted') {
+            throw new Error('Native browser notifications are unavailable.');
+        }
+        const notification = new Notification('Scouts agenda changed', notificationOptions);
+        notification.onclick = () => window.focus();
+        browserNotificationUnavailableShown = false;
+        return true;
+    } catch (error) {
+        browserNotificationsEnabled = false;
+        persistBrowserNotificationsPreference(false);
+        updateBrowserNotificationsUi();
+        if (!browserNotificationUnavailableShown) {
+            showAdminNotification(`Agenda changed: ${body}`, 'info', 7000);
+            browserNotificationUnavailableShown = true;
+        }
+        return false;
+    }
 }
 
 function applyRuntimeDetailsNow(message, type = 'info') {
@@ -1358,7 +1545,10 @@ function restartAutoLambdaInvokeTimer() {
 function runStatusPollingJob() {
     if (statusPollingInFlight) return;
     statusPollingInFlight = true;
-    Promise.resolve(pollQueueDepthSnapshots()).finally(() => {
+    Promise.all([
+        pollQueueDepthSnapshots(),
+        loadEvents({ silent: true, notifyOnAgendaChanges: true, onlyIfChanged: true, notificationSource: 'Agenda polling' }),
+    ]).finally(() => {
         statusPollingInFlight = false;
     });
 }
@@ -1559,7 +1749,13 @@ async function fetchAgendaJson() {
 
 // Load events from the current site's agenda feed
 async function loadEvents(options = {}) {
-    const { silent = false, notifyOnCountChange = false, notificationSource = 'Lambda refresh' } = options;
+    const {
+        silent = false,
+        notifyOnCountChange = false,
+        notifyOnAgendaChanges = false,
+        onlyIfChanged = false,
+        notificationSource = 'Lambda refresh',
+    } = options;
     if (agendaLoadInFlight) {
         return;
     }
@@ -1573,6 +1769,19 @@ async function loadEvents(options = {}) {
         agendaPayload = data;
         uniqueEventEntries = buildUniqueEventEntries(eventsData);
         applyVisibilityOverrides(uniqueEventEntries);
+        const previousAgendaEntries = agendaNotificationBaseline;
+        const agendaChangeSet = previousAgendaEntries
+            ? buildAgendaChangeSet(previousAgendaEntries, uniqueEventEntries)
+            : { added: [], removed: [], changed: [], hasChanges: false };
+        agendaNotificationBaseline = uniqueEventEntries.map((entry) => ({
+            event: cloneEventRecord(entry.event),
+        }));
+        if (notifyOnAgendaChanges && previousAgendaEntries) {
+            notifyAgendaChanges(agendaChangeSet);
+        }
+        if (onlyIfChanged && previousAgendaEntries && !agendaChangeSet.hasChanges) {
+            return;
+        }
         console.log('[Admin] agenda.json fetched', {
             totalEvents: rawEvents.length,
             uniqueEvents: uniqueEventEntries.length,
@@ -3793,6 +4002,7 @@ document.addEventListener('DOMContentLoaded', () => {
     statusPollingIntervalMs = readStatusPollingIntervalPreference();
     hexPreviewAutoRefreshEnabled = readHexPreviewAutoRefreshPreference();
     hexPreviewIntervalMs = readHexPreviewIntervalPreference();
+    initializeBrowserNotificationsPreference();
     setAutoLambdaInvocationEnabled(readAutoLambdaInvocationPreference(), false);
     setStatusPollingEnabled(readStatusPollingPreference(), false);
     persistAutoLambdaInvocationPreference(autoLambdaInvokeEnabled);

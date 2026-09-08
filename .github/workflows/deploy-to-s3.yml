@@ -137,7 +137,7 @@ jobs:
                 ;;
             esac
             case "${file}" in
-              deploy.sh|lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|tests/issue-34-admin-ui.integration.test.mjs|tests/issue-39-*.test.mjs|tests/issue-39-*.integration.test.mjs|tests/helpers/*|docs/TESTING-STRATEGY.md|website/admin/*|.github/workflows/deploy-to-s3.yml)
+              deploy.sh|lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|tests/issue-34-admin-ui.integration.test.mjs|tests/issue-39-*.test.mjs|tests/issue-39-*.integration.test.mjs|tests/issue-43-*.test.mjs|tests/admin-notifications.test.mjs|tests/helpers/*|docs/TESTING-STRATEGY.md|website/admin/*|.github/workflows/deploy-to-s3.yml)
                 retry_safety=true
                 ;;
             esac
@@ -246,6 +246,10 @@ jobs:
       - name: Run issue 34 admin UI contracts
         if: steps.plan.outputs.retry_safety == 'true'
         run: node --test tests/issue-34-admin-ui.integration.test.mjs
+
+      - name: Run admin notification tests
+        if: steps.plan.outputs.retry_safety == 'true'
+        run: node --test tests/admin-notifications.test.mjs
 
       - name: Run issue 39 workflow journey and security tests
         if: steps.plan.outputs.retry_safety == 'true'

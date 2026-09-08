@@ -332,12 +332,14 @@ function renderFutureEvents(events, container) {
         return;
     }
 
-    container.innerHTML = events.map(event => {
+    container.innerHTML = events.map((event, index) => {
         const image = createEventImageMarkup(event);
         const sectionKey = resolveEventSection(event);
         const headingMarkup = createEventHeading('h4', event);
+        const nextLabel = index === 0 ? '<p class="event-card-kicker">Coming next</p>' : '';
         return `
-            <div class="event-card" data-section="${sectionKey}">
+            <div class="event-card${index === 0 ? ' event-card--next' : ''}" data-section="${sectionKey}">
+                ${nextLabel}
                 ${image}
                 ${headingMarkup}
                 ${getTagline(event) ? `<p class="ai-text">${getTagline(event)}</p>` : ''}
@@ -499,10 +501,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 .filter(event => event.__eventDate <= now)
                 .sort((a, b) => b.__eventDate - a.__eventDate);
                     console.log('[EventsLoader] Past events count:', pastEvents.length);
-                    const nextEvent = futureEvents.length ? futureEvents[0] : null;
-                    const upcomingEvents = futureEvents.slice(1, 4);
+                    const upcomingEvents = futureEvents.slice(0, 3);
 
-                    renderNextEventCard(nextEvent, document.getElementById('next-event'));
                     renderFutureEvents(upcomingEvents, document.getElementById('future-events'));
                     renderPastEventsCarousel(pastEvents, document.getElementById('past-events'));
         })
