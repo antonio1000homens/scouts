@@ -94,6 +94,9 @@ Parameters:
   GeminiEnrichmentStateTableName:
     Type: String
     Default: scouts-enrichment-state
+  ScoutsRequestActivityTableName:
+    Type: String
+    Default: scouts-request-activity
   GeminiMaxAttemptsPerStage:
     Type: Number
     Default: 3
@@ -192,6 +195,34 @@ Resources:
         AttributeName: expiresAt
         Enabled: true
 
+  ScoutsRequestActivityTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref ScoutsRequestActivityTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: requestId
+          AttributeType: S
+        - AttributeName: feed
+          AttributeType: S
+        - AttributeName: updatedAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: requestId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: activity-feed
+          KeySchema:
+            - AttributeName: feed
+              KeyType: HASH
+            - AttributeName: updatedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
   Sqs2ScoutsRole:
     Type: AWS::IAM::Role
     Properties:
@@ -248,6 +279,8 @@ Resources:
                 Resource:
                   - !GetAtt GeminiUsageTable.Arn
                   - !GetAtt GeminiEnrichmentStateTable.Arn
+                  - !GetAtt ScoutsRequestActivityTable.Arn
+                  - !Sub ${ScoutsRequestActivityTable.Arn}/index/*
               - Effect: Allow
                 Action:
                   - ssm:GetParameter
@@ -281,6 +314,7 @@ Resources:
           GEMINI_IMAGES: !Ref GeminiImagesEnabled
           GEMINI_USAGE_TABLE_NAME: !Ref GeminiUsageTableName
           GEMINI_ENRICHMENT_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
+          SCOUTS_REQUEST_ACTIVITY_TABLE_NAME: !Ref ScoutsRequestActivityTableName
           GEMINI_MAX_ATTEMPTS_PER_STAGE: !Ref GeminiMaxAttemptsPerStage
           GEMINI_RETRY_DELAY_ATTEMPT_2_SECONDS: !Ref GeminiRetryDelayAttempt2Seconds
           GEMINI_RETRY_DELAY_ATTEMPT_3_SECONDS: !Ref GeminiRetryDelayAttempt3Seconds
@@ -396,3 +430,5 @@ Outputs:
     Value: !Ref GeminiUsageTable
   GeminiEnrichmentStateTableName:
     Value: !Ref GeminiEnrichmentStateTable
+  ScoutsRequestActivityTableName:
+    Value: !Ref ScoutsRequestActivityTable

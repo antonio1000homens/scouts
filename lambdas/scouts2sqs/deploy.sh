@@ -64,6 +64,7 @@ DLQ_ARN="${DLQ_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsRequestsDLQ}"
 DLQ_URL="${DLQ_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequestsDLQ}"
 FULL_ENRICH_STATE_MACHINE_ARN="${FULL_ENRICH_STATE_MACHINE_ARN:-}"
 IMAGE_GENERATION_PROVIDER="${IMAGE_GENERATION_PROVIDER:-disabled}"
+SCOUTS_REQUEST_ACTIVITY_TABLE_NAME="${SCOUTS_REQUEST_ACTIVITY_TABLE_NAME:-scouts-request-activity}"
 
 TEMPLATE_FILE="${ROOT_DIR}/cloudformation/templates/scouts2sqs.yaml"
 
@@ -188,6 +189,7 @@ CFN_DEPLOY_ARGS+=(
     DlqUrl="${DLQ_URL}"
     FullEnrichStateMachineArn="${FULL_ENRICH_STATE_MACHINE_ARN}"
     ImageGenerationProvider="${IMAGE_GENERATION_PROVIDER}"
+    ScoutsRequestActivityTableName="${SCOUTS_REQUEST_ACTIVITY_TABLE_NAME}"
 )
 
 deploy_cloudformation_with_diagnostics "${STACK_NAME}" "${REGION}" "${CFN_DEPLOY_ARGS[@]}"

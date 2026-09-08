@@ -4,6 +4,7 @@ import { SFNClient, ListExecutionsCommand, StartExecutionCommand } from '@aws-sd
 import https from 'https';
 import crypto from 'crypto';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
+import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 
 // Load configuration from environment variables
 const { TARGET_BUCKET } = process.env;
@@ -1329,6 +1330,12 @@ export async function lambdaHandler(event) {
                     observedLinks.push(...hints.links);
                     observedRequests.push(...hints.requests);
                     const requestContext = buildRequestContext(record, messageBody);
+                    await recordRequestActivity({
+                        ...messageBody,
+                        requestId: requestContext.requestId,
+                        state: 'processing',
+                        stage: 'scouts2sqs',
+                    }).catch((activityError) => console.warn('[Activity] Unable to record ingress:', activityError?.message || activityError));
                     
                     const rawRealm = typeof messageBody.realm === 'string' ? messageBody.realm.trim() : '';
                     const rawAction = typeof messageBody.action === 'string' ? messageBody.action.trim() : '';
@@ -1396,6 +1403,15 @@ export async function lambdaHandler(event) {
                         }
                         
                         if (targetRealm) {
+                            await recordRequestActivity({
+                                ...messageBody,
+                                requestId: requestContext.requestId,
+                                hex: hexValue,
+                                title: rawSubject?.title || rawSubject?.summary,
+                                action: targetAction || rawAction,
+                                state: targetRealm === 'imageEnrich' ? 'orchestrating' : 'processing',
+                                stage: targetRealm,
+                            }).catch((activityError) => console.warn('[Activity] Unable to record router transition:', activityError?.message || activityError));
                             if (targetRealm === 'imageEnrich') {
                                 const orchestrationPayload = withRequestContext({
                                     realm: 'scoutsRequest',
@@ -1469,8 +1485,6 @@ export async function lambdaHandler(event) {
             }
         }
 
-        await persistQueuedRequestsRuntimeSnapshot(event.Records, observedRequestIds, observedHexes, observedLinks, observedRequests);
-        
         return withCors({ statusCode: 200, body: 'SQS messages processed' });
     }
     
@@ -1536,7 +1550,8 @@ export async function lambdaHandler(event) {
                 subject: processedSubject,
             }, requestContext);
             await startImageEnrichExecution(orchestratedPayload, requestContext);
-            return withCors({ statusCode: 200, body: JSON.stringify({ message: 'imageEnrich execution started' }) });
+            await recordRequestActivity({ ...orchestratedPayload, requestId: requestContext.requestId, state: 'orchestrating', stage: 'full_enrich' });
+            return withCors({ statusCode: 200, body: JSON.stringify({ message: 'imageEnrich execution started', requestId: requestContext.requestId }) });
         }
 
         const allowed = new Set(['tagline', 'imageTheme', 'image', 'persist']);
@@ -1556,10 +1571,12 @@ export async function lambdaHandler(event) {
             return withCors({ statusCode: 200, body: JSON.stringify({ message: 'Dropped unsupported realm' }) });
         }
 
-        const payload = { realm: normalizedRealm, subject: processedSubject, action: normalizedAction };
+        const requestContext = buildRequestContext(null, body);
+        const payload = withRequestContext({ realm: normalizedRealm, subject: processedSubject, action: normalizedAction }, requestContext);
         try {
             await sendToSQS(payload);
-            return withCors({ statusCode: 200, body: JSON.stringify({ message: 'Payload sent to SQS successfully' }) });
+            await recordRequestActivity({ ...payload, requestId: requestContext.requestId, state: 'queued', stage: 'scoutsProcessing' });
+            return withCors({ statusCode: 200, body: JSON.stringify({ message: 'Payload sent to SQS successfully', requestId: requestContext.requestId }) });
         } catch (err) {
             console.error('[HTTP] Failed to forward payload:', err.message);
             // Log and drop (return 200 so caller won't retry)

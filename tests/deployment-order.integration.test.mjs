@@ -16,6 +16,8 @@ const slackTemplate = readFileSync('lambdas/cloudformation/templates/slack-handl
 const adminIndex = readFileSync('website/admin/index.html', 'utf8');
 const adminScript = readFileSync('website/admin/admin-script.js', 'utf8');
 const adminSimplify = readFileSync('website/admin/admin-simplify.js', 'utf8');
+const adminActivityCentre = readFileSync('website/admin/admin-activity-centre.js', 'utf8');
+const requestActivity = readFileSync('lambdas/shared-layer/nodejs/request-activity.mjs', 'utf8');
 const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
 const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
 const agendaHexRepair = readFileSync('lambdas/scouts/function/agenda-hex-repair.mjs', 'utf8');
@@ -165,7 +167,7 @@ test('Scouts Lambda packaging includes every local module imported by the deploy
   assert.match(scoutsDeploy, /zip -q scouts-lambda\.zip[\s\S]*agenda-hex-repair\.mjs/);
 });
 
-test('admin polling is synchronously cut over to canonical full-enrich activity', () => {
+test('admin polling is cut over to the durable request activity ledger', () => {
   const legacyScriptIndex = adminIndex.indexOf('<script src="admin-script.js"></script>');
   const simplifyScriptIndex = adminIndex.indexOf('<script src="admin-simplify.js"></script>');
   assert.notEqual(legacyScriptIndex, -1);
@@ -177,9 +179,26 @@ test('admin polling is synchronously cut over to canonical full-enrich activity'
   assert.match(scoutsEntry, /buildRuntimeActivity/);
   assert.match(scoutsEntry, /text\(body\?\.realm\)\.toLowerCase\(\) !== 'runtime'/);
   assert.match(scoutsEntry, /command\.subject === 'activity'/);
-  assert.match(scoutsEntry, /command\.action === 'status'/);
-  assert.match(runtimeActivity, /fullEnrich: workflowSummary\(FULL_ENRICH_STATE_MACHINE_ARN, fullExecutions\)/);
-  assert.doesNotMatch(runtimeActivity, /imageEnrich:\s*workflowSummary/);
+  assert.match(scoutsEntry, /\['status', 'history', 'lookup'\]/);
+  assert.match(runtimeActivity, /listRequestActivity/);
+  assert.match(runtimeActivity, /request-activity-ledger/);
+  assert.match(requestActivity, /activity-feed/);
+  assert.match(requestActivity, /RETENTION_SECONDS = 7 \* 24 \* 60 \* 60/);
+  assert.match(adminActivityCentre, /activityCommand\('status'\)/);
+  assert.match(adminActivityCentre, /activityCommand\('history'/);
+  assert.match(adminActivityCentre, /localStorage/);
+});
+
+test('activity ledger table and every request hop are deployed together', () => {
+  assert.match(sqs2scoutsTemplate, /ScoutsRequestActivityTable:/);
+  assert.match(sqs2scoutsTemplate, /IndexName: activity-feed/);
+  assert.match(sqs2scoutsTemplate, /AttributeName: expiresAt/);
+  for (const template of [scoutsTemplate, sqs2scoutsTemplate, scouts2sqsTemplate]) {
+    assert.match(template, /SCOUTS_REQUEST_ACTIVITY_TABLE_NAME|ScoutsRequestActivityTableName/);
+  }
+  assert.match(scoutsService, /recordRequestActivity/);
+  assert.match(sqs2scoutsDeploy, /ScoutsRequestActivityTableName/);
+  assert.match(scouts2sqsDeploy, /ScoutsRequestActivityTableName/);
 });
 
 test('calendar refresh backfills canonical agenda HEX independently of enrichment publication', () => {
