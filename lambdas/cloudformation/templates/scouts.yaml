@@ -104,13 +104,6 @@ Parameters:
   FullEnrichStateMachineArn:
     Type: String
     Default: ''
-  GeminiDailyRequestLimit:
-    Type: Number
-    Default: 10
-    MinValue: 0
-  GeminiUsageTableName:
-    Type: String
-    Default: scouts-gemini-usage
   GeminiEnrichmentStateTableName:
     Type: String
     Default: scouts-enrichment-state
@@ -260,8 +253,6 @@ Resources:
           SCOUTS_REQUESTS_QUEUE_URL: !Ref ScoutsRequestsQueueUrl
           SCOUTS2SQS_FUNCTION_URL: !Ref Scouts2SqsFunctionUrl
           FULL_ENRICH_STATE_MACHINE_ARN: !Ref FullEnrichStateMachineArn
-          GEMINI_DAILY_REQUEST_LIMIT: !Ref GeminiDailyRequestLimit
-          GEMINI_USAGE_TABLE_NAME: !Ref GeminiUsageTableName
           GEMINI_ENRICHMENT_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
           SCOUTS_SCHEDULE_EXPRESSION: !Ref ScheduledRefreshExpression
           SCOUTS_SCHEDULED_REFRESH_DEFAULT_ENABLED: !Ref ScheduledRefreshDefaultEnabled
