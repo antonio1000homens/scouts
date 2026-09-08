@@ -12,7 +12,6 @@ const helpers = read('lambdas/sqs2scouts/function/full-enrich-helpers.mjs');
 const template = read('lambdas/cloudformation/templates/sqs2scouts.yaml');
 const stateMachine = read('lambdas/cloudformation/templates/scouts-full-enrich.yaml');
 const deploy = read('lambdas/sqs2scouts/deploy.sh');
-const entrypoint = read('lambdas/sqs2scouts/function/full-enrich-adapter.mjs');
 
 test('CloudFormation has fail-closed provider defaults and SSM-only Cloudflare token wiring', () => {
   assert.match(template, /ImageGenerationProvider:\s*[\s\S]*?Default:\s*disabled[\s\S]*?AllowedValues:\s*\[disabled, cloudflare, gemini\]/);
@@ -25,18 +24,20 @@ test('CloudFormation has fail-closed provider defaults and SSM-only Cloudflare t
   assert.match(template, /parameter\$\{CloudflareAiApiTokenParameter\}/);
 });
 
-test('deploy packages provider modules and forces Gemini images off for Cloudflare', () => {
-  assert.match(deploy, /full-enrich-adapter\.mjs/);
+test('deploy packages the direct provider worker and forces Gemini images off for Cloudflare', () => {
+  assert.doesNotMatch(deploy, /full-enrich-adapter\.mjs/);
   assert.match(deploy, /full-enrich-core\.mjs/);
   assert.match(deploy, /image-provider-adapter\.mjs/);
   assert.match(deploy, /cloudflare-image-client\.mjs/);
+  assert.match(deploy, /HANDLER="\$\{HANDLER:-image-provider-adapter\.lambdaHandler\}"/);
   assert.match(deploy, /ImageGenerationProvider="\$\{IMAGE_GENERATION_PROVIDER\}"/);
   assert.match(deploy, /IMAGE_GENERATION_PROVIDER.*cloudflare[\s\S]*?GEMINI_IMAGES_ENABLED='false'/);
 });
 
-test('stable Lambda entrypoint delegates through provider adapter', () => {
-  assert.match(entrypoint, /export \{ lambdaHandler \} from '\.\/image-provider-adapter\.mjs'/);
-  assert.match(template, /Handler:\s*[\s\S]*?Default:\s*full-enrich-adapter\.lambdaHandler/);
+test('provider adapter is the stable Lambda entrypoint and delegates non-image work to full-enrich core', () => {
+  assert.match(adapter, /import \{ lambdaHandler as fullEnrichHandler \} from '\.\/full-enrich-core\.mjs'/);
+  assert.match(adapter, /export async function lambdaHandler\(event\)/);
+  assert.match(adapter, /if \(records\.length === 0\) return fullEnrichHandler\(event\)/);
 });
 
 test('Cloudflare path reserves stage before application inference budget', () => {
