@@ -85,6 +85,18 @@ test('shared layer is content-addressed and published centrally', () => {
   assert.match(sharedLayerDeploy, /GITHUB_ENV/);
 });
 
+test('shared layer resolver rechecks after artifact preparation before publishing', () => {
+  const prepareIndex = sharedLayerResolver.indexOf('prepare_shared_layer_zip');
+  const recheckMarkerIndex = sharedLayerResolver.indexOf('Another deployment may have published');
+  const publishIndex = sharedLayerResolver.indexOf('aws lambda publish-layer-version');
+  assert.notEqual(prepareIndex, -1);
+  assert.notEqual(recheckMarkerIndex, -1);
+  assert.notEqual(publishIndex, -1);
+  assert.ok(prepareIndex < recheckMarkerIndex, 'concurrency recheck must happen after artifact preparation');
+  assert.ok(recheckMarkerIndex < publishIndex, 'concurrency recheck must happen before publishing');
+  assert.match(sharedLayerResolver, /Reusing concurrently published shared Lambda layer version/);
+});
+
 test('CI resolves one shared layer before any Lambda consumer deploys', () => {
   const resolver = indexOfRequired('- name: Resolve shared Lambda layer version', 'shared layer resolver step');
   const sqs2scouts = indexOfRequired('- name: Deploy sqs2scouts', 'sqs2scouts deployment step');
@@ -117,6 +129,11 @@ test('function stacks consume a shared layer ARN and no longer publish LayerVers
     assert.match(template, /HasSharedLayerVersionArn/, `${name} must prefer the central layer ARN`);
     assert.doesNotMatch(template, /Type: AWS::Lambda::LayerVersion/, `${name} must not publish its own layer version`);
   }
+});
+
+test('sqs2scouts uses the canonical enrichment-state environment variable name', () => {
+  assert.match(sqs2scoutsTemplate, /GEMINI_ENRICHMENT_STATE_TABLE_NAME:\s*!Ref GeminiEnrichmentStateTableName/);
+  assert.doesNotMatch(sqs2scoutsTemplate, /GEMINI_ENRICH_STATE_TABLE_NAME:/);
 });
 
 test('local deploy scripts keep using the shared resolver compatibility entrypoint', () => {
