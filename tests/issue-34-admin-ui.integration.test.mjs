@@ -7,6 +7,7 @@ import './issue-43-dlq-admin-enhancements.test.mjs';
 const html = readFileSync('website/admin/index.html', 'utf8');
 const simplify = readFileSync('website/admin/admin-simplify.js', 'utf8');
 const css = readFileSync('website/admin/admin-simplify.css', 'utf8');
+const adminScript = readFileSync('website/admin/admin-script.js', 'utf8');
 
 test('admin page loads simplified presentation assets after legacy controller', () => {
   assert.match(html, /admin-simplify\.css/);
@@ -35,6 +36,13 @@ test('agenda enrichment control is expressed as user intent', () => {
   assert.match(simplify, /5 events/);
   assert.match(simplify, /10 events/);
   assert.match(simplify, /AI enrichment events/);
+});
+
+test('admin commands stay on the same-origin proxy and derive missing agenda HEX safely', () => {
+  assert.match(adminScript, /const configuredScoutsUrl = window\.SCOUTS_URL \|\| window\.SCOUTS_REFRESH_URL \|\| ''/);
+  assert.match(adminScript, /configuredScoutsUrl\.startsWith\('\/'\)/);
+  assert.match(adminScript, /const bytes = new TextEncoder\(\)\.encode\(String\(title\)\.trim\(\)\.toLowerCase\(\)\)/);
+  assert.match(adminScript, /byte\.toString\(16\)\.padStart\(2, '0'\)/);
 });
 
 test('activity rendering uses lifecycle data and textContent rather than cloned diagnostics DOM', () => {
