@@ -38,6 +38,15 @@ function defaultSettings() {
   };
 }
 
+function errorDetail(error) {
+  if (!error) return 'Unknown schedule-state error';
+  const name = typeof error.name === 'string' && error.name.trim() ? error.name.trim() : '';
+  const message = typeof error.message === 'string' && error.message.trim()
+    ? error.message.trim()
+    : String(error);
+  return name && !message.startsWith(`${name}:`) ? `${name}: ${message}` : message;
+}
+
 export async function getScheduledRefreshSettings() {
   let stored = null;
   try {
@@ -59,6 +68,27 @@ export async function getScheduledRefreshSettings() {
     updatedAt: typeof stored.updatedAt === 'string' ? stored.updatedAt : null,
     updatedBy: typeof stored.updatedBy === 'string' ? stored.updatedBy : null,
   };
+}
+
+export async function getScheduledRefreshStatus() {
+  try {
+    return {
+      ...(await getScheduledRefreshSettings()),
+      health: 'ok',
+      healthDetail: null,
+    };
+  } catch (error) {
+    // Status/diagnostics must stay available even when persisted schedule state
+    // cannot be read. Scheduled execution still uses getScheduledRefreshSettings()
+    // directly and therefore remains fail-closed on the same error.
+    console.error('[ScheduledRefresh] Unable to read persisted schedule status.', errorDetail(error));
+    return {
+      ...defaultSettings(),
+      configSource: 'unavailable',
+      health: 'degraded',
+      healthDetail: errorDetail(error),
+    };
+  }
 }
 
 export async function setScheduledRefreshEnabled(enabled, updatedBy = 'admin') {
