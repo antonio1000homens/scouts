@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 const runtimeDlq = readFileSync('lambdas/scouts/function/runtime-dlq.mjs', 'utf8');
+const runtimeSchedule = readFileSync('lambdas/scouts/function/runtime-schedule.mjs', 'utf8');
 const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
 const scoutsTemplate = readFileSync('lambdas/cloudformation/templates/scouts.yaml', 'utf8');
 const adminEnhancements = readFileSync('website/admin/admin-diagnostics-enhancements.js', 'utf8');
@@ -14,8 +15,9 @@ function assertSyntax(path) {
   assert.equal(result.status, 0, `${path} syntax failed: ${result.stderr || result.stdout}`);
 }
 
-test('new DLQ and browser enhancement modules are syntactically valid', () => {
+test('new DLQ, schedule and browser enhancement modules are syntactically valid', () => {
   assertSyntax('lambdas/scouts/function/runtime-dlq.mjs');
+  assertSyntax('lambdas/scouts/function/runtime-schedule.mjs');
   assertSyntax('lambdas/scouts/function/scouts-entry.mjs');
   assertSyntax('website/admin/admin-diagnostics-enhancements.js');
 });
@@ -48,29 +50,70 @@ test('redrive is guarded against stale counts and throttled', () => {
   assert.match(adminEnhancements, /expectedVisible: count/);
 });
 
-test('runtime DLQ commands retain the same API-key authentication boundary', () => {
+test('runtime DLQ and schedule commands retain the same API-key authentication boundary', () => {
   assert.match(scoutsEntry, /command\.subject === 'dlq'/);
   assert.match(scoutsEntry, /\['inspect', 'redrive'\]/);
+  assert.match(scoutsEntry, /command\.subject === 'schedule'/);
+  assert.match(scoutsEntry, /\['status', 'enable', 'disable'\]/);
   assert.match(scoutsEntry, /getRequiredSecret\('REQUIRED_API_KEY_PARAMETER'\)/);
   assert.match(scoutsEntry, /constantTimeEquals\(getApiKey\(event\), requiredApiKey\)/);
 });
 
-test('Scouts role grants only the SQS operations needed for inspect and redrive', () => {
-  assert.match(scoutsTemplate, /sqs:ReceiveMessage/);
-  assert.match(scoutsTemplate, /sqs:DeleteMessage/);
-  assert.match(scoutsTemplate, /sqs:StartMessageMoveTask/);
-  assert.match(scoutsTemplate, /scoutsRequestsDLQ/);
-  assert.match(scoutsTemplate, /scoutsProcessingDLQ/);
-  assert.match(scoutsTemplate, /sqs:SendMessage[\s\S]*scoutsProcessing/);
+test('Scouts role separates normal queue publishing from permissions required by SQS redrive', () => {
+  assert.match(scoutsTemplate, /# Normal Scouts ingress publishes only to scoutsRequests\.[\s\S]*?sqs:SendMessage\n\s+Resource:\n\s+- !Ref ScoutsRequestsQueueArn/);
+  assert.match(scoutsTemplate, /# StartMessageMoveTask requires Receive\/Delete\/GetAttributes on the[\s\S]*?sqs:ReceiveMessage[\s\S]*?sqs:DeleteMessage[\s\S]*?sqs:StartMessageMoveTask/);
+  assert.match(scoutsTemplate, /sqs:StartMessageMoveTask[\s\S]*?Resource:\n\s+- !Sub arn:aws:sqs:\$\{AWS::Region\}:\$\{AWS::AccountId\}:scoutsRequestsDLQ\n\s+- !Sub arn:aws:sqs:\$\{AWS::Region\}:\$\{AWS::AccountId\}:scoutsProcessingDLQ/);
+  assert.match(scoutsTemplate, /sqs:SendMessage\n\s+Resource:\n\s+- !Ref ScoutsRequestsQueueArn\n\s+- !Sub arn:aws:sqs:\$\{AWS::Region\}:\$\{AWS::AccountId\}:scoutsProcessing/);
   assert.doesNotMatch(scoutsTemplate, /arn:aws:sqs:[^\n]*:\*/);
 });
 
-test('normal status polling remains read-only and Auto Lambda heartbeat is retired', () => {
+test('EventBridge owns periodic calendar refresh and scheduled queue publication is fail-safe zero by default', () => {
+  assert.match(scoutsTemplate, /ScheduledRefreshExpression:[\s\S]*Default: rate\(30 minutes\)/);
+  assert.match(scoutsTemplate, /ScheduledRefreshMaxEvents:[\s\S]*Default: 0/);
+  assert.match(scoutsTemplate, /ScoutsScheduledRefreshRule:\n\s+Type: AWS::Events::Rule/);
+  assert.match(scoutsTemplate, /ScheduleExpression: !Ref ScheduledRefreshExpression/);
+  assert.match(scoutsTemplate, /State: ENABLED/);
+  assert.match(scoutsTemplate, /\"_scheduledRefresh\":true/);
+  assert.match(scoutsTemplate, /\"subject\":\"calendars\"/);
+  assert.match(scoutsTemplate, /\"action\":\"refreshAllCalendars\"/);
+  assert.match(scoutsTemplate, /\"maxEvents\":\$\{ScheduledRefreshMaxEvents\}/);
+  assert.match(scoutsTemplate, /Principal: events\.amazonaws\.com/);
+});
+
+test('scheduled refresh enablement is durable and fails closed before calendar work', () => {
+  assert.match(runtimeSchedule, /runtime\/scheduledRefresh\.json/);
+  assert.match(runtimeSchedule, /getScheduledRefreshSettings/);
+  assert.match(runtimeSchedule, /setScheduledRefreshEnabled/);
+  assert.match(runtimeSchedule, /PutObjectCommand/);
+  assert.match(scoutsEntry, /isScheduledRefreshInvocation\(event\)/);
+  assert.match(scoutsEntry, /if \(!schedule\.enabled\)/);
+  assert.match(scoutsEntry, /schedule_state_unavailable/);
+  assert.match(scoutsEntry, /return legacyHandler\(event\)/);
+});
+
+test('status polling remains read-only and browser Auto Lambda is replaced by AWS scheduled refresh', () => {
   assert.match(adminEnhancements, /setAutoLambdaInvocationEnabled\(false, true\)/);
-  assert.match(adminEnhancements, /Auto Lambda heartbeat has been retired/);
+  assert.match(adminEnhancements, /Scheduled refresh/);
+  assert.match(adminEnhancements, /EventBridge scheduled calendar refresh/);
   assert.match(adminEnhancements, /Status polling refreshes the canonical request lifecycle, queue counts and Step Functions status/);
   assert.match(adminEnhancements, /It does not invoke workers, create requests or process queues/);
   assert.match(adminEnhancements, /label\.append\(document\.createTextNode\(' Status polling'\)\)/);
+});
+
+test('admin can enable, disable, inspect and manually run scheduled refresh', () => {
+  assert.match(adminEnhancements, /subject: 'schedule', action: 'status'/);
+  assert.match(adminEnhancements, /action: enabled \? 'enable' : 'disable'/);
+  assert.match(adminEnhancements, /Run refresh now/);
+  assert.match(adminEnhancements, /subject: 'calendars'/);
+  assert.match(adminEnhancements, /action: 'refreshAllCalendars'/);
+  assert.match(adminEnhancements, /calendar: 'all'/);
+  assert.match(adminEnhancements, /maxEvents: 0/);
+});
+
+test('DLQ polling waits for API authentication instead of rendering startup failure noise', () => {
+  assert.match(adminEnhancements, /async function refreshDlqOverview[\s\S]*if \(!apiAuthReady\)/);
+  assert.match(adminEnhancements, /refreshOperationalStatusWhenReady/);
+  assert.match(adminEnhancements, /if \(apiAuthReady\)[\s\S]*refreshDlqOverview\(false\)/);
 });
 
 test('DLQ message sampling happens only behind an explicit Inspect action', () => {
