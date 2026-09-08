@@ -53,6 +53,7 @@ test('CloudFormation provisions retry state, safe parameters, least-required Dyn
   assert.match(workerTemplate, /GeminiEnrichmentQuarantineAlarm/);
   assert.match(workerTemplate, /GeminiEnrichmentRetryBurstAlarm/);
   assert.match(scoutsTemplate, /GEMINI_ENRICHMENT_STATE_TABLE_NAME/);
+  assert.match(scoutsTemplate, /GeminiUsageTableName:\s*[\s\S]*?Default:\s*scouts-gemini-usage/);
   assert.doesNotMatch(scoutsTemplate, /GEMINI_DAILY_REQUEST_LIMIT|GeminiDailyRequestLimit/);
 });
 
