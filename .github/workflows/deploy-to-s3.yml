@@ -22,7 +22,6 @@ on:
           - scouts-queues
           - scouts-function
           - scouts-slack-handler
-          - scouts-image-enrich
           - scouts-full-enrich
           - scouts2sqs
           - sqs2scouts
@@ -55,7 +54,6 @@ jobs:
       scouts_queues: ${{ steps.plan.outputs.scouts_queues }}
       scouts_function: ${{ steps.plan.outputs.scouts_function }}
       scouts_slack_handler: ${{ steps.plan.outputs.scouts_slack_handler }}
-      scouts_image_enrich: ${{ steps.plan.outputs.scouts_image_enrich }}
       scouts_full_enrich: ${{ steps.plan.outputs.scouts_full_enrich }}
       scouts2sqs: ${{ steps.plan.outputs.scouts2sqs }}
       sqs2scouts: ${{ steps.plan.outputs.sqs2scouts }}
@@ -83,7 +81,6 @@ jobs:
           scouts_queues=false
           scouts_function=false
           scouts_slack_handler=false
-          scouts_image_enrich=false
           scouts_full_enrich=false
           scouts2sqs=false
           sqs2scouts=false
@@ -126,7 +123,6 @@ jobs:
             case "${file}" in lambdas/scouts-queues/*|lambdas/cloudformation/templates/scouts-queues.yaml) scouts_queues=true ;; esac
             case "${file}" in lambdas/scouts/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/scouts.yaml) scouts_function=true ;; esac
             case "${file}" in lambdas/scouts-slack-handler/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/slack-handler.yaml) scouts_slack_handler=true ;; esac
-            case "${file}" in lambdas/scouts-image-enrich/*|lambdas/cloudformation/templates/scouts-image-enrich.yaml) scouts_image_enrich=true ;; esac
             case "${file}" in lambdas/scouts-full-enrich/*|lambdas/cloudformation/templates/scouts-full-enrich.yaml) scouts_full_enrich=true ;; esac
             case "${file}" in lambdas/scouts2sqs/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/scouts2sqs.yaml) scouts2sqs=true ;; esac
             case "${file}" in lambdas/sqs2scouts/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/sqs2scouts.yaml) sqs2scouts=true ;; esac
@@ -152,7 +148,6 @@ jobs:
               scouts_queues=true
               scouts_function=true
               scouts_slack_handler=true
-              scouts_image_enrich=true
               scouts_full_enrich=true
               scouts2sqs=true
               sqs2scouts=true
@@ -163,7 +158,6 @@ jobs:
               scouts_queues=false
               scouts_function=false
               scouts_slack_handler=false
-              scouts_image_enrich=false
               scouts_full_enrich=false
               scouts2sqs=false
               sqs2scouts=false
@@ -174,7 +168,6 @@ jobs:
                 scouts-queues) aws_bootstrap=true; scouts_queues=true ;;
                 scouts-function) aws_bootstrap=true; scouts_queues=true; scouts_function=true ;;
                 scouts-slack-handler) scouts_slack_handler=true ;;
-                scouts-image-enrich) scouts_image_enrich=true ;;
                 scouts-full-enrich) scouts_full_enrich=true ;;
                 scouts2sqs) aws_bootstrap=true; scouts_queues=true; scouts2sqs=true ;;
                 sqs2scouts) aws_bootstrap=true; scouts_queues=true; sqs2scouts=true ;;
@@ -190,7 +183,6 @@ jobs:
             echo "scouts_queues=${scouts_queues}"
             echo "scouts_function=${scouts_function}"
             echo "scouts_slack_handler=${scouts_slack_handler}"
-            echo "scouts_image_enrich=${scouts_image_enrich}"
             echo "scouts_full_enrich=${scouts_full_enrich}"
             echo "scouts2sqs=${scouts2sqs}"
             echo "sqs2scouts=${sqs2scouts}"
@@ -204,7 +196,6 @@ jobs:
           printf '  %-24s %s\n' scouts-queues "${scouts_queues}"
           printf '  %-24s %s\n' scouts-function "${scouts_function}"
           printf '  %-24s %s\n' scouts-slack-handler "${scouts_slack_handler}"
-          printf '  %-24s %s\n' scouts-image-enrich "${scouts_image_enrich}"
           printf '  %-24s %s\n' scouts-full-enrich "${scouts_full_enrich}"
           printf '  %-24s %s\n' scouts2sqs "${scouts2sqs}"
           printf '  %-24s %s\n' sqs2scouts "${sqs2scouts}"
@@ -404,7 +395,6 @@ jobs:
       github.event_name != 'pull_request' &&
       (needs.plan-and-test.outputs.aws_bootstrap == 'true' ||
        needs.plan-and-test.outputs.scouts_queues == 'true' ||
-       needs.plan-and-test.outputs.scouts_image_enrich == 'true' ||
        needs.plan-and-test.outputs.scouts_full_enrich == 'true' ||
        needs.plan-and-test.outputs.sqs2scouts == 'true' ||
        needs.plan-and-test.outputs.scouts2sqs == 'true' ||
@@ -518,13 +508,6 @@ jobs:
           EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
         run: cd lambdas/scouts-queues && bash ./deploy.sh
 
-      - name: Deploy image-enrich state machine
-        if: needs.plan-and-test.outputs.scouts_image_enrich == 'true'
-        env:
-          CLOUDFORMATION_ROLE_ARN: ${{ env.CLOUDFORMATION_ROLE_ARN }}
-          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
-        run: cd lambdas/scouts-image-enrich && bash ./deploy.sh
-
       - name: Deploy full-enrich state machine
         if: needs.plan-and-test.outputs.scouts_full_enrich == 'true'
         env:
@@ -544,7 +527,7 @@ jobs:
           SCOUTS_DECISION_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsDecision
           SCOUTS_DECISION_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsDecision
           DLQ_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessingDLQ
-          DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
+          DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883:scoutsProcessingDLQ
           S3_WEBSITE_BASE_URL: https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com
           GEMINI_API_VERSION: ${{ vars.GEMINI_API_VERSION }}
           GEMINI_IMAGE_API_VERSION: ${{ vars.GEMINI_IMAGE_API_VERSION }}
@@ -558,13 +541,13 @@ jobs:
           CLOUDFLARE_AI_STEPS: ${{ vars.CLOUDFLARE_AI_STEPS || '4' }}
         run: cd lambdas/sqs2scouts && bash ./deploy.sh
 
-      - name: Verify sqs2scouts adapter
+      - name: Verify sqs2scouts worker
         if: needs.plan-and-test.outputs.sqs2scouts == 'true'
         run: |
           VALUE="$(aws lambda get-function-configuration --function-name sqs2scouts --region "${AWS_REGION}" --query 'Environment.Variables.GEMINI_API_KEY_PARAMETER' --output text)"
           [ -n "$VALUE" ] && [ "$VALUE" != "None" ] && [ "$VALUE" != "null" ] || { echo "GEMINI_API_KEY_PARAMETER is not set"; exit 1; }
           HANDLER="$(aws lambda get-function-configuration --function-name sqs2scouts --region "${AWS_REGION}" --query 'Handler' --output text)"
-          [ "$HANDLER" = "full-enrich-adapter.lambdaHandler" ] || { echo "Unexpected sqs2scouts handler: $HANDLER"; exit 1; }
+          [ "$HANDLER" = "image-provider-adapter.lambdaHandler" ] || { echo "Unexpected sqs2scouts handler: $HANDLER"; exit 1; }
 
       - name: Deploy scouts2sqs
         if: needs.plan-and-test.outputs.scouts2sqs == 'true'
