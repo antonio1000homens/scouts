@@ -207,6 +207,20 @@ Resources:
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:function:sqs2scouts
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:layer:scouts-shared:*
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:event-source-mapping:*
+              - Sid: EventBridgeManagement
+                Effect: Allow
+                Action:
+                  - events:DeleteRule
+                  - events:DescribeRule
+                  - events:ListTagsForResource
+                  - events:ListTargetsByRule
+                  - events:PutRule
+                  - events:PutTargets
+                  - events:RemoveTargets
+                  - events:TagResource
+                  - events:UntagResource
+                Resource:
+                  - !Sub arn:aws:events:eu-west-2:${AWS::AccountId}:rule/scouts-*
               - Sid: StepFunctionsManagement
                 Effect: Allow
                 Action:

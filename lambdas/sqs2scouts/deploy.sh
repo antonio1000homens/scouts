@@ -7,8 +7,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BWS_HELPER="${ROOT_DIR}/tools/bws-env.sh"
+SHARED_LAYER_HELPER="${ROOT_DIR}/tools/shared-layer-artifact.sh"
+CFN_HELPER="${ROOT_DIR}/tools/cloudformation-deploy.sh"
 SHARED_LAYER_DIR="${ROOT_DIR}/shared-layer"
-SHARED_LAYER_ZIP="${SHARED_LAYER_DIR}/lambda-layer.zip"
 
 if [ -f "${ROOT_DIR}/.env" ]; then
   set -a
@@ -21,6 +22,10 @@ if [ -f "${BWS_HELPER}" ]; then
   # shellcheck disable=SC1090
   source "${BWS_HELPER}"
 fi
+# shellcheck disable=SC1090
+source "${SHARED_LAYER_HELPER}"
+# shellcheck disable=SC1090
+source "${CFN_HELPER}"
 
 REGION="${AWS_REGION:-eu-west-2}"
 STACK_NAME="${STACK_NAME:-sqs2scouts-lambda}"
@@ -40,7 +45,7 @@ FUNCTION_NAME="${FUNCTION_NAME:-sqs2scouts}"
 LAYER_NAME="${LAYER_NAME:-scouts-shared}"
 ROLE_NAME="${ROLE_NAME:-sqs2scouts-lambda-role}"
 RUNTIME="${RUNTIME:-nodejs24.x}"
-HANDLER="${HANDLER:-full-enrich-adapter.lambdaHandler}"
+HANDLER="${HANDLER:-image-provider-adapter.lambdaHandler}"
 QUEUE_ARN="${QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing}"
 QUEUE_URL="${QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing}"
 SCOUTS_DECISION_QUEUE_ARN="${SCOUTS_DECISION_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsDecision}"
@@ -99,9 +104,7 @@ echo -e "${BLUE}=== sqs2scouts CloudFormation Deployment ===${NC}"
 
 cleanup_failed_stack() {
   local stack_status
-  if ! aws cloudformation describe-stacks --region "${REGION}" --stack-name "${STACK_NAME}" >/dev/null 2>&1; then
-    return 0
-  fi
+  if ! aws cloudformation describe-stacks --region "${REGION}" --stack-name "${STACK_NAME}" >/dev/null 2>&1; then return 0; fi
   stack_status="$(aws cloudformation describe-stacks --region "${REGION}" --stack-name "${STACK_NAME}" --query 'Stacks[0].StackStatus' --output text)"
   if [ "${stack_status}" = "ROLLBACK_COMPLETE" ]; then
     echo -e "${YELLOW}Stack ${STACK_NAME} is in ROLLBACK_COMPLETE; deleting before redeploy.${NC}"
@@ -111,10 +114,7 @@ cleanup_failed_stack() {
 }
 
 for cmd in aws npm zip; do
-  if ! command -v "${cmd}" >/dev/null 2>&1; then
-    echo -e "${RED}Missing required command: ${cmd}${NC}"
-    exit 1
-  fi
+  if ! command -v "${cmd}" >/dev/null 2>&1; then echo -e "${RED}Missing required command: ${cmd}${NC}"; exit 1; fi
 done
 
 put_standard_secure_parameter() {
@@ -134,14 +134,8 @@ require_existing_secure_parameter() {
 echo -e "\n${YELLOW}AWS identity preflight...${NC}"
 CALLER_ARN="$(aws sts get-caller-identity --query 'Arn' --output text 2>/dev/null || true)"
 CALLER_ACCOUNT="$(aws sts get-caller-identity --query 'Account' --output text 2>/dev/null || true)"
-if [ -z "${CALLER_ARN}" ] || [ -z "${CALLER_ACCOUNT}" ] || [ "${CALLER_ARN}" = "None" ]; then
-  echo -e "${RED}Unable to resolve AWS caller identity. Ensure credentials are configured for local/CI.${NC}"
-  exit 1
-fi
-if [ "${CALLER_ACCOUNT}" != "${EXPECTED_AWS_ACCOUNT}" ]; then
-  echo -e "${RED}Unexpected AWS account ${CALLER_ACCOUNT}. Expected ${EXPECTED_AWS_ACCOUNT}.${NC}"
-  exit 1
-fi
+if [ -z "${CALLER_ARN}" ] || [ -z "${CALLER_ACCOUNT}" ] || [ "${CALLER_ARN}" = "None" ]; then echo -e "${RED}Unable to resolve AWS caller identity. Ensure credentials are configured for local/CI.${NC}"; exit 1; fi
+if [ "${CALLER_ACCOUNT}" != "${EXPECTED_AWS_ACCOUNT}" ]; then echo -e "${RED}Unexpected AWS account ${CALLER_ACCOUNT}. Expected ${EXPECTED_AWS_ACCOUNT}.${NC}"; exit 1; fi
 echo "Using AWS identity: ${CALLER_ARN}"
 
 cd "${SCRIPT_DIR}"
@@ -182,10 +176,7 @@ if [ -z "${GEMINI_IMAGES_ENABLED}" ]; then
   if [ "${CURRENT_GEMINI_IMAGES_ENABLED}" = "true" ] || [ "${CURRENT_GEMINI_IMAGES_ENABLED}" = "false" ]; then GEMINI_IMAGES_ENABLED="${CURRENT_GEMINI_IMAGES_ENABLED}"; else GEMINI_IMAGES_ENABLED="false"; fi
 fi
 
-if [ "${REQUIRE_GEMINI_API_KEY}" = "true" ] && [ -z "${GEMINI_API_KEY}" ]; then
-  echo -e "${RED}GEMINI_API_KEY is required but missing.${NC}"
-  exit 1
-fi
+if [ "${REQUIRE_GEMINI_API_KEY}" = "true" ] && [ -z "${GEMINI_API_KEY}" ]; then echo -e "${RED}GEMINI_API_KEY is required but missing.${NC}"; exit 1; fi
 
 case "${IMAGE_GENERATION_PROVIDER}" in
   disabled|cloudflare|gemini) ;;
@@ -194,13 +185,8 @@ esac
 
 if [ "${IMAGE_GENERATION_PROVIDER}" = "cloudflare" ]; then
   GEMINI_IMAGES_ENABLED='false'
-  if [ -z "${CLOUDFLARE_ACCOUNT_ID}" ]; then
-    echo -e "${RED}CLOUDFLARE_ACCOUNT_ID is required when IMAGE_GENERATION_PROVIDER=cloudflare.${NC}"
-    exit 1
-  fi
-  if [ -z "${CLOUDFLARE_AI_API_TOKEN}" ]; then
-    require_existing_secure_parameter "${CLOUDFLARE_AI_API_TOKEN_PARAMETER}"
-  fi
+  if [ -z "${CLOUDFLARE_ACCOUNT_ID}" ]; then echo -e "${RED}CLOUDFLARE_ACCOUNT_ID is required when IMAGE_GENERATION_PROVIDER=cloudflare.${NC}"; exit 1; fi
+  if [ -z "${CLOUDFLARE_AI_API_TOKEN}" ]; then require_existing_secure_parameter "${CLOUDFLARE_AI_API_TOKEN_PARAMETER}"; fi
 fi
 
 if [ -z "${SCOUTS2SQS_FUNCTION_URL}" ]; then
@@ -208,29 +194,25 @@ if [ -z "${SCOUTS2SQS_FUNCTION_URL}" ]; then
   if [ -n "${DISCOVERED_SCOUTS2SQS_URL}" ] && [ "${DISCOVERED_SCOUTS2SQS_URL}" != "None" ] && [ "${DISCOVERED_SCOUTS2SQS_URL}" != "null" ]; then SCOUTS2SQS_FUNCTION_URL="${DISCOVERED_SCOUTS2SQS_URL}"; fi
 fi
 
-echo -e "\n${YELLOW}Step 1: Build shared Lambda layer...${NC}"
-(
-  cd "${SHARED_LAYER_DIR}/nodejs"
-  npm install --production --cache "${NPM_CACHE_DIR}"
-)
-(
-  cd "${SHARED_LAYER_DIR}"
-  rm -f lambda-layer.zip
-  zip -qr lambda-layer.zip nodejs
-)
+echo -e "\n${YELLOW}Step 1: Resolve shared Lambda layer artifact...${NC}"
+prepare_shared_layer_artifact "${SHARED_LAYER_DIR}" "${CODE_BUCKET}" "${REGION}" "${NPM_CACHE_DIR}"
 
 echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
 (
   cd function
   rm -f sqs2scouts-lambda.zip
-  zip -jq sqs2scouts-lambda.zip sqs2scouts.mjs full-enrich-adapter.mjs full-enrich-core.mjs full-enrich-helpers.mjs image-provider-adapter.mjs cloudflare-image-client.mjs ../scouts.conf
+  zip -jq sqs2scouts-lambda.zip \
+    persistence-processor.mjs \
+    full-enrich-core.mjs \
+    full-enrich-helpers.mjs \
+    image-provider-adapter.mjs \
+    cloudflare-image-client.mjs \
+    ../scouts.conf
 )
 
-echo -e "\n${YELLOW}Step 3: Upload artifacts to S3...${NC}"
+echo -e "\n${YELLOW}Step 3: Upload function artifact to S3...${NC}"
 FUNCTION_CODE_KEY="${S3_PREFIX}/${DEPLOY_ID}/sqs2scouts-lambda.zip"
-LAYER_CODE_KEY="${S3_PREFIX}/${DEPLOY_ID}/scouts-shared-layer.zip"
 aws s3 cp function/sqs2scouts-lambda.zip "s3://${CODE_BUCKET}/${FUNCTION_CODE_KEY}" --region "${REGION}"
-aws s3 cp "${SHARED_LAYER_ZIP}" "s3://${CODE_BUCKET}/${LAYER_CODE_KEY}" --region "${REGION}"
 
 if [ "${UPLOAD_SCOUTS_CONFIG}" = "true" ] && [ -f "${CONFIG_SOURCE_FILE}" ]; then
   echo -e "\n${YELLOW}Step 3b: Upload Scouts runtime config...${NC}"
@@ -297,7 +279,7 @@ CFN_DEPLOY_ARGS+=(
     ApprovalMetadataPrefix="${APPROVAL_METADATA_PREFIX}"
     S3WebsiteBaseUrl="${S3_WEBSITE_BASE_URL}"
 )
-aws cloudformation deploy "${CFN_DEPLOY_ARGS[@]}"
+deploy_cloudformation_with_diagnostics "${STACK_NAME}" "${REGION}" "${CFN_DEPLOY_ARGS[@]}"
 
 if [ -n "${SLACK_SIGNING_SECRET}" ]; then put_standard_secure_parameter "${SLACK_SIGNING_SECRET_PARAMETER}" "${SLACK_SIGNING_SECRET}"; fi
 if [ -n "${SLACK_BOT_TOKEN}" ]; then put_standard_secure_parameter "${SLACK_BOT_TOKEN_PARAMETER}" "${SLACK_BOT_TOKEN}"; fi
