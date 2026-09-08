@@ -73,11 +73,12 @@ test('EventBridge owns periodic calendar refresh and scheduled queue publication
   assert.match(scoutsTemplate, /ScoutsScheduledRefreshRule:\n\s+Type: AWS::Events::Rule/);
   assert.match(scoutsTemplate, /ScheduleExpression: !Ref ScheduledRefreshExpression/);
   assert.match(scoutsTemplate, /State: ENABLED/);
-  assert.match(scoutsTemplate, /\"_scheduledRefresh\":true/);
-  assert.match(scoutsTemplate, /\"subject\":\"calendars\"/);
-  assert.match(scoutsTemplate, /\"action\":\"refreshAllCalendars\"/);
-  assert.match(scoutsTemplate, /\"maxEvents\":\$\{ScheduledRefreshMaxEvents\}/);
+  assert.match(scoutsTemplate, /Input: '\{\"_scheduledRefresh\":true\}'/);
   assert.match(scoutsTemplate, /Principal: events\.amazonaws\.com/);
+  assert.match(scoutsEntry, /subject: 'calendars'/);
+  assert.match(scoutsEntry, /action: 'refreshAllCalendars'/);
+  assert.match(scoutsEntry, /calendar: 'all'/);
+  assert.match(scoutsEntry, /maxEvents: schedule\.maxQueuePublishesPerRun/);
 });
 
 test('scheduled refresh enablement is durable and fails closed before calendar work', () => {
@@ -88,7 +89,9 @@ test('scheduled refresh enablement is durable and fails closed before calendar w
   assert.match(scoutsEntry, /isScheduledRefreshInvocation\(event\)/);
   assert.match(scoutsEntry, /if \(!schedule\.enabled\)/);
   assert.match(scoutsEntry, /schedule_state_unavailable/);
-  assert.match(scoutsEntry, /return legacyHandler\(event\)/);
+  assert.match(scoutsEntry, /const trustedInternalEvent/);
+  assert.match(scoutsEntry, /headers: \{ 'x-api-key': requiredApiKey \}/);
+  assert.match(scoutsEntry, /return legacyHandler\(trustedInternalEvent\)/);
 });
 
 test('status polling remains read-only and browser Auto Lambda is replaced by AWS scheduled refresh', () => {
