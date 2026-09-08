@@ -56,7 +56,12 @@ const missingHexRetryAtByHex = new Map();
 const warnedMissingDtstartIds = new Set();
 const localVisibilityOverrides = new Map();
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
-const SCOUTS_URL = window.SCOUTS_URL || window.SCOUTS_REFRESH_URL || `${ADMIN_API_BASE}/scouts`;
+const configuredScoutsUrl = window.SCOUTS_URL || window.SCOUTS_REFRESH_URL || '';
+// Never let a browser-side config point at the Lambda URL.  The API key is
+// injected only by the same-origin Cloudflare Worker proxy.
+const SCOUTS_URL = configuredScoutsUrl.startsWith('/')
+    ? configuredScoutsUrl
+    : `${ADMIN_API_BASE}/scouts`;
 const AUTH_STATUS_URL = window.SCOUTS_AUTH_STATUS_URL || `${ADMIN_API_BASE}/auth-status`;
 const QUEUED_REQUESTS_RUNTIME_URL = '../../runtime/scoutsQueued.json';
 const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/scoutsProcessing.json';
@@ -1842,7 +1847,15 @@ function getEventHex(event) {
             : (hasText(event?.hex)
                 ? event.hex
                 : event?.hexId));
-    return hasText(candidate) ? String(candidate).trim().toLowerCase() : '';
+    if (hasText(candidate)) return String(candidate).trim().toLowerCase();
+
+    // Calendar refresh repairs the canonical S3 agenda, but derive the same
+    // stable key locally while an older agenda is still cached or awaiting a
+    // refresh. This keeps the admin actions usable during that transition.
+    const title = event?.summary ?? event?.title;
+    if (!hasText(title) || typeof TextEncoder !== 'function') return '';
+    const bytes = new TextEncoder().encode(String(title).trim().toLowerCase());
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function decodeHexToText(hexValue) {

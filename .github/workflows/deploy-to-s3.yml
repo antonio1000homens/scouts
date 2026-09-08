@@ -118,7 +118,7 @@ jobs:
           while IFS= read -r file; do
             [ -n "${file}" ] || continue
             case "${file}" in aws/bootstrap/*) aws_bootstrap=true ;; esac
-            case "${file}" in index.html|deploy-manual.sh|.github/workflows/deploy-to-s3.yml|lambdas/sqs2scouts/scouts.conf|website/*) website=true ;; esac
+            case "${file}" in index.html|deploy.sh|deploy-manual.sh|.github/workflows/deploy-to-s3.yml|lambdas/sqs2scouts/scouts.conf|website/*) website=true ;; esac
             case "${file}" in cloudflare/*|.github/workflows/deploy-to-s3.yml) cloudflare=true ;; esac
             case "${file}" in lambdas/scouts-queues/*|lambdas/cloudformation/templates/scouts-queues.yaml) scouts_queues=true ;; esac
             case "${file}" in lambdas/scouts/*|lambdas/tools/*|lambdas/cloudformation/templates/scouts.yaml) scouts_function=true ;; esac
@@ -137,7 +137,7 @@ jobs:
                 ;;
             esac
             case "${file}" in
-              lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|tests/issue-34-admin-ui.integration.test.mjs|tests/issue-39-*.test.mjs|tests/issue-39-*.integration.test.mjs|tests/helpers/*|docs/TESTING-STRATEGY.md|website/admin/*|.github/workflows/deploy-to-s3.yml)
+              deploy.sh|lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|tests/issue-34-admin-ui.integration.test.mjs|tests/issue-39-*.test.mjs|tests/issue-39-*.integration.test.mjs|tests/helpers/*|docs/TESTING-STRATEGY.md|website/admin/*|.github/workflows/deploy-to-s3.yml)
                 retry_safety=true
                 ;;
             esac
@@ -360,7 +360,6 @@ jobs:
         env:
           ADMIN_API_BASE: ${{ vars.ADMIN_API_BASE }}
           SCOUTS_AUTH_STATUS_URL: ${{ vars['SCOUTS_AUTH_STATUS_URL'] }}
-          SCOUTS_URL: ${{ vars['SCOUTS_URL'] || vars['SCOUTS_REFRESH_URL'] }}
           SCOUTS_CONFIG_URL: ${{ vars['SCOUTS_CONFIG_URL'] }}
         run: |
           ADMIN_API_BASE_VALUE="${ADMIN_API_BASE:-/admin-api}"
@@ -368,7 +367,6 @@ jobs:
             echo "// Generated during CI deploy for Cloudflare proxy mode."
             echo "window.ADMIN_API_BASE = '${ADMIN_API_BASE_VALUE}';"
             [ -z "${SCOUTS_AUTH_STATUS_URL:-}" ] || echo "window.SCOUTS_AUTH_STATUS_URL = '${SCOUTS_AUTH_STATUS_URL}';"
-            [ -z "${SCOUTS_URL:-}" ] || echo "window.SCOUTS_URL = '${SCOUTS_URL}';"
             [ -z "${SCOUTS_CONFIG_URL:-}" ] || echo "window.SCOUTS_CONFIG_URL = '${SCOUTS_CONFIG_URL}';"
           } > website/admin/admin-config.js
 
