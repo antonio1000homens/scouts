@@ -52,7 +52,7 @@ Parameters:
     Default: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessingDLQ
   DlqUrl:
     Type: String
-    Default: https://sqs.eu-west-2.amazonaws.com/553490163883:scoutsProcessingDLQ
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
   ProcessingQueueUrl:
     Type: String
     Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
