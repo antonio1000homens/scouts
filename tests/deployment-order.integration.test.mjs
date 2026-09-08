@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const workflow = readFileSync('.github/workflows/deploy-to-s3.yml', 'utf8');
+const scoutsDeploy = readFileSync('lambdas/scouts/deploy.sh', 'utf8');
+const imageEnrichDecommission = readFileSync('lambdas/scouts-image-enrich/decommission.sh', 'utf8');
+const adminIndex = readFileSync('website/admin/index.html', 'utf8');
+const adminSimplify = readFileSync('website/admin/admin-simplify.js', 'utf8');
+const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
+const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
 
 function indexOfRequired(text, label) {
   const index = workflow.indexOf(text);
@@ -43,4 +49,36 @@ test('manual scouts2sqs target preserves prerequisite semantics without forcing 
 test('PRs validate but never enter deployment lanes', () => {
   assert.match(workflow, /deploy-web:[\s\S]*if: github\.event_name != 'pull_request'/);
   assert.match(workflow, /deploy-aws:[\s\S]*github\.event_name != 'pull_request'/);
+});
+
+test('Scouts deployment resolves the managed full-enrich stack before historical fallback', () => {
+  const managed = scoutsDeploy.indexOf('scouts-full-enrich-managed-poc scouts-full-enrich');
+  assert.notEqual(managed, -1, 'managed and fallback stack lookup must be explicit');
+  assert.match(scoutsDeploy, /for candidate_stack in scouts-full-enrich-managed-poc scouts-full-enrich; do/);
+  assert.match(scoutsDeploy, /StateMachineArn could not be resolved from scouts-full-enrich-managed-poc or scouts-full-enrich/);
+});
+
+test('legacy image-enrich decommission resolves stack-owned ARN and fails closed', () => {
+  assert.doesNotMatch(imageEnrichDecommission, /aws stepfunctions list-state-machines/);
+  assert.match(imageEnrichDecommission, /Outputs\[\?OutputKey=='StateMachineArn'\]\.OutputValue \| \[0\]/);
+  assert.match(imageEnrichDecommission, /does not expose StateMachineArn; refusing to decommission/);
+  assert.match(imageEnrichDecommission, /--status-filter RUNNING/);
+  assert.match(imageEnrichDecommission, /--max-results 1/);
+  assert.match(imageEnrichDecommission, /Unable to verify running executions[^\n]*refusing to decommission/);
+});
+
+test('admin polling is synchronously cut over to canonical full-enrich activity', () => {
+  const legacyScriptIndex = adminIndex.indexOf('<script src="admin-script.js"></script>');
+  const simplifyScriptIndex = adminIndex.indexOf('<script src="admin-simplify.js"></script>');
+  assert.notEqual(legacyScriptIndex, -1);
+  assert.notEqual(simplifyScriptIndex, -1);
+  assert.ok(legacyScriptIndex < simplifyScriptIndex, 'admin-simplify must load after the legacy controller it overrides');
+
+  assert.match(adminSimplify, /legacySendScoutsCommand\(\{ realm: 'runtime', subject: 'activity', action: 'status' \}\)/);
+  assert.match(adminSimplify, /pollQueueDepthSnapshots = pollAuthoritativeActivity;/);
+  assert.match(scoutsEntry, /buildRuntimeActivity/);
+  assert.match(scoutsEntry, /realm\)\.toLowerCase\(\) === 'runtime'/);
+  assert.match(scoutsEntry, /subject\)\.toLowerCase\(\) === 'activity'/);
+  assert.match(runtimeActivity, /fullEnrich: workflowSummary\(FULL_ENRICH_STATE_MACHINE_ARN, fullExecutions\)/);
+  assert.doesNotMatch(runtimeActivity, /imageEnrich:\s*workflowSummary/);
 });

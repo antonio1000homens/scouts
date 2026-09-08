@@ -87,14 +87,10 @@ Parameters:
       - 'true'
       - 'false'
     Default: 'true'
-  ImageEnrichStateMachineArn:
-    Type: String
-    Default: ''
-    Description: Legacy rollback-only image-enrich state machine ARN.
   FullEnrichStateMachineArn:
     Type: String
     Default: ''
-    Description: Production full enrichment state machine ARN.
+    Description: Canonical full enrichment state machine ARN.
   ImageGenerationProvider:
     Type: String
     Default: disabled
@@ -105,7 +101,6 @@ Parameters:
 
 Conditions:
   IsPublicFunctionUrl: !Equals [!Ref FunctionUrlAuthType, 'NONE']
-  HasImageEnrichStateMachineArn: !Not [!Equals [!Ref ImageEnrichStateMachineArn, '']]
   HasFullEnrichStateMachineArn: !Not [!Equals [!Ref FullEnrichStateMachineArn, '']]
 
 Resources:
@@ -169,13 +164,6 @@ Resources:
                     - states:ListExecutions
                   Resource: !Ref FullEnrichStateMachineArn
                 - !Ref AWS::NoValue
-              - !If
-                - HasImageEnrichStateMachineArn
-                - Effect: Allow
-                  Action:
-                    - states:StartExecution
-                  Resource: !Ref ImageEnrichStateMachineArn
-                - !Ref AWS::NoValue
               - Effect: Allow
                 Action:
                   - ssm:GetParameter
@@ -201,7 +189,6 @@ Resources:
           SCOUTS_REQUESTS_QUEUE_URL: !Ref ScoutsRequestsQueueUrl
           SQS_QUEUE_URL: !Ref ProcessingQueueUrl
           DLQ_URL: !Ref DlqUrl
-          IMAGE_ENRICH_STATE_MACHINE_ARN: !Ref ImageEnrichStateMachineArn
           FULL_ENRICH_STATE_MACHINE_ARN: !Ref FullEnrichStateMachineArn
           IMAGE_GENERATION_PROVIDER: !Ref ImageGenerationProvider
       Code:
