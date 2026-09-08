@@ -159,6 +159,11 @@ test('Scouts deployment resolves the managed full-enrich stack before historical
   assert.match(scoutsDeploy, /StateMachineArn could not be resolved from scouts-full-enrich-managed-poc or scouts-full-enrich/);
 });
 
+test('Scouts Lambda packaging includes every local module imported by the deployed entrypoint', () => {
+  assert.match(scoutsEntry, /from '\.\/agenda-hex-repair\.mjs'/);
+  assert.match(scoutsDeploy, /zip -q scouts-lambda\.zip[\s\S]*agenda-hex-repair\.mjs/);
+});
+
 test('admin polling is synchronously cut over to canonical full-enrich activity', () => {
   const legacyScriptIndex = adminIndex.indexOf('<script src="admin-script.js"></script>');
   const simplifyScriptIndex = adminIndex.indexOf('<script src="admin-simplify.js"></script>');
