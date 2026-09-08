@@ -77,8 +77,9 @@ test('admin polling is synchronously cut over to canonical full-enrich activity'
   assert.match(adminSimplify, /legacySendScoutsCommand\(\{ realm: 'runtime', subject: 'activity', action: 'status' \}\)/);
   assert.match(adminSimplify, /pollQueueDepthSnapshots = pollAuthoritativeActivity;/);
   assert.match(scoutsEntry, /buildRuntimeActivity/);
-  assert.match(scoutsEntry, /realm\)\.toLowerCase\(\) === 'runtime'/);
-  assert.match(scoutsEntry, /subject\)\.toLowerCase\(\) === 'activity'/);
+  assert.match(scoutsEntry, /text\(body\?\.realm\)\.toLowerCase\(\) !== 'runtime'/);
+  assert.match(scoutsEntry, /command\.subject === 'activity'/);
+  assert.match(scoutsEntry, /command\.action === 'status'/);
   assert.match(runtimeActivity, /fullEnrich: workflowSummary\(FULL_ENRICH_STATE_MACHINE_ARN, fullExecutions\)/);
   assert.doesNotMatch(runtimeActivity, /imageEnrich:\s*workflowSummary/);
 });
