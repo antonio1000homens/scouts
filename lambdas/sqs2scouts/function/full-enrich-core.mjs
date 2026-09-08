@@ -17,7 +17,7 @@ import {
   claimEnrichmentEscalation,
   enrichmentStateConfig,
 } from '/opt/nodejs/enrichment-state.mjs';
-import { lambdaHandler as legacyHandler } from './sqs2scouts.mjs';
+import { lambdaHandler as persistenceProcessorHandler } from './persistence-processor.mjs';
 import {
   text,
   normaliseStage,
@@ -105,7 +105,7 @@ function getImageMetadata(event) {
 
 function stageFieldPresent(event, stage) {
   if (!event) return false;
-  if (stage === 'tagline') return Boolean(text(getMetadata(event).tagline ?? event?.tagline ?? event?.AI));
+  if (stage === 'tagline') return Boolean(text(getMetadata(event).tagline ?? event?.tagline));
   if (stage === 'imageTheme') return Boolean(text(getImageMetadata(event).theme ?? event?.imageTheme));
   if (stage === 'image') return Boolean(text(getImageMetadata(event).url ?? event?.imageUrl));
   return false;
@@ -528,7 +528,7 @@ async function processImageProvider(message, provider) {
   }
 }
 
-async function resultAfterLegacy(message, response) {
+async function resultAfterProcessor(message, response) {
   const stage = normaliseStage(message?.orchestrationStep ?? message?.realm);
   const hex = getHex(message);
   const state = hex && stage ? await getEnrichmentState(hex, stage).catch(() => null) : null;
@@ -537,7 +537,7 @@ async function resultAfterLegacy(message, response) {
   let fallbackStatus = null;
   if (stageFieldPresent(event, stage)) fallbackStatus = 'succeeded';
   else if (statusCode === 202) fallbackStatus = 'quota';
-  else if (statusCode >= 500 && !state) throw new Error(`Legacy ${stage || 'enrichment'} worker failed without persisted safety state`);
+  else if (statusCode >= 500 && !state) throw new Error(`Canonical ${stage || 'enrichment'} processor failed without persisted safety state`);
   return buildCallbackResultFromState({ state, stage, hex, fallbackStatus });
 }
 
@@ -577,8 +577,8 @@ async function handleFullRecord(record, message) {
       if (!provider) throw new Error(`Unsupported image provider: ${message?.imageProvider || 'missing'}`);
       result = await processImageProvider(message, provider);
     } else {
-      const response = await legacyHandler({ Records: [record] });
-      result = await resultAfterLegacy(message, response);
+      const response = await persistenceProcessorHandler({ Records: [record] });
+      result = await resultAfterProcessor(message, response);
     }
   } catch (error) {
     console.error('[FullEnrich] Stage processing failed', {
@@ -610,18 +610,18 @@ async function handleFullRecord(record, message) {
 
 export async function lambdaHandler(event) {
   const records = Array.isArray(event?.Records) ? event.Records : [];
-  if (records.length === 0) return legacyHandler(event);
+  if (records.length === 0) return persistenceProcessorHandler(event);
 
-  const legacyRecords = [];
+  const standardRecords = [];
   for (const record of records) {
     const message = parseRecord(record);
     if (message && isFullEnrichMessage(message)) {
       await handleFullRecord(record, message);
     } else {
-      legacyRecords.push(record);
+      standardRecords.push(record);
     }
   }
 
-  if (legacyRecords.length > 0) return legacyHandler({ ...event, Records: legacyRecords });
+  if (standardRecords.length > 0) return persistenceProcessorHandler({ ...event, Records: standardRecords });
   return { statusCode: 200, body: JSON.stringify({ message: 'Full enrichment stages processed' }) };
 }
