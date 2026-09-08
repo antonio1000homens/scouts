@@ -283,8 +283,7 @@ Resources:
       Targets:
         - Arn: !GetAtt ScoutsFunction.Arn
           Id: ScoutsScheduledRefresh
-          Input: !Sub |
-            {"_scheduledRefresh":true,"body":{"realm":"scouts","subject":"calendars","action":"refreshAllCalendars","calendar":"all","maxEvents":${ScheduledRefreshMaxEvents}}}
+          Input: '{"_scheduledRefresh":true}'
 
   ScoutsScheduledRefreshInvokePermission:
     Type: AWS::Lambda::Permission
