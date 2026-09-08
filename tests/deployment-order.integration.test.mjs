@@ -14,10 +14,12 @@ const sqs2scoutsTemplate = readFileSync('lambdas/cloudformation/templates/sqs2sc
 const scouts2sqsTemplate = readFileSync('lambdas/cloudformation/templates/scouts2sqs.yaml', 'utf8');
 const slackTemplate = readFileSync('lambdas/cloudformation/templates/slack-handler.yaml', 'utf8');
 const adminIndex = readFileSync('website/admin/index.html', 'utf8');
+const adminScript = readFileSync('website/admin/admin-script.js', 'utf8');
 const adminSimplify = readFileSync('website/admin/admin-simplify.js', 'utf8');
 const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
 const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
 const agendaHexRepair = readFileSync('lambdas/scouts/function/agenda-hex-repair.mjs', 'utf8');
+const deployEntry = readFileSync('deploy.sh', 'utf8');
 
 function indexOfRequired(text, label) {
   const index = workflow.indexOf(text);
@@ -188,4 +190,22 @@ test('calendar refresh backfills canonical agenda HEX independently of enrichmen
   assert.match(scoutsEntry, /return invokeScoutsService\(trustedInternalEvent\)/);
   assert.match(scoutsEntry, /return invokeScoutsService\(event\)/);
   assert.match(scoutsEntry, /maxEvents: schedule\.maxQueuePublishesPerRun/);
+});
+
+test('website deployment never publishes the Lambda URL into browser config', () => {
+  assert.match(deployEntry, /ADMIN_API_BASE_VALUE="\$\{ADMIN_API_BASE:-\/admin-api\}"/);
+  assert.match(deployEntry, /Keep the Lambda URL server-side in the Cloudflare Worker/);
+  assert.doesNotMatch(deployEntry, /echo "window\.SCOUTS_URL/);
+  assert.match(workflow, /Generate admin runtime config[\s\S]*ADMIN_API_BASE_VALUE/);
+  assert.doesNotMatch(workflow, /echo "window\.SCOUTS_URL/);
+  assert.doesNotMatch(workflow, /SCOUTS_URL: \$\{\{ vars\./);
+  assert.match(workflow, /case "\$\{file\}" in index\.html\|deploy\.sh\|deploy-manual\.sh/);
+  assert.match(workflow, /deploy\.sh\|lambdas\/shared-layer/);
+});
+
+test('admin refresh commands use the authenticated proxy routes', () => {
+  assert.match(adminIndex, /onclick="refreshSelectedCalendar\('all', 'All Calendars', this\.value\)"/);
+  assert.match(adminIndex, /onclick="refreshLambda\(this\.value\)"/);
+  assert.match(adminScript, /const SCOUTS_URL = configuredScoutsUrl\.startsWith\('\/'\)/);
+  assert.match(adminScript, /fetch\(SCOUTS_URL, \{[\s\S]*credentials: 'same-origin'/);
 });
