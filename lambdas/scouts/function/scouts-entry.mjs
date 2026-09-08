@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
+import { repairAgendaHexMetadata } from './agenda-hex-repair.mjs';
 import { handler as scoutsServiceHandler } from './scouts-service.mjs';
 import { buildRuntimeActivity } from './runtime-activity.mjs';
 import { inspectRuntimeDlq, redriveRuntimeDlq } from './runtime-dlq.mjs';
@@ -57,6 +58,34 @@ function runtimeCommand(body) {
   };
 }
 
+function isCalendarRefreshInvocation(event) {
+  const body = decodeBody(event);
+  if (text(body?.realm).toLowerCase() !== 'scouts') return false;
+  const subject = text(body?.subject).toLowerCase();
+  const action = text(body?.action).toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return ['calendar', 'calendars', 'all'].includes(subject) && action.startsWith('refresh');
+}
+
+async function invokeScoutsService(event) {
+  const result = await scoutsServiceHandler(event);
+  if (!isCalendarRefreshInvocation(event)) {
+    return result;
+  }
+
+  try {
+    const repair = await repairAgendaHexMetadata();
+    if (repair.repairedCount > 0 || repair.missingCount > 0) {
+      console.log('[AgendaHexRepair] Refresh post-processing result.', repair);
+    }
+  } catch (error) {
+    // The calendar refresh itself has already completed. Keep its original
+    // result, but make a failed canonical-HEX repair explicit in Lambda logs.
+    console.error('[AgendaHexRepair] Unable to repair agenda HEX metadata after refresh.', error?.message || error);
+  }
+
+  return result;
+}
+
 function isInterceptedRuntimeCommand(command) {
   if (!command) return false;
   if (command.subject === 'activity' && command.action === 'status') return true;
@@ -103,7 +132,7 @@ async function handleScheduledInvocation() {
       scheduleExpression: schedule.scheduleExpression,
       maxQueuePublishesPerRun: schedule.maxQueuePublishesPerRun,
     });
-    return scoutsServiceHandler(trustedInternalEvent);
+    return invokeScoutsService(trustedInternalEvent);
   } catch (error) {
     // Fail closed: a schedule-state/secret read problem should not accidentally
     // trigger calendar/network/enrichment work. Returning successfully also
@@ -124,7 +153,7 @@ export async function handler(event = {}) {
 
   const command = runtimeCommand(decodeBody(event));
   if (!isInterceptedRuntimeCommand(command)) {
-    return scoutsServiceHandler(event);
+    return invokeScoutsService(event);
   }
 
   try {

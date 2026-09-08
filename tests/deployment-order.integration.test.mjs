@@ -17,6 +17,7 @@ const adminIndex = readFileSync('website/admin/index.html', 'utf8');
 const adminSimplify = readFileSync('website/admin/admin-simplify.js', 'utf8');
 const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
 const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
+const agendaHexRepair = readFileSync('lambdas/scouts/function/agenda-hex-repair.mjs', 'utf8');
 
 function indexOfRequired(text, label) {
   const index = workflow.indexOf(text);
@@ -171,4 +172,20 @@ test('admin polling is synchronously cut over to canonical full-enrich activity'
   assert.match(scoutsEntry, /command\.action === 'status'/);
   assert.match(runtimeActivity, /fullEnrich: workflowSummary\(FULL_ENRICH_STATE_MACHINE_ARN, fullExecutions\)/);
   assert.doesNotMatch(runtimeActivity, /imageEnrich:\s*workflowSummary/);
+});
+
+test('calendar refresh backfills canonical agenda HEX independently of enrichment publication', () => {
+  assert.match(agendaHexRepair, /Buffer\.from\(normalized, 'utf8'\)\.toString\('hex'\)/);
+  assert.match(agendaHexRepair, /metadata\.hex \|\| event\.hex \|\| event\.hexId/);
+  assert.match(agendaHexRepair, /event\.summary \?\? event\.title/);
+  assert.match(agendaHexRepair, /event\.metadata = \{[\s\S]*hex: derivedHex/);
+  assert.match(agendaHexRepair, /PutObjectCommand/);
+  assert.match(agendaHexRepair, /Key: AGENDA_KEY/);
+
+  assert.match(scoutsEntry, /repairAgendaHexMetadata/);
+  assert.match(scoutsEntry, /function isCalendarRefreshInvocation/);
+  assert.match(scoutsEntry, /action\.startsWith\('refresh'\)/);
+  assert.match(scoutsEntry, /return invokeScoutsService\(trustedInternalEvent\)/);
+  assert.match(scoutsEntry, /return invokeScoutsService\(event\)/);
+  assert.match(scoutsEntry, /maxEvents: schedule\.maxQueuePublishesPerRun/);
 });
