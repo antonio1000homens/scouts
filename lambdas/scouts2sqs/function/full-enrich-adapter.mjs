@@ -31,23 +31,6 @@ function bool(value) {
   return null;
 }
 
-function clone(value) {
-  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
-}
-
-function mergeSparse(target, patch) {
-  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return target;
-  for (const [key, value] of Object.entries(patch)) {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      const child = target[key] && typeof target[key] === 'object' && !Array.isArray(target[key]) ? target[key] : {};
-      target[key] = mergeSparse(child, value);
-    } else {
-      target[key] = value;
-    }
-  }
-  return target;
-}
-
 export function normaliseImageProvider(value) {
   const provider = text(value)?.toLowerCase() || 'disabled';
   return ['cloudflare', 'gemini', 'disabled'].includes(provider) ? provider : 'disabled';
@@ -209,14 +192,19 @@ export function translateCompactPersistRequest(message) {
   };
 }
 
-export function applyCanonicalPersistPatch(existingEvent, canonicalSubject) {
-  if (!existingEvent || typeof existingEvent !== 'object' || Array.isArray(existingEvent)) {
-    throw new Error('Persist target event is missing');
-  }
-  if (!canonicalSubject || typeof canonicalSubject !== 'object' || Array.isArray(canonicalSubject)) {
-    throw new Error('Persist patch is invalid');
-  }
-  return mergeSparse(clone(existingEvent), clone(canonicalSubject));
+// sqs2scouts already owns the durable read/merge/write. Keep this handoff
+// sparse so two independent compact patches cannot overwrite each other with
+// stale full-event snapshots. Its persist parser supports a JSON patch in the
+// action field; a string HEX subject bypasses the legacy subject normalizer
+// while still giving the worker an unambiguous persistence target.
+export function buildDownstreamPersistMessage(message) {
+  const translated = translateCompactPersistRequest(message);
+  return {
+    ...translated,
+    subject: translated.hex,
+    action: JSON.stringify(translated.subject),
+    operation: 'persist',
+  };
 }
 
 export function eventGenerationKey(hex, event) {
@@ -247,7 +235,15 @@ function executionPrefix(hex, event) {
 
 function executionName(prefix) {
   const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
-  return `${prefix}-${timestamp}`.slice(0, 80);
+  const entropy = crypto.randomBytes(3).toString('hex');
+  return `${prefix}-${timestamp}-${entropy}`.slice(0, 80);
+}
+
+export function shouldReuseActiveExecution(message) {
+  // A manual image request represents a separate user action with its own
+  // lifecycle/request ID. Reusing an older execution would make callbacks keep
+  // the original request ID and leave this new request permanently queued.
+  return !isDirectImageEnrichRequest(message);
 }
 
 export function buildFullEnrichExecutionInput(message, event, name = null) {
@@ -320,7 +316,7 @@ async function startFullEnrich(message) {
   }
 
   const prefix = executionPrefix(hex, event);
-  const active = await findActiveExecution(prefix);
+  const active = shouldReuseActiveExecution(message) ? await findActiveExecution(prefix) : null;
   if (active) {
     const reusedInput = { ...input, executionName: active.name || null };
     console.log('[FullEnrich] Reusing active execution', {
@@ -364,15 +360,11 @@ async function forwardStageRequest(message) {
 }
 
 async function forwardPersistRequest(message) {
-  const translated = translateCompactPersistRequest(message);
-  const existingEvent = await loadEvent(translated.hex);
-  if (!existingEvent) throw new Error(`HEX ${translated.hex} not found for persistence`);
-  const fullEvent = applyCanonicalPersistPatch(existingEvent, translated.subject);
-  const payload = { ...translated, subject: fullEvent };
+  const payload = buildDownstreamPersistMessage(message);
   await sqs.send(new SendMessageCommand({ QueueUrl: PROCESSING_QUEUE_URL, MessageBody: JSON.stringify(payload) }));
-  console.log('[FullEnrich] Forwarded merged persist event to processing queue', {
-    hex: translated.hex,
-    requestId: translated.requestId || null,
+  console.log('[FullEnrich] Forwarded canonical sparse persist patch to processing queue', {
+    hex: payload.hex,
+    requestId: payload.requestId || null,
   });
 }
 
