@@ -69,6 +69,20 @@
         min-width: 0;
     }
 
+    .home-page .past-events {
+        padding: 2rem;
+    }
+
+    .home-page .past-events .event-card {
+        padding: 1.5rem;
+    }
+
+    .home-page .past-events .event-card img {
+        width: 92%;
+        margin-left: auto;
+        margin-right: auto;
+    }
+
     .home-page .event-group + .event-group {
         margin-top: 0;
     }
