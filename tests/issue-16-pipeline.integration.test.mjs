@@ -6,10 +6,9 @@ function read(relativePath) {
   return readFileSync(new URL(`../${relativePath}`, import.meta.url), 'utf8');
 }
 
-const scoutsSource = read('lambdas/scouts/function/scouts.mjs');
+const scoutsSource = read('lambdas/scouts/function/scouts-service.mjs');
 const workerSource = read('lambdas/sqs2scouts/function/image-provider-adapter.mjs');
 const workerCoreSource = read('lambdas/sqs2scouts/function/full-enrich-core.mjs');
-const workerLegacySource = read('lambdas/sqs2scouts/function/sqs2scouts.mjs');
 const scoutsTemplate = read('lambdas/cloudformation/templates/scouts.yaml');
 const workerTemplate = read('lambdas/cloudformation/templates/sqs2scouts.yaml');
 const retryDocs = read('GEMINI-ENRICHMENT-RETRY.md');
@@ -67,7 +66,7 @@ test('image provider calls are owned by atomic stage reservation before any prov
   assert.ok(cloudflareReserve >= 0 && cloudflareBudget > cloudflareReserve, 'Cloudflare stage reservation must precede image budget');
   assert.ok(cloudflareCall > cloudflareBudget, 'Cloudflare call must occur after stage and budget reservation');
 
-  const geminiFlow = sliceFunction(workerCoreSource, 'async function processImageProvider', 'async function resultAfterLegacy');
+  const geminiFlow = sliceFunction(workerCoreSource, 'async function processImageProvider', 'async function resultAfterProcessor');
   const geminiReserve = geminiFlow.search(/await\s+reserveEnrichmentAttempt\s*\(/);
   const geminiBudget = geminiFlow.search(/await\s+reserveGeminiImageBudgets\s*\(/);
   const geminiCall = geminiFlow.search(/await\s+callGemini\s*\(\s*prompt\s*\)/);
@@ -83,7 +82,7 @@ test('provider success is cached before event persistence so persistence retries
   assert.match(cloudflareFlow, /loadReusableGeneration/);
   assert.match(cloudflareFlow, /persistence_pending/);
 
-  const geminiFlow = sliceFunction(workerCoreSource, 'async function processImageProvider', 'async function resultAfterLegacy');
+  const geminiFlow = sliceFunction(workerCoreSource, 'async function processImageProvider', 'async function resultAfterProcessor');
   const geminiCache = geminiFlow.indexOf('await markGeminiSucceeded');
   const geminiPersist = geminiFlow.indexOf('await persistGeneratedImage', geminiCache);
   assert.ok(geminiCache >= 0 && geminiPersist > geminiCache, 'Gemini rollback result must be cached before event persistence');
@@ -95,13 +94,6 @@ test('Slack escalation is warning-on-second-attempt and quarantine-once', () => 
   assert.match(notification, /state\.state === 'retry_wait' && attemptCount === 2/);
   assert.match(notification, /state\.state === 'manual_review'/);
   assert.match(notification, /claimEnrichmentEscalation/);
-});
-
-test('legacy Gemini worker still reserves per-stage attempts and caches success before persistence', () => {
-  assert.match(workerLegacySource, /reserveEnrichmentAttempt/);
-  assert.match(workerLegacySource, /loadReusableGeneration/);
-  assert.match(workerLegacySource, /markGeminiSucceeded/);
-  assert.match(workerLegacySource, /markEnrichmentFailure/);
 });
 
 test('manual recovery is documented and requires an explicit HEX + stage reset', () => {

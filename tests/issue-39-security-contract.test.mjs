@@ -37,7 +37,7 @@ test('fake provider remains confined to test helpers', () => {
   const productionFiles = [
     'lambdas/sqs2scouts/function/cloudflare-image-client.mjs',
     'lambdas/sqs2scouts/function/image-provider-adapter.mjs',
-    'lambdas/scouts2sqs/function/full-enrich-adapter.mjs',
+    'lambdas/scouts2sqs/function/request-router.mjs',
   ];
   for (const path of productionFiles) {
     assert.doesNotMatch(source(path), /(?:provider|IMAGE_GENERATION_PROVIDER)[\s\S]{0,120}['"]fake['"]/i, `${path} must not make fake selectable in production`);

@@ -15,12 +15,11 @@ import {
   buildImageGenerationPrompt,
 } from '../full-enrich-helpers.mjs';
 
-const fullEnrichAdapter = readFileSync('lambdas/scouts2sqs/function/full-enrich-adapter.mjs', 'utf8');
+const requestRouter = readFileSync('lambdas/scouts2sqs/function/request-router.mjs', 'utf8');
 const scoutsTemplate = readFileSync('lambdas/cloudformation/templates/scouts.yaml', 'utf8');
 const scouts2sqsTemplate = readFileSync('lambdas/cloudformation/templates/scouts2sqs.yaml', 'utf8');
 const scoutsDeploy = readFileSync('lambdas/scouts/deploy.sh', 'utf8');
 const scouts2sqsDeploy = readFileSync('lambdas/scouts2sqs/deploy.sh', 'utf8');
-const retiredImageDeploy = readFileSync('lambdas/scouts-image-enrich/deploy.sh', 'utf8');
 const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
 
 test('normaliseStage maps external imageUrl to logical image', () => {
@@ -111,16 +110,16 @@ test('image prompt uses the same scouts.conf placeholders', () => {
 });
 
 test('full-enrich preserves the ingress request ID separately from execution name', () => {
-  assert.match(fullEnrichAdapter, /requestId: text\(message\?\.requestId\) \|\| name \|\| executionName\(prefix\)/);
-  assert.match(fullEnrichAdapter, /executionName: name \|\| null/);
-  assert.match(fullEnrichAdapter, /const finalInput = \{ \.\.\.input, executionName: name \}/);
-  assert.doesNotMatch(fullEnrichAdapter, /const finalInput = \{ \.\.\.input, requestId: name \}/);
+  assert.match(requestRouter, /requestId: text\(message\?\.requestId\) \|\| name \|\| executionName\(prefix\)/);
+  assert.match(requestRouter, /executionName: name \|\| null/);
+  assert.match(requestRouter, /const finalInput = \{ \.\.\.input, executionName: name \}/);
+  assert.doesNotMatch(requestRouter, /const finalInput = \{ \.\.\.input, requestId: name \}/);
 });
 
 test('historical imageEnrich action is only a compatibility alias into full-enrich', () => {
-  assert.match(fullEnrichAdapter, /new Set\(\['new', 'retry', 'imageEnrich', 'fullEnrich'\]\)/);
-  assert.match(fullEnrichAdapter, /stateMachineArn: FULL_ENRICH_STATE_MACHINE_ARN/);
-  assert.doesNotMatch(fullEnrichAdapter, /IMAGE_ENRICH_STATE_MACHINE_ARN/);
+  assert.match(requestRouter, /new Set\(\['new', 'retry', 'imageEnrich', 'fullEnrich'\]\)/);
+  assert.match(requestRouter, /stateMachineArn: FULL_ENRICH_STATE_MACHINE_ARN/);
+  assert.doesNotMatch(requestRouter, /IMAGE_ENRICH_STATE_MACHINE_ARN/);
 });
 
 test('active deployments contain only the canonical full-enrich state machine', () => {
@@ -133,14 +132,14 @@ test('active deployments contain only the canonical full-enrich state machine', 
   assert.match(scouts2sqsTemplate, /FullEnrichStateMachineArn/);
   assert.match(scoutsDeploy, /scouts-full-enrich/);
   assert.match(scouts2sqsDeploy, /scouts-full-enrich/);
+  assert.match(scouts2sqsDeploy, /HANDLER="\$\{HANDLER:-request-router\.lambdaHandler\}"/);
   assert.equal(existsSync('lambdas/cloudformation/templates/scouts-image-enrich.yaml'), false);
 });
 
-test('retired image-enrich deploy target cannot recreate legacy resources', () => {
-  assert.match(retiredImageDeploy, /has been retired/);
-  assert.match(retiredImageDeploy, /exit 0/);
-  assert.doesNotMatch(retiredImageDeploy, /cloudformation deploy/);
-  assert.doesNotMatch(retiredImageDeploy, /scouts-image-enrich\.yaml/);
+test('retired image-enrich deployment artifacts stay removed after cutover', () => {
+  assert.equal(existsSync('lambdas/scouts-image-enrich/deploy.sh'), false);
+  assert.equal(existsSync('lambdas/scouts-image-enrich/decommission.sh'), false);
+  assert.equal(existsSync('lambdas/cloudformation/templates/scouts-image-enrich.yaml'), false);
 });
 
 test('Scouts status deployment uses full-enrich activity entrypoint and least privilege', () => {
@@ -151,7 +150,7 @@ test('Scouts status deployment uses full-enrich activity entrypoint and least pr
   assert.equal((scoutsTemplate.match(/execution:\$\{FullEnrichStateMachineName\}:\*/g) || []).length, 1);
   assert.match(scoutsTemplate, /FullEnrichStateMachineName: !Select \[6, !Split \[':', !Ref FullEnrichStateMachineArn\]\]/);
   assert.match(scoutsDeploy, /scouts-entry\.handler/);
-  assert.match(scoutsDeploy, /scouts-entry\.mjs runtime-activity\.mjs/);
+  assert.match(scoutsDeploy, /scouts-entry\.mjs[\s\\]+runtime-activity\.mjs/);
 });
 
 test('activity status uses execution history for live stage and bounded recent terminal outcomes', () => {
