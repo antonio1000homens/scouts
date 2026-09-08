@@ -262,7 +262,7 @@ Resources:
           FULL_ENRICH_STATE_MACHINE_ARN: !Ref FullEnrichStateMachineArn
           GEMINI_DAILY_REQUEST_LIMIT: !Ref GeminiDailyRequestLimit
           GEMINI_USAGE_TABLE_NAME: !Ref GeminiUsageTableName
-          GEMINI_ENRICH_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
+          GEMINI_ENRICHMENT_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
           SCOUTS_SCHEDULE_EXPRESSION: !Ref ScheduledRefreshExpression
           SCOUTS_SCHEDULED_REFRESH_DEFAULT_ENABLED: !Ref ScheduledRefreshDefaultEnabled
           SCOUTS_SCHEDULED_REFRESH_MAX_EVENTS: !Ref ScheduledRefreshMaxEvents
