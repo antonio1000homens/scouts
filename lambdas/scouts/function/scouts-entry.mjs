@@ -5,6 +5,7 @@ import { buildRuntimeActivity } from './runtime-activity.mjs';
 import { inspectRuntimeDlq, redriveRuntimeDlq } from './runtime-dlq.mjs';
 import {
   getScheduledRefreshSettings,
+  getScheduledRefreshStatus,
   isScheduledRefreshInvocation,
   setScheduledRefreshEnabled,
 } from './runtime-schedule.mjs';
@@ -139,8 +140,11 @@ export async function handler(event = {}) {
 
     if (command.subject === 'schedule') {
       if (command.action === 'status') {
-        const schedule = await getScheduledRefreshSettings();
-        return response(200, { status: 'ok', schedule });
+        const schedule = await getScheduledRefreshStatus();
+        return response(200, {
+          status: schedule.health === 'ok' ? 'ok' : 'degraded',
+          schedule,
+        });
       }
       const schedule = await setScheduledRefreshEnabled(command.action === 'enable', 'admin');
       return response(200, { status: 'ok', schedule });
