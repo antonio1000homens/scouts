@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: scouts2sqs Lambda stack (function + layer + IAM + function URL + SQS event source mapping)
+Description: scouts2sqs Lambda stack (function + shared layer reference + IAM + function URL + SQS event source mapping)
 
 Parameters:
   CodeBucket:
@@ -8,15 +8,12 @@ Parameters:
   FunctionCodeKey:
     Type: String
     Description: S3 key for function zip.
-  LayerCodeKey:
+  SharedLayerVersionArn:
     Type: String
-    Description: S3 key for layer zip.
+    Description: Centrally published scouts-shared Lambda layer version ARN.
   FunctionName:
     Type: String
     Default: scouts2sqs
-  LayerName:
-    Type: String
-    Default: scouts-shared
   RoleName:
     Type: String
     Default: scouts2sqs-lambda-role
@@ -104,16 +101,6 @@ Conditions:
   HasFullEnrichStateMachineArn: !Not [!Equals [!Ref FullEnrichStateMachineArn, '']]
 
 Resources:
-  Scouts2SqsLayer:
-    Type: AWS::Lambda::LayerVersion
-    Properties:
-      LayerName: !Ref LayerName
-      CompatibleRuntimes:
-        - !Ref Runtime
-      Content:
-        S3Bucket: !Ref CodeBucket
-        S3Key: !Ref LayerCodeKey
-
   Scouts2SqsRole:
     Type: AWS::IAM::Role
     Properties:
@@ -179,7 +166,7 @@ Resources:
       Timeout: !Ref Timeout
       MemorySize: !Ref MemorySize
       Layers:
-        - !Ref Scouts2SqsLayer
+        - !Ref SharedLayerVersionArn
       Environment:
         Variables:
           REQUIRED_API_KEY_PARAMETER: !Ref RequiredApiKeyParameter
@@ -238,6 +225,6 @@ Outputs:
   FunctionUrl:
     Value: !GetAtt Scouts2SqsFunctionUrl.FunctionUrl
   LayerVersionArn:
-    Value: !Ref Scouts2SqsLayer
+    Value: !Ref SharedLayerVersionArn
   EventSourceMappingId:
     Value: !Ref Scouts2SqsEventSourceMapping
