@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Scouts Lambda stack (function + layer + IAM + optional S3 bucket + function URL)
+Description: Scouts Lambda stack (function + shared layer reference + IAM + optional S3 bucket + function URL)
 
 Parameters:
   CodeBucket:
@@ -8,15 +8,12 @@ Parameters:
   FunctionCodeKey:
     Type: String
     Description: S3 key for scouts function zip.
-  LayerCodeKey:
+  SharedLayerVersionArn:
     Type: String
-    Description: S3 key for shared layer zip.
+    Description: Centrally published scouts-shared Lambda layer version ARN.
   FunctionName:
     Type: String
     Default: scouts
-  LayerName:
-    Type: String
-    Default: scouts-shared
   RoleName:
     Type: String
     Default: scouts-lambda-role
@@ -140,16 +137,6 @@ Resources:
     Properties:
       BucketName: !Ref DataBucketName
 
-  ScoutsSharedLayer:
-    Type: AWS::Lambda::LayerVersion
-    Properties:
-      LayerName: !Ref LayerName
-      CompatibleRuntimes:
-        - !Ref Runtime
-      Content:
-        S3Bucket: !Ref CodeBucket
-        S3Key: !Ref LayerCodeKey
-
   ScoutsLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -249,7 +236,7 @@ Resources:
       Timeout: !Ref Timeout
       MemorySize: !Ref MemorySize
       Layers:
-        - !Ref ScoutsSharedLayer
+        - !Ref SharedLayerVersionArn
       Environment:
         Variables:
           REQUIRED_API_KEY_PARAMETER: !Ref RequiredApiKeyParameter
@@ -265,7 +252,7 @@ Resources:
           FULL_ENRICH_STATE_MACHINE_ARN: !Ref FullEnrichStateMachineArn
           GEMINI_DAILY_REQUEST_LIMIT: !Ref GeminiDailyRequestLimit
           GEMINI_USAGE_TABLE_NAME: !Ref GeminiUsageTableName
-          GEMINI_ENRICHMENT_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
+          GEMINI_ENRICH_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
           SCOUTS_SCHEDULE_EXPRESSION: !Ref ScheduledRefreshExpression
           SCOUTS_SCHEDULED_REFRESH_DEFAULT_ENABLED: !Ref ScheduledRefreshDefaultEnabled
           SCOUTS_SCHEDULED_REFRESH_MAX_EVENTS: !Ref ScheduledRefreshMaxEvents
@@ -328,7 +315,7 @@ Outputs:
   FunctionUrl:
     Value: !GetAtt ScoutsFunctionUrl.FunctionUrl
   LayerVersionArn:
-    Value: !Ref ScoutsSharedLayer
+    Value: !Ref SharedLayerVersionArn
   DataBucket:
     Value: !Ref DataBucketName
   ScheduledRefreshRuleArn:
