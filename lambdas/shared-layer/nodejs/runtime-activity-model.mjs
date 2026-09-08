@@ -54,10 +54,18 @@ function isStepFunctionsLifecycle(entry) {
   return Boolean(text(entry?.executionArn));
 }
 
+function snapshotLifecycleState(entry, fallbackState) {
+  const explicit = text(entry?.status).toLowerCase();
+  return ['failed', 'manual_review', 'needs_attention'].includes(explicit)
+    ? explicit
+    : fallbackState;
+}
+
 function normaliseSnapshotEntry(entry, state, source) {
   const requestId = requestIdOf(entry);
   const hex = hexOf(entry);
   if (!requestId && !hex) return null;
+  const lifecycleState = snapshotLifecycleState(entry, state);
   const createdAt = iso(entry?.requestTime || entry?.createdAt || entry?.timestamp);
   const updatedAt = requestTimeOf(entry) || createdAt;
   return {
@@ -67,15 +75,20 @@ function normaliseSnapshotEntry(entry, state, source) {
     title: text(entry?.title || entry?.summary) || null,
     realm: text(entry?.realm) || null,
     operation: text(entry?.action || entry?.operation) || null,
-    state,
-    stage: text(entry?.orchestrationStep) || state,
+    state: lifecycleState,
+    stage: text(entry?.orchestrationStep) || lifecycleState,
     orchestrationType: text(entry?.orchestrationType) || null,
     createdAt,
     updatedAt,
     queueMessageIds: { [source]: text(entry?.messageId) || null },
     executionArn: null,
-    failure: null,
-    timeline: [{ state, stage: text(entry?.orchestrationStep) || state, at: updatedAt || createdAt, source }],
+    failure: ['failed', 'manual_review', 'needs_attention'].includes(lifecycleState)
+      ? {
+          type: text(entry?.failure?.type) || 'PROCESSING_FAILED',
+          message: text(entry?.failure?.message) || null,
+        }
+      : null,
+    timeline: [{ state: lifecycleState, stage: text(entry?.orchestrationStep) || lifecycleState, at: updatedAt || createdAt, source }],
   };
 }
 

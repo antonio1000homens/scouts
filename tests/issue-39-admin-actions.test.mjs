@@ -30,6 +30,7 @@ function actionSandbox(overrides = {}) {
       return { _httpStatus: 200, queueAccepted: true, requestId: 'test-request-id' };
     },
     pollQueueDepthSnapshots: async () => {},
+    pollGeneratedRequestUntilSettled: async () => {},
     refreshApiActionButtons: () => {},
     updateApiAuthStatus: () => {},
     updateModalStatus: () => {},
@@ -74,8 +75,38 @@ function actionSandbox(overrides = {}) {
 }
 
 async function invokeAdminFunction(functionName, args, sandbox) {
-  const { functions } = loadFunctionsFromSource(adminSource, [functionName], sandbox);
+  const dependencies = functionName === 'pollGeneratedRequestUntilSettled'
+    ? ['stopGeneratedRequestPolling', 'findAuthoritativeRequest', 'isTerminalAuthoritativeRequest', 'describeAuthoritativeRequestOutcome', 'refreshGeneratedEvent']
+    : [];
+  const { functions } = loadFunctionsFromSource(adminSource, [functionName, ...dependencies], sandbox);
   return functions[functionName](...args);
+}
+
+function progressSandbox(activityResponses, overrides = {}) {
+  const statuses = [];
+  const refreshed = { events: 0, modal: 0 };
+  let responseIndex = 0;
+  const entry = {
+    event: { summary: 'Progress Test Event', metadata: { hex: TEST_HEX } },
+  };
+  const sandbox = {
+    hasText: (value) => value !== null && value !== undefined && String(value).trim().length > 0,
+    generatedRequestPollTimer: null,
+    generatedRequestPollToken: 0,
+    GENERATED_REQUEST_POLL_TIMEOUT_MS: 30000,
+    currentEventIndex: 0,
+    visibleEventEntries: [entry],
+    pollQueueDepthSnapshots: async () => activityResponses[Math.min(responseIndex++, activityResponses.length - 1)],
+    updateModalStatus: (message, tone) => statuses.push({ message, tone }),
+    loadEvents: async () => { refreshed.events += 1; },
+    updateModalContent: () => { refreshed.modal += 1; },
+    getEventHex: (event) => event?.metadata?.hex || '',
+    setTimeout: () => 0,
+    clearTimeout: () => {},
+    Date: { now: () => 0 },
+    ...overrides,
+  };
+  return { sandbox, statuses, refreshed };
 }
 
 test('admin agenda refresh publishes the selected enrichment count', async () => {
@@ -106,6 +137,60 @@ test('admin generation buttons publish field-specific actions with only the sele
       action,
     }], `${field} request contract changed`);
   }
+});
+
+test('admin generation progress stops on a matching completed request and refreshes the modal', async () => {
+  const progress = progressSandbox([{ requests: [{ requestId: 'request-1', state: 'completed' }] }]);
+  await invokeAdminFunction('pollGeneratedRequestUntilSettled', ['request-1', {
+    hex: TEST_HEX,
+    config: { label: 'Tagline', queueLabel: 'AI tagline' },
+    eventLabel: 'Progress Test Event',
+  }], progress.sandbox);
+
+  assert.equal(progress.refreshed.events, 1);
+  assert.equal(progress.refreshed.modal, 1);
+  assert.deepEqual(progress.statuses.at(-1), {
+    message: 'Tagline completed for "Progress Test Event".',
+    tone: 'success',
+  });
+});
+
+test('admin generation progress reports a matching terminal failure and refreshes the modal', async () => {
+  const progress = progressSandbox([{ requests: [{
+    requestId: 'request-2',
+    state: 'needs_attention',
+    failure: { message: 'Gemini daily limit reached' },
+  }] }]);
+  await invokeAdminFunction('pollGeneratedRequestUntilSettled', ['request-2', {
+    hex: TEST_HEX,
+    config: { label: 'Tagline', queueLabel: 'AI tagline' },
+    eventLabel: 'Progress Test Event',
+  }], progress.sandbox);
+
+  assert.equal(progress.refreshed.events, 1);
+  assert.equal(progress.refreshed.modal, 1);
+  assert.deepEqual(progress.statuses.at(-1), {
+    message: 'Tagline needs_attention: Gemini daily limit reached for "Progress Test Event".',
+    tone: 'error',
+  });
+});
+
+test('admin generation progress times out when no matching request update arrives', async () => {
+  let nowCall = 0;
+  const progress = progressSandbox([{ requests: [{ requestId: 'other-request', state: 'completed' }] }], {
+    Date: { now: () => (nowCall++ === 0 ? 0 : 30000) },
+  });
+  await invokeAdminFunction('pollGeneratedRequestUntilSettled', ['request-3', {
+    hex: TEST_HEX,
+    config: { label: 'Tagline', queueLabel: 'AI tagline' },
+    eventLabel: 'Progress Test Event',
+  }], progress.sandbox);
+
+  assert.equal(progress.refreshed.events, 0);
+  assert.deepEqual(progress.statuses.at(-1), {
+    message: 'No AI tagline update received for "Progress Test Event" within 30 seconds.',
+    tone: 'error',
+  });
 });
 
 test('admin hide and unhide publish idempotent visibility state for the same HEX', async () => {

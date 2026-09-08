@@ -33,6 +33,21 @@ test('later completed state supersedes stale queued state for the same request I
   assert.deepEqual(activity[0].timeline.map((entry) => entry.state), ['queued', 'completed']);
 });
 
+test('failed worker completion remains a terminal failure in authoritative activity', () => {
+  const activity = buildCanonicalActivity({
+    processingSnapshot: snapshot('processing', [request()]),
+    completedSnapshot: snapshot('completed', [request({
+      status: 'failed',
+      failure: { type: 'QUOTA_REJECTED', message: 'Gemini daily limit reached' },
+    })]),
+    now: NOW,
+  });
+  assert.equal(activity.length, 1);
+  assert.equal(activity[0].state, 'failed');
+  assert.equal(activity[0].failure.type, 'QUOTA_REJECTED');
+  assert.equal(activity[0].failure.message, 'Gemini daily limit reached');
+});
+
 test('age alone never creates queued-stalled or needs-attention lifecycle state', () => {
   const activity = buildCanonicalActivity({
     queuedSnapshot: snapshot('queued', [request({ requestTime: '2026-09-07T18:00:00Z' })]),
