@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
-import { handler as legacyHandler } from './scouts.mjs';
+import { handler as scoutsServiceHandler } from './scouts-service.mjs';
 import { buildRuntimeActivity } from './runtime-activity.mjs';
 import { inspectRuntimeDlq, redriveRuntimeDlq } from './runtime-dlq.mjs';
 import {
@@ -102,7 +102,7 @@ async function handleScheduledInvocation() {
       scheduleExpression: schedule.scheduleExpression,
       maxQueuePublishesPerRun: schedule.maxQueuePublishesPerRun,
     });
-    return legacyHandler(trustedInternalEvent);
+    return scoutsServiceHandler(trustedInternalEvent);
   } catch (error) {
     // Fail closed: a schedule-state/secret read problem should not accidentally
     // trigger calendar/network/enrichment work. Returning successfully also
@@ -123,7 +123,7 @@ export async function handler(event = {}) {
 
   const command = runtimeCommand(decodeBody(event));
   if (!isInterceptedRuntimeCommand(command)) {
-    return legacyHandler(event);
+    return scoutsServiceHandler(event);
   }
 
   try {
