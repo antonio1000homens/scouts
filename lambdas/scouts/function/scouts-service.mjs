@@ -2233,6 +2233,26 @@ function mergeEvents(existingData, newEvents) {
     if (existingEventsMap.has(newEvent.uid)) {
       const existing = existingEventsMap.get(newEvent.uid);
       applySanitizedUidToEvent(existing);
+      const titleChanged = Boolean(
+        incomingTitle
+        && normalizeComparableText(existing.title ?? existing.summary) !== normalizeComparableText(incomingTitle)
+      );
+
+      // Calendar content is authoritative for an existing UID.  Keeping an old
+      // title here turns a renamed/replaced programme item into a ghost event;
+      // worse, its title-keyed enrichment can then be shown on the replacement.
+      if (titleChanged) {
+        const oldMediaKey = buildSummaryLocationKey(existing.title ?? existing.summary, existing.location);
+        if (oldMediaKey) mediaIndex.delete(oldMediaKey);
+        existing.title = incomingTitle;
+        existing.summary = newEvent.summary ?? incomingTitle;
+        existing.location = newEvent.location ?? null;
+        existing.tagline = getEventTagline(newEvent) ?? null;
+        existing.image = ensureImageContainer(newEvent.image);
+        existing.metadata = {};
+        delete existing.approved;
+        delete existing.hex;
+      }
       existing.section = combineSections(existing.section, newEvent.section);
       if (!existing.title && incomingTitle) {
         existing.title = incomingTitle;
@@ -2262,7 +2282,11 @@ function mergeEvents(existingData, newEvents) {
         existingImage.prompt = newImage.prompt;
       }
       existing.image = existingImage;
-      applyMediaFromIndex(existing, mediaIndex);
+      // Only carry enrichment forward when the calendar item still has the
+      // same title. A title replacement needs a fresh canonical event record.
+      if (!titleChanged) {
+        applyMediaFromIndex(existing, mediaIndex);
+      }
       addEventToMediaIndex(mediaIndex, existing);
       mergedEvents.push(existing);
       existingEventsMap.delete(newEvent.uid);

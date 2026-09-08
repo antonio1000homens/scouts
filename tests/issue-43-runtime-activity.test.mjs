@@ -48,6 +48,19 @@ test('failed worker completion remains a terminal failure in authoritative activ
   assert.equal(activity[0].failure.message, 'Gemini daily limit reached');
 });
 
+test('agenda publication failure is needs-attention rather than completed', () => {
+  const activity = buildCanonicalActivity({
+    completedSnapshot: snapshot('completed', [request({
+      status: 'failed',
+      failure: { type: 'AGENDA_EVENT_NOT_FOUND', message: 'No agenda event matches HEX' },
+    })]),
+    now: NOW,
+  });
+  assert.equal(activity[0].state, 'failed');
+  assert.equal(activity[0].health, 'needs_attention');
+  assert.equal(activity[0].failure.type, 'AGENDA_EVENT_NOT_FOUND');
+});
+
 test('age alone never creates queued-stalled or needs-attention lifecycle state', () => {
   const activity = buildCanonicalActivity({
     queuedSnapshot: snapshot('queued', [request({ requestTime: '2026-09-07T18:00:00Z' })]),

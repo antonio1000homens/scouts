@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import './test-cloudflare-image-client.mjs';
+import './test-agenda-publisher.mjs';
 import '../../../../tests/issue-18-cloudflare-image.integration.test.mjs';
 import {
   normaliseStage,
@@ -20,7 +21,10 @@ const scoutsTemplate = readFileSync('lambdas/cloudformation/templates/scouts.yam
 const scouts2sqsTemplate = readFileSync('lambdas/cloudformation/templates/scouts2sqs.yaml', 'utf8');
 const scoutsDeploy = readFileSync('lambdas/scouts/deploy.sh', 'utf8');
 const scouts2sqsDeploy = readFileSync('lambdas/scouts2sqs/deploy.sh', 'utf8');
+const sqs2scoutsDeploy = readFileSync('lambdas/sqs2scouts/deploy.sh', 'utf8');
 const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
+const persistenceProcessor = readFileSync('lambdas/sqs2scouts/function/persistence-processor.mjs', 'utf8');
+const imageProviderAdapter = readFileSync('lambdas/sqs2scouts/function/image-provider-adapter.mjs', 'utf8');
 
 test('normaliseStage maps external imageUrl to logical image', () => {
   assert.equal(normaliseStage('tagline'), 'tagline');
@@ -161,4 +165,13 @@ test('activity status uses execution history for live stage and bounded recent t
   assert.match(runtimeActivity, /RECENT_FAILURE_WINDOW_MS/);
   assert.match(runtimeActivity, /terminalExecutionCache/);
   assert.match(runtimeActivity, /statusFilter:\s*'RUNNING'/);
+});
+
+test('all direct enrichment persistence paths publish their canonical HEX event before completion', () => {
+  assert.match(sqs2scoutsDeploy, /agenda-publisher\.mjs/);
+  assert.match(persistenceProcessor, /await saveHexEventToS3\(hexValue, hexData\);\s*await publishHexEventToAgenda\(hexValue, hexData\);/);
+  assert.match(persistenceProcessor, /await saveHexEventToS3\(hexValue, event\);\s*await publishHexEventToAgenda\(hexValue, event\);/);
+  assert.match(persistenceProcessor, /orchestrationStep: 'tagline'/);
+  assert.match(persistenceProcessor, /orchestrationStep: 'imageTheme'/);
+  assert.match(imageProviderAdapter, /await saveEvent\(hex, event\);\s*await publishEvent\(hex, event\);/);
 });
