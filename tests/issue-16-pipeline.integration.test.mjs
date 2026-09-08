@@ -66,7 +66,7 @@ test('image provider calls are owned by atomic stage reservation before any prov
   assert.ok(cloudflareReserve >= 0 && cloudflareBudget > cloudflareReserve, 'Cloudflare stage reservation must precede image budget');
   assert.ok(cloudflareCall > cloudflareBudget, 'Cloudflare call must occur after stage and budget reservation');
 
-  const geminiFlow = sliceFunction(workerCoreSource, 'async function processImageProvider', 'async function resultAfterLegacy');
+  const geminiFlow = sliceFunction(workerCoreSource, 'async function processImageProvider', 'async function resultAfterProcessor');
   const geminiReserve = geminiFlow.search(/await\s+reserveEnrichmentAttempt\s*\(/);
   const geminiBudget = geminiFlow.search(/await\s+reserveGeminiImageBudgets\s*\(/);
   const geminiCall = geminiFlow.search(/await\s+callGemini\s*\(\s*prompt\s*\)/);
@@ -82,7 +82,7 @@ test('provider success is cached before event persistence so persistence retries
   assert.match(cloudflareFlow, /loadReusableGeneration/);
   assert.match(cloudflareFlow, /persistence_pending/);
 
-  const geminiFlow = sliceFunction(workerCoreSource, 'async function processImageProvider', 'async function resultAfterLegacy');
+  const geminiFlow = sliceFunction(workerCoreSource, 'async function processImageProvider', 'async function resultAfterProcessor');
   const geminiCache = geminiFlow.indexOf('await markGeminiSucceeded');
   const geminiPersist = geminiFlow.indexOf('await persistGeneratedImage', geminiCache);
   assert.ok(geminiCache >= 0 && geminiPersist > geminiCache, 'Gemini rollback result must be cached before event persistence');
