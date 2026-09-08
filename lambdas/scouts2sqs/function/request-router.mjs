@@ -3,7 +3,7 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SFNClient, ListExecutionsCommand, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
-import { lambdaHandler as legacyHandler } from './scouts2sqs.mjs';
+import { lambdaHandler as requestProcessorHandler } from './request-processor.mjs';
 
 const AWS_REGION = process.env.AWS_REGION || 'eu-west-2';
 const TARGET_BUCKET = process.env.TARGET_BUCKET || 'scouts-2ndtolworth-prod-553490163883';
@@ -49,7 +49,7 @@ function getImageMetadata(event) {
 }
 
 function getTagline(event) {
-  return text(getMetadata(event).tagline ?? event?.tagline ?? event?.AI ?? null);
+  return text(getMetadata(event).tagline ?? event?.tagline ?? null);
 }
 
 function getImageTheme(event) {
@@ -110,6 +110,10 @@ export function isDirectImageEnrichRequest(message) {
 
 export function isFullEnrichStartRequest(message) {
   if (text(message?.realm) !== 'scoutsRequest') return false;
+  // `new`/`retry`/`imageEnrich` are accepted at the queue boundary so messages
+  // produced by the calendar service before deployment are drained safely. All
+  // of them enter the single full-enrich state machine; no legacy workflow is
+  // selected by these aliases.
   return new Set(['new', 'retry', 'imageEnrich', 'fullEnrich']).has(text(message?.action));
 }
 
@@ -192,11 +196,10 @@ export function translateCompactPersistRequest(message) {
   };
 }
 
-// sqs2scouts already owns the durable read/merge/write. Keep this handoff
-// sparse so two independent compact patches cannot overwrite each other with
-// stale full-event snapshots. Its persist parser supports a JSON patch in the
-// action field; a string HEX subject bypasses the legacy subject normalizer
-// while still giving the worker an unambiguous persistence target.
+// The persistence processor owns the durable read/merge/write. Keep this
+// handoff sparse so independent patches cannot overwrite one another with stale
+// full-event snapshots. Its persistence contract accepts a JSON patch in the
+// action field and a string HEX subject as the unambiguous target.
 export function buildDownstreamPersistMessage(message) {
   const translated = translateCompactPersistRequest(message);
   return {
@@ -422,16 +425,16 @@ async function handleMessage(message) {
 export async function lambdaHandler(event) {
   const records = Array.isArray(event?.Records) ? event.Records : null;
   if (records) {
-    const delegatedRecords = [];
+    const standardRecords = [];
     for (const record of records) {
       const message = parseRecord(record);
       if (!message) {
-        delegatedRecords.push(record);
+        standardRecords.push(record);
         continue;
       }
       try {
         const handled = await handleMessage(message);
-        if (!handled.intercepted) delegatedRecords.push(record);
+        if (!handled.intercepted) standardRecords.push(record);
       } catch (error) {
         console.error('[FullEnrich] Intercepted request failed', {
           error: error?.message || String(error),
@@ -442,7 +445,7 @@ export async function lambdaHandler(event) {
         throw error;
       }
     }
-    if (delegatedRecords.length > 0) return legacyHandler({ ...event, Records: delegatedRecords });
+    if (standardRecords.length > 0) return requestProcessorHandler({ ...event, Records: standardRecords });
     return { statusCode: 200, body: 'Canonical Scouts requests processed' };
   }
 
@@ -478,5 +481,5 @@ export async function lambdaHandler(event) {
       };
     }
   }
-  return legacyHandler(event);
+  return requestProcessorHandler(event);
 }
