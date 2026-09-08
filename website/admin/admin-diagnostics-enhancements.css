@@ -1,0 +1,111 @@
+.diagnostics-help {
+    margin: .55rem 0;
+    color: #5f6368;
+    font-size: .84rem;
+    line-height: 1.4;
+}
+
+.dlq-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: .7rem;
+}
+
+#diagnostics-dlq-content {
+    display: grid;
+    gap: .8rem;
+}
+
+.dlq-panel {
+    border: 1px solid #ddd;
+    border-radius: 9px;
+    padding: .75rem;
+    background: #fafafa;
+}
+
+.dlq-panel-header,
+.dlq-message-header {
+    display: flex;
+    justify-content: space-between;
+    gap: .75rem;
+    align-items: baseline;
+}
+
+.dlq-panel-header > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.dlq-panel-header > div span,
+.dlq-message-header span,
+.dlq-count {
+    color: #666;
+    font-size: .82rem;
+}
+
+.dlq-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    margin-top: .7rem;
+}
+
+.dlq-redrive-button:not(:disabled) {
+    border-color: #b42318;
+}
+
+.dlq-action-status {
+    margin: .55rem 0 0;
+    padding: .5rem .6rem;
+    border-radius: 6px;
+    background: #f2f4f7;
+    font-size: .84rem;
+}
+
+.dlq-action-status.error { background: #fef3f2; color: #b42318; }
+.dlq-action-status.success { background: #ecfdf3; color: #166534; }
+
+.dlq-message-list {
+    display: grid;
+    gap: .6rem;
+    margin-top: .75rem;
+}
+
+.dlq-message-card {
+    border-top: 1px solid #ddd;
+    padding-top: .65rem;
+    display: grid;
+    gap: .25rem;
+}
+
+.dlq-body-details { margin-top: .35rem; }
+.dlq-body-details summary { cursor: pointer; font-weight: 600; }
+.dlq-body-details pre {
+    max-height: 280px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    background: #111827;
+    color: #f9fafb;
+    padding: .65rem;
+    border-radius: 6px;
+    font-size: .75rem;
+}
+
+.event-direct-image-request {
+    position: relative;
+}
+
+.event-direct-image-request::before {
+    content: "✦";
+    margin-right: .3rem;
+}
+
+@media (max-width: 600px) {
+    .dlq-panel-header,
+    .dlq-message-header {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: .2rem;
+    }
+}
