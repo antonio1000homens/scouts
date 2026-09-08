@@ -157,14 +157,12 @@ test('Scouts status deployment uses full-enrich activity entrypoint and least pr
   assert.match(scoutsDeploy, /scouts-entry\.mjs[\s\\]+(?:agenda-hex-repair\.mjs[\s\\]+)?runtime-activity\.mjs/);
 });
 
-test('activity status uses execution history for live stage and bounded recent terminal outcomes', () => {
-  assert.match(runtimeActivity, /GetExecutionHistoryCommand/);
-  assert.match(runtimeActivity, /reverseOrder:\s*true/);
-  assert.match(runtimeActivity, /stateEnteredName/);
-  assert.match(runtimeActivity, /MAX_RECENT_FAILURES/);
-  assert.match(runtimeActivity, /RECENT_FAILURE_WINDOW_MS/);
-  assert.match(runtimeActivity, /terminalExecutionCache/);
-  assert.match(runtimeActivity, /statusFilter:\s*'RUNNING'/);
+test('activity status reads the durable request ledger rather than rotating snapshots', () => {
+  assert.match(runtimeActivity, /listRequestActivity/);
+  assert.match(runtimeActivity, /request-activity-ledger/);
+  assert.match(runtimeActivity, /nextCursor/);
+  assert.doesNotMatch(runtimeActivity, /scoutsProcessing\.json/);
+  assert.doesNotMatch(runtimeActivity, /scoutsComplete\.json/);
 });
 
 test('all direct enrichment persistence paths publish their canonical HEX event before completion', () => {

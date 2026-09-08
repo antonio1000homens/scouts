@@ -6,6 +6,7 @@ import { SQSClient, SendMessageCommand, GetQueueAttributesCommand } from '@aws-s
 import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
 import sharp from 'sharp';
 import { getOptionalSecret, getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
+import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 import { publishCanonicalEventToAgenda } from './agenda-publisher.mjs';
 import {
     buildGenerationId,
@@ -3152,6 +3153,7 @@ export async function lambdaHandler(event) {
     const observedLinks = [];
     const observedRequests = [];
     let runtimeOutcome = { status: 'completed' };
+    let activityContext = null;
     try {
         if (directInvocation) {
             const hints = collectRequestHints(null, event);
@@ -3211,6 +3213,9 @@ export async function lambdaHandler(event) {
 
         console.log('[sqs2scouts] Parsed message body:', JSON.stringify(summarizeMessageBody(messageBody)));
         const requestContext = buildRequestContext(sqsMessage, messageBody);
+        activityContext = { ...messageBody, requestId: requestContext.requestId, hex: requestContext.hex };
+        await recordRequestActivity({ ...activityContext, state: 'processing', stage: messageBody.realm || 'processing' })
+            .catch((activityError) => console.warn('[Activity] Unable to record worker start:', activityError?.message || activityError));
         const autoApproval = isAutoApprovalMode(messageBody);
 
         const realm = messageBody.realm || 'unknown';
@@ -3738,7 +3743,17 @@ export async function lambdaHandler(event) {
             body: JSON.stringify({ error: error.message })
         };
     } finally {
-        await persistCompletedRequestsRuntimeSnapshot(records, observedRequestIds, observedHexes, observedLinks, observedRequests, runtimeOutcome);
+        if (activityContext?.requestId) {
+            const isWorkflowStage = activityContext.invocationType === 'stepFunctions' && activityContext.realm !== 'image';
+            const failed = runtimeOutcome.status === 'failed';
+            await recordRequestActivity({
+                ...activityContext,
+                state: failed ? 'needs_attention' : (isWorkflowStage ? 'published' : 'completed'),
+                stage: failed ? 'failed' : (isWorkflowStage ? 'published' : 'agenda_published'),
+                publication: failed ? 'failed' : 'published',
+                failure: runtimeOutcome.failure || null,
+            }).catch((activityError) => console.warn('[Activity] Unable to record worker outcome:', activityError?.message || activityError));
+        }
     }
 }
 

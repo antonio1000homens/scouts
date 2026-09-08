@@ -11,6 +11,7 @@ import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SFNClient, DescribeExecutionCommand, ListExecutionsCommand } from '@aws-sdk/client-sfn';
 import { randomUUID } from 'crypto';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
+import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 import {
   getEnrichmentState,
   evaluateEnrichmentEligibility,
@@ -1659,12 +1660,14 @@ async function postToScoutsRequestsQueue(payload, contextLabel) {
 
   try {
     const sendResult = await sqs.send(command);
+    await recordRequestActivity({
+      ...outgoing,
+      requestId: outgoing.requestId,
+      state: 'queued',
+      stage: 'scoutsRequests',
+      action: outgoing.action || contextLabel,
+    }).catch((activityError) => console.warn('[Activity] Unable to record queued request:', activityError?.message || activityError));
     console.log(`[SQS] ${contextLabel}:`, JSON.stringify(outgoing));
-    try {
-      await appendQueuedRuntimeSnapshot(outgoing, sendResult?.MessageId ?? null);
-    } catch (runtimeError) {
-      console.warn('[Runtime] Failed to update scoutsQueued snapshot:', runtimeError?.message || runtimeError);
-    }
     return {
       messageId: sendResult?.MessageId ?? null,
       md5OfMessageBody: sendResult?.MD5OfMessageBody ?? null,

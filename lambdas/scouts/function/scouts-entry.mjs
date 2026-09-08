@@ -88,7 +88,7 @@ async function invokeScoutsService(event) {
 
 function isInterceptedRuntimeCommand(command) {
   if (!command) return false;
-  if (command.subject === 'activity' && command.action === 'status') return true;
+  if (command.subject === 'activity' && ['status', 'history', 'lookup'].includes(command.action)) return true;
   if (command.subject === 'dlq' && ['inspect', 'redrive'].includes(command.action)) return true;
   return command.subject === 'schedule' && ['status', 'enable', 'disable'].includes(command.action);
 }
@@ -163,7 +163,14 @@ export async function handler(event = {}) {
     }
 
     if (command.subject === 'activity') {
-      const activity = await buildRuntimeActivity();
+      const activity = await buildRuntimeActivity({
+        requestIds: command.action === 'lookup' ? command.body?.requestIds : undefined,
+        hex: command.body?.hex,
+        states: command.body?.states,
+        cursor: command.action === 'history' ? command.body?.cursor : undefined,
+        limit: command.action === 'history' ? command.body?.limit : 50,
+        activeOnly: command.action === 'status' && command.body?.activeOnly === true,
+      });
       return response(200, { status: 'ok', activity });
     }
 

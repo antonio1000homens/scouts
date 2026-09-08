@@ -110,6 +110,9 @@ Parameters:
   GeminiEnrichmentStateTableName:
     Type: String
     Default: scouts-enrichment-state
+  ScoutsRequestActivityTableName:
+    Type: String
+    Default: scouts-request-activity
   ScheduledRefreshExpression:
     Type: String
     Default: rate(30 minutes)
@@ -207,9 +210,16 @@ Resources:
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
+                  - dynamodb:Query
                 Resource:
                   - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${GeminiUsageTableName}
                   - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${GeminiEnrichmentStateTableName}
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScoutsRequestActivityTableName}
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScoutsRequestActivityTableName}/index/*
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScoutsRequestActivityTableName}
               - Effect: Allow
                 Action:
                   - ssm:GetParameter
@@ -257,6 +267,7 @@ Resources:
           SCOUTS2SQS_FUNCTION_URL: !Ref Scouts2SqsFunctionUrl
           FULL_ENRICH_STATE_MACHINE_ARN: !Ref FullEnrichStateMachineArn
           GEMINI_ENRICHMENT_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
+          SCOUTS_REQUEST_ACTIVITY_TABLE_NAME: !Ref ScoutsRequestActivityTableName
           SCOUTS_SCHEDULE_EXPRESSION: !Ref ScheduledRefreshExpression
           SCOUTS_SCHEDULED_REFRESH_DEFAULT_ENABLED: !Ref ScheduledRefreshDefaultEnabled
           SCOUTS_SCHEDULED_REFRESH_MAX_EVENTS: !Ref ScheduledRefreshMaxEvents

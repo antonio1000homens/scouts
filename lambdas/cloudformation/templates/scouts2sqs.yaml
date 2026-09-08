@@ -104,6 +104,9 @@ Parameters:
       - disabled
       - cloudflare
       - gemini
+  ScoutsRequestActivityTableName:
+    Type: String
+    Default: scouts-request-activity
 
 Conditions:
   IsPublicFunctionUrl: !Equals [!Ref FunctionUrlAuthType, 'NONE']
@@ -153,6 +156,10 @@ Resources:
                   - s3:GetObject
                   - s3:PutObject
                 Resource: !Sub arn:aws:s3:::${TargetBucket}/*
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScoutsRequestActivityTableName}
               - !If
                 - HasFullEnrichStateMachineArn
                 - Effect: Allow
@@ -188,6 +195,7 @@ Resources:
           DLQ_URL: !Ref DlqUrl
           FULL_ENRICH_STATE_MACHINE_ARN: !Ref FullEnrichStateMachineArn
           IMAGE_GENERATION_PROVIDER: !Ref ImageGenerationProvider
+          SCOUTS_REQUEST_ACTIVITY_TABLE_NAME: !Ref ScoutsRequestActivityTableName
       Code:
         S3Bucket: !Ref CodeBucket
         S3Key: !Ref FunctionCodeKey
