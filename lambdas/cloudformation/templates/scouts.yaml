@@ -108,6 +108,25 @@ Parameters:
   GeminiEnrichmentStateTableName:
     Type: String
     Default: scouts-enrichment-state
+  ScheduledRefreshExpression:
+    Type: String
+    Default: rate(30 minutes)
+    Description: EventBridge cadence for automatic calendar/agenda refresh.
+  ScheduledRefreshDefaultEnabled:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Description: Used only until the admin writes an explicit scheduled-refresh preference to S3.
+  ScheduledRefreshMaxEvents:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    Description: Maximum new enrichment queue publications per scheduled refresh. Zero keeps scheduled refresh discovery-only.
+  ScheduledRefreshConfigKey:
+    Type: String
+    Default: runtime/scheduledRefresh.json
 
 Conditions:
   ShouldCreateDataBucket: !Equals [!Ref CreateDataBucket, 'true']
@@ -161,12 +180,12 @@ Resources:
                   - s3:GetObject
                   - s3:DeleteObject
                 Resource: !Sub arn:aws:s3:::${DataBucketName}/*
+              # Normal Scouts ingress publishes only to scoutsRequests.
               - Effect: Allow
                 Action:
                   - sqs:SendMessage
                 Resource:
                   - !Ref ScoutsRequestsQueueArn
-                  - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsProcessing
               - Effect: Allow
                 Action:
                   - sqs:GetQueueAttributes
@@ -175,6 +194,9 @@ Resources:
                   - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsProcessing
                   - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsRequestsDLQ
                   - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsProcessingDLQ
+              # StartMessageMoveTask requires Receive/Delete/GetAttributes on the
+              # DLQ plus SendMessage on its destination queue. These permissions
+              # are for explicit admin redrive, not normal application publishing.
               - Effect: Allow
                 Action:
                   - sqs:ReceiveMessage
@@ -183,6 +205,12 @@ Resources:
                 Resource:
                   - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsRequestsDLQ
                   - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsProcessingDLQ
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource:
+                  - !Ref ScoutsRequestsQueueArn
+                  - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsProcessing
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
@@ -238,9 +266,33 @@ Resources:
           GEMINI_DAILY_REQUEST_LIMIT: !Ref GeminiDailyRequestLimit
           GEMINI_USAGE_TABLE_NAME: !Ref GeminiUsageTableName
           GEMINI_ENRICHMENT_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
+          SCOUTS_SCHEDULE_EXPRESSION: !Ref ScheduledRefreshExpression
+          SCOUTS_SCHEDULED_REFRESH_DEFAULT_ENABLED: !Ref ScheduledRefreshDefaultEnabled
+          SCOUTS_SCHEDULED_REFRESH_MAX_EVENTS: !Ref ScheduledRefreshMaxEvents
+          SCOUTS_SCHEDULED_REFRESH_CONFIG_KEY: !Ref ScheduledRefreshConfigKey
       Code:
         S3Bucket: !Ref CodeBucket
         S3Key: !Ref FunctionCodeKey
+
+  ScoutsScheduledRefreshRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Scheduled refresh of all configured Scout calendar feeds and agenda state.
+      ScheduleExpression: !Ref ScheduledRefreshExpression
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ScoutsFunction.Arn
+          Id: ScoutsScheduledRefresh
+          Input: !Sub |
+            {"_scheduledRefresh":true,"body":{"realm":"scouts","subject":"calendars","action":"refreshAllCalendars","calendar":"all","maxEvents":${ScheduledRefreshMaxEvents}}}
+
+  ScoutsScheduledRefreshInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ScoutsFunction
+      Principal: events.amazonaws.com
+      Action: lambda:InvokeFunction
+      SourceArn: !GetAtt ScoutsScheduledRefreshRule.Arn
 
   ScoutsFunctionUrl:
     Type: AWS::Lambda::Url
@@ -280,3 +332,7 @@ Outputs:
     Value: !Ref ScoutsSharedLayer
   DataBucket:
     Value: !Ref DataBucketName
+  ScheduledRefreshRuleArn:
+    Value: !GetAtt ScoutsScheduledRefreshRule.Arn
+  ScheduledRefreshExpression:
+    Value: !Ref ScheduledRefreshExpression
