@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Slack handler Lambda stack (function + layer + IAM + function URL)
+Description: Slack handler Lambda stack (function + shared layer reference + IAM + function URL)
 
 Parameters:
   CodeBucket:
@@ -8,15 +8,12 @@ Parameters:
   FunctionCodeKey:
     Type: String
     Description: S3 key for function zip.
-  LayerCodeKey:
+  SharedLayerVersionArn:
     Type: String
-    Description: S3 key for layer zip.
+    Description: Centrally published scouts-shared Lambda layer version ARN.
   FunctionName:
     Type: String
     Default: scouts-slack-handler
-  LayerName:
-    Type: String
-    Default: scouts-shared
   RoleArn:
     Type: String
     Default: ''
@@ -110,16 +107,6 @@ Resources:
                   - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/shared/slack-bot-token
                   - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/shared/required-api-key
 
-  SlackHandlerLayer:
-    Type: AWS::Lambda::LayerVersion
-    Properties:
-      LayerName: !Ref LayerName
-      CompatibleRuntimes:
-        - !Ref Runtime
-      Content:
-        S3Bucket: !Ref CodeBucket
-        S3Key: !Ref LayerCodeKey
-
   SlackHandlerFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -130,7 +117,7 @@ Resources:
       Timeout: !Ref Timeout
       MemorySize: !Ref MemorySize
       Layers:
-        - !Ref SlackHandlerLayer
+        - !Ref SharedLayerVersionArn
       Environment:
         Variables:
           SLACK_SIGNING_SECRET_PARAMETER: !Ref SlackSigningSecretParameter
@@ -185,6 +172,6 @@ Outputs:
   FunctionUrl:
     Value: !GetAtt SlackHandlerFunctionUrl.FunctionUrl
   LayerVersionArn:
-    Value: !Ref SlackHandlerLayer
+    Value: !Ref SharedLayerVersionArn
   EffectiveRoleArn:
     Value: !If [UseProvidedRole, !Ref RoleArn, !GetAtt SlackHandlerRole.Arn]
