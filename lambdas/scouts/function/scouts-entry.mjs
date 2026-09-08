@@ -74,7 +74,7 @@ function response(statusCode, body) {
   };
 }
 
-async function handleScheduledInvocation(event) {
+async function handleScheduledInvocation() {
   try {
     const schedule = await getScheduledRefreshSettings();
     if (!schedule.enabled) {
@@ -84,16 +84,30 @@ async function handleScheduledInvocation(event) {
         scheduledRefresh: schedule,
       };
     }
+
+    const requiredApiKey = await getRequiredSecret('REQUIRED_API_KEY_PARAMETER');
+    const trustedInternalEvent = {
+      requestContext: { http: { method: 'POST' } },
+      headers: { 'x-api-key': requiredApiKey },
+      body: JSON.stringify({
+        realm: 'scouts',
+        subject: 'calendars',
+        action: 'refreshAllCalendars',
+        calendar: 'all',
+        maxEvents: schedule.maxQueuePublishesPerRun,
+      }),
+    };
+
     console.log('[ScheduledRefresh] Running EventBridge calendar refresh.', {
       scheduleExpression: schedule.scheduleExpression,
       maxQueuePublishesPerRun: schedule.maxQueuePublishesPerRun,
     });
-    return legacyHandler(event);
+    return legacyHandler(trustedInternalEvent);
   } catch (error) {
-    // Fail closed: a schedule-state read problem should not accidentally trigger
-    // calendar/network/enrichment work. Return successfully so EventBridge does
-    // not create a retry storm while the configuration store is unavailable.
-    console.error('[ScheduledRefresh] Unable to read scheduled refresh state; skipping run.', error?.message || error);
+    // Fail closed: a schedule-state/secret read problem should not accidentally
+    // trigger calendar/network/enrichment work. Returning successfully also
+    // avoids an EventBridge retry storm while configuration is unavailable.
+    console.error('[ScheduledRefresh] Unable to prepare scheduled refresh; skipping run.', error?.message || error);
     return {
       status: 'skipped',
       reason: 'schedule_state_unavailable',
@@ -104,7 +118,7 @@ async function handleScheduledInvocation(event) {
 
 export async function handler(event = {}) {
   if (isScheduledRefreshInvocation(event)) {
-    return handleScheduledInvocation(event);
+    return handleScheduledInvocation();
   }
 
   const command = runtimeCommand(decodeBody(event));
