@@ -19,6 +19,7 @@ const adminSimplify = readFileSync('website/admin/admin-simplify.js', 'utf8');
 const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
 const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
 const agendaHexRepair = readFileSync('lambdas/scouts/function/agenda-hex-repair.mjs', 'utf8');
+const scoutsService = readFileSync('lambdas/scouts/function/scouts-service.mjs', 'utf8');
 const deployEntry = readFileSync('deploy.sh', 'utf8');
 
 function indexOfRequired(text, label) {
@@ -195,6 +196,14 @@ test('calendar refresh backfills canonical agenda HEX independently of enrichmen
   assert.match(scoutsEntry, /return invokeScoutsService\(trustedInternalEvent\)/);
   assert.match(scoutsEntry, /return invokeScoutsService\(event\)/);
   assert.match(scoutsEntry, /maxEvents: schedule\.maxQueuePublishesPerRun/);
+});
+
+test('calendar UID replacements overwrite stale titles without carrying their media forward', () => {
+  assert.match(scoutsService, /const titleChanged = Boolean\(/);
+  assert.match(scoutsService, /existing\.title = incomingTitle;/);
+  assert.match(scoutsService, /existing\.summary = newEvent\.summary \?\? incomingTitle;/);
+  assert.match(scoutsService, /existing\.tagline = getEventTagline\(newEvent\) \?\? null;/);
+  assert.match(scoutsService, /if \(!titleChanged\) \{\s*applyMediaFromIndex\(existing, mediaIndex\);/);
 });
 
 test('website deployment never publishes the Lambda URL into browser config', () => {
