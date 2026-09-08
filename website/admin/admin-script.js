@@ -73,12 +73,16 @@ const COMPLETED_REQUESTS_RUNTIME_URL = '../../runtime/scoutsComplete.json';
 const SCOUTS_CONFIG_URL = window.SCOUTS_CONFIG_URL || '../../scouts.conf';
 const SCOUTS_CONFIG_CACHE_MS = 5 * 60 * 1000;
 const HEX_PREVIEW_POLL_INTERVAL_MS = 5000;
+const GENERATED_REQUEST_POLL_INTERVAL_MS = 3000;
+const GENERATED_REQUEST_POLL_TIMEOUT_MS = 30000;
 const QUEUED_STALLED_THRESHOLD_MS = 60 * 1000;
 let activeHexPreviewCardIndex = null;
 let activeHexPreviewHex = null;
 let activeHexPreviewPollTimer = null;
 let hexPreviewAutoRefreshEnabled = false;
 let hexPreviewIntervalMs = HEX_PREVIEW_POLL_INTERVAL_MS;
+let generatedRequestPollTimer = null;
+let generatedRequestPollToken = 0;
 
 async function buildHttpError(response) {
     let details = '';
@@ -3145,8 +3149,94 @@ function updateModalContent(index) {
     openUploadModal(index);
 }
 
+function stopGeneratedRequestPolling() {
+    generatedRequestPollToken += 1;
+    if (generatedRequestPollTimer) {
+        clearTimeout(generatedRequestPollTimer);
+        generatedRequestPollTimer = null;
+    }
+}
+
+function findAuthoritativeRequest(activity, requestId) {
+    const normalizedRequestId = hasText(requestId) ? String(requestId).trim() : '';
+    if (!normalizedRequestId || !activity || typeof activity !== 'object') return null;
+    const requests = Array.isArray(activity.requests) ? activity.requests : [];
+    return requests.find((request) => String(request?.requestId || '').trim() === normalizedRequestId) || null;
+}
+
+function isTerminalAuthoritativeRequest(request) {
+    return ['completed', 'failed', 'manual_review', 'needs_attention'].includes(
+        String(request?.state || '').trim().toLowerCase(),
+    );
+}
+
+function describeAuthoritativeRequestOutcome(request) {
+    const state = String(request?.state || '').trim().toLowerCase();
+    if (state === 'completed') return 'completed';
+    const failure = request?.failure && typeof request.failure === 'object' ? request.failure : {};
+    const detail = hasText(failure.message) ? `: ${failure.message.trim()}` : '';
+    return `${state || 'failed'}${detail}`;
+}
+
+async function refreshGeneratedEvent(hex) {
+    await loadEvents({ silent: true });
+    if (currentEventIndex === null) return;
+
+    const normalizedHex = String(hex || '').trim().toLowerCase();
+    const refreshedIndex = visibleEventEntries.findIndex(
+        (entry) => getEventHex(entry?.event).toLowerCase() === normalizedHex,
+    );
+    if (refreshedIndex < 0) return;
+
+    currentEventIndex = refreshedIndex;
+    updateModalContent(refreshedIndex);
+}
+
+async function pollGeneratedRequestUntilSettled(requestId, options) {
+    const { hex, config, eventLabel } = options || {};
+    stopGeneratedRequestPolling();
+    const pollToken = generatedRequestPollToken;
+    const deadline = Date.now() + GENERATED_REQUEST_POLL_TIMEOUT_MS;
+
+    const check = async () => {
+        if (pollToken !== generatedRequestPollToken) return;
+
+        let activity;
+        try {
+            activity = await pollQueueDepthSnapshots();
+        } catch (error) {
+            updateModalStatus(`Unable to check ${config?.queueLabel || 'AI generation'} progress: ${error.message}`, 'error');
+            generatedRequestPollTimer = null;
+            return;
+        }
+
+        if (pollToken !== generatedRequestPollToken) return;
+        const request = findAuthoritativeRequest(activity, requestId);
+        if (request && isTerminalAuthoritativeRequest(request)) {
+            await refreshGeneratedEvent(hex);
+            if (pollToken !== generatedRequestPollToken) return;
+            const outcome = describeAuthoritativeRequestOutcome(request);
+            const tone = request.state === 'completed' ? 'success' : 'error';
+            updateModalStatus(`${config?.label || 'AI generation'} ${outcome} for "${eventLabel}".`, tone);
+            generatedRequestPollTimer = null;
+            return;
+        }
+
+        if (Date.now() >= deadline) {
+            updateModalStatus(`No ${config?.queueLabel || 'AI generation'} update received for "${eventLabel}" within 30 seconds.`, 'error');
+            generatedRequestPollTimer = null;
+            return;
+        }
+
+        generatedRequestPollTimer = setTimeout(check, GENERATED_REQUEST_POLL_INTERVAL_MS);
+    };
+
+    await check();
+}
+
 // Close upload modal
 function closeUploadModal() {
+    stopGeneratedRequestPolling();
     const modal = document.getElementById('upload-modal');
     modal.style.display = 'none';
     const taglineInput = document.getElementById('modal-tagline-input');
@@ -3654,6 +3744,14 @@ async function requestGeneratedField(field, action = 'generate') {
         updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
         await pollQueueDepthSnapshots();
+        const requestId = extractBackendRequestId(result);
+        if (requestId) {
+            void pollGeneratedRequestUntilSettled(requestId, {
+                hex,
+                config,
+                eventLabel,
+            });
+        }
         setTimeout(() => {
             loadEvents({ silent: true });
         }, 2000);
