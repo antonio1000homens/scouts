@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import { handler as legacyHandler } from './scouts.mjs';
 import { buildRuntimeActivity } from './runtime-activity.mjs';
+import { inspectRuntimeDlq, redriveRuntimeDlq } from './runtime-dlq.mjs';
 
 function text(value) {
   if (value === undefined || value === null) return '';
@@ -41,11 +42,19 @@ function constantTimeEquals(left, right) {
   return crypto.timingSafeEqual(a, b);
 }
 
-function isRuntimeActivityCommand(event) {
-  const body = decodeBody(event);
-  return text(body?.realm).toLowerCase() === 'runtime'
-    && text(body?.subject).toLowerCase() === 'activity'
-    && text(body?.action).toLowerCase() === 'status';
+function runtimeCommand(body) {
+  if (text(body?.realm).toLowerCase() !== 'runtime') return null;
+  return {
+    subject: text(body?.subject).toLowerCase(),
+    action: text(body?.action).toLowerCase(),
+    body,
+  };
+}
+
+function isInterceptedRuntimeCommand(command) {
+  if (!command) return false;
+  if (command.subject === 'activity' && command.action === 'status') return true;
+  return command.subject === 'dlq' && ['inspect', 'redrive'].includes(command.action);
 }
 
 function response(statusCode, body) {
@@ -60,7 +69,8 @@ function response(statusCode, body) {
 }
 
 export async function handler(event = {}) {
-  if (!isRuntimeActivityCommand(event)) {
+  const command = runtimeCommand(decodeBody(event));
+  if (!isInterceptedRuntimeCommand(command)) {
     return legacyHandler(event);
   }
 
@@ -69,14 +79,29 @@ export async function handler(event = {}) {
     if (!constantTimeEquals(getApiKey(event), requiredApiKey)) {
       return response(403, { status: 'error', error: 'Forbidden: Invalid API Key' });
     }
-    const activity = await buildRuntimeActivity();
-    return response(200, { status: 'ok', activity });
+
+    if (command.subject === 'activity') {
+      const activity = await buildRuntimeActivity();
+      return response(200, { status: 'ok', activity });
+    }
+
+    const queueName = text(command.body?.queueName ?? command.body?.queue);
+    if (command.action === 'inspect') {
+      const dlq = await inspectRuntimeDlq(queueName, command.body?.maxMessages);
+      return response(200, { status: 'ok', dlq });
+    }
+
+    const redrive = await redriveRuntimeDlq(queueName, command.body?.expectedVisible);
+    return response(200, { status: 'ok', redrive });
   } catch (error) {
-    console.error('[RuntimeActivity] Failed to build admin activity status', error?.message || error);
-    return response(503, {
+    const statusCode = Number.isFinite(Number(error?.statusCode)) ? Number(error.statusCode) : 503;
+    const subject = command?.subject === 'dlq' ? 'DLQ diagnostics' : 'Runtime activity status';
+    console.error(`[RuntimeActivity] ${subject} command failed`, error?.message || error);
+    return response(statusCode, {
       status: 'error',
-      error: 'Runtime activity status unavailable',
+      error: `${subject} unavailable`,
       detail: error?.message || String(error),
+      ...(Number.isFinite(Number(error?.currentVisible)) ? { currentVisible: Number(error.currentVisible) } : {}),
     });
   }
 }
