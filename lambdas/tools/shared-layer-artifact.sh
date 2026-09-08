@@ -135,6 +135,17 @@ resolve_shared_layer_version() {
 
   prepare_shared_layer_zip "${shared_layer_dir}" "${code_bucket}" "${region}" "${npm_cache_dir}" "${layer_hash}"
 
+  # Another deployment may have published the same content-addressed layer
+  # while this deployment was building/uploading the ZIP. Re-check immediately
+  # before publishing to narrow the race window and reuse the canonical version.
+  existing_arn="$(find_shared_layer_version_arn "${layer_name}" "${layer_hash}" "${region}")"
+  if [ -n "${existing_arn}" ]; then
+    SCOUTS_SHARED_LAYER_VERSION_ARN="${existing_arn}"
+    export SCOUTS_SHARED_LAYER_VERSION_ARN
+    echo "Reusing concurrently published shared Lambda layer version ${SCOUTS_SHARED_LAYER_VERSION_ARN} (${layer_hash})"
+    return 0
+  fi
+
   echo "Publishing shared Lambda layer version for ${layer_hash}."
   published_arn="$(aws lambda publish-layer-version \
     --layer-name "${layer_name}" \
