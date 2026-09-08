@@ -61,7 +61,7 @@ SCOUTS2SQS_FUNCTION_URL="${SCOUTS2SQS_FUNCTION_URL:-}"
 FULL_ENRICH_STATE_MACHINE_ARN="${FULL_ENRICH_STATE_MACHINE_ARN:-}"
 GEMINI_DAILY_REQUEST_LIMIT="${GEMINI_DAILY_REQUEST_LIMIT:-10}"
 GEMINI_USAGE_TABLE_NAME="${GEMINI_USAGE_TABLE_NAME:-scouts-gemini-usage}"
-GEMINI_ENRICHMENT_STATE_TABLE_NAME="${GEMINI_ENRICHMENT_STATE_TABLE_NAME:-scouts-enrichment-state}"
+GEMINI_ENRICH_STATE_TABLE_NAME="${GEMINI_ENRICH_STATE_TABLE_NAME:-scouts-enrichment-state}"
 
 TEMPLATE_FILE="${ROOT_DIR}/cloudformation/templates/scouts.yaml"
 
@@ -133,12 +133,18 @@ if [ -z "${SCOUTS2SQS_FUNCTION_URL}" ]; then
 fi
 
 if [ -z "${FULL_ENRICH_STATE_MACHINE_ARN}" ]; then
-  DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN="$(aws cloudformation describe-stacks --region "${REGION}" --stack-name scouts-full-enrich --query "Stacks[0].Outputs[?OutputKey=='StateMachineArn'].OutputValue" --output text 2>/dev/null || true)"
-  if [ -n "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" ] && [ "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" != "None" ] && [ "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" != "null" ]; then FULL_ENRICH_STATE_MACHINE_ARN="${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}"; fi
+  for candidate_stack in scouts-full-enrich-managed-poc scouts-full-enrich; do
+    DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN="$(aws cloudformation describe-stacks --region "${REGION}" --stack-name "${candidate_stack}" --query "Stacks[0].Outputs[?OutputKey=='StateMachineArn'].OutputValue" --output text 2>/dev/null || true)"
+    if [ -n "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" ] && [ "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" != "None" ] && [ "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" != "null" ]; then
+      FULL_ENRICH_STATE_MACHINE_ARN="${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}"
+      echo "Discovered full-enrich state machine from stack ${candidate_stack}"
+      break
+    fi
+  done
 fi
 
 if [ -z "${FULL_ENRICH_STATE_MACHINE_ARN}" ]; then
-  echo -e "${RED}scouts-full-enrich StateMachineArn could not be resolved; refusing to deploy a partially wired Scouts Lambda.${NC}"
+  echo -e "${RED}full-enrich StateMachineArn could not be resolved from scouts-full-enrich-managed-poc or scouts-full-enrich; refusing to deploy a partially wired Scouts Lambda.${NC}"
   exit 1
 fi
 
@@ -192,7 +198,7 @@ CFN_DEPLOY_ARGS+=(
     FullEnrichStateMachineArn="${FULL_ENRICH_STATE_MACHINE_ARN}"
     GeminiDailyRequestLimit="${GEMINI_DAILY_REQUEST_LIMIT}"
     GeminiUsageTableName="${GEMINI_USAGE_TABLE_NAME}"
-    GeminiEnrichmentStateTableName="${GEMINI_ENRICHMENT_STATE_TABLE_NAME}"
+    GeminiEnrichmentStateTableName="${GEMINI_ENRICH_STATE_TABLE_NAME}"
 )
 
 aws cloudformation deploy "${CFN_DEPLOY_ARGS[@]}"
