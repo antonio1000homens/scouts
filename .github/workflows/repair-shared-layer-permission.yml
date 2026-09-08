@@ -1,0 +1,82 @@
+name: Repair shared Lambda layer deploy permission
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/repair-shared-layer-permission.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: eu-west-2
+  AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+  EXPECTED_AWS_ACCOUNT: "553490163883"
+
+jobs:
+  repair-shared-layer-permission:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: github-actions-scouts-layer-permission-repair
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify AWS account
+        run: |
+          set -euo pipefail
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          if [ "${account_id}" != "${EXPECTED_AWS_ACCOUNT}" ]; then
+            echo "Unexpected AWS account ${account_id}; expected ${EXPECTED_AWS_ACCOUNT}." >&2
+            exit 1
+          fi
+
+      - name: Grant shared Lambda layer deployment permission
+        run: |
+          set -euo pipefail
+          cat > /tmp/scouts-shared-layer-policy.json <<'JSON'
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "PublishScoutsSharedLayer",
+                "Effect": "Allow",
+                "Action": [
+                  "lambda:PublishLayerVersion"
+                ],
+                "Resource": "arn:aws:lambda:eu-west-2:553490163883:layer:scouts-shared"
+              },
+              {
+                "Sid": "ReadScoutsSharedLayerVersions",
+                "Effect": "Allow",
+                "Action": [
+                  "lambda:GetLayerVersion",
+                  "lambda:ListLayerVersions"
+                ],
+                "Resource": [
+                  "arn:aws:lambda:eu-west-2:553490163883:layer:scouts-shared",
+                  "arn:aws:lambda:eu-west-2:553490163883:layer:scouts-shared:*"
+                ]
+              }
+            ]
+          }
+          JSON
+
+          aws iam put-role-policy \
+            --role-name GitHubActionsScoutsDeployRole \
+            --policy-name ScoutsSharedLayerDeploy \
+            --policy-document file:///tmp/scouts-shared-layer-policy.json
+
+      - name: Verify repaired permission policy
+        run: |
+          set -euo pipefail
+          aws iam get-role-policy \
+            --role-name GitHubActionsScoutsDeployRole \
+            --policy-name ScoutsSharedLayerDeploy \
+            --query 'PolicyDocument.Statement[].Sid' \
+            --output text
