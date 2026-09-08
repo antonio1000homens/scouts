@@ -11,6 +11,7 @@ const workerSource = read('lambdas/sqs2scouts/function/image-provider-adapter.mj
 const workerCoreSource = read('lambdas/sqs2scouts/function/full-enrich-core.mjs');
 const scoutsTemplate = read('lambdas/cloudformation/templates/scouts.yaml');
 const workerTemplate = read('lambdas/cloudformation/templates/sqs2scouts.yaml');
+const scoutsDeploy = read('lambdas/scouts/deploy.sh');
 const retryDocs = read('GEMINI-ENRICHMENT-RETRY.md');
 
 function sliceFunction(source, startMarker, endMarker) {
@@ -28,13 +29,10 @@ test('scheduled enrichment checks per-stage state before both new and retry queu
   assert.match(scoutsSource, /state_store_unavailable/);
 });
 
-test('global daily Gemini circuit is checked upstream and fails closed', () => {
-  const circuit = sliceFunction(scoutsSource, 'async function isGeminiCircuitOpen', 'async function checkEnrichmentEligibility');
-  assert.match(circuit, /GEMINI_DAILY_REQUEST_LIMIT <= 0/);
-  assert.match(circuit, /usageScope:\s*\{ S: 'requests' \}/);
-  assert.match(circuit, /count >= GEMINI_DAILY_REQUEST_LIMIT/);
-  assert.match(circuit, /budget_circuit_open/);
-  assert.match(circuit, /budget_circuit_unavailable/);
+test('scheduled enrichment relies on per-stage state rather than a global daily request circuit', () => {
+  assert.doesNotMatch(scoutsSource, /GEMINI_DAILY_REQUEST_LIMIT|isGeminiCircuitOpen|budget_circuit_/);
+  assert.match(scoutsSource, /getEnrichmentState\(hex, stage\)/);
+  assert.match(scoutsSource, /evaluateEnrichmentEligibility\(state, new Date\(\), generationId\)/);
 });
 
 test('CloudFormation provisions retry state, safe parameters, least-required DynamoDB actions and alarms', () => {
@@ -55,23 +53,25 @@ test('CloudFormation provisions retry state, safe parameters, least-required Dyn
   assert.match(workerTemplate, /GeminiEnrichmentQuarantineAlarm/);
   assert.match(workerTemplate, /GeminiEnrichmentRetryBurstAlarm/);
   assert.match(scoutsTemplate, /GEMINI_ENRICHMENT_STATE_TABLE_NAME/);
-  assert.match(scoutsTemplate, /GEMINI_DAILY_REQUEST_LIMIT/);
+  assert.doesNotMatch(scoutsTemplate, /GEMINI_DAILY_REQUEST_LIMIT|GeminiDailyRequestLimit/);
 });
 
-test('image provider calls are owned by atomic stage reservation before any provider budget or external call', () => {
+test('Scouts deployment reuses the existing API-key parameter when no replacement secret is supplied', () => {
+  assert.match(scoutsDeploy, /require_existing_secure_parameter\(\)/);
+  assert.match(scoutsDeploy, /if \[ -z "\$\{REQUIRED_API_KEY\}" \]; then require_existing_secure_parameter "\$\{REQUIRED_API_KEY_PARAMETER\}"; fi/);
+  assert.match(scoutsDeploy, /if \[ -n "\$\{REQUIRED_API_KEY\}" \]; then put_standard_secure_parameter/);
+});
+
+test('image provider calls are owned by atomic stage reservation before any external call', () => {
   const cloudflareFlow = sliceFunction(workerSource, 'async function processCloudflareImage', 'async function sendTaskSuccess');
   const cloudflareReserve = cloudflareFlow.search(/await\s+reserveEnrichmentAttempt\s*\(/);
-  const cloudflareBudget = cloudflareFlow.search(/await\s+reserveImageBudget\s*\(/);
   const cloudflareCall = cloudflareFlow.search(/await\s+generateCloudflareImageAsset\s*\(/);
-  assert.ok(cloudflareReserve >= 0 && cloudflareBudget > cloudflareReserve, 'Cloudflare stage reservation must precede image budget');
-  assert.ok(cloudflareCall > cloudflareBudget, 'Cloudflare call must occur after stage and budget reservation');
+  assert.ok(cloudflareReserve >= 0 && cloudflareCall > cloudflareReserve, 'Cloudflare stage reservation must precede the external call');
 
   const geminiFlow = sliceFunction(workerCoreSource, 'async function processImageProvider', 'async function resultAfterProcessor');
   const geminiReserve = geminiFlow.search(/await\s+reserveEnrichmentAttempt\s*\(/);
-  const geminiBudget = geminiFlow.search(/await\s+reserveGeminiImageBudgets\s*\(/);
   const geminiCall = geminiFlow.search(/await\s+callGemini\s*\(\s*prompt\s*\)/);
-  assert.ok(geminiReserve >= 0 && geminiBudget > geminiReserve, 'Gemini rollback stage reservation must precede Gemini/image budgets');
-  assert.ok(geminiCall > geminiBudget, 'Gemini rollback call must occur after stage and budget reservation');
+  assert.ok(geminiReserve >= 0 && geminiCall > geminiReserve, 'Gemini fallback stage reservation must precede the external call');
 });
 
 test('provider success is cached before event persistence so persistence retries do not regenerate', () => {

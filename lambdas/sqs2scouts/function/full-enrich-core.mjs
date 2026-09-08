@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import sharp from 'sharp';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
-import { DynamoDBClient, TransactWriteItemsCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { getOptionalSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import {
   buildGenerationId,
@@ -37,14 +37,7 @@ const SCOUTS_CONFIG_TTL_MS = Number.isFinite(Number(process.env.SCOUTS_CONFIG_TT
   : 5 * 60 * 1000;
 const EVENT_IMAGE_PREFIX = 'website/eventImages/';
 const GEMINI_PROMPT_VERSION = text(process.env.GEMINI_PROMPT_VERSION) || '1';
-const USAGE_TABLE_NAME = text(process.env.GEMINI_USAGE_TABLE_NAME);
 const ENRICHMENT_TABLE_NAME = text(process.env.GEMINI_ENRICHMENT_STATE_TABLE_NAME);
-const IMAGE_DAILY_REQUEST_LIMIT = Number.isFinite(Number(process.env.IMAGE_GENERATION_DAILY_REQUEST_LIMIT))
-  ? Math.max(0, Math.floor(Number(process.env.IMAGE_GENERATION_DAILY_REQUEST_LIMIT)))
-  : 0;
-const GEMINI_DAILY_REQUEST_LIMIT = Number.isFinite(Number(process.env.GEMINI_DAILY_REQUEST_LIMIT))
-  ? Math.max(0, Math.floor(Number(process.env.GEMINI_DAILY_REQUEST_LIMIT)))
-  : 0;
 const GEMINI_IMAGE_API_VERSION = text(process.env.GEMINI_IMAGE_API_VERSION) || 'v1beta';
 const GEMINI_IMAGE_MODELS = (() => {
   const configured = [process.env.GEMINI_IMAGE_MODELS, process.env.GEMINI_IMAGE_MODEL]
@@ -53,7 +46,7 @@ const GEMINI_IMAGE_MODELS = (() => {
     .split(',')
     .map((value) => text(value))
     .filter(Boolean);
-  return Array.from(new Set(configured.length > 0 ? configured : ['gemini-2.5-flash-image']));
+  return Array.from(new Set(configured.length > 0 ? configured : ['gemini-3.1-flash-image']));
 })();
 const CLOUDFLARE_ACCOUNT_ID = text(process.env.CLOUDFLARE_ACCOUNT_ID);
 const CLOUDFLARE_MODEL = text(process.env.CLOUDFLARE_AI_MODEL) || '@cf/black-forest-labs/flux-1-schnell';
@@ -74,10 +67,6 @@ const sfn = new SFNClient({ region: AWS_REGION });
 const dynamo = new DynamoDBClient({ region: AWS_REGION });
 let cachedScoutsConfig = null;
 let cachedScoutsConfigExpiresAt = 0;
-
-function usageDay(now = new Date()) {
-  return now.toISOString().slice(0, 10);
-}
 
 function ttlEpoch(now = new Date()) {
   return Math.floor(now.getTime() / 1000) + (90 * 24 * 60 * 60);
@@ -180,72 +169,6 @@ function emitImageMetric(provider, outcome) {
     Outcome: outcome,
     Requests: 1,
   }));
-}
-
-function quotaUpdate(scope, limit, now) {
-  return {
-    TableName: USAGE_TABLE_NAME,
-    Key: {
-      usageDay: { S: usageDay(now) },
-      usageScope: { S: scope },
-    },
-    UpdateExpression: 'SET #expiresAt = :expiresAt ADD #requestCount :one',
-    ConditionExpression: 'attribute_not_exists(#requestCount) OR #requestCount < :limit',
-    ExpressionAttributeNames: {
-      '#expiresAt': 'expiresAt',
-      '#requestCount': 'requestCount',
-    },
-    ExpressionAttributeValues: {
-      ':expiresAt': { N: String(ttlEpoch(now)) },
-      ':one': { N: '1' },
-      ':limit': { N: String(limit) },
-    },
-  };
-}
-
-async function reserveImageBudget(provider, now = new Date()) {
-  if (!USAGE_TABLE_NAME || IMAGE_DAILY_REQUEST_LIMIT <= 0) {
-    emitImageMetric(provider, 'quota_rejected');
-    return false;
-  }
-  try {
-    await dynamo.send(new UpdateItemCommand(quotaUpdate(`image#${provider}`, IMAGE_DAILY_REQUEST_LIMIT, now)));
-    emitImageMetric(provider, 'attempt');
-    return true;
-  } catch (error) {
-    if (error?.name === 'ConditionalCheckFailedException') {
-      emitImageMetric(provider, 'quota_rejected');
-      return false;
-    }
-    console.error('[ImageGeneration] Daily quota counter unavailable; blocking provider request', error?.message || error);
-    emitImageMetric(provider, 'quota_counter_error');
-    return false;
-  }
-}
-
-async function reserveGeminiImageBudgets(now = new Date()) {
-  if (!USAGE_TABLE_NAME || IMAGE_DAILY_REQUEST_LIMIT <= 0 || GEMINI_DAILY_REQUEST_LIMIT <= 0) {
-    emitImageMetric('gemini', 'quota_rejected');
-    return false;
-  }
-  try {
-    await dynamo.send(new TransactWriteItemsCommand({
-      TransactItems: [
-        { Update: quotaUpdate('requests', GEMINI_DAILY_REQUEST_LIMIT, now) },
-        { Update: quotaUpdate('image#gemini', IMAGE_DAILY_REQUEST_LIMIT, now) },
-      ],
-    }));
-    emitImageMetric('gemini', 'attempt');
-    return true;
-  } catch (error) {
-    if (error?.name === 'TransactionCanceledException' || error?.name === 'ConditionalCheckFailedException') {
-      emitImageMetric('gemini', 'quota_rejected');
-      return false;
-    }
-    console.error('[ImageGeneration] Gemini quota counters unavailable; blocking provider request', error?.message || error);
-    emitImageMetric('gemini', 'quota_counter_error');
-    return false;
-  }
 }
 
 async function markQuotaDeferralWithoutAttempt({
@@ -450,8 +373,8 @@ async function processImageProvider(message, provider) {
     return buildCallbackResultFromState({ state: currentState, stage: 'image', hex, provider, generationId, fallbackStatus: eligibility.reason });
   }
 
-  // Own the stage before charging any global/provider budget. A duplicate delivery
-  // that loses this conditional reservation consumes no budget and sends no callback.
+  // Own the stage before calling the provider. A duplicate delivery that loses this
+  // conditional reservation sends no callback and makes no external request.
   const reservation = await reserveEnrichmentAttempt({
     hex,
     stage: 'image',
@@ -460,20 +383,6 @@ async function processImageProvider(message, provider) {
   });
   if (!reservation?.reserved) {
     return buildCallbackResultFromState({ state: reservation?.state, stage: 'image', hex, provider, generationId, fallbackStatus: reservation?.reason });
-  }
-
-  const budgetAllowed = provider === 'gemini'
-    ? await reserveGeminiImageBudgets()
-    : await reserveImageBudget(provider);
-  if (!budgetAllowed) {
-    const state = await markQuotaDeferralWithoutAttempt({
-      hex,
-      attemptCount: reservation?.state?.attemptCount || 0,
-      error: new Error('Image generation daily safety limit reached'),
-      errorType: 'GLOBAL_QUOTA',
-      attemptWasReserved: true,
-    });
-    return buildCallbackResultFromState({ state, stage: 'image', hex, provider, generationId, fallbackStatus: 'quota' });
   }
 
   try {

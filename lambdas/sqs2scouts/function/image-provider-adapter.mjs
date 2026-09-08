@@ -42,9 +42,6 @@ const EVENT_IMAGE_PREFIX = 'website/eventImages/';
 const PROMPT_VERSION = text(process.env.GEMINI_PROMPT_VERSION) || '1';
 const USAGE_TABLE_NAME = text(process.env.GEMINI_USAGE_TABLE_NAME);
 const ENRICHMENT_TABLE_NAME = text(process.env.GEMINI_ENRICHMENT_STATE_TABLE_NAME);
-const IMAGE_DAILY_REQUEST_LIMIT = Number.isFinite(Number(process.env.IMAGE_GENERATION_DAILY_REQUEST_LIMIT))
-  ? Math.max(0, Math.floor(Number(process.env.IMAGE_GENERATION_DAILY_REQUEST_LIMIT)))
-  : 10;
 const CONFIGURED_IMAGE_PROVIDER = normaliseImageProvider(process.env.IMAGE_GENERATION_PROVIDER || 'disabled');
 const GEMINI_IMAGES_ENABLED = String(process.env.GEMINI_IMAGES || 'false').trim().toLowerCase() === 'true';
 const CLOUDFLARE_ACCOUNT_ID = text(process.env.CLOUDFLARE_ACCOUNT_ID);
@@ -232,80 +229,12 @@ async function readUsage(scope, now = new Date()) {
   };
 }
 
-async function imageApplicationCapOpen(now = new Date()) {
-  // A configured limit of zero intentionally means zero external image calls.
-  // This is fail-closed billing safety, not an "unlimited/disabled cap" mode.
-  if (IMAGE_DAILY_REQUEST_LIMIT <= 0) {
-    return { open: true, reason: 'application_daily_cap', blockedUntil: nextProviderReset(now) };
-  }
-  const usage = await readUsage('image-requests', now);
-  return usage.requestCount >= IMAGE_DAILY_REQUEST_LIMIT
-    ? { open: true, reason: 'application_daily_cap', blockedUntil: nextProviderReset(now) }
-    : { open: false, count: usage.requestCount };
-}
-
 async function providerQuotaCircuitOpen(now = new Date()) {
   const usage = await readUsage('provider#cloudflare#daily-quota', now);
   if (!usage.blockedUntil) return { open: false };
   return new Date(usage.blockedUntil).getTime() > now.getTime()
     ? { open: true, reason: 'provider_daily_quota_exhausted', blockedUntil: usage.blockedUntil }
     : { open: false };
-}
-
-async function signalApplicationCapReached(now = new Date()) {
-  if (!USAGE_TABLE_NAME) return false;
-  let firstSignal = false;
-  try {
-    await dynamo.send(new UpdateItemCommand({
-      TableName: USAGE_TABLE_NAME,
-      Key: { usageDay: { S: usageDay(now) }, usageScope: { S: 'image-cap-alert' } },
-      UpdateExpression: 'SET #signalledAt = :signalledAt, #expiresAt = :expiresAt',
-      ConditionExpression: 'attribute_not_exists(#signalledAt)',
-      ExpressionAttributeNames: { '#signalledAt': 'signalledAt', '#expiresAt': 'expiresAt' },
-      ExpressionAttributeValues: {
-        ':signalledAt': { S: now.toISOString() },
-        ':expiresAt': { N: String(ttlEpoch(now)) },
-      },
-    }));
-    firstSignal = true;
-  } catch (error) {
-    if (error?.name !== 'ConditionalCheckFailedException') throw error;
-  }
-  if (firstSignal) {
-    emitImageMetric('QuotaRejected', 'cloudflare', 'quota_rejected');
-    await sendSlackText(`⚠️ Scouts image-generation daily cap reached\n\nAutomatic external image generation is paused until ${nextProviderReset(now)}.\nCached-result reuse and persistence-only retries remain allowed.`).catch(() => {});
-  }
-  return firstSignal;
-}
-
-async function reserveImageBudget(now = new Date()) {
-  if (!USAGE_TABLE_NAME || IMAGE_DAILY_REQUEST_LIMIT <= 0) {
-    await signalApplicationCapReached(now).catch(() => {});
-    return false;
-  }
-  try {
-    await dynamo.send(new UpdateItemCommand({
-      TableName: USAGE_TABLE_NAME,
-      Key: { usageDay: { S: usageDay(now) }, usageScope: { S: 'image-requests' } },
-      UpdateExpression: 'SET #expiresAt = :expiresAt ADD #requestCount :one',
-      ConditionExpression: 'attribute_not_exists(#requestCount) OR #requestCount < :limit',
-      ExpressionAttributeNames: { '#expiresAt': 'expiresAt', '#requestCount': 'requestCount' },
-      ExpressionAttributeValues: {
-        ':expiresAt': { N: String(ttlEpoch(now)) },
-        ':one': { N: '1' },
-        ':limit': { N: String(IMAGE_DAILY_REQUEST_LIMIT) },
-      },
-    }));
-    emitImageMetric('Requests', 'cloudflare', 'attempt');
-    return true;
-  } catch (error) {
-    if (error?.name === 'ConditionalCheckFailedException') {
-      await signalApplicationCapReached(now).catch(() => {});
-      return false;
-    }
-    console.error('[ImageGeneration] Daily quota counter unavailable; blocking Cloudflare request', error?.message || error);
-    return false;
-  }
 }
 
 async function markProviderQuotaExhausted(error, now = new Date()) {
@@ -439,10 +368,8 @@ async function processCloudflareImage(message) {
   }
 
   let providerCircuit;
-  let appCap;
   try {
     providerCircuit = await providerQuotaCircuitOpen(now);
-    appCap = await imageApplicationCapOpen(now);
   } catch (error) {
     const retryAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
     const state = await markImageDeferral({
@@ -468,19 +395,6 @@ async function processCloudflareImage(message) {
     return buildCallbackResultFromState({ state, stage: 'image', hex, provider: 'cloudflare', generationId, fallbackStatus: 'provider_daily_quota_exhausted' });
   }
 
-  if (appCap.open) {
-    await signalApplicationCapReached(now).catch(() => {});
-    const state = await markImageDeferral({
-      hex,
-      attemptCount: currentState?.attemptCount || 0,
-      errorType: 'GLOBAL_QUOTA',
-      message: 'Application image-generation daily cap reached',
-      nextRetryAt: appCap.blockedUntil || nextProviderReset(now),
-      now,
-    });
-    return buildCallbackResultFromState({ state, stage: 'image', hex, provider: 'cloudflare', generationId, fallbackStatus: 'application_daily_cap' });
-  }
-
   const reservation = await reserveEnrichmentAttempt({
     hex,
     stage: 'image',
@@ -490,19 +404,6 @@ async function processCloudflareImage(message) {
   });
   if (!reservation?.reserved) {
     return buildCallbackResultFromState({ state: reservation?.state, stage: 'image', hex, provider: 'cloudflare', generationId, fallbackStatus: reservation?.reason });
-  }
-
-  if (!await reserveImageBudget(now)) {
-    const state = await markImageDeferral({
-      hex,
-      attemptCount: reservation?.state?.attemptCount || 0,
-      attemptWasReserved: true,
-      errorType: 'GLOBAL_QUOTA',
-      message: 'Application image-generation daily cap reached',
-      nextRetryAt: nextProviderReset(now),
-      now,
-    });
-    return buildCallbackResultFromState({ state, stage: 'image', hex, provider: 'cloudflare', generationId, fallbackStatus: 'application_daily_cap' });
   }
 
   let externalAttempted = false;
