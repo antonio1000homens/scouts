@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: sqs2scouts Lambda stack (function + layer + IAM + SQS event source mapping)
+Description: sqs2scouts Lambda stack (function + shared layer reference + IAM + SQS event source mapping)
 
 Parameters:
   CodeBucket:
@@ -8,15 +8,12 @@ Parameters:
   FunctionCodeKey:
     Type: String
     Description: S3 key for function zip.
-  LayerCodeKey:
+  SharedLayerVersionArn:
     Type: String
-    Description: S3 key for layer zip.
+    Description: Centrally published scouts-shared Lambda layer version ARN.
   FunctionName:
     Type: String
     Default: sqs2scouts
-  LayerName:
-    Type: String
-    Default: scouts-shared
   RoleName:
     Type: String
     Default: sqs2scouts-lambda-role
@@ -191,16 +188,6 @@ Resources:
         AttributeName: expiresAt
         Enabled: true
 
-  Sqs2ScoutsLayer:
-    Type: AWS::Lambda::LayerVersion
-    Properties:
-      LayerName: !Ref LayerName
-      CompatibleRuntimes:
-        - !Ref Runtime
-      Content:
-        S3Bucket: !Ref CodeBucket
-        S3Key: !Ref LayerCodeKey
-
   Sqs2ScoutsRole:
     Type: AWS::IAM::Role
     Properties:
@@ -276,7 +263,7 @@ Resources:
       Timeout: !Ref Timeout
       MemorySize: !Ref MemorySize
       Layers:
-        - !Ref Sqs2ScoutsLayer
+        - !Ref SharedLayerVersionArn
       Environment:
         Variables:
           SLACK_SIGNING_SECRET_PARAMETER: !Ref SlackSigningSecretParameter
@@ -290,7 +277,7 @@ Resources:
           GEMINI_IMAGES: !Ref GeminiImagesEnabled
           GEMINI_DAILY_REQUEST_LIMIT: !Ref GeminiDailyRequestLimit
           GEMINI_USAGE_TABLE_NAME: !Ref GeminiUsageTableName
-          GEMINI_ENRICHMENT_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
+          GEMINI_ENRICH_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
           GEMINI_MAX_ATTEMPTS_PER_STAGE: !Ref GeminiMaxAttemptsPerStage
           GEMINI_RETRY_DELAY_ATTEMPT_2_SECONDS: !Ref GeminiRetryDelayAttempt2Seconds
           GEMINI_RETRY_DELAY_ATTEMPT_3_SECONDS: !Ref GeminiRetryDelayAttempt3Seconds
@@ -431,7 +418,7 @@ Outputs:
   FunctionArn:
     Value: !GetAtt Sqs2ScoutsFunction.Arn
   LayerVersionArn:
-    Value: !Ref Sqs2ScoutsLayer
+    Value: !Ref SharedLayerVersionArn
   EventSourceMappingId:
     Value: !Ref Sqs2ScoutsEventSourceMapping
   GeminiUsageTableName:
