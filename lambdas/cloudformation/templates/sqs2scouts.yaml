@@ -10,7 +10,16 @@ Parameters:
     Description: S3 key for function zip.
   SharedLayerVersionArn:
     Type: String
+    Default: ''
     Description: Centrally published scouts-shared Lambda layer version ARN.
+  LayerCodeKey:
+    Type: String
+    Default: ''
+    Description: Deprecated compatibility alias carrying the resolved shared layer ARN.
+  LayerName:
+    Type: String
+    Default: scouts-shared
+    Description: Deprecated compatibility parameter; layer publication is centrally owned.
   FunctionName:
     Type: String
     Default: sqs2scouts
@@ -149,6 +158,9 @@ Parameters:
     Type: String
     Default: approvals
 
+Conditions:
+  HasSharedLayerVersionArn: !Not [!Equals [!Ref SharedLayerVersionArn, '']]
+
 Resources:
   GeminiUsageTable:
     Type: AWS::DynamoDB::Table
@@ -263,7 +275,7 @@ Resources:
       Timeout: !Ref Timeout
       MemorySize: !Ref MemorySize
       Layers:
-        - !Ref SharedLayerVersionArn
+        - !If [HasSharedLayerVersionArn, !Ref SharedLayerVersionArn, !Ref LayerCodeKey]
       Environment:
         Variables:
           SLACK_SIGNING_SECRET_PARAMETER: !Ref SlackSigningSecretParameter
@@ -418,7 +430,7 @@ Outputs:
   FunctionArn:
     Value: !GetAtt Sqs2ScoutsFunction.Arn
   LayerVersionArn:
-    Value: !Ref SharedLayerVersionArn
+    Value: !If [HasSharedLayerVersionArn, !Ref SharedLayerVersionArn, !Ref LayerCodeKey]
   EventSourceMappingId:
     Value: !Ref Sqs2ScoutsEventSourceMapping
   GeminiUsageTableName:
