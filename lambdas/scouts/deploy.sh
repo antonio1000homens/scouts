@@ -162,6 +162,7 @@ rm -f function/scouts-lambda.zip
   zip -q scouts-lambda.zip \
     scouts-service.mjs \
     scouts-entry.mjs \
+    agenda-hex-repair.mjs \
     runtime-activity.mjs \
     runtime-dlq.mjs \
     runtime-schedule.mjs
