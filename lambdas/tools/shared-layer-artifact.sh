@@ -157,6 +157,12 @@ resolve_shared_layer_version() {
 
 # Backwards-compatible entrypoint used by the four local deploy scripts. It now
 # resolves the centrally owned Lambda layer version, not merely the S3 ZIP.
+#
+# Existing scripts historically pass LAYER_CODE_KEY to CloudFormation. Until
+# those callers are all migrated, carry the resolved ARN in that variable too;
+# templates accept it only as a deprecated fallback and never publish a layer.
 prepare_shared_layer_artifact() {
   resolve_shared_layer_version "$@" "${LAYER_NAME:-scouts-shared}" "${RUNTIME:-nodejs24.x}"
+  LAYER_CODE_KEY="${SCOUTS_SHARED_LAYER_VERSION_ARN}"
+  export LAYER_CODE_KEY
 }
