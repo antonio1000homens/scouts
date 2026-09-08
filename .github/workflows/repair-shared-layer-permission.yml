@@ -1,4 +1,4 @@
-name: Repair shared Lambda layer deploy permission
+name: Repair Scouts deployment permissions
 
 on:
   push:
@@ -18,13 +18,13 @@ env:
   EXPECTED_AWS_ACCOUNT: "553490163883"
 
 jobs:
-  repair-shared-layer-permission:
+  repair-deployment-permissions:
     runs-on: ubuntu-latest
     steps:
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
-          role-session-name: github-actions-scouts-layer-permission-repair
+          role-session-name: github-actions-scouts-permission-repair
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Verify AWS account
@@ -72,11 +72,49 @@ jobs:
             --policy-name ScoutsSharedLayerDeploy \
             --policy-document file:///tmp/scouts-shared-layer-policy.json
 
-      - name: Verify repaired permission policy
+      - name: Grant CloudFormation EventBridge deployment permission
+        run: |
+          set -euo pipefail
+          cat > /tmp/scouts-eventbridge-policy.json <<'JSON'
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "ScoutsEventBridgeManagement",
+                "Effect": "Allow",
+                "Action": [
+                  "events:DeleteRule",
+                  "events:DescribeRule",
+                  "events:ListTagsForResource",
+                  "events:ListTargetsByRule",
+                  "events:PutRule",
+                  "events:PutTargets",
+                  "events:RemoveTargets",
+                  "events:TagResource",
+                  "events:UntagResource"
+                ],
+                "Resource": "arn:aws:events:eu-west-2:553490163883:rule/scouts-*"
+              }
+            ]
+          }
+          JSON
+
+          aws iam put-role-policy \
+            --role-name CloudFormationExecutionRole \
+            --policy-name ScoutsEventBridgeDeployRepair \
+            --policy-document file:///tmp/scouts-eventbridge-policy.json
+
+      - name: Verify repaired permission policies
         run: |
           set -euo pipefail
           aws iam get-role-policy \
             --role-name GitHubActionsScoutsDeployRole \
             --policy-name ScoutsSharedLayerDeploy \
+            --query 'PolicyDocument.Statement[].Sid' \
+            --output text
+
+          aws iam get-role-policy \
+            --role-name CloudFormationExecutionRole \
+            --policy-name ScoutsEventBridgeDeployRepair \
             --query 'PolicyDocument.Statement[].Sid' \
             --output text
