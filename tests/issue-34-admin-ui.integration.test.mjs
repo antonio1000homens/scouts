@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import './issue-43-runtime-activity.test.mjs';
+import './issue-43-dlq-admin-enhancements.test.mjs';
 
 const html = readFileSync('website/admin/index.html', 'utf8');
 const simplify = readFileSync('website/admin/admin-simplify.js', 'utf8');
