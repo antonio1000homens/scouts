@@ -52,7 +52,7 @@ Parameters:
     Default: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessingDLQ
   DlqUrl:
     Type: String
-    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
+    Default: https://sqs.eu-west-2.amazonaws.com/553490163883:scoutsProcessingDLQ
   ProcessingQueueUrl:
     Type: String
     Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
@@ -289,7 +289,7 @@ Resources:
           GEMINI_IMAGES: !Ref GeminiImagesEnabled
           GEMINI_DAILY_REQUEST_LIMIT: !Ref GeminiDailyRequestLimit
           GEMINI_USAGE_TABLE_NAME: !Ref GeminiUsageTableName
-          GEMINI_ENRICH_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
+          GEMINI_ENRICHMENT_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
           GEMINI_MAX_ATTEMPTS_PER_STAGE: !Ref GeminiMaxAttemptsPerStage
           GEMINI_RETRY_DELAY_ATTEMPT_2_SECONDS: !Ref GeminiRetryDelayAttempt2Seconds
           GEMINI_RETRY_DELAY_ATTEMPT_3_SECONDS: !Ref GeminiRetryDelayAttempt3Seconds
