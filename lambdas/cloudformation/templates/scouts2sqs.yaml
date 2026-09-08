@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: scouts2sqs Lambda stack (function + layer + IAM + function URL + SQS event source mapping)
+Description: scouts2sqs Lambda stack (function + shared layer reference + IAM + function URL + SQS event source mapping)
 
 Parameters:
   CodeBucket:
@@ -8,15 +8,21 @@ Parameters:
   FunctionCodeKey:
     Type: String
     Description: S3 key for function zip.
+  SharedLayerVersionArn:
+    Type: String
+    Default: ''
+    Description: Centrally published scouts-shared Lambda layer version ARN.
   LayerCodeKey:
     Type: String
-    Description: S3 key for layer zip.
-  FunctionName:
-    Type: String
-    Default: scouts2sqs
+    Default: ''
+    Description: Deprecated compatibility alias carrying the resolved shared layer ARN.
   LayerName:
     Type: String
     Default: scouts-shared
+    Description: Deprecated compatibility parameter; layer publication is centrally owned.
+  FunctionName:
+    Type: String
+    Default: scouts2sqs
   RoleName:
     Type: String
     Default: scouts2sqs-lambda-role
@@ -102,18 +108,9 @@ Parameters:
 Conditions:
   IsPublicFunctionUrl: !Equals [!Ref FunctionUrlAuthType, 'NONE']
   HasFullEnrichStateMachineArn: !Not [!Equals [!Ref FullEnrichStateMachineArn, '']]
+  HasSharedLayerVersionArn: !Not [!Equals [!Ref SharedLayerVersionArn, '']]
 
 Resources:
-  Scouts2SqsLayer:
-    Type: AWS::Lambda::LayerVersion
-    Properties:
-      LayerName: !Ref LayerName
-      CompatibleRuntimes:
-        - !Ref Runtime
-      Content:
-        S3Bucket: !Ref CodeBucket
-        S3Key: !Ref LayerCodeKey
-
   Scouts2SqsRole:
     Type: AWS::IAM::Role
     Properties:
@@ -179,7 +176,7 @@ Resources:
       Timeout: !Ref Timeout
       MemorySize: !Ref MemorySize
       Layers:
-        - !Ref Scouts2SqsLayer
+        - !If [HasSharedLayerVersionArn, !Ref SharedLayerVersionArn, !Ref LayerCodeKey]
       Environment:
         Variables:
           REQUIRED_API_KEY_PARAMETER: !Ref RequiredApiKeyParameter
@@ -238,6 +235,6 @@ Outputs:
   FunctionUrl:
     Value: !GetAtt Scouts2SqsFunctionUrl.FunctionUrl
   LayerVersionArn:
-    Value: !Ref Scouts2SqsLayer
+    Value: !If [HasSharedLayerVersionArn, !Ref SharedLayerVersionArn, !Ref LayerCodeKey]
   EventSourceMappingId:
     Value: !Ref Scouts2SqsEventSourceMapping

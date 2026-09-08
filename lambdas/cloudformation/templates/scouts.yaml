@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Scouts Lambda stack (function + layer + IAM + optional S3 bucket + function URL)
+Description: Scouts Lambda stack (function + shared layer reference + IAM + optional S3 bucket + function URL)
 
 Parameters:
   CodeBucket:
@@ -8,15 +8,21 @@ Parameters:
   FunctionCodeKey:
     Type: String
     Description: S3 key for scouts function zip.
+  SharedLayerVersionArn:
+    Type: String
+    Default: ''
+    Description: Centrally published scouts-shared Lambda layer version ARN.
   LayerCodeKey:
     Type: String
-    Description: S3 key for shared layer zip.
-  FunctionName:
-    Type: String
-    Default: scouts
+    Default: ''
+    Description: Deprecated compatibility alias carrying the resolved shared layer ARN.
   LayerName:
     Type: String
     Default: scouts-shared
+    Description: Deprecated compatibility parameter; layer publication is centrally owned.
+  FunctionName:
+    Type: String
+    Default: scouts
   RoleName:
     Type: String
     Default: scouts-lambda-role
@@ -132,6 +138,7 @@ Conditions:
   ShouldCreateDataBucket: !Equals [!Ref CreateDataBucket, 'true']
   IsPublicFunctionUrl: !Equals [!Ref FunctionUrlAuthType, 'NONE']
   HasFullEnrichStateMachineArn: !Not [!Equals [!Ref FullEnrichStateMachineArn, '']]
+  HasSharedLayerVersionArn: !Not [!Equals [!Ref SharedLayerVersionArn, '']]
 
 Resources:
   ScoutsDataBucket:
@@ -139,16 +146,6 @@ Resources:
     Condition: ShouldCreateDataBucket
     Properties:
       BucketName: !Ref DataBucketName
-
-  ScoutsSharedLayer:
-    Type: AWS::Lambda::LayerVersion
-    Properties:
-      LayerName: !Ref LayerName
-      CompatibleRuntimes:
-        - !Ref Runtime
-      Content:
-        S3Bucket: !Ref CodeBucket
-        S3Key: !Ref LayerCodeKey
 
   ScoutsLambdaRole:
     Type: AWS::IAM::Role
@@ -249,7 +246,7 @@ Resources:
       Timeout: !Ref Timeout
       MemorySize: !Ref MemorySize
       Layers:
-        - !Ref ScoutsSharedLayer
+        - !If [HasSharedLayerVersionArn, !Ref SharedLayerVersionArn, !Ref LayerCodeKey]
       Environment:
         Variables:
           REQUIRED_API_KEY_PARAMETER: !Ref RequiredApiKeyParameter
@@ -328,7 +325,7 @@ Outputs:
   FunctionUrl:
     Value: !GetAtt ScoutsFunctionUrl.FunctionUrl
   LayerVersionArn:
-    Value: !Ref ScoutsSharedLayer
+    Value: !If [HasSharedLayerVersionArn, !Ref SharedLayerVersionArn, !Ref LayerCodeKey]
   DataBucket:
     Value: !Ref DataBucketName
   ScheduledRefreshRuleArn:

@@ -6,6 +6,13 @@ const workflow = readFileSync('.github/workflows/deploy-to-s3.yml', 'utf8');
 const scoutsDeploy = readFileSync('lambdas/scouts/deploy.sh', 'utf8');
 const sqs2scoutsDeploy = readFileSync('lambdas/sqs2scouts/deploy.sh', 'utf8');
 const scouts2sqsDeploy = readFileSync('lambdas/scouts2sqs/deploy.sh', 'utf8');
+const slackDeploy = readFileSync('lambdas/scouts-slack-handler/deploy.sh', 'utf8');
+const sharedLayerResolver = readFileSync('lambdas/tools/shared-layer-artifact.sh', 'utf8');
+const sharedLayerDeploy = readFileSync('lambdas/shared-layer/deploy.sh', 'utf8');
+const scoutsTemplate = readFileSync('lambdas/cloudformation/templates/scouts.yaml', 'utf8');
+const sqs2scoutsTemplate = readFileSync('lambdas/cloudformation/templates/sqs2scouts.yaml', 'utf8');
+const scouts2sqsTemplate = readFileSync('lambdas/cloudformation/templates/scouts2sqs.yaml', 'utf8');
+const slackTemplate = readFileSync('lambdas/cloudformation/templates/slack-handler.yaml', 'utf8');
 const adminIndex = readFileSync('website/admin/index.html', 'utf8');
 const adminSimplify = readFileSync('website/admin/admin-simplify.js', 'utf8');
 const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
@@ -63,6 +70,83 @@ test('worker and ingress deployment handlers match the modern cutover', () => {
   assert.match(scouts2sqsDeploy, /HANDLER="\$\{HANDLER:-request-router\.lambdaHandler\}"/);
   assert.match(workflow, /\[ "\$HANDLER" = "image-provider-adapter\.lambdaHandler" \]/);
   assert.doesNotMatch(workflow, /full-enrich-adapter\.lambdaHandler/);
+});
+
+test('shared layer is content-addressed and published centrally', () => {
+  assert.match(sharedLayerResolver, /shared_layer_source_hash/);
+  assert.match(sharedLayerResolver, /! -name '\*\.test\.mjs'/);
+  assert.match(sharedLayerResolver, /! -name '\*\.integration\.test\.mjs'/);
+  assert.match(sharedLayerResolver, /lambdas\/shared-layer\/\$\{layer_hash\}\/scouts-shared-layer\.zip/);
+  assert.match(sharedLayerResolver, /lambda list-layer-versions/);
+  assert.match(sharedLayerResolver, /source-sha256:\$\{layer_hash\}/);
+  assert.match(sharedLayerResolver, /lambda publish-layer-version/);
+  assert.match(sharedLayerResolver, /SCOUTS_SHARED_LAYER_VERSION_ARN/);
+  assert.match(sharedLayerDeploy, /resolve_shared_layer_version/);
+  assert.match(sharedLayerDeploy, /GITHUB_ENV/);
+});
+
+test('shared layer resolver rechecks after artifact preparation before publishing', () => {
+  const prepareIndex = sharedLayerResolver.indexOf('prepare_shared_layer_zip');
+  const recheckMarkerIndex = sharedLayerResolver.indexOf('Another deployment may have published');
+  const publishIndex = sharedLayerResolver.indexOf('aws lambda publish-layer-version');
+  assert.notEqual(prepareIndex, -1);
+  assert.notEqual(recheckMarkerIndex, -1);
+  assert.notEqual(publishIndex, -1);
+  assert.ok(prepareIndex < recheckMarkerIndex, 'concurrency recheck must happen after artifact preparation');
+  assert.ok(recheckMarkerIndex < publishIndex, 'concurrency recheck must happen before publishing');
+  assert.match(sharedLayerResolver, /Reusing concurrently published shared Lambda layer version/);
+});
+
+test('CI resolves one shared layer before any Lambda consumer deploys', () => {
+  const resolver = indexOfRequired('- name: Resolve shared Lambda layer version', 'shared layer resolver step');
+  const sqs2scouts = indexOfRequired('- name: Deploy sqs2scouts', 'sqs2scouts deployment step');
+  const scouts2sqs = indexOfRequired('- name: Deploy scouts2sqs', 'scouts2sqs deployment step');
+  const scouts = indexOfRequired('- name: Deploy Scouts function', 'Scouts deployment step');
+  const slack = indexOfRequired('- name: Deploy Scouts Slack handler', 'Slack deployment step');
+
+  assert.ok(resolver < sqs2scouts);
+  assert.ok(resolver < scouts2sqs);
+  assert.ok(resolver < scouts);
+  assert.ok(resolver < slack);
+  assert.match(workflow, /run: bash lambdas\/shared-layer\/deploy\.sh/);
+  assert.match(workflow, /needs\.plan-and-test\.outputs\.sqs2scouts == 'true'[\s\S]*needs\.plan-and-test\.outputs\.scouts_slack_handler == 'true'/);
+});
+
+test('shared-layer test changes run safety tests without redeploying all consumers', () => {
+  assert.match(workflow, /lambdas\/shared-layer\/nodejs\/\*\.test\.mjs\|lambdas\/shared-layer\/nodejs\/\*\.integration\.test\.mjs\)\n\s*;;/);
+  assert.match(workflow, /lambdas\/shared-layer\/nodejs\/\*\.mjs\|lambdas\/shared-layer\/nodejs\/package\.json\|lambdas\/shared-layer\/nodejs\/package-lock\.json\)[\s\S]*scouts_function=true[\s\S]*scouts_slack_handler=true[\s\S]*scouts2sqs=true[\s\S]*sqs2scouts=true/);
+  assert.match(workflow, /lambdas\/shared-layer\/\*\|[\s\S]*retry_safety=true/);
+});
+
+test('function stacks consume a shared layer ARN and no longer publish LayerVersion resources', () => {
+  for (const [name, template] of [
+    ['scouts', scoutsTemplate],
+    ['sqs2scouts', sqs2scoutsTemplate],
+    ['scouts2sqs', scouts2sqsTemplate],
+    ['slack-handler', slackTemplate],
+  ]) {
+    assert.match(template, /SharedLayerVersionArn:/, `${name} must accept the central layer ARN`);
+    assert.match(template, /HasSharedLayerVersionArn/, `${name} must prefer the central layer ARN`);
+    assert.doesNotMatch(template, /Type: AWS::Lambda::LayerVersion/, `${name} must not publish its own layer version`);
+  }
+});
+
+test('sqs2scouts uses the canonical enrichment-state environment variable name', () => {
+  assert.match(sqs2scoutsTemplate, /GEMINI_ENRICHMENT_STATE_TABLE_NAME:\s*!Ref GeminiEnrichmentStateTableName/);
+  assert.doesNotMatch(sqs2scoutsTemplate, /GEMINI_ENRICH_STATE_TABLE_NAME:/);
+});
+
+test('local deploy scripts keep using the shared resolver compatibility entrypoint', () => {
+  for (const [name, deploy] of [
+    ['scouts', scoutsDeploy],
+    ['sqs2scouts', sqs2scoutsDeploy],
+    ['scouts2sqs', scouts2sqsDeploy],
+    ['slack-handler', slackDeploy],
+  ]) {
+    assert.match(deploy, /shared-layer-artifact\.sh/, `${name} must source the shared resolver`);
+    assert.match(deploy, /prepare_shared_layer_artifact/, `${name} must resolve the shared layer before CloudFormation`);
+  }
+  assert.match(sharedLayerResolver, /Using supplied shared Lambda layer/);
 });
 
 test('Scouts deployment resolves the managed full-enrich stack before historical fallback', () => {

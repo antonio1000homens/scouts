@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: sqs2scouts Lambda stack (function + layer + IAM + SQS event source mapping)
+Description: sqs2scouts Lambda stack (function + shared layer reference + IAM + SQS event source mapping)
 
 Parameters:
   CodeBucket:
@@ -8,15 +8,21 @@ Parameters:
   FunctionCodeKey:
     Type: String
     Description: S3 key for function zip.
+  SharedLayerVersionArn:
+    Type: String
+    Default: ''
+    Description: Centrally published scouts-shared Lambda layer version ARN.
   LayerCodeKey:
     Type: String
-    Description: S3 key for layer zip.
-  FunctionName:
-    Type: String
-    Default: sqs2scouts
+    Default: ''
+    Description: Deprecated compatibility alias carrying the resolved shared layer ARN.
   LayerName:
     Type: String
     Default: scouts-shared
+    Description: Deprecated compatibility parameter; layer publication is centrally owned.
+  FunctionName:
+    Type: String
+    Default: sqs2scouts
   RoleName:
     Type: String
     Default: sqs2scouts-lambda-role
@@ -152,6 +158,9 @@ Parameters:
     Type: String
     Default: approvals
 
+Conditions:
+  HasSharedLayerVersionArn: !Not [!Equals [!Ref SharedLayerVersionArn, '']]
+
 Resources:
   GeminiUsageTable:
     Type: AWS::DynamoDB::Table
@@ -190,16 +199,6 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: expiresAt
         Enabled: true
-
-  Sqs2ScoutsLayer:
-    Type: AWS::Lambda::LayerVersion
-    Properties:
-      LayerName: !Ref LayerName
-      CompatibleRuntimes:
-        - !Ref Runtime
-      Content:
-        S3Bucket: !Ref CodeBucket
-        S3Key: !Ref LayerCodeKey
 
   Sqs2ScoutsRole:
     Type: AWS::IAM::Role
@@ -276,7 +275,7 @@ Resources:
       Timeout: !Ref Timeout
       MemorySize: !Ref MemorySize
       Layers:
-        - !Ref Sqs2ScoutsLayer
+        - !If [HasSharedLayerVersionArn, !Ref SharedLayerVersionArn, !Ref LayerCodeKey]
       Environment:
         Variables:
           SLACK_SIGNING_SECRET_PARAMETER: !Ref SlackSigningSecretParameter
@@ -431,7 +430,7 @@ Outputs:
   FunctionArn:
     Value: !GetAtt Sqs2ScoutsFunction.Arn
   LayerVersionArn:
-    Value: !Ref Sqs2ScoutsLayer
+    Value: !If [HasSharedLayerVersionArn, !Ref SharedLayerVersionArn, !Ref LayerCodeKey]
   EventSourceMappingId:
     Value: !Ref Sqs2ScoutsEventSourceMapping
   GeminiUsageTableName:

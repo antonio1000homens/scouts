@@ -121,11 +121,21 @@ jobs:
             case "${file}" in index.html|deploy-manual.sh|.github/workflows/deploy-to-s3.yml|lambdas/sqs2scouts/scouts.conf|website/*) website=true ;; esac
             case "${file}" in cloudflare/*|.github/workflows/deploy-to-s3.yml) cloudflare=true ;; esac
             case "${file}" in lambdas/scouts-queues/*|lambdas/cloudformation/templates/scouts-queues.yaml) scouts_queues=true ;; esac
-            case "${file}" in lambdas/scouts/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/scouts.yaml) scouts_function=true ;; esac
-            case "${file}" in lambdas/scouts-slack-handler/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/slack-handler.yaml) scouts_slack_handler=true ;; esac
+            case "${file}" in lambdas/scouts/*|lambdas/tools/*|lambdas/cloudformation/templates/scouts.yaml) scouts_function=true ;; esac
+            case "${file}" in lambdas/scouts-slack-handler/*|lambdas/tools/*|lambdas/cloudformation/templates/slack-handler.yaml) scouts_slack_handler=true ;; esac
             case "${file}" in lambdas/scouts-full-enrich/*|lambdas/cloudformation/templates/scouts-full-enrich.yaml) scouts_full_enrich=true ;; esac
-            case "${file}" in lambdas/scouts2sqs/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/scouts2sqs.yaml) scouts2sqs=true ;; esac
-            case "${file}" in lambdas/sqs2scouts/*|lambdas/tools/*|lambdas/shared-layer/*|lambdas/cloudformation/templates/sqs2scouts.yaml) sqs2scouts=true ;; esac
+            case "${file}" in lambdas/scouts2sqs/*|lambdas/tools/*|lambdas/cloudformation/templates/scouts2sqs.yaml) scouts2sqs=true ;; esac
+            case "${file}" in lambdas/sqs2scouts/*|lambdas/tools/*|lambdas/cloudformation/templates/sqs2scouts.yaml) sqs2scouts=true ;; esac
+            case "${file}" in
+              lambdas/shared-layer/nodejs/*.test.mjs|lambdas/shared-layer/nodejs/*.integration.test.mjs)
+                ;;
+              lambdas/shared-layer/nodejs/*.mjs|lambdas/shared-layer/nodejs/package.json|lambdas/shared-layer/nodejs/package-lock.json)
+                scouts_function=true
+                scouts_slack_handler=true
+                scouts2sqs=true
+                sqs2scouts=true
+                ;;
+            esac
             case "${file}" in
               lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|tests/issue-34-admin-ui.integration.test.mjs|tests/issue-39-*.test.mjs|tests/issue-39-*.integration.test.mjs|tests/helpers/*|docs/TESTING-STRATEGY.md|website/admin/*|.github/workflows/deploy-to-s3.yml)
                 retry_safety=true
@@ -426,6 +436,13 @@ jobs:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           role-session-name: github-actions-scouts-aws-deploy
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve shared Lambda layer version
+        if: needs.plan-and-test.outputs.sqs2scouts == 'true' || needs.plan-and-test.outputs.scouts2sqs == 'true' || needs.plan-and-test.outputs.scouts_function == 'true' || needs.plan-and-test.outputs.scouts_slack_handler == 'true'
+        env:
+          CODE_BUCKET: ${{ env.CODE_BUCKET }}
+          EXPECTED_AWS_ACCOUNT: ${{ env.EXPECTED_AWS_ACCOUNT }}
+        run: bash lambdas/shared-layer/deploy.sh
 
       - name: Get required Scouts API key
         if: needs.plan-and-test.outputs.scouts_function == 'true' || needs.plan-and-test.outputs.scouts2sqs == 'true' || needs.plan-and-test.outputs.scouts_slack_handler == 'true'
