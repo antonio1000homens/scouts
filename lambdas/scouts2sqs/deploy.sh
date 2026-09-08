@@ -57,7 +57,6 @@ REQUIRED_API_KEY_PARAMETER="${REQUIRED_API_KEY_PARAMETER:-/scouts/shared/require
 SCOUTS2SQS_PUBLISH_ENABLED="${SCOUTS2SQS_PUBLISH_ENABLED:-true}"
 DLQ_ARN="${DLQ_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsRequestsDLQ}"
 DLQ_URL="${DLQ_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequestsDLQ}"
-IMAGE_ENRICH_STATE_MACHINE_ARN="${IMAGE_ENRICH_STATE_MACHINE_ARN:-}"
 FULL_ENRICH_STATE_MACHINE_ARN="${FULL_ENRICH_STATE_MACHINE_ARN:-}"
 IMAGE_GENERATION_PROVIDER="${IMAGE_GENERATION_PROVIDER:-disabled}"
 
@@ -73,11 +72,7 @@ echo -e "${BLUE}=== scouts2sqs CloudFormation Deployment ===${NC}"
 
 cleanup_failed_stack() {
   local stack_status
-
-  if ! aws cloudformation describe-stacks --region "${REGION}" --stack-name "${STACK_NAME}" >/dev/null 2>&1; then
-    return 0
-  fi
-
+  if ! aws cloudformation describe-stacks --region "${REGION}" --stack-name "${STACK_NAME}" >/dev/null 2>&1; then return 0; fi
   stack_status="$(aws cloudformation describe-stacks --region "${REGION}" --stack-name "${STACK_NAME}" --query 'Stacks[0].StackStatus' --output text)"
   if [ "${stack_status}" = "ROLLBACK_COMPLETE" ]; then
     echo -e "${YELLOW}Stack ${STACK_NAME} is in ROLLBACK_COMPLETE; deleting before redeploy.${NC}"
@@ -87,35 +82,20 @@ cleanup_failed_stack() {
 }
 
 for cmd in aws npm zip; do
-  if ! command -v "${cmd}" >/dev/null 2>&1; then
-    echo -e "${RED}Missing required command: ${cmd}${NC}"
-    exit 1
-  fi
+  if ! command -v "${cmd}" >/dev/null 2>&1; then echo -e "${RED}Missing required command: ${cmd}${NC}"; exit 1; fi
 done
 
 put_standard_secure_parameter() {
   local name="$1"
   local value="$2"
-  aws ssm put-parameter \
-    --region "${REGION}" \
-    --name "${name}" \
-    --type SecureString \
-    --tier Standard \
-    --overwrite \
-    --value "${value}" >/dev/null
+  aws ssm put-parameter --region "${REGION}" --name "${name}" --type SecureString --tier Standard --overwrite --value "${value}" >/dev/null
 }
 
 echo -e "\n${YELLOW}AWS identity preflight...${NC}"
 CALLER_ARN="$(aws sts get-caller-identity --query 'Arn' --output text 2>/dev/null || true)"
 CALLER_ACCOUNT="$(aws sts get-caller-identity --query 'Account' --output text 2>/dev/null || true)"
-if [ -z "${CALLER_ARN}" ] || [ -z "${CALLER_ACCOUNT}" ] || [ "${CALLER_ARN}" = "None" ]; then
-  echo -e "${RED}Unable to resolve AWS caller identity. Ensure credentials are configured for local/CI.${NC}"
-  exit 1
-fi
-if [ "${CALLER_ACCOUNT}" != "${EXPECTED_AWS_ACCOUNT}" ]; then
-  echo -e "${RED}Unexpected AWS account ${CALLER_ACCOUNT}. Expected ${EXPECTED_AWS_ACCOUNT}.${NC}"
-  exit 1
-fi
+if [ -z "${CALLER_ARN}" ] || [ -z "${CALLER_ACCOUNT}" ] || [ "${CALLER_ARN}" = "None" ]; then echo -e "${RED}Unable to resolve AWS caller identity.${NC}"; exit 1; fi
+if [ "${CALLER_ACCOUNT}" != "${EXPECTED_AWS_ACCOUNT}" ]; then echo -e "${RED}Unexpected AWS account ${CALLER_ACCOUNT}. Expected ${EXPECTED_AWS_ACCOUNT}.${NC}"; exit 1; fi
 echo "Using AWS identity: ${CALLER_ARN}"
 
 cd "${SCRIPT_DIR}"
@@ -123,31 +103,11 @@ cd "${SCRIPT_DIR}"
 if declare -F bws_export_if_unset >/dev/null 2>&1; then
   bws_export_if_unset "REQUIRED_API_KEY" "${BWS_REQUIRED_API_KEY_SECRET_ID:-${BWS_SCOUTS_REQUIRED_API_KEY_SECRET_ID:-}}" || true
 fi
-
-if [ -z "${REQUIRED_API_KEY}" ]; then
-  echo -e "${RED}REQUIRED_API_KEY must be set before deploying.${NC}"
-  exit 1
-fi
-
-# Keep the old image-enrich ARN available for an explicit handler rollback only.
-if [ -z "${IMAGE_ENRICH_STATE_MACHINE_ARN}" ]; then
-  DISCOVERED_IMAGE_ENRICH_STATE_MACHINE_ARN="$(aws cloudformation describe-stacks \
-    --region "${REGION}" \
-    --stack-name scouts-image-enrich \
-    --query "Stacks[0].Outputs[?OutputKey=='StateMachineArn'].OutputValue" \
-    --output text 2>/dev/null || true)"
-  if [ -n "${DISCOVERED_IMAGE_ENRICH_STATE_MACHINE_ARN}" ] && [ "${DISCOVERED_IMAGE_ENRICH_STATE_MACHINE_ARN}" != "None" ] && [ "${DISCOVERED_IMAGE_ENRICH_STATE_MACHINE_ARN}" != "null" ]; then
-    IMAGE_ENRICH_STATE_MACHINE_ARN="${DISCOVERED_IMAGE_ENRICH_STATE_MACHINE_ARN}"
-  fi
-fi
+if [ -z "${REQUIRED_API_KEY}" ]; then echo -e "${RED}REQUIRED_API_KEY must be set before deploying.${NC}"; exit 1; fi
 
 if [ -z "${FULL_ENRICH_STATE_MACHINE_ARN}" ]; then
   for candidate_stack in scouts-full-enrich-managed-poc scouts-full-enrich; do
-    DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN="$(aws cloudformation describe-stacks \
-      --region "${REGION}" \
-      --stack-name "${candidate_stack}" \
-      --query "Stacks[0].Outputs[?OutputKey=='StateMachineArn'].OutputValue" \
-      --output text 2>/dev/null || true)"
+    DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN="$(aws cloudformation describe-stacks --region "${REGION}" --stack-name "${candidate_stack}" --query "Stacks[0].Outputs[?OutputKey=='StateMachineArn'].OutputValue" --output text 2>/dev/null || true)"
     if [ -n "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" ] && [ "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" != "None" ] && [ "${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}" != "null" ]; then
       FULL_ENRICH_STATE_MACHINE_ARN="${DISCOVERED_FULL_ENRICH_STATE_MACHINE_ARN}"
       echo "Discovered full-enrich state machine from stack ${candidate_stack}"
@@ -161,20 +121,11 @@ if [ -z "${FULL_ENRICH_STATE_MACHINE_ARN}" ]; then
   exit 1
 fi
 
-# The ingress adapter must not begin creating fullEnrich executions until the
-# downstream callback-compatible worker is active. CI may schedule these jobs
-# concurrently, so wait for sqs2scouts to expose the production adapter first.
 if [ "${HANDLER}" = "full-enrich-adapter.lambdaHandler" ]; then
   WORKER_HANDLER=''
   for _ in $(seq 1 60); do
-    WORKER_HANDLER="$(aws lambda get-function-configuration \
-      --function-name "${SQS2SCOUTS_FUNCTION_NAME}" \
-      --region "${REGION}" \
-      --query 'Handler' \
-      --output text 2>/dev/null || true)"
-    if [ "${WORKER_HANDLER}" = "full-enrich-adapter.lambdaHandler" ]; then
-      break
-    fi
+    WORKER_HANDLER="$(aws lambda get-function-configuration --function-name "${SQS2SCOUTS_FUNCTION_NAME}" --region "${REGION}" --query 'Handler' --output text 2>/dev/null || true)"
+    if [ "${WORKER_HANDLER}" = "full-enrich-adapter.lambdaHandler" ]; then break; fi
     sleep 5
   done
   if [ "${WORKER_HANDLER}" != "full-enrich-adapter.lambdaHandler" ]; then
@@ -185,50 +136,26 @@ fi
 
 case "${IMAGE_GENERATION_PROVIDER}" in
   disabled|cloudflare|gemini) ;;
-  *)
-    echo -e "${RED}IMAGE_GENERATION_PROVIDER must be disabled, cloudflare, or gemini.${NC}"
-    exit 1
-    ;;
+  *) echo -e "${RED}IMAGE_GENERATION_PROVIDER must be disabled, cloudflare, or gemini.${NC}"; exit 1 ;;
 esac
 
 echo -e "\n${YELLOW}Step 1: Build shared Lambda layer...${NC}"
-(
-  cd "${SHARED_LAYER_DIR}/nodejs"
-  npm install --production --cache "${NPM_CACHE_DIR}"
-)
-(
-  cd "${SHARED_LAYER_DIR}"
-  rm -f lambda-layer.zip
-  zip -qr lambda-layer.zip nodejs
-)
+( cd "${SHARED_LAYER_DIR}/nodejs" && npm install --production --cache "${NPM_CACHE_DIR}" )
+( cd "${SHARED_LAYER_DIR}" && rm -f lambda-layer.zip && zip -qr lambda-layer.zip nodejs )
 
 echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
-(
-  cd function
-  rm -f scouts2sqs-lambda.zip
-  zip -q scouts2sqs-lambda.zip scouts2sqs.mjs full-enrich-adapter.mjs
-)
+( cd function && rm -f scouts2sqs-lambda.zip && zip -q scouts2sqs-lambda.zip scouts2sqs.mjs full-enrich-adapter.mjs )
 
 echo -e "\n${YELLOW}Step 3: Upload artifacts to S3...${NC}"
 FUNCTION_CODE_KEY="${S3_PREFIX}/${DEPLOY_ID}/scouts2sqs-lambda.zip"
 LAYER_CODE_KEY="${S3_PREFIX}/${DEPLOY_ID}/scouts-shared-layer.zip"
-
 aws s3 cp function/scouts2sqs-lambda.zip "s3://${CODE_BUCKET}/${FUNCTION_CODE_KEY}" --region "${REGION}"
 aws s3 cp "${SHARED_LAYER_ZIP}" "s3://${CODE_BUCKET}/${LAYER_CODE_KEY}" --region "${REGION}"
 
 echo -e "\n${YELLOW}Step 4: Deploy CloudFormation stack...${NC}"
 cleanup_failed_stack
-CFN_DEPLOY_ARGS=(
-  --region "${REGION}"
-  --stack-name "${STACK_NAME}"
-  --template-file "${TEMPLATE_FILE}"
-  --capabilities CAPABILITY_NAMED_IAM
-)
-
-if [ -n "${CLOUDFORMATION_ROLE_ARN}" ]; then
-  CFN_DEPLOY_ARGS+=(--role-arn "${CLOUDFORMATION_ROLE_ARN}")
-fi
-
+CFN_DEPLOY_ARGS=(--region "${REGION}" --stack-name "${STACK_NAME}" --template-file "${TEMPLATE_FILE}" --capabilities CAPABILITY_NAMED_IAM)
+if [ -n "${CLOUDFORMATION_ROLE_ARN}" ]; then CFN_DEPLOY_ARGS+=(--role-arn "${CLOUDFORMATION_ROLE_ARN}"); fi
 CFN_DEPLOY_ARGS+=(
   --parameter-overrides
     CodeBucket="${CODE_BUCKET}"
@@ -253,20 +180,14 @@ CFN_DEPLOY_ARGS+=(
     ProcessingQueueUrl="${QUEUE_URL}"
     DlqArn="${DLQ_ARN}"
     DlqUrl="${DLQ_URL}"
-    ImageEnrichStateMachineArn="${IMAGE_ENRICH_STATE_MACHINE_ARN}"
     FullEnrichStateMachineArn="${FULL_ENRICH_STATE_MACHINE_ARN}"
     ImageGenerationProvider="${IMAGE_GENERATION_PROVIDER}"
 )
 
 aws cloudformation deploy "${CFN_DEPLOY_ARGS[@]}"
-
 put_standard_secure_parameter "${REQUIRED_API_KEY_PARAMETER}" "${REQUIRED_API_KEY}"
 
 echo -e "\n${YELLOW}Step 5: Read stack outputs...${NC}"
-aws cloudformation describe-stacks \
-  --region "${REGION}" \
-  --stack-name "${STACK_NAME}" \
-  --query 'Stacks[0].Outputs' \
-  --output table
+aws cloudformation describe-stacks --region "${REGION}" --stack-name "${STACK_NAME}" --query 'Stacks[0].Outputs' --output table
 
 echo -e "\n${GREEN}Deployment complete.${NC}"
