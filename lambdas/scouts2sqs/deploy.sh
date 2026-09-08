@@ -7,8 +7,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BWS_HELPER="${ROOT_DIR}/tools/bws-env.sh"
+SHARED_LAYER_HELPER="${ROOT_DIR}/tools/shared-layer-artifact.sh"
+CFN_HELPER="${ROOT_DIR}/tools/cloudformation-deploy.sh"
 SHARED_LAYER_DIR="${ROOT_DIR}/shared-layer"
-SHARED_LAYER_ZIP="${SHARED_LAYER_DIR}/lambda-layer.zip"
 
 if [ -f "${ROOT_DIR}/.env" ]; then
   set -a
@@ -21,6 +22,10 @@ if [ -f "${BWS_HELPER}" ]; then
   # shellcheck disable=SC1090
   source "${BWS_HELPER}"
 fi
+# shellcheck disable=SC1090
+source "${SHARED_LAYER_HELPER}"
+# shellcheck disable=SC1090
+source "${CFN_HELPER}"
 
 REGION="${AWS_REGION:-eu-west-2}"
 STACK_NAME="${STACK_NAME:-scouts2sqs-lambda}"
@@ -41,7 +46,7 @@ SQS2SCOUTS_FUNCTION_NAME="${SQS2SCOUTS_FUNCTION_NAME:-sqs2scouts}"
 LAYER_NAME="${LAYER_NAME:-scouts-shared}"
 ROLE_NAME="${ROLE_NAME:-scouts2sqs-lambda-role}"
 RUNTIME="${RUNTIME:-nodejs24.x}"
-HANDLER="${HANDLER:-full-enrich-adapter.lambdaHandler}"
+HANDLER="${HANDLER:-request-router.lambdaHandler}"
 QUEUE_ARN="${QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing}"
 QUEUE_URL="${QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing}"
 SCOUTS_REQUESTS_QUEUE_ARN="${SCOUTS_REQUESTS_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsRequests}"
@@ -121,15 +126,15 @@ if [ -z "${FULL_ENRICH_STATE_MACHINE_ARN}" ]; then
   exit 1
 fi
 
-if [ "${HANDLER}" = "full-enrich-adapter.lambdaHandler" ]; then
+if [ "${HANDLER}" = "request-router.lambdaHandler" ]; then
   WORKER_HANDLER=''
   for _ in $(seq 1 60); do
     WORKER_HANDLER="$(aws lambda get-function-configuration --function-name "${SQS2SCOUTS_FUNCTION_NAME}" --region "${REGION}" --query 'Handler' --output text 2>/dev/null || true)"
-    if [ "${WORKER_HANDLER}" = "full-enrich-adapter.lambdaHandler" ]; then break; fi
+    if [ "${WORKER_HANDLER}" = "image-provider-adapter.lambdaHandler" ]; then break; fi
     sleep 5
   done
-  if [ "${WORKER_HANDLER}" != "full-enrich-adapter.lambdaHandler" ]; then
-    echo -e "${RED}${SQS2SCOUTS_FUNCTION_NAME} is not running full-enrich-adapter.lambdaHandler. Deploy sqs2scouts before enabling the full-enrich ingress adapter.${NC}"
+  if [ "${WORKER_HANDLER}" != "image-provider-adapter.lambdaHandler" ]; then
+    echo -e "${RED}${SQS2SCOUTS_FUNCTION_NAME} is not running image-provider-adapter.lambdaHandler. Deploy sqs2scouts before enabling full-enrich ingress.${NC}"
     exit 1
   fi
 fi
@@ -139,18 +144,19 @@ case "${IMAGE_GENERATION_PROVIDER}" in
   *) echo -e "${RED}IMAGE_GENERATION_PROVIDER must be disabled, cloudflare, or gemini.${NC}"; exit 1 ;;
 esac
 
-echo -e "\n${YELLOW}Step 1: Build shared Lambda layer...${NC}"
-( cd "${SHARED_LAYER_DIR}/nodejs" && npm install --production --cache "${NPM_CACHE_DIR}" )
-( cd "${SHARED_LAYER_DIR}" && rm -f lambda-layer.zip && zip -qr lambda-layer.zip nodejs )
+echo -e "\n${YELLOW}Step 1: Resolve shared Lambda layer artifact...${NC}"
+prepare_shared_layer_artifact "${SHARED_LAYER_DIR}" "${CODE_BUCKET}" "${REGION}" "${NPM_CACHE_DIR}"
 
 echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
-( cd function && rm -f scouts2sqs-lambda.zip && zip -q scouts2sqs-lambda.zip scouts2sqs.mjs full-enrich-adapter.mjs )
+(
+  cd function
+  rm -f scouts2sqs-lambda.zip
+  zip -q scouts2sqs-lambda.zip request-processor.mjs request-router.mjs
+)
 
-echo -e "\n${YELLOW}Step 3: Upload artifacts to S3...${NC}"
+echo -e "\n${YELLOW}Step 3: Upload function artifact to S3...${NC}"
 FUNCTION_CODE_KEY="${S3_PREFIX}/${DEPLOY_ID}/scouts2sqs-lambda.zip"
-LAYER_CODE_KEY="${S3_PREFIX}/${DEPLOY_ID}/scouts-shared-layer.zip"
 aws s3 cp function/scouts2sqs-lambda.zip "s3://${CODE_BUCKET}/${FUNCTION_CODE_KEY}" --region "${REGION}"
-aws s3 cp "${SHARED_LAYER_ZIP}" "s3://${CODE_BUCKET}/${LAYER_CODE_KEY}" --region "${REGION}"
 
 echo -e "\n${YELLOW}Step 4: Deploy CloudFormation stack...${NC}"
 cleanup_failed_stack
@@ -184,7 +190,7 @@ CFN_DEPLOY_ARGS+=(
     ImageGenerationProvider="${IMAGE_GENERATION_PROVIDER}"
 )
 
-aws cloudformation deploy "${CFN_DEPLOY_ARGS[@]}"
+deploy_cloudformation_with_diagnostics "${STACK_NAME}" "${REGION}" "${CFN_DEPLOY_ARGS[@]}"
 put_standard_secure_parameter "${REQUIRED_API_KEY_PARAMETER}" "${REQUIRED_API_KEY}"
 
 echo -e "\n${YELLOW}Step 5: Read stack outputs...${NC}"
