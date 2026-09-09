@@ -137,7 +137,8 @@ async function invokeScoutsService(event) {
   const isReconciliation = isAgendaReconciliationInvocation(event);
   const startedAtMs = Date.now();
   const beforeActivity = isReconciliation ? await captureActivitySnapshot() : null;
-  let result = await scoutsServiceHandler(event);
+  const result = await scoutsServiceHandler(event);
+  let responseResult = result;
 
   if (isCalendarRefreshInvocation(event)) {
     try {
@@ -155,10 +156,10 @@ async function invokeScoutsService(event) {
   if (isReconciliation) {
     const afterActivity = await captureActivitySnapshot();
     const enrichmentRequestsStarted = countNewEnrichmentRequests(beforeActivity, afterActivity, startedAtMs);
-    result = addEnrichmentAccounting(result, enrichmentRequestsStarted);
+    responseResult = addEnrichmentAccounting(result, enrichmentRequestsStarted);
   }
 
-  return result;
+  return responseResult;
 }
 
 function isInterceptedRuntimeCommand(command) {
