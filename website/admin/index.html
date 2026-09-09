@@ -66,25 +66,26 @@
                 </div>
             </div>
             <span id="api-ready-indicator" class="api-ready-pill api-loading" title="Checking Cloudflare admin API...">API</span>
-            <label class="auto-invoke-header-label" for="auto-lambda-toggle">
+            <label class="auto-invoke-header-label" for="agenda-auto-refresh-toggle">
                 <input
                     type="checkbox"
-                    id="auto-lambda-toggle"
+                    id="agenda-auto-refresh-toggle"
                     checked
-                    onchange="toggleAutoLambdaInvocation(this.checked)"
+                    onchange="toggleAgendaAutoRefresh(this.checked)"
                 >
                 Auto refresh
             </label>
             <input
                 type="number"
-                id="auto-lambda-interval-seconds"
+                id="agenda-auto-refresh-interval-seconds"
                 class="refresh-input auto-invoke-header-interval"
                 min="60"
                 step="1"
                 value="300"
-                onchange="updateAutoLambdaInvocationInterval(this.value)"
+                onchange="updateAgendaAutoRefreshInterval(this.value)"
                 title="Automatic agenda reconciliation interval in seconds (status polling is separate)."
             >
+            <span id="agenda-auto-refresh-status" class="auto-invoke-header-status">Auto refresh: every 300s</span>
             <label class="auto-invoke-header-label" for="status-polling-toggle">
                 <input
                     type="checkbox"
