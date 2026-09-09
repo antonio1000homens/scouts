@@ -4,9 +4,11 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 const runtimeDlq = readFileSync('lambdas/scouts/function/runtime-dlq.mjs', 'utf8');
+const dlqActivityHandler = readFileSync('lambdas/scouts/function/dlq-activity-handler.mjs', 'utf8');
 const runtimeSchedule = readFileSync('lambdas/scouts/function/runtime-schedule.mjs', 'utf8');
 const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
 const scoutsTemplate = readFileSync('lambdas/cloudformation/templates/scouts.yaml', 'utf8');
+const queuesTemplate = readFileSync('lambdas/cloudformation/templates/scouts-queues.yaml', 'utf8');
 const adminEnhancements = readFileSync('website/admin/admin-diagnostics-enhancements.js', 'utf8');
 const adminHtml = readFileSync('website/admin/index.html', 'utf8');
 
@@ -17,9 +19,30 @@ function assertSyntax(path) {
 
 test('new DLQ, schedule and browser enhancement modules are syntactically valid', () => {
   assertSyntax('lambdas/scouts/function/runtime-dlq.mjs');
+  assertSyntax('lambdas/scouts/function/dlq-activity-handler.mjs');
   assertSyntax('lambdas/scouts/function/runtime-schedule.mjs');
   assertSyntax('lambdas/scouts/function/scouts-entry.mjs');
   assertSyntax('website/admin/admin-diagnostics-enhancements.js');
+});
+
+test('processing DLQ delivery exhaustion is recorded through a dedicated least-privilege consumer', () => {
+  assert.match(scoutsTemplate, /ScoutsDlqActivityRole:/);
+  assert.match(scoutsTemplate, /ScoutsDlqActivityFunction:/);
+  assert.match(scoutsTemplate, /Handler: dlq-activity-handler\.lambdaHandler/);
+  assert.match(scoutsTemplate, /ScoutsProcessingDlqActivityMapping:[\s\S]*?EventSourceArn: !Ref ScoutsProcessingDlqArn/);
+  assert.match(scoutsTemplate, /FunctionResponseTypes:[\s\S]*?ReportBatchItemFailures/);
+  assert.match(scoutsTemplate, /PolicyName: ScoutsProcessingDlqActivity[\s\S]*?sqs:ReceiveMessage[\s\S]*?sqs:DeleteMessage[\s\S]*?dynamodb:UpdateItem/);
+  assert.doesNotMatch(scoutsTemplate.match(/PolicyName: ScoutsProcessingDlqActivity[\s\S]*?(?=\n  [A-Z]|$)/)?.[0] || '', /s3:|ssm:|states:/);
+  assert.match(dlqActivityHandler, /recordWorkerDeliveryExhausted/);
+});
+
+test('only processing queue retries are shortened for browser-visible terminal failures', () => {
+  assert.match(queuesTemplate, /RequestsVisibilityTimeout:[\s\S]*?Default: 600/);
+  assert.match(queuesTemplate, /ProcessingVisibilityTimeout:[\s\S]*?Default: 60/);
+  assert.match(queuesTemplate, /RequestsMaxReceiveCount:[\s\S]*?Default: 5/);
+  assert.match(queuesTemplate, /ProcessingMaxReceiveCount:[\s\S]*?Default: 3/);
+  assert.match(queuesTemplate, /ScoutsRequestsQueue:[\s\S]*?VisibilityTimeout: !Ref RequestsVisibilityTimeout[\s\S]*?maxReceiveCount: !Ref RequestsMaxReceiveCount/);
+  assert.match(queuesTemplate, /ScoutsProcessingQueue:[\s\S]*?VisibilityTimeout: !Ref ProcessingVisibilityTimeout[\s\S]*?maxReceiveCount: !Ref ProcessingMaxReceiveCount/);
 });
 
 test('DLQ inspection is explicit, bounded and non-destructive', () => {
