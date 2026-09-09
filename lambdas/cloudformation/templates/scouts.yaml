@@ -98,6 +98,9 @@ Parameters:
   ScoutsRequestsQueueUrl:
     Type: String
     Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
+  ScoutsProcessingDlqArn:
+    Type: String
+    Default: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessingDLQ
   Scouts2SqsFunctionUrl:
     Type: String
     Default: ''
@@ -276,6 +279,63 @@ Resources:
         S3Bucket: !Ref CodeBucket
         S3Key: !Ref FunctionCodeKey
 
+  ScoutsDlqActivityRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${RoleName}-dlq-activity
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ScoutsProcessingDlqActivity
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !Ref ScoutsProcessingDlqArn
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScoutsRequestActivityTableName}
+
+  ScoutsDlqActivityFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${FunctionName}-dlq-activity
+      Runtime: !Ref Runtime
+      Handler: dlq-activity-handler.lambdaHandler
+      Role: !GetAtt ScoutsDlqActivityRole.Arn
+      Timeout: 30
+      MemorySize: 128
+      Layers:
+        - !If [HasSharedLayerVersionArn, !Ref SharedLayerVersionArn, !Ref LayerCodeKey]
+      Environment:
+        Variables:
+          SCOUTS_REQUEST_ACTIVITY_TABLE_NAME: !Ref ScoutsRequestActivityTableName
+      Code:
+        S3Bucket: !Ref CodeBucket
+        S3Key: !Ref FunctionCodeKey
+
+  ScoutsProcessingDlqActivityMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !Ref ScoutsProcessingDlqArn
+      FunctionName: !Ref ScoutsDlqActivityFunction
+      Enabled: true
+      BatchSize: 1
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+
   ScoutsScheduledRefreshRule:
     Type: AWS::Events::Rule
     Properties:
@@ -329,6 +389,8 @@ Outputs:
     Value: !GetAtt ScoutsFunction.Arn
   FunctionUrl:
     Value: !GetAtt ScoutsFunctionUrl.FunctionUrl
+  ScoutsDlqActivityFunctionArn:
+    Value: !GetAtt ScoutsDlqActivityFunction.Arn
   LayerVersionArn:
     Value: !If [HasSharedLayerVersionArn, !Ref SharedLayerVersionArn, !Ref LayerCodeKey]
   DataBucket:

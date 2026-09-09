@@ -226,6 +226,7 @@ echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
     full-enrich-helpers.mjs \
     image-provider-adapter.mjs \
     cloudflare-image-client.mjs \
+    gemini-text-models.mjs \
     ../scouts.conf
 )
 
