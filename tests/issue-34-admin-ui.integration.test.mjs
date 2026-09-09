@@ -69,19 +69,23 @@ test('normal agenda reconciliation does not send a browser enrichment limit', ()
 });
 
 test('automatic reconciliation is enabled by default, slow, and non-overlapping', () => {
-  assert.match(html, /id="auto-lambda-toggle"[\s\S]*checked/);
-  assert.match(html, /id="auto-lambda-interval-seconds"[\s\S]*min="60"[\s\S]*value="300"/);
+  assert.match(html, /id="agenda-auto-refresh-toggle"[\s\S]*checked/);
+  assert.match(html, /id="agenda-auto-refresh-interval-seconds"[\s\S]*min="60"[\s\S]*value="300"/);
   assert.match(agendaRefresh, /DEFAULT_RECONCILIATION_INTERVAL_SECONDS = 300/);
-  assert.match(agendaRefresh, /agendaRefreshExecutionInFlight \|\| autoLambdaInvokeInFlight \|\| uiCommandInFlight/);
-  assert.match(agendaRefresh, /if \(!autoLambdaInvokeEnabled\) return null/);
-  assert.match(agendaRefresh, /currentSeconds < LEGACY_FAST_INTERVAL_CUTOFF_SECONDS/);
+  assert.match(agendaRefresh, /let agendaAutoRefreshEnabled = true/);
+  assert.match(agendaRefresh, /agendaAutoRefreshTimer = setInterval/);
+  assert.match(agendaRefresh, /if \(agendaRefreshExecutionInFlight \|\| uiCommandInFlight\)/);
+  assert.match(agendaRefresh, /if \(!agendaAutoRefreshEnabled\) return;/);
+  assert.match(agendaRefresh, /automatic agenda reconciliation has its own preference and timer/);
 });
 
 test('status polling remains read-only and separate from real reconciliation', () => {
   assert.match(adminScript, /function runStatusPollingJob\(\)[\s\S]*pollQueueDepthSnapshots\(\)[\s\S]*loadEvents\(/);
   const pollingBody = adminScript.match(/function runStatusPollingJob\(\) \{[\s\S]*?\n\}/)?.[0] || '';
   assert.doesNotMatch(pollingBody, /sendScoutsCommand|refreshLambda|invokeLambdaHeartbeat/);
-  assert.match(agendaRefresh, /Status polling remains separate in runStatusPollingJob/);
+  assert.match(agendaRefresh, /Keep three concerns deliberately separate/);
+  assert.match(agendaRefresh, /admin-script\.js status polling reads agenda\/runtime state frequently/);
+  assert.match(agendaRefresh, /agendaAutoRefreshTimer = setInterval/);
 });
 
 test('backend enrichment state prevents duplicate, succeeded, cooldown and exhausted work', () => {
