@@ -35,6 +35,12 @@
         });
     }
 
+    function optionalFiniteNumber(value) {
+        if (value === undefined || value === null || value === '') return null;
+        const number = Number(value);
+        return Number.isFinite(number) ? number : null;
+    }
+
     function formatChangeValue(value) {
         if (value === undefined || value === null || value === '') return 'missing';
         if (typeof value === 'boolean') return value ? 'true' : 'false';
@@ -165,12 +171,8 @@
         if (!title || !metrics || !details || !modifiedList) return;
 
         const modifiedEvents = Array.isArray(result?.modifiedEvents) ? result.modifiedEvents : [];
-        const modifiedCount = Number.isFinite(Number(result?.modifiedEventsCount))
-            ? Number(result.modifiedEventsCount)
-            : modifiedEvents.length;
-        const started = Number.isFinite(Number(result?.enrichmentRequestsStarted))
-            ? Number(result.enrichmentRequestsStarted)
-            : null;
+        const modifiedCount = optionalFiniteNumber(result?.modifiedEventsCount) ?? modifiedEvents.length;
+        const started = optionalFiniteNumber(result?.enrichmentRequestsStarted);
         const completion = currentAgendaCompletionCounts();
 
         title.textContent = `Agenda refreshed · ${formatRefreshTime(result?.generatedAt)}`;
@@ -254,12 +256,8 @@
             renderRefreshResult(result);
 
             const modifiedEvents = Array.isArray(result?.modifiedEvents) ? result.modifiedEvents : [];
-            const modifiedCount = Number.isFinite(Number(result?.modifiedEventsCount))
-                ? Number(result.modifiedEventsCount)
-                : modifiedEvents.length;
-            const started = Number.isFinite(Number(result?.enrichmentRequestsStarted))
-                ? Number(result.enrichmentRequestsStarted)
-                : null;
+            const modifiedCount = optionalFiniteNumber(result?.modifiedEventsCount) ?? modifiedEvents.length;
+            const started = optionalFiniteNumber(result?.enrichmentRequestsStarted);
             const startedText = started === null ? 'enrichment start count unavailable' : `${started} enrichment job${started === 1 ? '' : 's'} started`;
             if (statusElement) {
                 statusElement.textContent = `Agenda refreshed · ${formatRefreshTime(result?.generatedAt)} · ${modifiedCount} updated · ${startedText}`;
