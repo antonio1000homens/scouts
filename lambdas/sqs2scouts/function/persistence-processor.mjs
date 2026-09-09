@@ -8,6 +8,7 @@ import sharp from 'sharp';
 import { getOptionalSecret, getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 import { publishCanonicalEventToAgenda } from './agenda-publisher.mjs';
+import { generateGeminiTextWithFallback, parseGeminiTextModels } from './gemini-text-models.mjs';
 import {
     buildGenerationId,
     getEnrichmentState,
@@ -36,7 +37,9 @@ const TARGET_BUCKET = process.env.TARGET_BUCKET || DEFAULT_BUCKET;
 const EVENT_IMAGE_PREFIX = 'website/eventImages/';
 const GEMINI_API_VERSION = (process.env.GEMINI_API_VERSION || 'v1').trim() || 'v1';
 const GEMINI_IMAGE_API_VERSION = (process.env.GEMINI_IMAGE_API_VERSION || 'v1beta').trim() || 'v1beta';
-const GEMINI_TEXT_MODEL = (process.env.GEMINI_TEXT_MODEL || 'gemini-3.5-flash-lite').trim() || 'gemini-3.5-flash-lite';
+const GEMINI_TEXT_MODEL_PREFERENCES = parseGeminiTextModels(
+    process.env.GEMINI_TEXT_MODELS || process.env.GEMINI_TEXT_MODEL,
+);
 const GEMINI_PROMPT_VERSION = (process.env.GEMINI_PROMPT_VERSION || '1').trim() || '1';
 const GENERATED_IMAGE_WIDTH = Number.isFinite(Number(process.env.GEMINI_IMAGE_OUTPUT_WIDTH))
     ? Math.max(320, Number(process.env.GEMINI_IMAGE_OUTPUT_WIDTH))
@@ -979,16 +982,24 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
 
     try {
         const genAI = new GoogleGenerativeAILib(geminiApiKey);
-        const suggestionModel = genAI.getGenerativeModel({
-            model: GEMINI_TEXT_MODEL,
-            generationConfig: {
-                temperature: 0.8,
-                maxOutputTokens: 200,
+        const { result, model, attemptedModels } = await generateGeminiTextWithFallback({
+            models: GEMINI_TEXT_MODEL_PREFERENCES,
+            generate: async (modelName) => {
+                const suggestionModel = genAI.getGenerativeModel({
+                    model: modelName,
+                    generationConfig: {
+                        temperature: 0.8,
+                        maxOutputTokens: 200,
+                    },
+                });
+                console.log('[Gemini] Request payload:', { model: modelName, prompt: prompt.substring(0, 200) + '...' });
+                return suggestionModel.generateContent(prompt);
+            },
+            onFailure: (modelName, modelError) => {
+                console.warn(`[Gemini] Text model ${modelName} failed with ${modelError?.status || modelError?.code || 'unknown'}; trying the next model when retryable.`);
             },
         });
-
-        console.log('[Gemini] Request payload:', { model: GEMINI_TEXT_MODEL, prompt: prompt.substring(0, 200) + '...' });
-        const result = await suggestionModel.generateContent(prompt);
+        console.log('[Gemini] Text suggestion generated', { model, attemptedModels });
         const responseObj = result?.response;
         const responseText = typeof responseObj?.text === 'function' ? responseObj.text().trim() : String(responseObj || '').trim();
 

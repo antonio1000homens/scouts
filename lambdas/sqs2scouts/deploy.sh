@@ -66,7 +66,11 @@ CLOUDFLARE_AI_API_TOKEN_PARAMETER="${CLOUDFLARE_AI_API_TOKEN_PARAMETER:-/scouts/
 GEMINI_API_VERSION="${GEMINI_API_VERSION:-}"
 GEMINI_IMAGE_API_VERSION="${GEMINI_IMAGE_API_VERSION:-}"
 GEMINI_IMAGE_MODEL="${GEMINI_IMAGE_MODEL:-gemini-3.1-flash-image}"
-GEMINI_TEXT_MODEL="${GEMINI_TEXT_MODEL:-gemini-3.5-flash-lite}"
+# Text fallback order deliberately uses only models that the configured API key
+# exposes on the Gemini free tier. GEMINI_TEXT_MODEL remains a compatibility
+# primary override; GEMINI_TEXT_MODELS is the authoritative ordered list.
+GEMINI_TEXT_MODEL="${GEMINI_TEXT_MODEL:-}"
+GEMINI_TEXT_MODELS="${GEMINI_TEXT_MODELS:-gemini-3.5-flash,gemini-3.1-flash-lite,gemini-2.5-flash,gemini-2.5-flash-lite}"
 GEMINI_ENABLED="${GEMINI_ENABLED:-}"
 GEMINI_IMAGES_ENABLED="${GEMINI_IMAGES_ENABLED:-}"
 GEMINI_USAGE_TABLE_NAME="${GEMINI_USAGE_TABLE_NAME:-scouts-gemini-usage}"
@@ -270,6 +274,7 @@ CFN_DEPLOY_ARGS+=(
     GeminiImageApiVersion="${GEMINI_IMAGE_API_VERSION}"
     GeminiImageModel="${GEMINI_IMAGE_MODEL}"
     GeminiTextModel="${GEMINI_TEXT_MODEL}"
+    GeminiTextModels="${GEMINI_TEXT_MODELS}"
     GeminiEnabled="${GEMINI_ENABLED}"
     GeminiImagesEnabled="${GEMINI_IMAGES_ENABLED}"
     GeminiUsageTableName="${GEMINI_USAGE_TABLE_NAME}"
