@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { DynamoDBClient, QueryCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 
 const REGION = process.env.AWS_REGION || 'eu-west-2';
@@ -5,9 +6,11 @@ const TABLE_NAME = String(process.env.SCOUTS_REQUEST_ACTIVITY_TABLE_NAME || '').
 const RETENTION_SECONDS = 7 * 24 * 60 * 60;
 const MAX_TIMELINE = 24;
 const client = new DynamoDBClient({ region: REGION });
+const requestActivityContext = new AsyncLocalStorage();
 
 const TERMINAL = new Set(['completed', 'failed', 'needs_attention', 'manual_review']);
 const PRIORITY = Object.freeze({ accepted: 10, queued: 20, processing: 40, orchestrating: 50, persisting: 60, published: 70, completed: 80, failed: 90, needs_attention: 100, manual_review: 100 });
+const RECONCILIATION_ENRICHMENT_ACTIONS = new Set(['new', 'imageenrich']);
 
 function text(value) { return value === undefined || value === null ? '' : String(value).trim(); }
 function hexOf(value) {
@@ -20,6 +23,9 @@ function titleOf(value) {
 }
 function requestIdOf(value) { return text(value?.requestId || value?.messageId) || null; }
 function itemValue(value) { return value == null ? { NULL: true } : { S: String(value) }; }
+function reconciliationIdOf(value) {
+  return text(value?.reconciliationId || requestActivityContext.getStore()?.reconciliationId) || null;
+}
 function unmarshall(item = {}) {
   const result = {};
   for (const [key, value] of Object.entries(item)) {
@@ -32,6 +38,35 @@ function unmarshall(item = {}) {
 
 export function requestActivityEnabled() { return Boolean(TABLE_NAME); }
 
+export function withRequestActivityContext(context = {}, callback) {
+  if (typeof callback !== 'function') throw new TypeError('Request activity context callback must be a function');
+  const store = context && typeof context === 'object' ? context : {};
+  const reconciliationId = text(store.reconciliationId);
+  if (reconciliationId) store.reconciliationId = reconciliationId;
+  if (!(store.enrichmentRequestIds instanceof Set)) store.enrichmentRequestIds = new Set();
+  if (!Number.isFinite(Number(store.enrichmentRequestsStarted))) store.enrichmentRequestsStarted = 0;
+  return requestActivityContext.run(store, callback);
+}
+
+export function trackReconciliationPublication(input = {}) {
+  const store = requestActivityContext.getStore();
+  if (!text(store?.reconciliationId)) return false;
+
+  const state = text(input.state || 'processing').toLowerCase();
+  const stage = text(input.stage || state).toLowerCase();
+  const action = text(input.action || input.operation).toLowerCase();
+  const requestId = requestIdOf(input);
+  if (state !== 'queued' || stage !== 'scoutsrequests' || !RECONCILIATION_ENRICHMENT_ACTIONS.has(action) || !requestId) {
+    return false;
+  }
+
+  if (!(store.enrichmentRequestIds instanceof Set)) store.enrichmentRequestIds = new Set();
+  if (store.enrichmentRequestIds.has(requestId)) return false;
+  store.enrichmentRequestIds.add(requestId);
+  store.enrichmentRequestsStarted = store.enrichmentRequestIds.size;
+  return true;
+}
+
 export function buildRequestActivityUpdate(input = {}) {
   if (!TABLE_NAME) return null;
   const requestId = requestIdOf(input);
@@ -41,6 +76,7 @@ export function buildRequestActivityUpdate(input = {}) {
   const state = text(input.state || 'processing').toLowerCase();
   const stage = text(input.stage || state) || state;
   const failure = input.failure && typeof input.failure === 'object' ? input.failure : null;
+  const reconciliationId = reconciliationIdOf(input);
   const timelineEntry = JSON.stringify({ state, stage, at: timestamp, ...(failure ? { failure: { type: text(failure.type) || 'PROCESSING_FAILED', message: text(failure.message) || null } } : {}) });
   const attrs = {
     ':feed': { S: 'activity' }, ':updatedAt': { S: timestamp },
@@ -49,16 +85,17 @@ export function buildRequestActivityUpdate(input = {}) {
     ':expiresAt': { N: String(Math.floor(now.getTime() / 1000) + RETENTION_SECONDS) },
     ':priority': { N: String(PRIORITY[state] || 0) }, ':terminal': { S: TERMINAL.has(state) ? 'true' : 'false' },
     ':hex': itemValue(hexOf(input)), ':title': itemValue(titleOf(input)), ':action': itemValue(text(input.action || input.operation) || null),
+    ':reconciliationId': itemValue(reconciliationId),
     ':publication': itemValue(text(input.publication) || (state === 'completed' ? 'published' : null)),
     ':failureType': itemValue(failure ? text(failure.type) || 'PROCESSING_FAILED' : null),
     ':failureMessage': itemValue(failure ? text(failure.message) || null : null),
   };
   return {
-    requestId, state, stage, updatedAt: timestamp,
+    requestId, state, stage, updatedAt: timestamp, reconciliationId,
     command: new UpdateItemCommand({
     TableName: TABLE_NAME,
     Key: { requestId: { S: requestId } },
-    UpdateExpression: 'SET feed = :feed, updatedAt = :updatedAt, createdAt = if_not_exists(createdAt, :createdAt), #state = :state, stage = :stage, timeline = list_append(if_not_exists(timeline, :empty), :timeline), expiresAt = :expiresAt, priority = :priority, terminal = :terminal, hex = if_not_exists(hex, :hex), title = if_not_exists(title, :title), #action = if_not_exists(#action, :action), publication = :publication, failureType = :failureType, failureMessage = :failureMessage',
+    UpdateExpression: 'SET feed = :feed, updatedAt = :updatedAt, createdAt = if_not_exists(createdAt, :createdAt), #state = :state, stage = :stage, timeline = list_append(if_not_exists(timeline, :empty), :timeline), expiresAt = :expiresAt, priority = :priority, terminal = :terminal, hex = if_not_exists(hex, :hex), title = if_not_exists(title, :title), #action = if_not_exists(#action, :action), reconciliationId = if_not_exists(reconciliationId, :reconciliationId), publication = :publication, failureType = :failureType, failureMessage = :failureMessage',
     ConditionExpression: 'attribute_not_exists(priority) OR priority <= :priority',
     ExpressionAttributeNames: { '#state': 'state', '#action': 'action' },
     ExpressionAttributeValues: attrs,
@@ -67,10 +104,14 @@ export function buildRequestActivityUpdate(input = {}) {
 }
 
 export async function recordRequestActivity(input = {}) {
+  // scouts-service calls this only after SQS SendMessage succeeds. Count the
+  // publication before the best-effort ledger write so the per-invocation metric
+  // remains exact even if DynamoDB activity persistence is temporarily degraded.
+  trackReconciliationPublication(input);
   const update = buildRequestActivityUpdate(input);
   if (!update) return null;
   await client.send(update.command);
-  return { requestId: update.requestId, state: update.state, stage: update.stage, updatedAt: update.updatedAt };
+  return { requestId: update.requestId, state: update.state, stage: update.stage, updatedAt: update.updatedAt, reconciliationId: update.reconciliationId };
 }
 
 export async function listRequestActivity({ requestIds = [], hex = '', states = [], cursor = null, limit = 50, activeOnly = false } = {}) {
