@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
+import { withRequestActivityContext } from '/opt/nodejs/request-activity.mjs';
 import { repairAgendaHexMetadata } from './agenda-hex-repair.mjs';
 import { handler as scoutsServiceHandler } from './scouts-service.mjs';
 import { buildRuntimeActivity } from './runtime-activity.mjs';
@@ -66,24 +67,90 @@ function isCalendarRefreshInvocation(event) {
   return ['calendar', 'calendars', 'all'].includes(subject) && action.startsWith('refresh');
 }
 
-async function invokeScoutsService(event) {
-  const result = await scoutsServiceHandler(event);
-  if (!isCalendarRefreshInvocation(event)) {
+function isAgendaRefreshInvocation(event) {
+  const body = decodeBody(event);
+  if (text(body?.realm).toLowerCase() !== 'scouts') return false;
+  if (text(body?.subject).toLowerCase() !== 'agenda') return false;
+  const action = body?.action;
+  if (typeof action === 'number') return true;
+  const normalizedAction = text(action).toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return !normalizedAction || normalizedAction.startsWith('refresh') || /^\d+$/.test(normalizedAction);
+}
+
+function isAgendaReconciliationInvocation(event) {
+  return isCalendarRefreshInvocation(event) || isAgendaRefreshInvocation(event);
+}
+
+function addEnrichmentAccounting(result, reconciliationContext) {
+  const enrichmentRequestsStarted = Number.isFinite(Number(reconciliationContext?.enrichmentRequestsStarted))
+    ? Number(reconciliationContext.enrichmentRequestsStarted)
+    : 0;
+  const accounting = {
+    reconciliationId: text(reconciliationContext?.reconciliationId) || null,
+    enrichmentRequestsStarted,
+    enrichmentRequestAccountingSource: 'reconciliation-publication-context',
+  };
+
+  if (result && typeof result === 'object' && typeof result.body === 'string') {
+    try {
+      const body = JSON.parse(result.body);
+      return {
+        ...result,
+        body: JSON.stringify({ ...body, ...accounting }),
+      };
+    } catch {
+      return result;
+    }
+  }
+  if (result && typeof result === 'object') {
+    return { ...result, ...accounting };
+  }
+  return result;
+}
+
+async function callScoutsService(event, reconciliationContext = null) {
+  if (!reconciliationContext) {
+    // Keep the direct call explicit: scheduled-refresh safety contracts verify
+    // the wrapper still delegates to the canonical service handler.
+    const result = await scoutsServiceHandler(event);
     return result;
   }
+  return withRequestActivityContext(
+    reconciliationContext,
+    () => scoutsServiceHandler(event),
+  );
+}
 
-  try {
-    const repair = await repairAgendaHexMetadata();
-    if (repair.repairedCount > 0 || repair.missingCount > 0) {
-      console.log('[AgendaHexRepair] Refresh post-processing result.', repair);
+async function invokeScoutsService(event) {
+  const isReconciliation = isAgendaReconciliationInvocation(event);
+  const reconciliationContext = isReconciliation
+    ? {
+        reconciliationId: crypto.randomUUID(),
+        enrichmentRequestsStarted: 0,
+        enrichmentRequestIds: new Set(),
+      }
+    : null;
+  const result = await callScoutsService(event, reconciliationContext);
+  let responseResult = result;
+
+  if (isCalendarRefreshInvocation(event)) {
+    try {
+      const repair = await repairAgendaHexMetadata();
+      if (repair.repairedCount > 0 || repair.missingCount > 0) {
+        console.log('[AgendaHexRepair] Refresh post-processing result.', repair);
+      }
+    } catch (error) {
+      // The calendar refresh itself has already completed. Keep its original
+      // result, but make a failed canonical-HEX repair explicit in Lambda logs.
+      console.error('[AgendaHexRepair] Unable to repair agenda HEX metadata after refresh.', error?.message || error);
     }
-  } catch (error) {
-    // The calendar refresh itself has already completed. Keep its original
-    // result, but make a failed canonical-HEX repair explicit in Lambda logs.
-    console.error('[AgendaHexRepair] Unable to repair agenda HEX metadata after refresh.', error?.message || error);
   }
 
-  return result;
+  if (isReconciliation) {
+    responseResult = addEnrichmentAccounting(result, reconciliationContext);
+  }
+
+  return responseResult;
 }
 
 function isInterceptedRuntimeCommand(command) {
