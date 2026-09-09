@@ -12,6 +12,8 @@ const adminScript = readFileSync('website/admin/admin-script.js', 'utf8');
 const agendaRefresh = readFileSync('website/admin/admin-agenda-refresh.js', 'utf8');
 const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
 const scoutsService = readFileSync('lambdas/scouts/function/scouts-service.mjs', 'utf8');
+const requestActivity = readFileSync('lambdas/shared-layer/nodejs/request-activity.mjs', 'utf8');
+const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
 const enrichmentState = readFileSync('lambdas/shared-layer/nodejs/enrichment-state.mjs', 'utf8');
 const imageProvider = readFileSync('lambdas/sqs2scouts/function/image-provider-adapter.mjs', 'utf8');
 
@@ -20,11 +22,17 @@ function assertSyntax(path) {
   assert.equal(result.status, 0, `${path} syntax check failed:\n${result.stderr}`);
 }
 
+function assertNodeTest(path) {
+  const result = spawnSync(process.execPath, ['--test', path], { encoding: 'utf8' });
+  assert.equal(result.status, 0, `${path} tests failed:\n${result.stdout}\n${result.stderr}`);
+}
+
 test('admin page loads simplified agenda refresh controller after legacy controller', () => {
   assert.match(html, /admin-simplify\.css/);
   assert.match(html, /admin-script\.js[\s\S]*admin-simplify\.js[\s\S]*admin-agenda-refresh\.js/);
   assertSyntax('website/admin/admin-agenda-refresh.js');
   assertSyntax('lambdas/scouts/function/scouts-entry.mjs');
+  assertSyntax('lambdas/shared-layer/nodejs/request-activity.mjs');
 });
 
 test('default UI exposes diagnostics separately and keeps activity user-facing', () => {
@@ -101,10 +109,21 @@ test('refresh result exposes modified-event details in the normal UI', () => {
   assert.match(agendaRefresh, /Agenda refreshed ·/);
 });
 
-test('enrichment starts are explicitly accounted and distinct from modified events', () => {
+test('enrichment starts are exact per reconciliation and distinct from modified events', () => {
+  assert.match(scoutsEntry, /withRequestActivityContext/);
+  assert.match(scoutsEntry, /reconciliationId: crypto\.randomUUID\(\)/);
   assert.match(scoutsEntry, /enrichmentRequestsStarted/);
-  assert.match(scoutsEntry, /enrichmentRequestAccountingSource/);
-  assert.match(scoutsEntry, /countNewEnrichmentRequests/);
+  assert.match(scoutsEntry, /enrichmentRequestAccountingSource: 'reconciliation-publication-context'/);
+  assert.doesNotMatch(scoutsEntry, /captureActivitySnapshot|countNewEnrichmentRequests|startedAtMs|beforeIds/);
+
+  assert.match(requestActivity, /new AsyncLocalStorage\(\)/);
+  assert.match(requestActivity, /trackReconciliationPublication/);
+  assert.match(requestActivity, /RECONCILIATION_ENRICHMENT_ACTIONS/);
+  assert.match(requestActivity, /reconciliationId = if_not_exists\(reconciliationId, :reconciliationId\)/);
+  assert.match(requestActivity, /state !== 'queued' \|\| stage !== 'scoutsrequests'/);
+  assert.match(runtimeActivity, /reconciliationId: request\.reconciliationId \|\| null/);
+  assertNodeTest('lambdas/shared-layer/nodejs/request-activity.test.mjs');
+
   assert.match(agendaRefresh, /result\?\.modifiedEventsCount/);
   assert.match(agendaRefresh, /result\?\.enrichmentRequestsStarted/);
   assert.doesNotMatch(agendaRefresh, /enrichmentRequestsStarted\s*=\s*modified/);
