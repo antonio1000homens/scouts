@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
+import { withRequestActivityContext } from '/opt/nodejs/request-activity.mjs';
 import { repairAgendaHexMetadata } from './agenda-hex-repair.mjs';
 import { handler as scoutsServiceHandler } from './scouts-service.mjs';
 import { buildRuntimeActivity } from './runtime-activity.mjs';
@@ -80,40 +81,14 @@ function isAgendaReconciliationInvocation(event) {
   return isCalendarRefreshInvocation(event) || isAgendaRefreshInvocation(event);
 }
 
-async function captureActivitySnapshot() {
-  try {
-    return await buildRuntimeActivity({ limit: 200 });
-  } catch (error) {
-    console.warn('[AgendaRefresh] Unable to capture request-activity snapshot for enrichment accounting.', error?.message || error);
-    return null;
-  }
-}
-
-function countNewEnrichmentRequests(beforeActivity, afterActivity, startedAtMs) {
-  if (!beforeActivity || !afterActivity) return null;
-  const beforeIds = new Set(
-    (Array.isArray(beforeActivity.requests) ? beforeActivity.requests : [])
-      .map((request) => text(request?.requestId))
-      .filter(Boolean),
-  );
-  const validActions = new Set(['new', 'imageenrich']);
-  let count = 0;
-  for (const request of Array.isArray(afterActivity.requests) ? afterActivity.requests : []) {
-    const requestId = text(request?.requestId);
-    if (!requestId || beforeIds.has(requestId)) continue;
-    const action = text(request?.action).toLowerCase();
-    if (!validActions.has(action)) continue;
-    const createdAtMs = Date.parse(request?.createdAt || '');
-    if (Number.isFinite(createdAtMs) && createdAtMs < startedAtMs - 2000) continue;
-    count += 1;
-  }
-  return count;
-}
-
-function addEnrichmentAccounting(result, enrichmentRequestsStarted) {
+function addEnrichmentAccounting(result, reconciliationContext) {
+  const enrichmentRequestsStarted = Number.isFinite(Number(reconciliationContext?.enrichmentRequestsStarted))
+    ? Number(reconciliationContext.enrichmentRequestsStarted)
+    : 0;
   const accounting = {
+    reconciliationId: text(reconciliationContext?.reconciliationId) || null,
     enrichmentRequestsStarted,
-    enrichmentRequestAccountingSource: enrichmentRequestsStarted === null ? 'unavailable' : 'request-activity-ledger',
+    enrichmentRequestAccountingSource: 'reconciliation-publication-context',
   };
 
   if (result && typeof result === 'object' && typeof result.body === 'string') {
@@ -133,11 +108,29 @@ function addEnrichmentAccounting(result, enrichmentRequestsStarted) {
   return result;
 }
 
+async function callScoutsService(event, reconciliationContext = null) {
+  if (!reconciliationContext) {
+    // Keep the direct call explicit: scheduled-refresh safety contracts verify
+    // the wrapper still delegates to the canonical service handler.
+    const result = await scoutsServiceHandler(event);
+    return result;
+  }
+  return withRequestActivityContext(
+    reconciliationContext,
+    () => scoutsServiceHandler(event),
+  );
+}
+
 async function invokeScoutsService(event) {
   const isReconciliation = isAgendaReconciliationInvocation(event);
-  const startedAtMs = Date.now();
-  const beforeActivity = isReconciliation ? await captureActivitySnapshot() : null;
-  const result = await scoutsServiceHandler(event);
+  const reconciliationContext = isReconciliation
+    ? {
+        reconciliationId: crypto.randomUUID(),
+        enrichmentRequestsStarted: 0,
+        enrichmentRequestIds: new Set(),
+      }
+    : null;
+  const result = await callScoutsService(event, reconciliationContext);
   let responseResult = result;
 
   if (isCalendarRefreshInvocation(event)) {
@@ -154,9 +147,7 @@ async function invokeScoutsService(event) {
   }
 
   if (isReconciliation) {
-    const afterActivity = await captureActivitySnapshot();
-    const enrichmentRequestsStarted = countNewEnrichmentRequests(beforeActivity, afterActivity, startedAtMs);
-    responseResult = addEnrichmentAccounting(result, enrichmentRequestsStarted);
+    responseResult = addEnrichmentAccounting(result, reconciliationContext);
   }
 
   return responseResult;
