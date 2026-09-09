@@ -66,21 +66,96 @@ function isCalendarRefreshInvocation(event) {
   return ['calendar', 'calendars', 'all'].includes(subject) && action.startsWith('refresh');
 }
 
+function isAgendaRefreshInvocation(event) {
+  const body = decodeBody(event);
+  if (text(body?.realm).toLowerCase() !== 'scouts') return false;
+  if (text(body?.subject).toLowerCase() !== 'agenda') return false;
+  const action = body?.action;
+  if (typeof action === 'number') return true;
+  const normalizedAction = text(action).toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return !normalizedAction || normalizedAction.startsWith('refresh') || /^\d+$/.test(normalizedAction);
+}
+
+function isAgendaReconciliationInvocation(event) {
+  return isCalendarRefreshInvocation(event) || isAgendaRefreshInvocation(event);
+}
+
+async function captureActivitySnapshot() {
+  try {
+    return await buildRuntimeActivity({ limit: 200 });
+  } catch (error) {
+    console.warn('[AgendaRefresh] Unable to capture request-activity snapshot for enrichment accounting.', error?.message || error);
+    return null;
+  }
+}
+
+function countNewEnrichmentRequests(beforeActivity, afterActivity, startedAtMs) {
+  if (!beforeActivity || !afterActivity) return null;
+  const beforeIds = new Set(
+    (Array.isArray(beforeActivity.requests) ? beforeActivity.requests : [])
+      .map((request) => text(request?.requestId))
+      .filter(Boolean),
+  );
+  const validActions = new Set(['new', 'imageenrich']);
+  let count = 0;
+  for (const request of Array.isArray(afterActivity.requests) ? afterActivity.requests : []) {
+    const requestId = text(request?.requestId);
+    if (!requestId || beforeIds.has(requestId)) continue;
+    const action = text(request?.action).toLowerCase();
+    if (!validActions.has(action)) continue;
+    const createdAtMs = Date.parse(request?.createdAt || '');
+    if (Number.isFinite(createdAtMs) && createdAtMs < startedAtMs - 2000) continue;
+    count += 1;
+  }
+  return count;
+}
+
+function addEnrichmentAccounting(result, enrichmentRequestsStarted) {
+  const accounting = {
+    enrichmentRequestsStarted,
+    enrichmentRequestAccountingSource: enrichmentRequestsStarted === null ? 'unavailable' : 'request-activity-ledger',
+  };
+
+  if (result && typeof result === 'object' && typeof result.body === 'string') {
+    try {
+      const body = JSON.parse(result.body);
+      return {
+        ...result,
+        body: JSON.stringify({ ...body, ...accounting }),
+      };
+    } catch {
+      return result;
+    }
+  }
+  if (result && typeof result === 'object') {
+    return { ...result, ...accounting };
+  }
+  return result;
+}
+
 async function invokeScoutsService(event) {
-  const result = await scoutsServiceHandler(event);
-  if (!isCalendarRefreshInvocation(event)) {
-    return result;
+  const isReconciliation = isAgendaReconciliationInvocation(event);
+  const startedAtMs = Date.now();
+  const beforeActivity = isReconciliation ? await captureActivitySnapshot() : null;
+  let result = await scoutsServiceHandler(event);
+
+  if (isCalendarRefreshInvocation(event)) {
+    try {
+      const repair = await repairAgendaHexMetadata();
+      if (repair.repairedCount > 0 || repair.missingCount > 0) {
+        console.log('[AgendaHexRepair] Refresh post-processing result.', repair);
+      }
+    } catch (error) {
+      // The calendar refresh itself has already completed. Keep its original
+      // result, but make a failed canonical-HEX repair explicit in Lambda logs.
+      console.error('[AgendaHexRepair] Unable to repair agenda HEX metadata after refresh.', error?.message || error);
+    }
   }
 
-  try {
-    const repair = await repairAgendaHexMetadata();
-    if (repair.repairedCount > 0 || repair.missingCount > 0) {
-      console.log('[AgendaHexRepair] Refresh post-processing result.', repair);
-    }
-  } catch (error) {
-    // The calendar refresh itself has already completed. Keep its original
-    // result, but make a failed canonical-HEX repair explicit in Lambda logs.
-    console.error('[AgendaHexRepair] Unable to repair agenda HEX metadata after refresh.', error?.message || error);
+  if (isReconciliation) {
+    const afterActivity = await captureActivitySnapshot();
+    const enrichmentRequestsStarted = countNewEnrichmentRequests(beforeActivity, afterActivity, startedAtMs);
+    result = addEnrichmentAccounting(result, enrichmentRequestsStarted);
   }
 
   return result;
