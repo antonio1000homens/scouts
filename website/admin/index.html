@@ -57,24 +57,12 @@
             <div class="header-control-group" aria-label="Agenda refresh controls">
                 <span class="header-control-label">Agenda</span>
                 <div class="header-control-actions header-control-actions-agenda">
-                    <input
-                        type="number"
-                        id="refresh-action"
-                        placeholder="5"
-                        class="refresh-input refresh-input-header"
-                        min="0"
-                        step="1"
-                        inputmode="numeric"
-                        aria-label="Events to enrich"
-                        title="Number of scoutsRequest queue notifications Lambda may publish this run. 0 = no new queue notifications; it still enriches and updates agenda/HEX data."
-                    >
                     <button
                         id="refresh-button"
                         class="btn btn-primary btn-header requires-api"
-                        value="refreshAgenda"
-                        onclick="refreshLambda(this.value)"
-                        title="Runs agenda enrichment with the integer as max queue publish count. This does not do a full calendar feed refresh."
-                    >Refresh Agenda</button>
+                        onclick="refreshLambda()"
+                        title="Refresh calendar feeds and reconcile the agenda now. Backend policy controls enrichment throttling and retries."
+                    >Refresh now</button>
                 </div>
             </div>
             <span id="api-ready-indicator" class="api-ready-pill api-loading" title="Checking Cloudflare admin API...">API</span>
@@ -85,17 +73,17 @@
                     checked
                     onchange="toggleAutoLambdaInvocation(this.checked)"
                 >
-                Auto lambda
+                Auto refresh
             </label>
             <input
                 type="number"
                 id="auto-lambda-interval-seconds"
                 class="refresh-input auto-invoke-header-interval"
-                min="5"
+                min="60"
                 step="1"
-                value="20"
+                value="300"
                 onchange="updateAutoLambdaInvocationInterval(this.value)"
-                title="Auto invoke interval in seconds"
+                title="Automatic agenda reconciliation interval in seconds (status polling is separate)."
             >
             <label class="auto-invoke-header-label" for="status-polling-toggle">
                 <input
@@ -376,6 +364,7 @@
     <script src="admin-config.js"></script>
     <script src="admin-script.js"></script>
     <script src="admin-simplify.js"></script>
+    <script src="admin-agenda-refresh.js"></script>
     <script src="admin-diagnostics-enhancements.js"></script>
     <script src="admin-activity-centre.js"></script>
 </body>
