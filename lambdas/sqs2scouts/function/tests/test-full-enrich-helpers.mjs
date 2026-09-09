@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import './test-cloudflare-image-client.mjs';
 import './test-agenda-publisher.mjs';
+import './test-deployment-artifact.mjs';
 import '../../../../tests/issue-18-cloudflare-image.integration.test.mjs';
 import {
   normaliseStage,

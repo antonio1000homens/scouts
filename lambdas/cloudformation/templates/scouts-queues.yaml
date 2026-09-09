@@ -17,57 +17,66 @@ Parameters:
   ProcessingDlqName:
     Type: String
     Default: scoutsProcessingDLQ
-  VisibilityTimeout:
+  RequestsVisibilityTimeout:
+    Type: Number
+    Default: 600
+  ProcessingVisibilityTimeout:
+    Type: Number
+    Default: 60
+  DlqVisibilityTimeout:
     Type: Number
     Default: 600
   MessageRetentionSeconds:
     Type: Number
     Default: 1209600
-  MaxReceiveCount:
+  RequestsMaxReceiveCount:
     Type: Number
     Default: 5
+  ProcessingMaxReceiveCount:
+    Type: Number
+    Default: 3
 
 Resources:
   ScoutsRequestsDlq:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Ref RequestsDlqName
-      VisibilityTimeout: !Ref VisibilityTimeout
+      VisibilityTimeout: !Ref DlqVisibilityTimeout
       MessageRetentionPeriod: !Ref MessageRetentionSeconds
 
   ScoutsProcessingDlq:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Ref ProcessingDlqName
-      VisibilityTimeout: !Ref VisibilityTimeout
+      VisibilityTimeout: !Ref DlqVisibilityTimeout
       MessageRetentionPeriod: !Ref MessageRetentionSeconds
 
   ScoutsRequestsQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Ref RequestsQueueName
-      VisibilityTimeout: !Ref VisibilityTimeout
+      VisibilityTimeout: !Ref RequestsVisibilityTimeout
       MessageRetentionPeriod: !Ref MessageRetentionSeconds
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt ScoutsRequestsDlq.Arn
-        maxReceiveCount: !Ref MaxReceiveCount
+        maxReceiveCount: !Ref RequestsMaxReceiveCount
 
   ScoutsDecisionQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Ref DecisionQueueName
-      VisibilityTimeout: !Ref VisibilityTimeout
+      VisibilityTimeout: !Ref RequestsVisibilityTimeout
       MessageRetentionPeriod: !Ref MessageRetentionSeconds
 
   ScoutsProcessingQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Ref ProcessingQueueName
-      VisibilityTimeout: !Ref VisibilityTimeout
+      VisibilityTimeout: !Ref ProcessingVisibilityTimeout
       MessageRetentionPeriod: !Ref MessageRetentionSeconds
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt ScoutsProcessingDlq.Arn
-        maxReceiveCount: !Ref MaxReceiveCount
+        maxReceiveCount: !Ref ProcessingMaxReceiveCount
 
 Outputs:
   ScoutsRequestsQueueArn:

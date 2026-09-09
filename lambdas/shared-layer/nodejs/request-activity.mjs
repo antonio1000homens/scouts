@@ -78,6 +78,7 @@ export function buildRequestActivityUpdate(input = {}) {
   const failure = input.failure && typeof input.failure === 'object' ? input.failure : null;
   const reconciliationId = reconciliationIdOf(input);
   const timelineEntry = JSON.stringify({ state, stage, at: timestamp, ...(failure ? { failure: { type: text(failure.type) || 'PROCESSING_FAILED', message: text(failure.message) || null } } : {}) });
+  const strictTerminal = input.strictTerminal === true;
   const attrs = {
     ':feed': { S: 'activity' }, ':updatedAt': { S: timestamp },
     ':createdAt': { S: text(input.createdAt) || timestamp }, ':state': { S: state }, ':stage': { S: stage },
@@ -90,13 +91,26 @@ export function buildRequestActivityUpdate(input = {}) {
     ':failureType': itemValue(failure ? text(failure.type) || 'PROCESSING_FAILED' : null),
     ':failureMessage': itemValue(failure ? text(failure.message) || null : null),
   };
+  if (strictTerminal) {
+    attrs[':notTerminal'] = { S: 'false' };
+  } else {
+    attrs[':completed'] = { S: 'completed' };
+    attrs[':published'] = { S: 'published' };
+    attrs[':needsAttention'] = { S: 'needs_attention' };
+    attrs[':failed'] = { S: 'failed' };
+    attrs[':manualReview'] = { S: 'manual_review' };
+  }
   return {
     requestId, state, stage, updatedAt: timestamp, reconciliationId,
     command: new UpdateItemCommand({
     TableName: TABLE_NAME,
     Key: { requestId: { S: requestId } },
     UpdateExpression: 'SET feed = :feed, updatedAt = :updatedAt, createdAt = if_not_exists(createdAt, :createdAt), #state = :state, stage = :stage, timeline = list_append(if_not_exists(timeline, :empty), :timeline), expiresAt = :expiresAt, priority = :priority, terminal = :terminal, hex = if_not_exists(hex, :hex), title = if_not_exists(title, :title), #action = if_not_exists(#action, :action), reconciliationId = if_not_exists(reconciliationId, :reconciliationId), publication = :publication, failureType = :failureType, failureMessage = :failureMessage',
-    ConditionExpression: 'attribute_not_exists(priority) OR priority <= :priority',
+    // A DLQ terminal state is authoritative over delayed processing updates. A
+    // later successful publish/completion is the only permitted recovery path.
+    ConditionExpression: strictTerminal
+      ? 'attribute_not_exists(priority) OR (terminal = :notTerminal AND priority < :priority)'
+      : 'attribute_not_exists(priority) OR priority <= :priority OR (#state IN (:needsAttention, :failed, :manualReview) AND (:state = :completed OR :state = :published))',
     ExpressionAttributeNames: { '#state': 'state', '#action': 'action' },
     ExpressionAttributeValues: attrs,
     }),
@@ -112,6 +126,20 @@ export async function recordRequestActivity(input = {}) {
   if (!update) return null;
   await client.send(update.command);
   return { requestId: update.requestId, state: update.state, stage: update.stage, updatedAt: update.updatedAt, reconciliationId: update.reconciliationId };
+}
+
+export async function recordWorkerDeliveryExhausted(input = {}) {
+  const update = buildRequestActivityUpdate({ ...input, strictTerminal: true });
+  if (!update) return null;
+  try {
+    await client.send(update.command);
+    return { requestId: update.requestId, state: update.state, stage: update.stage, updatedAt: update.updatedAt, recorded: true };
+  } catch (error) {
+    if (error?.name === 'ConditionalCheckFailedException') {
+      return { requestId: update.requestId, state: update.state, stage: update.stage, recorded: false };
+    }
+    throw error;
+  }
 }
 
 export async function listRequestActivity({ requestIds = [], hex = '', states = [], cursor = null, limit = 50, activeOnly = false } = {}) {
