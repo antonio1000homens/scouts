@@ -11,6 +11,7 @@ function present(request, now) {
   const updated = Date.parse(request.updatedAt || request.createdAt || '');
   return {
     requestId: request.requestId,
+    reconciliationId: request.reconciliationId || null,
     hex: request.hex || null,
     title: request.title || null,
     action: request.action || null,
