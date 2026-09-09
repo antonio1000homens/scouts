@@ -1,5 +1,9 @@
 /* Homepage-only desktop compaction. Keep the existing mobile layout untouched. */
 @media (min-width: 901px) {
+    .home-page {
+        --homepage-event-card-height: clamp(300px, 25vw, 360px);
+    }
+
     .home-page header {
         padding: 0.6rem 0;
     }
@@ -107,6 +111,7 @@
 
     .home-page .event-card {
         padding: 1rem;
+        min-height: var(--homepage-event-card-height);
     }
 
     .home-page .event-card img {
