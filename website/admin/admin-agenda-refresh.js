@@ -5,15 +5,23 @@
 // 2. this controller performs a real calendar + agenda reconciliation at a
 //    much slower cadence (or when the user explicitly clicks Refresh now);
 // 3. enrichment remains asynchronous and is throttled/idempotent in the backend.
+//
+// This is intentionally separate from the historical browser "Auto Lambda"
+// heartbeat. That legacy timer remains retired by admin-diagnostics-enhancements;
+// automatic agenda reconciliation has its own preference and timer.
 
 (function () {
     const DEFAULT_RECONCILIATION_INTERVAL_SECONDS = 300;
     const MIN_RECONCILIATION_INTERVAL_SECONDS = 60;
-    const LEGACY_FAST_INTERVAL_CUTOFF_SECONDS = 60;
     const INITIAL_REFRESH_RETRY_MS = 5000;
     const MAX_INITIAL_REFRESH_AUTH_CHECKS = 12;
+    const AUTO_REFRESH_ENABLED_STORAGE_KEY = 'scoutsAdminAgendaAutoRefreshEnabledV1';
+    const AUTO_REFRESH_INTERVAL_STORAGE_KEY = 'scoutsAdminAgendaAutoRefreshIntervalSecondsV1';
 
     let agendaRefreshExecutionInFlight = false;
+    let agendaAutoRefreshEnabled = true;
+    let agendaAutoRefreshIntervalSeconds = DEFAULT_RECONCILIATION_INTERVAL_SECONDS;
+    let agendaAutoRefreshTimer = null;
     let initialRefreshAuthChecks = 0;
 
     function reconciliationPayload() {
@@ -39,6 +47,36 @@
         if (value === undefined || value === null || value === '') return null;
         const number = Number(value);
         return Number.isFinite(number) ? number : null;
+    }
+
+    function readStoredBoolean(key, fallback) {
+        try {
+            const stored = window.localStorage.getItem(key);
+            if (stored === null) return fallback;
+            return stored === 'true';
+        } catch {
+            return fallback;
+        }
+    }
+
+    function readStoredInterval() {
+        try {
+            const stored = Number(window.localStorage.getItem(AUTO_REFRESH_INTERVAL_STORAGE_KEY));
+            if (Number.isFinite(stored) && stored >= MIN_RECONCILIATION_INTERVAL_SECONDS) {
+                return Math.round(stored);
+            }
+        } catch {
+            // Local storage is optional; defaults remain safe.
+        }
+        return DEFAULT_RECONCILIATION_INTERVAL_SECONDS;
+    }
+
+    function storePreference(key, value) {
+        try {
+            window.localStorage.setItem(key, String(value));
+        } catch {
+            // The feature still works for the current page when storage is unavailable.
+        }
     }
 
     function formatChangeValue(value) {
@@ -217,6 +255,34 @@
         section.hidden = false;
     }
 
+    function updateAutoRefreshUi() {
+        const toggle = document.getElementById('agenda-auto-refresh-toggle');
+        if (toggle) toggle.checked = agendaAutoRefreshEnabled;
+        const interval = document.getElementById('agenda-auto-refresh-interval-seconds');
+        if (interval) interval.value = String(agendaAutoRefreshIntervalSeconds);
+        const status = document.getElementById('agenda-auto-refresh-status');
+        if (status) {
+            status.textContent = agendaAutoRefreshEnabled
+                ? `Auto refresh: every ${agendaAutoRefreshIntervalSeconds}s`
+                : 'Auto refresh: off';
+        }
+    }
+
+    function stopAutoRefreshTimer() {
+        if (agendaAutoRefreshTimer !== null) {
+            clearInterval(agendaAutoRefreshTimer);
+            agendaAutoRefreshTimer = null;
+        }
+    }
+
+    function startAutoRefreshTimer() {
+        stopAutoRefreshTimer();
+        if (!agendaAutoRefreshEnabled) return;
+        agendaAutoRefreshTimer = setInterval(() => {
+            void performAgendaReconciliation({ automatic: true });
+        }, agendaAutoRefreshIntervalSeconds * 1000);
+    }
+
     async function performAgendaReconciliation({ automatic = false } = {}) {
         const statusElement = document.getElementById('refresh-status');
         if (!apiAuthReady) {
@@ -226,7 +292,7 @@
             }
             return null;
         }
-        if (agendaRefreshExecutionInFlight || autoLambdaInvokeInFlight || uiCommandInFlight) {
+        if (agendaRefreshExecutionInFlight || uiCommandInFlight) {
             if (!automatic && statusElement) {
                 statusElement.textContent = 'Agenda refresh already in progress.';
                 statusElement.className = 'refresh-status loading';
@@ -235,7 +301,6 @@
         }
 
         agendaRefreshExecutionInFlight = true;
-        autoLambdaInvokeInFlight = automatic;
         uiCommandInFlight = true;
         refreshApiActionButtons();
         if (statusElement) {
@@ -273,7 +338,6 @@
             return null;
         } finally {
             agendaRefreshExecutionInFlight = false;
-            autoLambdaInvokeInFlight = false;
             uiCommandInFlight = false;
             refreshApiActionButtons();
         }
@@ -286,11 +350,24 @@
         return performAgendaReconciliation({ automatic: false });
     };
 
-    // Re-purpose the old heartbeat timer as a real, slow reconciliation timer.
-    // Status polling remains separate in runStatusPollingJob().
-    invokeLambdaHeartbeat = async function () {
-        if (!autoLambdaInvokeEnabled) return null;
-        return performAgendaReconciliation({ automatic: true });
+    window.toggleAgendaAutoRefresh = function (enabled) {
+        agendaAutoRefreshEnabled = Boolean(enabled);
+        storePreference(AUTO_REFRESH_ENABLED_STORAGE_KEY, agendaAutoRefreshEnabled);
+        updateAutoRefreshUi();
+        startAutoRefreshTimer();
+        if (agendaAutoRefreshEnabled && apiAuthReady) {
+            void performAgendaReconciliation({ automatic: true });
+        }
+    };
+
+    window.updateAgendaAutoRefreshInterval = function (value) {
+        const parsed = Number(value);
+        agendaAutoRefreshIntervalSeconds = Number.isFinite(parsed)
+            ? Math.max(MIN_RECONCILIATION_INTERVAL_SECONDS, Math.round(parsed))
+            : DEFAULT_RECONCILIATION_INTERVAL_SECONDS;
+        storePreference(AUTO_REFRESH_INTERVAL_STORAGE_KEY, agendaAutoRefreshIntervalSeconds);
+        updateAutoRefreshUi();
+        startAutoRefreshTimer();
     };
 
     function configureRefreshControls() {
@@ -304,35 +381,16 @@
             refreshButton.removeAttribute('value');
         }
 
-        const autoLabel = document.querySelector('label[for="auto-lambda-toggle"]');
-        if (autoLabel) {
-            const checkbox = document.getElementById('auto-lambda-toggle');
-            autoLabel.childNodes.forEach((node) => {
-                if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) node.textContent = '\n                Auto refresh\n            ';
-            });
-            if (checkbox) checkbox.title = 'Automatically reconcile the agenda while this authenticated admin page remains open.';
-        }
-
-        const intervalInput = document.getElementById('auto-lambda-interval-seconds');
-        if (intervalInput) {
-            intervalInput.min = String(MIN_RECONCILIATION_INTERVAL_SECONDS);
-            intervalInput.title = 'Automatic agenda reconciliation interval in seconds (status polling is separate).';
-        }
-
-        // Existing browsers may have persisted the old 20-second heartbeat.
-        // Migrate only legacy fast values; preserve deliberate slower choices.
-        const currentSeconds = Math.max(0, Math.round(Number(autoLambdaInvokeIntervalMs) / 1000));
-        if (!Number.isFinite(currentSeconds) || currentSeconds < LEGACY_FAST_INTERVAL_CUTOFF_SECONDS) {
-            updateAutoLambdaInvocationInterval(DEFAULT_RECONCILIATION_INTERVAL_SECONDS, true);
-        } else {
-            updateAutoLambdaInvocationInterval(Math.max(MIN_RECONCILIATION_INTERVAL_SECONDS, currentSeconds), false);
-        }
+        agendaAutoRefreshEnabled = readStoredBoolean(AUTO_REFRESH_ENABLED_STORAGE_KEY, true);
+        agendaAutoRefreshIntervalSeconds = readStoredInterval();
+        updateAutoRefreshUi();
+        startAutoRefreshTimer();
     }
 
     function attemptInitialAutomaticRefresh() {
-        if (!autoLambdaInvokeEnabled) return;
+        if (!agendaAutoRefreshEnabled) return;
         if (apiAuthReady) {
-            void invokeLambdaHeartbeat();
+            void performAgendaReconciliation({ automatic: true });
             return;
         }
         initialRefreshAuthChecks += 1;
