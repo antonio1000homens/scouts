@@ -143,6 +143,13 @@ test('sqs2scouts uses the canonical enrichment-state environment variable name',
   assert.doesNotMatch(sqs2scoutsTemplate, /GEMINI_ENRICH_STATE_TABLE_NAME:/);
 });
 
+test('sqs2scouts deploys an ordered Gemini text fallback list', () => {
+  assert.match(sqs2scoutsTemplate, /GeminiTextModels:/);
+  assert.match(sqs2scoutsTemplate, /GEMINI_TEXT_MODELS:\s*!Ref GeminiTextModels/);
+  assert.match(sqs2scoutsDeploy, /GEMINI_TEXT_MODELS=.*gemini-3\.5-flash,gemini-3\.1-flash-lite,gemini-2\.5-flash,gemini-2\.5-flash-lite/);
+  assert.match(sqs2scoutsDeploy, /GeminiTextModels="\$\{GEMINI_TEXT_MODELS\}"/);
+});
+
 test('local deploy scripts keep using the shared resolver compatibility entrypoint', () => {
   for (const [name, deploy] of [
     ['scouts', scoutsDeploy],

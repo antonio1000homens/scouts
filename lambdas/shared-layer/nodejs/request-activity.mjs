@@ -32,7 +32,7 @@ function unmarshall(item = {}) {
 
 export function requestActivityEnabled() { return Boolean(TABLE_NAME); }
 
-export async function recordRequestActivity(input = {}) {
+export function buildRequestActivityUpdate(input = {}) {
   if (!TABLE_NAME) return null;
   const requestId = requestIdOf(input);
   if (!requestId) return null;
@@ -43,7 +43,7 @@ export async function recordRequestActivity(input = {}) {
   const failure = input.failure && typeof input.failure === 'object' ? input.failure : null;
   const timelineEntry = JSON.stringify({ state, stage, at: timestamp, ...(failure ? { failure: { type: text(failure.type) || 'PROCESSING_FAILED', message: text(failure.message) || null } } : {}) });
   const attrs = {
-    ':requestId': { S: requestId }, ':feed': { S: 'activity' }, ':updatedAt': { S: timestamp },
+    ':feed': { S: 'activity' }, ':updatedAt': { S: timestamp },
     ':createdAt': { S: text(input.createdAt) || timestamp }, ':state': { S: state }, ':stage': { S: stage },
     ':timeline': { L: [{ S: timelineEntry }] }, ':empty': { L: [] },
     ':expiresAt': { N: String(Math.floor(now.getTime() / 1000) + RETENTION_SECONDS) },
@@ -53,15 +53,24 @@ export async function recordRequestActivity(input = {}) {
     ':failureType': itemValue(failure ? text(failure.type) || 'PROCESSING_FAILED' : null),
     ':failureMessage': itemValue(failure ? text(failure.message) || null : null),
   };
-  await client.send(new UpdateItemCommand({
+  return {
+    requestId, state, stage, updatedAt: timestamp,
+    command: new UpdateItemCommand({
     TableName: TABLE_NAME,
     Key: { requestId: { S: requestId } },
     UpdateExpression: 'SET feed = :feed, updatedAt = :updatedAt, createdAt = if_not_exists(createdAt, :createdAt), #state = :state, stage = :stage, timeline = list_append(if_not_exists(timeline, :empty), :timeline), expiresAt = :expiresAt, priority = :priority, terminal = :terminal, hex = if_not_exists(hex, :hex), title = if_not_exists(title, :title), #action = if_not_exists(#action, :action), publication = :publication, failureType = :failureType, failureMessage = :failureMessage',
     ConditionExpression: 'attribute_not_exists(priority) OR priority <= :priority',
     ExpressionAttributeNames: { '#state': 'state', '#action': 'action' },
     ExpressionAttributeValues: attrs,
-  }));
-  return { requestId, state, stage, updatedAt: timestamp };
+    }),
+  };
+}
+
+export async function recordRequestActivity(input = {}) {
+  const update = buildRequestActivityUpdate(input);
+  if (!update) return null;
+  await client.send(update.command);
+  return { requestId: update.requestId, state: update.state, stage: update.stage, updatedAt: update.updatedAt };
 }
 
 export async function listRequestActivity({ requestIds = [], hex = '', states = [], cursor = null, limit = 50, activeOnly = false } = {}) {

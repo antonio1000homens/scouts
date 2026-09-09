@@ -552,6 +552,7 @@ jobs:
           GEMINI_IMAGE_API_VERSION: ${{ vars.GEMINI_IMAGE_API_VERSION }}
           GEMINI_IMAGE_MODEL: ${{ vars.GEMINI_IMAGE_MODEL }}
           GEMINI_TEXT_MODEL: ${{ vars.GEMINI_TEXT_MODEL }}
+          GEMINI_TEXT_MODELS: ${{ vars.GEMINI_TEXT_MODELS || 'gemini-3.5-flash,gemini-3.1-flash-lite,gemini-2.5-flash,gemini-2.5-flash-lite' }}
           REQUIRE_GEMINI_API_KEY: 'true'
           IMAGE_GENERATION_PROVIDER: ${{ vars.IMAGE_GENERATION_PROVIDER || 'disabled' }}
           IMAGE_GENERATION_DAILY_REQUEST_LIMIT: ${{ vars.IMAGE_GENERATION_DAILY_REQUEST_LIMIT || '10' }}
