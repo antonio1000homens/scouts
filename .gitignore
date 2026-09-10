@@ -1,6 +1,37 @@
+# Runtime/generated site data
 agenda.json
+
+# Local environment and developer configuration
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.local.env
+*.local.json
+
+# Cloudflare/Wrangler local state
 cloudflare/.dev.vars
-cloudflare/node_modules
-lambdas/shared-layer/nodejs/node_modules
+**/.wrangler/
+
+# Dependencies/build artefacts
+**/node_modules/
 lambdas/shared-layer/*.zip
 lambdas/*/function/*.zip
+*.log
+.DS_Store
+
+# Temporary/debug/diagnostic output
+**/tmp/
+**/.tmp/
+
+# Generated/live infrastructure snapshots
+# Prefer parameterised IaC rather than committing exports from deployed resources.
+distribution-config*.json
+etag.txt
+resources-to-import.json
+iam_policy.json
+vsstudio-policy-updated.json
+
+# Local deployment overrides
+.deploy.env
+deployment.local.env
