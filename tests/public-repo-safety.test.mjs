@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { extname } from 'node:path';
 import test from 'node:test';
 
 const trackedFiles = execFileSync('git', ['ls-files'], { encoding: 'utf8' })
@@ -17,6 +18,10 @@ const prohibitedTrackedPath = (path) => {
   return false;
 };
 
+const textExtensions = new Set([
+  '.css', '.html', '.ics', '.js', '.json', '.md', '.mjs', '.sh', '.toml', '.txt', '.yaml', '.yml', '.conf',
+]);
+
 test('private/generated deployment artefacts are not tracked', () => {
   const prohibited = trackedFiles.filter(prohibitedTrackedPath);
   assert.deepEqual(prohibited, [], `Prohibited tracked files:\n${prohibited.join('\n')}`);
@@ -31,8 +36,17 @@ test('calendar parser fixture is explicitly synthetic and contains no obvious UK
   assert.doesNotMatch(fixture, /what\s*3\s*words|what3words/i);
 });
 
-test('agent documentation does not contain a developer home-directory path', () => {
-  const agents = readFileSync('AGENTS.md', 'utf8');
-  assert.doesNotMatch(agents, /\/Users\/[A-Za-z0-9._-]+\//);
-  assert.doesNotMatch(agents, /[A-Za-z]:\\Users\\[A-Za-z0-9._-]+\\/i);
+test('tracked text does not contain developer home-directory paths', () => {
+  const offenders = [];
+
+  for (const path of trackedFiles) {
+    if (!textExtensions.has(extname(path)) && !['Dockerfile', 'Makefile'].includes(path)) continue;
+
+    const content = readFileSync(path, 'utf8');
+    if (/\/Users\/[A-Za-z0-9._-]+\//.test(content) || /[A-Za-z]:\\Users\\[A-Za-z0-9._-]+\\/i.test(content)) {
+      offenders.push(path);
+    }
+  }
+
+  assert.deepEqual(offenders, [], `Developer home-directory paths found in:\n${offenders.join('\n')}`);
 });
