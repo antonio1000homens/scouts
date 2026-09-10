@@ -4344,6 +4344,7 @@ export async function lambdaHandler(event = {}) {
 
   try {
     let dedupedNewEvents = [];
+    const feedFailures = [];
     if (!isAgendaEnrichmentOnlyCommand) {
       // Fetch calendar ICS data, but use S3 cached copies when they were updated within the last 24 hours
       console.log('Fetching ICS calendar feeds with S3 freshness checks...');
@@ -4354,20 +4355,29 @@ export async function lambdaHandler(event = {}) {
       const feedSummaries = [];
 
       for (const feed of selectedFeeds) {
-        let ics = await getFreshIcsFromS3(bucket, feed.key, freshnessMs);
-        if (!ics) {
-          console.log(`Cached ${feed.label} ICS is stale or missing; fetching from remote...`);
-          ics = await fetchCalendar(feed.url, feed.label);
-          await putRawIcsToS3(bucket, feed.key, ics, feed.label);
-        }
+        try {
+          let ics = await getFreshIcsFromS3(bucket, feed.key, freshnessMs);
+          if (!ics) {
+            console.log(`Cached ${feed.label} ICS is stale or missing; fetching from remote...`);
+            ics = await fetchCalendar(feed.url, feed.label);
+            await putRawIcsToS3(bucket, feed.key, ics, feed.label);
+          }
 
-        const parsedEvents = parseIcsEvents(ics).map((event) => ({
-          ...event,
-          section: feed.section,
-          icsType: feed.icsType,
-        }));
-        allNewEvents.push(...parsedEvents);
-        feedSummaries.push({ label: feed.label, chars: ics ? ics.length : 0, events: parsedEvents.length });
+          const parsedEvents = parseIcsEvents(ics).map((event) => ({
+            ...event,
+            section: feed.section,
+            icsType: feed.icsType,
+          }));
+          allNewEvents.push(...parsedEvents);
+          feedSummaries.push({ label: feed.label, chars: ics ? ics.length : 0, events: parsedEvents.length });
+        } catch (feedError) {
+          // A retired or temporarily unavailable feed must not discard the
+          // other sections. mergeEvents() will retain existing entries for
+          // this feed while the configuration is repaired.
+          const message = feedError?.message || String(feedError);
+          feedFailures.push({ label: feed.label, icsType: feed.icsType, message });
+          console.warn(`[Calendars] ${feed.label} failed; retaining existing agenda entries for this feed: ${message}`);
+        }
       }
 
       if (!selectedFeeds.length) {
@@ -4583,6 +4593,10 @@ export async function lambdaHandler(event = {}) {
         },
       },
     };
+
+    if (feedFailures.length > 0) {
+      responseBody.calendarWarnings = feedFailures;
+    }
 
     if (method === 'GET') {
       responseBody.agenda = agendaPayload;
