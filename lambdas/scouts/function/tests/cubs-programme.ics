@@ -1,0 +1,69 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Scouts Tests//Synthetic Fixture//EN
+X-WR-CALNAME:Synthetic Cubs Programme
+X-WR-TIMEZONE:Europe/London
+X-PUBLISHED-TTL:P1D
+BEGIN:VTIMEZONE
+TZID:Europe/London
+X-LIC-LOCATION:Europe/London
+BEGIN:DAYLIGHT
+TZNAME:BST
+TZOFFSETFROM:+0000
+TZOFFSETTO:+0100
+DTSTART:20260329T010000
+END:DAYLIGHT
+BEGIN:STANDARD
+TZNAME:GMT
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0000
+DTSTART:20261025T010000
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:synthetic-cubs-programme-001@example.invalid
+DTSTART;TZID=Europe/London:20260916T183000
+DTEND;TZID=Europe/London:20260916T200000
+SEQUENCE:0
+TRANSP:OPAQUE
+SUMMARY:Navigation Skills
+CLASS:PUBLIC
+LOCATION:Example Scout Hall
+DESCRIPTION:Synthetic fixture event for parser tests. Bring a water bottle.
+DTSTAMP:20260901T120000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:synthetic-cubs-programme-002@example.invalid
+DTSTART;TZID=Europe/London:20260923T183000
+DTEND;TZID=Europe/London:20260923T200000
+SEQUENCE:0
+TRANSP:OPAQUE
+SUMMARY:Outdoor Games
+CLASS:PUBLIC
+LOCATION:Example Recreation Ground
+DESCRIPTION:Synthetic fixture event with a location and ordinary instructions.\nNo real participant\, leader\, venue or contact information is represented.
+DTSTAMP:20260901T120000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:synthetic-cubs-programme-003@example.invalid
+DTSTART;VALUE=DATE:20261028
+DTEND;VALUE=DATE:20261029
+SEQUENCE:0
+TRANSP:OPAQUE
+SUMMARY:Half Term - No Meeting
+CLASS:PUBLIC
+X-MICROSOFT-CDO-ALLDAYEVENT:TRUE
+DTSTAMP:20260901T120000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:synthetic-cubs-programme-004@example.invalid
+DTSTART;TZID=Europe/London:20261104T183000
+DTEND;TZID=Europe/London:20261104T200000
+SEQUENCE:0
+TRANSP:OPAQUE
+SUMMARY:Community Project
+CLASS:PUBLIC
+DESCRIPTION:This long synthetic description exists to exercise ordinary ICS text parsing without using copied production data or personal information.
+DTSTAMP:20260901T120000Z
+END:VEVENT
+END:VCALENDAR
