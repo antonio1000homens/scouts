@@ -59,7 +59,7 @@ jobs:
       sqs2scouts: ${{ steps.plan.outputs.sqs2scouts }}
       retry_safety: ${{ steps.plan.outputs.retry_safety }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
@@ -211,7 +211,7 @@ jobs:
           printf '  %-24s %s\n' sqs2scouts "${sqs2scouts}"
           printf '  %-24s %s\n' retry-safety "${retry_safety}"
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         if: steps.plan.outputs.retry_safety == 'true'
         with:
           node-version: '24'
@@ -268,9 +268,9 @@ jobs:
       group: scouts-web-${{ github.ref }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         if: needs.plan-and-test.outputs.cloudflare == 'true'
         with:
           node-version: '24'
@@ -280,7 +280,7 @@ jobs:
         if: needs.plan-and-test.outputs.cloudflare == 'true'
         id: fetch_cloudflare_secrets
         continue-on-error: true
-        uses: bitwarden/sm-action@v2.2.0
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
@@ -289,7 +289,7 @@ jobs:
 
       - name: Retry Cloudflare deployment secrets
         if: needs.plan-and-test.outputs.cloudflare == 'true' && steps.fetch_cloudflare_secrets.outcome == 'failure'
-        uses: bitwarden/sm-action@v2.2.0
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
@@ -308,7 +308,7 @@ jobs:
         if: needs.plan-and-test.outputs.cloudflare == 'true'
         run: bash cloudflare/scouts-slack-handler/deploy-ci.sh
 
-      - uses: aws-actions/configure-aws-credentials@v6
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6
         if: needs.plan-and-test.outputs.website == 'true'
         with:
           aws-region: ${{ env.AWS_REGION }}
@@ -319,7 +319,7 @@ jobs:
         if: needs.plan-and-test.outputs.website == 'true'
         id: fetch_cloudfront_distribution_id
         continue-on-error: true
-        uses: bitwarden/sm-action@v2.2.0
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
@@ -327,7 +327,7 @@ jobs:
 
       - name: Retry CloudFront distribution ID
         if: needs.plan-and-test.outputs.website == 'true' && steps.fetch_cloudfront_distribution_id.outcome == 'failure'
-        uses: bitwarden/sm-action@v2.2.0
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
@@ -417,15 +417,15 @@ jobs:
       group: scouts-aws-${{ github.ref }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
           package-manager-cache: false
 
       - name: Restore npm cache for shared layer
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.npm
           key: ${{ runner.os }}-npm-scouts-shared-layer-${{ hashFiles('lambdas/shared-layer/nodejs/package-lock.json') }}
@@ -433,7 +433,7 @@ jobs:
       - name: Ensure jq is available
         run: command -v jq >/dev/null || { sudo apt-get update && sudo apt-get install -y jq; }
 
-      - uses: aws-actions/configure-aws-credentials@v6
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6
         with:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           role-session-name: github-actions-scouts-aws-deploy
@@ -450,7 +450,7 @@ jobs:
         if: needs.plan-and-test.outputs.scouts_function == 'true' || needs.plan-and-test.outputs.scouts2sqs == 'true' || needs.plan-and-test.outputs.scouts_slack_handler == 'true'
         id: fetch_required_api_key
         continue-on-error: true
-        uses: bitwarden/sm-action@v2.2.0
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
@@ -458,7 +458,7 @@ jobs:
 
       - name: Retry required Scouts API key
         if: (needs.plan-and-test.outputs.scouts_function == 'true' || needs.plan-and-test.outputs.scouts2sqs == 'true' || needs.plan-and-test.outputs.scouts_slack_handler == 'true') && steps.fetch_required_api_key.outcome == 'failure'
-        uses: bitwarden/sm-action@v2.2.0
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
@@ -468,7 +468,7 @@ jobs:
         if: needs.plan-and-test.outputs.scouts_slack_handler == 'true'
         id: fetch_slack_handler_secrets
         continue-on-error: true
-        uses: bitwarden/sm-action@v2.2.0
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
@@ -477,7 +477,7 @@ jobs:
 
       - name: Retry Slack handler secrets
         if: needs.plan-and-test.outputs.scouts_slack_handler == 'true' && steps.fetch_slack_handler_secrets.outcome == 'failure'
-        uses: bitwarden/sm-action@v2.2.0
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
@@ -488,7 +488,7 @@ jobs:
         if: needs.plan-and-test.outputs.sqs2scouts == 'true'
         id: fetch_sqs2scouts_secrets
         continue-on-error: true
-        uses: bitwarden/sm-action@v2.2.0
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
@@ -498,7 +498,7 @@ jobs:
 
       - name: Retry sqs2scouts provider secrets
         if: needs.plan-and-test.outputs.sqs2scouts == 'true' && steps.fetch_sqs2scouts_secrets.outcome == 'failure'
-        uses: bitwarden/sm-action@v2.2.0
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
@@ -508,7 +508,7 @@ jobs:
 
       - name: Get Cloudflare Workers AI token
         if: needs.plan-and-test.outputs.sqs2scouts == 'true' && vars.BW_CLOUDFLARE_AI_API_TOKEN != ''
-        uses: bitwarden/sm-action@v2.2.0
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |

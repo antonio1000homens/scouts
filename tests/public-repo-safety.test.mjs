@@ -50,3 +50,18 @@ test('tracked text does not contain developer home-directory paths', () => {
 
   assert.deepEqual(offenders, [], `Developer home-directory paths found in:\n${offenders.join('\n')}`);
 });
+
+test('workflow actions are pinned to immutable commit SHAs', () => {
+  const offenders = [];
+
+  for (const path of trackedFiles.filter((value) => value.startsWith('.github/workflows/'))) {
+    const content = readFileSync(path, 'utf8');
+    const actionRefs = [...content.matchAll(/^\s*(?:-\s*)?uses:\s+([^\s#]+)/gm)].map((match) => match[1]);
+
+    for (const actionRef of actionRefs) {
+      if (!/@[0-9a-f]{40}$/i.test(actionRef)) offenders.push(`${path}: ${actionRef}`);
+    }
+  }
+
+  assert.deepEqual(offenders, [], `Unpinned GitHub Actions:\n${offenders.join('\n')}`);
+});

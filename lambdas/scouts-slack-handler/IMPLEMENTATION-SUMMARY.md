@@ -32,7 +32,6 @@ Created a new `slack-handler` lambda that serves as a central router for all Sla
 slack-handler/
 ├── function/
 │   └── slack-handler.mjs
-├── hex.json
 ├── set-env-vars.sh
 └── IMPLEMENTATION-SUMMARY.md
 ```
@@ -72,7 +71,4 @@ slack-handler/
 
 ## Testing
 
-Use `test-slack-handler.js` to verify:
-- Scouts payloads are published to `scoutsRequest` SQS queue
-- Invalid payloads return appropriate errors
-- Signature verification works correctly
+Use synthetic, non-networked unit and integration tests for signature verification and request routing. Do not sign and submit copied Slack payloads to a production Function URL.
