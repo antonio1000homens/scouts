@@ -10,10 +10,10 @@ The current source of truth is the code, not the older board diagram.
 
 ## Scope
 
-- Source UI: `scouts/website/admin/admin-script.js`
-- Admin button action values: `scouts/website/admin/index.html`
+- Source UI: `website/admin/admin-script.js`
+- Admin button action values: `website/admin/index.html`
 - Lambda: `lambdas/scouts/function/scouts.mjs`
-- Queue consumer / transformer: `lambdas/scouts/sqs/scouts2sqs/function/scouts2sqs.mjs`
+- Queue consumer / transformer: `lambdas/scouts2sqs/function/request-processor.mjs`
 
 ## High-level flow
 
@@ -115,22 +115,24 @@ So queue payloads are normalized copies, not exact object echoes from the admin 
 
 ## File references
 
-- Admin runtime poll helper: `/Users/antoniofreire/storage/github/scouts/website/admin/admin-script.js:1029`
-- Admin agenda refresh payload: `/Users/antoniofreire/storage/github/scouts/website/admin/admin-script.js:2478`
-- Admin calendar refresh helper: `/Users/antoniofreire/storage/github/scouts/website/admin/admin-script.js:2536`
-- Admin field config and active subject keys: `/Users/antoniofreire/storage/github/scouts/website/admin/admin-script.js:2630`
-- Admin persist helper: `/Users/antoniofreire/storage/github/scouts/website/admin/admin-script.js:2805`
-- Admin generate helper: `/Users/antoniofreire/storage/github/scouts/website/admin/admin-script.js:2885`
-- Admin hide helper: `/Users/antoniofreire/storage/github/scouts/website/admin/admin-script.js:2948`
-- Admin unhide helper: `/Users/antoniofreire/storage/github/scouts/website/admin/admin-script.js:3041`
-- Admin button action tokens: `/Users/antoniofreire/storage/github/scouts/website/admin/index.html:283`
-- Queue publisher and identifier stripping: `/Users/antoniofreire/storage/github/lambdas/scouts/function/scouts.mjs:1310`
-- Reset notification producer: `/Users/antoniofreire/storage/github/lambdas/scouts/function/scouts.mjs:1355`
-- Enrichment new/retry queue emission: `/Users/antoniofreire/storage/github/lambdas/scouts/function/scouts.mjs:2470`
-- Metadata persist translation: `/Users/antoniofreire/storage/github/lambdas/scouts/function/scouts.mjs:3066`
-- Hide/unhide translation: `/Users/antoniofreire/storage/github/lambdas/scouts/function/scouts.mjs:3233`
-- Generate translation: `/Users/antoniofreire/storage/github/lambdas/scouts/function/scouts.mjs:3309`
-- `sqs2scouts` incomplete callback handling: `/Users/antoniofreire/storage/github/lambdas/scouts/function/scouts.mjs:3459`
-- `scouts2sqs` allowed realms: `/Users/antoniofreire/storage/github/lambdas/scouts/sqs/scouts2sqs/function/scouts2sqs.mjs:1592`
-- `scouts2sqs` Slack relay path: `/Users/antoniofreire/storage/github/lambdas/scouts/sqs/scouts2sqs/function/scouts2sqs.mjs:1707`
-- `scouts2sqs` `scoutsRequest` transformation path: `/Users/antoniofreire/storage/github/lambdas/scouts/sqs/scouts2sqs/function/scouts2sqs.mjs:1780`
+All references below are repository-relative:
+
+- Admin runtime poll helper: `website/admin/admin-script.js:1029`
+- Admin agenda refresh payload: `website/admin/admin-script.js:2478`
+- Admin calendar refresh helper: `website/admin/admin-script.js:2536`
+- Admin field config and active subject keys: `website/admin/admin-script.js:2630`
+- Admin persist helper: `website/admin/admin-script.js:2805`
+- Admin generate helper: `website/admin/admin-script.js:2885`
+- Admin hide helper: `website/admin/admin-script.js:2948`
+- Admin unhide helper: `website/admin/admin-script.js:3041`
+- Admin button action tokens: `website/admin/index.html:283`
+- Queue publisher and identifier stripping: `lambdas/scouts/function/scouts.mjs:1310`
+- Reset notification producer: `lambdas/scouts/function/scouts.mjs:1355`
+- Enrichment new/retry queue emission: `lambdas/scouts/function/scouts.mjs:2470`
+- Metadata persist translation: `lambdas/scouts/function/scouts.mjs:3066`
+- Hide/unhide translation: `lambdas/scouts/function/scouts.mjs:3233`
+- Generate translation: `lambdas/scouts/function/scouts.mjs:3309`
+- `sqs2scouts` incomplete callback handling: `lambdas/scouts/function/scouts.mjs:3459`
+- `scouts2sqs` realm validation and pass-through translation: `lambdas/scouts2sqs/function/request-processor.mjs` (`buildQueuePayload` and the SQS branch of `lambdaHandler`)
+- `scouts2sqs` Slack metadata forwarding: `lambdas/scouts2sqs/function/request-processor.mjs` (`lambdaHandler`)
+- `scouts2sqs` `scoutsRequest` transformation: `lambdas/scouts2sqs/function/request-processor.mjs` (`lambdaHandler`)

@@ -4,9 +4,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-AWS_PROFILE_NAME="${AWS_PROFILE_NAME:-${AWS_PROFILE:-scouts}}"
-WEBSITE_BUCKET="${WEBSITE_BUCKET:-scouts-2ndtolworth-prod-553490163883}"
-WEBSITE_URL="${WEBSITE_URL:-https://d1wv092irxi2lt.cloudfront.net}"
+# Developer/deployment-specific values must be supplied explicitly. In CI, AWS
+# credentials are normally provided by OIDC, so an AWS profile is optional.
+AWS_PROFILE_NAME="${AWS_PROFILE_NAME:-${AWS_PROFILE:-}}"
+WEBSITE_BUCKET="${WEBSITE_BUCKET:-}"
+WEBSITE_URL="${WEBSITE_URL:-}"
 
 usage() {
   cat <<'EOF'
@@ -19,8 +21,14 @@ Targets:
   lambdas
   all
 
+Environment for website deployment:
+  WEBSITE_BUCKET                 required
+  AWS_PROFILE or AWS_PROFILE_NAME optional when ambient/OIDC credentials exist
+  WEBSITE_URL                    optional display URL
+  CLOUDFRONT_DISTRIBUTION_ID     optional cache invalidation target
+
 Examples:
-  ./deploy.sh website
+  WEBSITE_BUCKET=my-scouts-site AWS_PROFILE=my-profile ./deploy.sh website
   ./deploy.sh queues scouts
   ./deploy.sh lambdas
   ./deploy.sh all
@@ -28,10 +36,24 @@ EOF
 }
 
 run_aws() {
-  AWS_PROFILE="${AWS_PROFILE_NAME}" aws "$@"
+  if [ -n "${AWS_PROFILE_NAME}" ]; then
+    AWS_PROFILE="${AWS_PROFILE_NAME}" aws "$@"
+  else
+    aws "$@"
+  fi
+}
+
+require_website_config() {
+  if [ -z "${WEBSITE_BUCKET}" ]; then
+    echo "WEBSITE_BUCKET must be set for website deployment." >&2
+    echo "Keep deployment-specific bucket names in local/GitHub environment configuration rather than relying on a repository default." >&2
+    exit 1
+  fi
 }
 
 deploy_website() {
+  require_website_config
+
   local legacy_dirs=(
     beavers badges contact cubs fonts hiringtheden images
     history location scouts-page volunteering welcome
@@ -55,7 +77,7 @@ deploy_website() {
     if [ -n "${SCOUTS_AUTH_STATUS_URL:-}" ]; then
       echo "window.SCOUTS_AUTH_STATUS_URL = '${SCOUTS_AUTH_STATUS_URL}';"
     fi
-    # Keep the Lambda URL server-side in the Cloudflare Worker.  Writing
+    # Keep the Lambda URL server-side in the Cloudflare Worker. Writing
     # SCOUTS_URL here would make the browser bypass /admin-api and lose the
     # Worker-injected API key.
     if [ -n "${SCOUTS_CONFIG_URL:-}" ]; then
@@ -77,18 +99,20 @@ deploy_website() {
   fi
 
   if [ -f "${SCRIPT_DIR}/lambdas/scouts/scouts.conf" ]; then
-    echo "Uploading lambdas/scouts/scouts.conf to s3://${WEBSITE_BUCKET}/scouts.conf..."
+    echo "Uploading lambdas/scouts/scouts.conf to the configured website bucket..."
     run_aws s3 cp "${SCRIPT_DIR}/lambdas/scouts/scouts.conf" "s3://${WEBSITE_BUCKET}/scouts.conf" \
       --cache-control "max-age=0, no-cache, no-store, must-revalidate"
   else
     echo "No lambdas/scouts/scouts.conf found locally, skipping upload."
   fi
 
-  echo "Website bucket: s3://${WEBSITE_BUCKET}"
-  echo "Website URL: ${WEBSITE_URL}"
+  echo "Website bucket configured."
+  if [ -n "${WEBSITE_URL}" ]; then
+    echo "Website URL: ${WEBSITE_URL}"
+  fi
 
   if [ -n "${CLOUDFRONT_DISTRIBUTION_ID:-}" ]; then
-    echo "Creating CloudFront invalidation for ${CLOUDFRONT_DISTRIBUTION_ID}..."
+    echo "Creating configured CloudFront invalidation..."
     run_aws cloudfront create-invalidation \
       --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
       --paths "/index.html" "/scouts.conf" "/website/*" "/agenda.json" "/runtime/*" "/events/*" >/dev/null
