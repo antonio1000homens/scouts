@@ -13,7 +13,7 @@ The current source of truth is the code, not the older board diagram.
 - Source UI: `website/admin/admin-script.js`
 - Admin button action values: `website/admin/index.html`
 - Lambda: `lambdas/scouts/function/scouts.mjs`
-- Queue consumer / transformer: `lambdas/scouts2sqs/function/scouts2sqs.mjs`
+- Queue consumer / transformer: `lambdas/scouts2sqs/function/request-processor.mjs`
 
 ## High-level flow
 
@@ -133,6 +133,6 @@ All references below are repository-relative:
 - Hide/unhide translation: `lambdas/scouts/function/scouts.mjs:3233`
 - Generate translation: `lambdas/scouts/function/scouts.mjs:3309`
 - `sqs2scouts` incomplete callback handling: `lambdas/scouts/function/scouts.mjs:3459`
-- `scouts2sqs` allowed realms: `lambdas/scouts2sqs/function/scouts2sqs.mjs:1592`
-- `scouts2sqs` Slack relay path: `lambdas/scouts2sqs/function/scouts2sqs.mjs:1707`
-- `scouts2sqs` `scoutsRequest` transformation path: `lambdas/scouts2sqs/function/scouts2sqs.mjs:1780`
+- `scouts2sqs` realm validation and pass-through translation: `lambdas/scouts2sqs/function/request-processor.mjs` (`buildQueuePayload` and the SQS branch of `lambdaHandler`)
+- `scouts2sqs` Slack metadata forwarding: `lambdas/scouts2sqs/function/request-processor.mjs` (`lambdaHandler`)
+- `scouts2sqs` `scoutsRequest` transformation: `lambdas/scouts2sqs/function/request-processor.mjs` (`lambdaHandler`)
