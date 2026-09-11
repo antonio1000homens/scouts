@@ -119,31 +119,33 @@ test('private runtime and HEX objects are reachable only through the Access-prot
   assert.match(scoutsEntry, /`events\/\$\{hex\}\.json`/);
 });
 
-test('formerly public private prefixes are explicitly purged and anonymously verified on the documented CloudFront distribution', () => {
+test('formerly public private prefixes are invalidated and the S3 origin is anonymously private', () => {
   const workflow = readFileSync('.github/workflows/purge-private-s3-cache.yml', 'utf8');
+  const repairWorkflow = readFileSync('.github/workflows/repair-shared-layer-permission.yml', 'utf8');
   const cloudfrontDoc = readFileSync('CLOUDFRONT.md', 'utf8');
+  const cloudfrontTemplate = readFileSync('cloudfront-stack.yaml', 'utf8');
   const documentedId = cloudfrontDoc.match(/\*\*Distribution ID\*\*:\s*`([^`]+)`/)?.[1] || '';
 
   assert.ok(documentedId, 'CLOUDFRONT.md must document the active distribution ID');
   assert.match(workflow, new RegExp(`CLOUDFRONT_DISTRIBUTION_ID: ${documentedId}`));
   assert.match(workflow, /aws cloudfront get-distribution/);
-  assert.match(workflow, /Distribution\.DomainName/);
-  assert.match(workflow, /GITHUB_ENV/);
-  assert.match(workflow, /CLOUDFRONT_BASE_URL/);
   assert.match(workflow, /aws cloudfront create-invalidation/);
-  assert.doesNotMatch(workflow, /aws cloudfront wait invalidation-completed/);
-  assert.doesNotMatch(workflow, /PUBLIC_SITE_BASE_URL/);
+  assert.match(workflow, /CLOUDFRONT_INVALIDATION_ID/);
+  assert.match(workflow, /aws cloudfront wait invalidation-completed/);
+  assert.match(repairWorkflow, /cloudfront:GetInvalidation/);
+  assert.match(repairWorkflow, new RegExp(`distribution\/${documentedId}`));
+  assert.match(cloudfrontTemplate, /RestrictionType:\s*whitelist/);
+  assert.match(cloudfrontTemplate, /- GB/);
   assert.match(workflow, /"\/calendar\/\*"/);
   assert.match(workflow, /"\/runtime\/\*"/);
   assert.match(workflow, /"\/events\/\*"/);
-  assert.match(workflow, /Verify anonymous access boundary/);
+  assert.match(workflow, /Verify anonymous S3 access boundary/);
   assert.match(workflow, /status_for/);
   assert.match(workflow, /is_private_status/);
-  assert.match(workflow, /private_paths=\(/);
-  assert.match(workflow, /for attempt in \$\(seq 1 30\)/);
   assert.match(workflow, /assert_public/);
   assert.match(workflow, /assert_private/);
   assert.match(workflow, /origin\/agenda\.json|\$\{origin\}\/agenda\.json/);
-  assert.match(workflow, /\$\{CLOUDFRONT_BASE_URL\}\/agenda\.json/);
+  assert.doesNotMatch(workflow, /CLOUDFRONT_BASE_URL/);
+  assert.doesNotMatch(workflow, /PUBLIC_SITE_BASE_URL/);
   assert.match(workflow, /configure-aws-credentials@[0-9a-f]{40}/i);
 });
