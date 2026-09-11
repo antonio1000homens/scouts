@@ -26,7 +26,7 @@ LAYER_NAME="${LAYER_NAME:-scouts-shared}"
 ROLE_NAME="${ROLE_NAME:-scouts-slack-handler-lambda-role}"
 ROLE_ARN="${ROLE_ARN:-}"
 RUNTIME="${RUNTIME:-nodejs24.x}"
-HANDLER="${HANDLER:-slack-handler.lambdaHandler}"
+HANDLER="${HANDLER:-slack-handler-proxy.lambdaHandler}"
 FUNCTION_URL_AUTH_TYPE="${FUNCTION_URL_AUTH_TYPE:-NONE}"
 TIMEOUT="${TIMEOUT:-30}"
 MEMORY_SIZE="${MEMORY_SIZE:-256}"
@@ -41,7 +41,7 @@ REQUIRED_API_KEY_PARAMETER="${REQUIRED_API_KEY_PARAMETER:-/scouts/shared/require
 SCOUTS_REQUEST_QUEUE_URL="${SCOUTS_REQUEST_QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests}"
 SCOUTS_REQUEST_QUEUE_ARN="${SCOUTS_REQUEST_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsRequests}"
 NFC_QUEUE_URL="${NFC_QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests}"
-NFC_QUEUE_ARN="${NFC_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsRequests}"
+NFC_QUEUE_ARN="${NFC_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883/scoutsRequests}"
 TARGET_BUCKET="${TARGET_BUCKET:-scouts-2ndtolworth-prod-553490163883}"
 SCOUTS_CONFIG_KEY="${SCOUTS_CONFIG_KEY:-scouts.conf}"
 
@@ -95,7 +95,7 @@ log "Building lambda function..."
 (
   cd function
   rm -f slack-handler-lambda.zip
-  zip -q slack-handler-lambda.zip slack-handler.mjs
+  zip -q slack-handler-lambda.zip slack-handler.mjs slack-handler-proxy.mjs
 )
 
 log "Uploading function artifact to S3..."
