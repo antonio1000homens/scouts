@@ -1,0 +1,103 @@
+name: Apply PR86 Copilot fixes
+
+on:
+  push:
+    branches:
+      - configure-sqs2scouts-slack-channel
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: configure-sqs2scouts-slack-channel
+          fetch-depth: 0
+
+      - name: Apply review fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          channel = 'C0C1996TGQZ'
+
+          deploy = Path('lambdas/sqs2scouts/deploy.sh')
+          data = deploy.read_text()
+          anchor = 'SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://slack.com/api/chat.postMessage}"\n'
+          line = f'SCOUTS_NOTIFICATION_CHANNEL="${{SCOUTS_NOTIFICATION_CHANNEL:-{channel}}}"\n'
+          if line not in data:
+              if anchor not in data:
+                  raise SystemExit('deploy.sh Slack webhook anchor not found')
+              data = data.replace(anchor, anchor + line, 1)
+
+          # Pass the CloudFormation parameter on every standard deployment.
+          candidates = [
+              'SlackWebhookUrl="${SLACK_WEBHOOK_URL}"',
+              'SlackWebhookUrl=${SLACK_WEBHOOK_URL}',
+          ]
+          if 'ScoutsNotificationChannel=' not in data:
+              replaced = False
+              for candidate in candidates:
+                  if candidate in data:
+                      data = data.replace(candidate, candidate + ' ScoutsNotificationChannel="${SCOUTS_NOTIFICATION_CHANNEL}"', 1)
+                      replaced = True
+                      break
+              if not replaced:
+                  # Fall back to the parameter override block near SlackWebhookUrl.
+                  marker = 'SlackWebhookUrl'
+                  idx = data.rfind(marker)
+                  if idx < 0:
+                      raise SystemExit('deploy.sh CloudFormation SlackWebhookUrl override not found')
+                  end = data.find('\n', idx)
+                  data = data[:end] + ' ScoutsNotificationChannel="${SCOUTS_NOTIFICATION_CHANNEL}"' + data[end:]
+          deploy.write_text(data)
+
+          env = Path('lambdas/sqs2scouts/update-env-vars.sh')
+          data = env.read_text()
+          env_anchor = '        SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-https://slack.com/api/chat.postMessage},\n'
+          env_line = f'        SCOUTS_NOTIFICATION_CHANNEL=${{SCOUTS_NOTIFICATION_CHANNEL:-{channel}}},\n'
+          if env_line not in data:
+              if env_anchor not in data:
+                  raise SystemExit('update-env-vars.sh Slack webhook anchor not found')
+              data = data.replace(env_anchor, env_anchor + env_line, 1)
+          env.write_text(data)
+
+          readme = Path('lambdas/sqs2scouts/README.md')
+          data = readme.read_text().replace(
+              '- Sends notifications to Slack channel: `#scouts`',
+              '- Sends notifications to the configured Slack channel (default: `#scouts-website`, ID `C0C1996TGQZ`)',
+          )
+          readme.write_text(data)
+
+          test = Path('lambdas/sqs2scouts/test-approval-notification.mjs')
+          data = test.read_text().replace('#scouts channel', '#scouts-website channel')
+          test.write_text(data)
+          PY
+
+          rm .github/workflows/tmp-address-pr86-copilot.yml
+
+      - name: Validate fixes
+        shell: bash
+        run: |
+          bash -n lambdas/sqs2scouts/deploy.sh
+          bash -n lambdas/sqs2scouts/update-env-vars.sh
+          node --check lambdas/sqs2scouts/test-approval-notification.mjs
+          grep -q 'SCOUTS_NOTIFICATION_CHANNEL' lambdas/sqs2scouts/deploy.sh
+          grep -q 'ScoutsNotificationChannel' lambdas/sqs2scouts/deploy.sh
+          grep -q 'SCOUTS_NOTIFICATION_CHANNEL' lambdas/sqs2scouts/update-env-vars.sh
+          ! grep -q 'Slack channel: `#scouts`' lambdas/sqs2scouts/README.md
+          ! grep -q '#scouts channel' lambdas/sqs2scouts/test-approval-notification.mjs
+
+      - name: Commit fixes
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: address PR 86 Copilot review'
+          git push origin HEAD:configure-sqs2scouts-slack-channel
