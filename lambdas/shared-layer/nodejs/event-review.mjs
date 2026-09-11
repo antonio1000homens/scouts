@@ -118,6 +118,20 @@ export function buildApprovedSnapshotPatch(snapshot) {
   };
 }
 
+export function approvalOperationId({ hex, revision, action = 'approve' } = {}) {
+  const eventHex = normaliseHex(hex);
+  const reviewRevision = text(revision);
+  const approvalAction = text(action)?.toLowerCase();
+  if (!eventHex || !reviewRevision || !approvalAction) {
+    throw new Error('Approval operation identity requires hex, revision and action');
+  }
+  const digest = crypto.createHash('sha256')
+    .update(`${eventHex}\n${reviewRevision}\n${approvalAction}`)
+    .digest('hex')
+    .slice(0, 32);
+  return `approval-${digest}`;
+}
+
 export function approvalIdempotencyKey({ rootRequestId, revision, action = 'approve' } = {}) {
   const root = text(rootRequestId);
   const reviewRevision = text(revision);
