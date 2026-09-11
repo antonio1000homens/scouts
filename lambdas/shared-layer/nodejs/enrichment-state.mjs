@@ -115,8 +115,10 @@ export function evaluateEnrichmentEligibility(state, now = new Date(), generatio
 export function classifyGeminiError(error) {
   const status = Number(error?.status ?? error?.statusCode ?? error?.response?.status ?? error?.code);
   const message = String(error?.message || error || '').toLowerCase();
-  if ([401, 403].includes(status) || /api.?key|unauthori[sz]|permission|billing|quota exceeded/.test(message)) return 'AUTH_FAILURE';
-  if (status === 429 || /rate.?limit|too many requests/.test(message)) return 'RATE_LIMIT';
+    // A provider's 429 is a retryable quota/rate-limit response even when its
+    // message also contains words such as "quota exceeded".
+    if (status === 429 || /rate.?limit|too many requests|resource_exhausted|quota exceeded/.test(message)) return 'RATE_LIMIT';
+    if ([401, 403].includes(status) || /api.?key|unauthori[sz]|permission|billing/.test(message)) return 'AUTH_FAILURE';
   if ([500, 502, 503, 504].includes(status) || /temporar|unavailable|internal server/.test(message)) return 'PROVIDER_5XX';
   if (/timeout|timed out|socket|econn|connection reset|network/.test(message)) return 'NETWORK_TIMEOUT';
   if (status === 404 || /model.*not found|not found/.test(message)) return 'MODEL_CONFIGURATION';

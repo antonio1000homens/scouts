@@ -3143,6 +3143,20 @@ function openUploadModal(index) {
     modal.style.display = 'flex';
 }
 
+function openAdminEventByHex(hex) {
+    const targetHex = String(hex || '').trim().toLowerCase();
+    setFilter('all');
+    const index = visibleEventEntries.findIndex((entry) => getEventHex(entry.event)?.toLowerCase() === targetHex);
+    if (index < 0) {
+        window.showAdminNotification?.('This event is no longer present in the agenda.', 'warning');
+        return false;
+    }
+    openUploadModal(index);
+    document.querySelector(`[data-event-card-index="${index}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return true;
+}
+window.openAdminEventByHex = openAdminEventByHex;
+
 function updateModalContent(index) {
     const modal = document.getElementById('upload-modal');
     if (!modal || modal.style.display !== 'flex') return;

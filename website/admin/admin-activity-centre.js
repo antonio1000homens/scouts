@@ -60,6 +60,20 @@
         await window.loadEvents({ silent: true, notifyOnAgendaChanges: true, onlyIfChanged: true, notificationSource: 'Activity published' });
     }
 
+    async function viewEvent(hex) {
+        if (!text(hex) || typeof window.loadEvents !== 'function' || typeof window.openAdminEventByHex !== 'function') {
+            notifyMessage('Event navigation is unavailable.', 'warning');
+            return;
+        }
+        try {
+            await window.loadEvents({ silent: true, notifyOnAgendaChanges: false, onlyIfChanged: false, notificationSource: 'Activity event link' });
+            const opened = window.openAdminEventByHex(hex);
+            if (opened) document.getElementById('activity-centre-drawer')?.classList.remove('open');
+        } catch (error) {
+            notifyMessage(`Event could not be loaded: ${error.message}`, 'warning');
+        }
+    }
+
     async function poll() {
         try {
             const result = await activityCommand('status');
@@ -90,6 +104,12 @@
             const failure = request.failure?.message ? `<p>${request.failure.message}</p>` : '';
             const timeline = (request.timeline || []).map((entry) => `<li>${new Date(entry.at).toLocaleString('en-GB')} · ${text(entry.state).replaceAll('_', ' ')}</li>`).join('');
             item.innerHTML = `<h3>${requestLabel(request)}</h3><p>${stateLabel(request)} · ${request.action || 'change'} · ${request.publication || 'not published'}</p><code>${request.hex || ''}</code>${failure}<details><summary>Timeline</summary><ol>${timeline}</ol></details>`;
+            if (request.hex) {
+                const button = document.createElement('button');
+                button.type = 'button'; button.className = 'btn btn-secondary activity-view-event'; button.textContent = 'View event';
+                button.addEventListener('click', () => viewEvent(request.hex));
+                item.appendChild(button);
+            }
             target.appendChild(item);
         });
     }
