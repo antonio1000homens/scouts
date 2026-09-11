@@ -110,7 +110,7 @@ Related Gemini env vars:
 
 - Triggered by messages in SQS queue: `arn:aws:sqs:eu-west-2:243857182133:scoutsProcessing`
 - Processes messages with `realm`, `subject`, `action` parameters
-- Sends notifications to Slack channel: `#scouts`
+- Sends notifications to the configured Slack channel (default: `#scouts-website`, ID `C0C1996TGQZ`)
 - Returns 200 on success, 500 on errors
 
 ## Supported SQS Message Schemas
