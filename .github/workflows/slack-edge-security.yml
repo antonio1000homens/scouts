@@ -75,11 +75,11 @@ jobs:
         run: npm install --global wrangler@4
 
       - name: Install Slack signing secret as Worker secret
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ env.CF_DEPLOY_API_TOKEN }}
         run: |
           set -euo pipefail
+          test -n "${CF_DEPLOY_API_TOKEN:-}"
           test -n "${SLACK_SIGNING_SECRET:-}"
+          export CLOUDFLARE_API_TOKEN="${CF_DEPLOY_API_TOKEN}"
           printf '%s' "${SLACK_SIGNING_SECRET}" | npx wrangler secret put SLACK_SIGNING_SECRET \
             --config cloudflare/scouts-slack-handler/wrangler.toml
 
