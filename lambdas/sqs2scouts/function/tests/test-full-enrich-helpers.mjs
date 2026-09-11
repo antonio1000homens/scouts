@@ -26,12 +26,16 @@ import {
 const requestRouter = readFileSync('lambdas/scouts2sqs/function/request-router.mjs', 'utf8');
 const scoutsTemplate = readFileSync('lambdas/cloudformation/templates/scouts.yaml', 'utf8');
 const scouts2sqsTemplate = readFileSync('lambdas/cloudformation/templates/scouts2sqs.yaml', 'utf8');
+const slackTemplate = readFileSync('lambdas/cloudformation/templates/slack-handler.yaml', 'utf8');
 const scoutsDeploy = readFileSync('lambdas/scouts/deploy.sh', 'utf8');
 const scouts2sqsDeploy = readFileSync('lambdas/scouts2sqs/deploy.sh', 'utf8');
 const sqs2scoutsDeploy = readFileSync('lambdas/sqs2scouts/deploy.sh', 'utf8');
 const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
 const persistenceProcessor = readFileSync('lambdas/sqs2scouts/function/persistence-processor.mjs', 'utf8');
 const imageProviderAdapter = readFileSync('lambdas/sqs2scouts/function/image-provider-adapter.mjs', 'utf8');
+const approvalLifecycleAdapter = readFileSync('lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs', 'utf8');
+const approvalCoordinator = readFileSync('lambdas/shared-layer/nodejs/approval-coordinator.mjs', 'utf8');
+const slackProxy = readFileSync('lambdas/scouts-slack-handler/function/slack-handler-proxy.mjs', 'utf8');
 
 test('normaliseStage maps external imageUrl to logical image', () => {
   assert.equal(normaliseStage('tagline'), 'tagline');
@@ -183,6 +187,53 @@ test('issue 91 root-correlated child requests collapse without merging separate 
     now: new Date('2026-09-11T20:01:00.000Z'),
   });
   assert.equal(separate.length, 2);
+});
+
+test('issue 91 second slice uses one idempotent coordinator for admin and Slack', () => {
+  assert.match(approvalCoordinator, /IDEMPOTENCY_PREFIX = 'runtime\/approval-idempotency\/'/);
+  assert.match(approvalCoordinator, /IfNoneMatch: options\.ifNoneMatch/);
+  assert.match(approvalCoordinator, /CLAIM_TAKEOVER_MS = 30_000/);
+  assert.match(approvalCoordinator, /reused: true/);
+  assert.match(approvalCoordinator, /const imageRequestId = `\$\{root\}:image:\$\{revision\}`/);
+  assert.match(slackProxy, /coordinateEventApproval/);
+  assert.match(slackProxy, /view_submission/);
+  assert.match(slackProxy, /baseRevision: baseSnapshot\.revision/);
+  assert.match(slackProxy, /statusCode === 409/);
+  assert.match(slackProxy, /Review changed — refreshed/);
+});
+
+test('issue 91 generated image persistence is concurrency guarded and requires final review', () => {
+  assert.match(imageProviderAdapter, /function approvalContext\(message\)/);
+  assert.match(imageProviderAdapter, /IfMatch: text\(options\.ifMatch\)/);
+  assert.match(imageProviderAdapter, /manual_image_superseded_generation/);
+  assert.match(imageProviderAdapter, /state: 'awaiting_review'/);
+  assert.match(imageProviderAdapter, /Approve generated image/);
+  assert.match(imageProviderAdapter, /realm: 'approvalReview'/);
+  assert.match(imageProviderAdapter, /review_notification_pending/);
+  assert.match(imageProviderAdapter, /approval_persist_pending/);
+});
+
+test('issue 91 revisioned persistence bypasses legacy auto-approval and completes only the root', () => {
+  assert.match(approvalLifecycleAdapter, /isRevisionedApprovalPersist/);
+  assert.match(approvalLifecycleAdapter, /currentReview\.revision !== baseRevision/);
+  assert.match(approvalLifecycleAdapter, /IfMatch: text\(eTag\)/);
+  assert.match(approvalLifecycleAdapter, /approvalState === 'approved' \? 'completed' : 'awaiting_image'/);
+  assert.match(approvalLifecycleAdapter, /await publishEvent\(hex, accepted\)/);
+  assert.match(sqs2scoutsDeploy, /HANDLER="\$\{HANDLER:-approval-lifecycle-adapter\.lambdaHandler\}"/);
+  assert.match(sqs2scoutsDeploy, /approval-lifecycle-adapter\.mjs/);
+});
+
+test('issue 91 root activity remains authoritative over child terminal states', () => {
+  assert.match(runtimeActivity, /isExplicitRootRow/);
+  assert.match(runtimeActivity, /existing\._hasExplicitRootRow && !incomingIsRoot/);
+  assert.match(runtimeActivity, /_hasExplicitRootRow: existing\._hasExplicitRootRow \|\| incomingIsRoot/);
+});
+
+test('issue 91 least privilege allows only required approval retries and Slack canonical reads', () => {
+  assert.match(scouts2sqsTemplate, /sqs:SendMessage[\s\S]*?- !Ref QueueArn[\s\S]*?- !Ref ScoutsDecisionQueueArn/);
+  assert.match(slackTemplate, /s3:GetObject[\s\S]*?\/events\/\*/);
+  assert.match(slackTemplate, /runtime\/approval-idempotency\/\*/);
+  assert.match(slackTemplate, /s3:PutObject[\s\S]*?runtime\/approval-idempotency\/\*/);
 });
 
 test('historical imageEnrich action is only a compatibility alias into full-enrich', () => {
