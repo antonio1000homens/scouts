@@ -1,0 +1,102 @@
+name: Apply sqs2scouts Slack channel configuration
+
+on:
+  push:
+    branches:
+      - configure-sqs2scouts-slack-channel
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: configure-sqs2scouts-slack-channel
+          fetch-depth: 0
+
+      - name: Apply configuration changes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          default_channel = 'C0C1996TGQZ'
+
+          replacements = {
+              Path('lambdas/sqs2scouts/function/persistence-processor.mjs'): (
+                  'const SLACK_CHANNEL = "#scouts";',
+                  "const SLACK_CHANNEL = (process.env.SCOUTS_NOTIFICATION_CHANNEL || 'C0C1996TGQZ').trim() || 'C0C1996TGQZ';",
+              ),
+              Path('lambdas/sqs2scouts/function/full-enrich-core.mjs'): (
+                  "const SLACK_CHANNEL = '#scouts';",
+                  "const SLACK_CHANNEL = text(process.env.SCOUTS_NOTIFICATION_CHANNEL) || 'C0C1996TGQZ';",
+              ),
+              Path('lambdas/sqs2scouts/function/image-provider-adapter.mjs'): (
+                  "const SLACK_CHANNEL = '#scouts';",
+                  "const SLACK_CHANNEL = text(process.env.SCOUTS_NOTIFICATION_CHANNEL) || 'C0C1996TGQZ';",
+              ),
+          }
+
+          for path, (old, new) in replacements.items():
+              data = path.read_text()
+              if old not in data:
+                  raise SystemExit(f'Expected Slack channel literal not found in {path}')
+              path.write_text(data.replace(old, new, 1))
+
+          template = Path('lambdas/cloudformation/templates/sqs2scouts.yaml')
+          data = template.read_text()
+          parameter_anchor = "  SlackWebhookUrl:\n    Type: String\n    Default: https://slack.com/api/chat.postMessage\n"
+          parameter_block = parameter_anchor + "  ScoutsNotificationChannel:\n    Type: String\n    Default: C0C1996TGQZ\n    Description: Slack channel ID for sqs2scouts runtime notifications.\n"
+          if '  ScoutsNotificationChannel:' not in data:
+              if parameter_anchor not in data:
+                  raise SystemExit('SlackWebhookUrl parameter anchor not found')
+              data = data.replace(parameter_anchor, parameter_block, 1)
+
+          env_anchor = "          SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl\n"
+          env_block = env_anchor + "          SCOUTS_NOTIFICATION_CHANNEL: !Ref ScoutsNotificationChannel\n"
+          if '          SCOUTS_NOTIFICATION_CHANNEL:' not in data:
+              if env_anchor not in data:
+                  raise SystemExit('SLACK_WEBHOOK_URL environment anchor not found')
+              data = data.replace(env_anchor, env_block, 1)
+          template.write_text(data)
+
+          readme = Path('lambdas/sqs2scouts/README.md')
+          data = readme.read_text()
+          readme_anchor = '- `SLACK_WEBHOOK_URL` - Slack API endpoint (defaults to chat.postMessage)\n'
+          readme_line = '- `SCOUTS_NOTIFICATION_CHANNEL` - Slack channel ID for runtime notifications (defaults to `C0C1996TGQZ`, `#scouts-website`)\n'
+          if readme_line not in data:
+              if readme_anchor not in data:
+                  raise SystemExit('README Slack environment anchor not found')
+              data = data.replace(readme_anchor, readme_anchor + readme_line, 1)
+          readme.write_text(data)
+
+          # Keep user-facing documentation aligned with the new destination.
+          for rel in ['lambdas/sqs2scouts/README.md', 'lambdas/sqs2scouts/test-local.js', 'lambdas/sqs2scouts/test-approval-notification.mjs']:
+              path = Path(rel)
+              if path.exists():
+                  path.write_text(path.read_text().replace('#scouts channel', '#scouts-website channel').replace('Slack #scouts ', 'Slack #scouts-website '))
+          PY
+
+          rm .github/workflows/tmp-configure-sqs2scouts-slack-channel.yml
+
+      - name: Validate changes
+        shell: bash
+        run: |
+          node --check lambdas/sqs2scouts/function/persistence-processor.mjs
+          node --check lambdas/sqs2scouts/function/full-enrich-core.mjs
+          node --check lambdas/sqs2scouts/function/image-provider-adapter.mjs
+          grep -q 'SCOUTS_NOTIFICATION_CHANNEL' lambdas/cloudformation/templates/sqs2scouts.yaml
+          ! grep -q "const SLACK_CHANNEL = ['\"]#scouts['\"]" lambdas/sqs2scouts/function/persistence-processor.mjs lambdas/sqs2scouts/function/full-enrich-core.mjs lambdas/sqs2scouts/function/image-provider-adapter.mjs
+
+      - name: Commit patched files
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: configure sqs2scouts Slack notification channel'
+          git push origin HEAD:configure-sqs2scouts-slack-channel
