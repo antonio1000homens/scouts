@@ -1,9 +1,12 @@
 import { readFileSync } from 'fs';
 import sharp from 'sharp';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { getOptionalSecret } from '/opt/nodejs/ssm-secrets.mjs';
+import { buildEventReviewSnapshot } from '/opt/nodejs/event-review.mjs';
+import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 import {
   buildGenerationId,
   getEnrichmentState,
@@ -57,8 +60,13 @@ const IMAGE_HEIGHT = Number.isFinite(Number(process.env.GEMINI_IMAGE_OUTPUT_HEIG
 const MAX_CACHED_JPEG_BYTES = 180 * 1024;
 const SLACK_WEBHOOK_URL = text(process.env.SLACK_WEBHOOK_URL) || 'https://slack.com/api/chat.postMessage';
 const SLACK_CHANNEL = text(process.env.SCOUTS_NOTIFICATION_CHANNEL) || 'C0C1996TGQZ';
+const PROCESSING_QUEUE_URL = text(process.env.SCOUTS_PROCESSING_QUEUE_URL);
+const S3_WEBSITE_BASE_URL = (text(process.env.S3_WEBSITE_BASE_URL) || `https://${TARGET_BUCKET}.s3.${AWS_REGION}.amazonaws.com`).replace(/\/$/, '');
+const APPROVAL_PERSIST_MAX_WAITS = 5;
+const REVIEW_NOTIFICATION_MAX_ATTEMPTS = 3;
 
 const s3 = new S3Client({ region: AWS_REGION });
+const sqs = new SQSClient({ region: AWS_REGION });
 const sfn = new SFNClient({ region: AWS_REGION });
 const dynamo = new DynamoDBClient({ region: AWS_REGION });
 let cachedScoutsConfig = null;
@@ -85,6 +93,10 @@ function getHex(message) {
     const subject = message.subject.trim().toLowerCase();
     if (/^[0-9a-f]+$/i.test(subject)) return subject;
   }
+  if (message?.subject && typeof message.subject === 'object') {
+    const subjectHex = text(message.subject.hex)?.toLowerCase();
+    if (subjectHex && /^[0-9a-f]+$/i.test(subjectHex)) return subjectHex;
+  }
   return null;
 }
 
@@ -98,24 +110,46 @@ function getImageMetadata(event) {
   return event && typeof event.image === 'object' && event.image ? event.image : {};
 }
 
-async function loadEvent(hex) {
+function approvalContext(message) {
+  const requestId = text(message?.requestId);
+  const match = requestId?.match(/^(.+):image:([a-f0-9]{24})$/i);
+  if (!match) return null;
+  return {
+    rootRequestId: match[1],
+    approvedRevision: match[2].toLowerCase(),
+  };
+}
+
+async function loadEventVersioned(hex) {
   try {
     const response = await s3.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: `events/${hex}.json` }));
-    return JSON.parse(await response.Body.transformToString());
+    return {
+      event: JSON.parse(await response.Body.transformToString()),
+      eTag: text(response.ETag),
+    };
   } catch (error) {
     if (error?.name === 'NoSuchKey' || error?.name === 'NotFound' || error?.$metadata?.httpStatusCode === 404) return null;
     throw error;
   }
 }
 
-async function saveEvent(hex, event) {
+async function loadEvent(hex) {
+  return (await loadEventVersioned(hex))?.event || null;
+}
+
+async function saveEvent(hex, event, options = {}) {
   await s3.send(new PutObjectCommand({
     Bucket: TARGET_BUCKET,
     Key: `events/${hex}.json`,
     Body: JSON.stringify(event, null, 2),
     ContentType: 'application/json',
     CacheControl: 'no-store',
+    ...(text(options.ifMatch) ? { IfMatch: text(options.ifMatch) } : {}),
   }));
+}
+
+function isPreconditionFailure(error) {
+  return error?.name === 'PreconditionFailed' || Number(error?.$metadata?.httpStatusCode) === 412;
 }
 
 async function publishEvent(hex, event) {
@@ -209,18 +243,159 @@ function logImageEvent({
   }));
 }
 
-async function sendSlackText(textValue) {
+async function sendSlackMessage(textValue, blocks = null) {
   const token = await getOptionalSecret('SLACK_BOT_TOKEN_PARAMETER', '').catch(() => '');
-  if (!token) return;
+  if (!token) throw new Error('Slack bot token is unavailable');
   const response = await fetch(SLACK_WEBHOOK_URL, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ channel: SLACK_CHANNEL, text: textValue }),
+    body: JSON.stringify({ channel: SLACK_CHANNEL, text: textValue, ...(blocks ? { blocks } : {}) }),
   });
-  if (!response.ok) throw new Error(`Slack HTTP ${response.status}`);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body?.ok === false) throw new Error(`Slack notification failed: ${body?.error || `HTTP ${response.status}`}`);
+  return body;
+}
+
+async function sendSlackText(textValue) {
+  return sendSlackMessage(textValue);
+}
+
+async function recordApprovalState(context, state, stage, details = {}) {
+  if (!context?.rootRequestId) return;
+  try {
+    await recordRequestActivity({
+      requestId: context.rootRequestId,
+      rootRequestId: context.rootRequestId,
+      hex: details.hex || null,
+      title: details.title || null,
+      action: 'approve',
+      state,
+      stage,
+      ...(details.failure ? { failure: details.failure } : {}),
+    });
+  } catch (error) {
+    console.warn('[ApprovalImage] Unable to update root activity', error?.message || error);
+  }
+}
+
+function publicImageUrl(value) {
+  const imageUrl = text(value);
+  if (!imageUrl) return null;
+  if (/^https?:\/\//i.test(imageUrl)) return imageUrl;
+  return `${S3_WEBSITE_BASE_URL}/${imageUrl.replace(/^\/+/, '')}`;
+}
+
+function generatedReviewBlocks(event, context) {
+  const review = buildEventReviewSnapshot(event);
+  const title = review.title || 'Scouts event';
+  const imageUrl = publicImageUrl(review.imageUrl);
+  const actionValue = JSON.stringify({
+    event: review,
+    rootRequestId: context.rootRequestId,
+    reviewRevision: review.revision,
+    baseRevision: review.revision,
+    action: 'approve_generated_image',
+  });
+  return {
+    review,
+    text: `Generated image ready for final review: ${title}`,
+    blocks: [
+      { type: 'header', text: { type: 'plain_text', text: 'Generated image — final review required', emoji: true } },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*${title}*\n• Tagline: ${review.tagline || 'Not set'}\n• Image theme: ${review.imageTheme || 'Not set'}\n• Status: Published — awaiting image approval`,
+        },
+      },
+      ...(imageUrl ? [{ type: 'image', image_url: imageUrl, alt_text: `Generated image for ${title}` }] : []),
+      {
+        type: 'actions',
+        elements: [{
+          type: 'button',
+          action_id: 'scouts_request_approve',
+          text: { type: 'plain_text', text: 'Approve generated image', emoji: true },
+          style: 'primary',
+          value: actionValue,
+        }],
+      },
+    ],
+  };
+}
+
+async function queueProcessingMessage(message, delaySeconds = 0) {
+  if (!PROCESSING_QUEUE_URL) throw new Error('SCOUTS_PROCESSING_QUEUE_URL is not configured');
+  await sqs.send(new SendMessageCommand({
+    QueueUrl: PROCESSING_QUEUE_URL,
+    MessageBody: JSON.stringify(message),
+    DelaySeconds: Math.max(0, Math.min(900, Math.floor(delaySeconds))),
+  }));
+}
+
+async function markReviewNotificationSent(hex, rootRequestId, reviewRevision) {
+  const current = await loadEventVersioned(hex);
+  if (!current?.event || !current.eTag) return false;
+  const marker = current.event.approvalWorkflow;
+  if (!marker || marker.rootRequestId !== rootRequestId || marker.reviewRevision !== reviewRevision) return false;
+  if (getMetadata(current.event).status?.isApproved === true) return true;
+  current.event.approvalWorkflow = {
+    ...marker,
+    notificationSentAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    await saveEvent(hex, current.event, { ifMatch: current.eTag });
+    return true;
+  } catch (error) {
+    if (isPreconditionFailure(error)) return false;
+    throw error;
+  }
+}
+
+async function notifyGeneratedReview(hex, context, attempt = 0) {
+  const current = await loadEventVersioned(hex);
+  if (!current?.event) return { sent: false, reason: 'event_missing' };
+  const marker = current.event.approvalWorkflow;
+  const review = buildEventReviewSnapshot(current.event);
+  if (getMetadata(current.event).status?.isApproved === true) return { sent: false, reason: 'already_approved' };
+  if (!marker || marker.rootRequestId !== context.rootRequestId || marker.reviewRevision !== review.revision) {
+    return { sent: false, reason: 'review_moved_on' };
+  }
+  if (marker.notificationSentAt) return { sent: false, reason: 'already_sent' };
+
+  try {
+    const message = generatedReviewBlocks(current.event, context);
+    await sendSlackMessage(message.text, message.blocks);
+    await markReviewNotificationSent(hex, context.rootRequestId, review.revision).catch(() => false);
+    await recordApprovalState(context, 'awaiting_review', 'review_notified', { hex, title: review.title });
+    return { sent: true, review };
+  } catch (error) {
+    console.warn('[ApprovalImage] Final review notification failed', error?.message || error);
+    if (attempt < REVIEW_NOTIFICATION_MAX_ATTEMPTS && PROCESSING_QUEUE_URL) {
+      const nextAttempt = attempt + 1;
+      const delays = [60, 300, 900];
+      await queueProcessingMessage({
+        realm: 'approvalReview',
+        action: 'notify',
+        requestId: `${context.rootRequestId}:review-notify:${review.revision}`,
+        rootRequestId: context.rootRequestId,
+        hex,
+        reviewRevision: review.revision,
+        attempt: nextAttempt,
+      }, delays[Math.min(nextAttempt - 1, delays.length - 1)]).catch((queueError) => {
+        console.warn('[ApprovalImage] Unable to queue review notification retry', queueError?.message || queueError);
+      });
+    }
+    await recordApprovalState(context, 'awaiting_review', 'review_notification_pending', {
+      hex,
+      title: review.title,
+      failure: { type: 'NOTIFICATION_FAILED', message: error?.message || String(error) },
+    });
+    return { sent: false, reason: 'notification_failed', error };
+  }
 }
 
 async function notifyTransition(state, details = {}) {
@@ -344,7 +519,35 @@ async function normaliseForDurableCache(buffer) {
   throw error;
 }
 
-async function persistCachedImage({ hex, event, generatedValue, generationId }) {
+async function prepareExistingImageForReview(hex, context, versioned) {
+  const event = versioned?.event;
+  if (!event) return { status: 'missing' };
+  const review = buildEventReviewSnapshot(event);
+  if (getMetadata(event).status?.isApproved === true) {
+    await recordApprovalState(context, 'completed', 'manual_image_already_approved', { hex, title: review.title });
+    return { status: 'completed', review };
+  }
+
+  event.approvalWorkflow = {
+    rootRequestId: context.rootRequestId,
+    approvedRevision: context.approvedRevision,
+    reviewRevision: review.revision,
+    state: 'awaiting_review',
+    source: 'manual_image_superseded_generation',
+    updatedAt: new Date().toISOString(),
+    notificationSentAt: event.approvalWorkflow?.notificationSentAt || null,
+  };
+  try {
+    await saveEvent(hex, event, { ifMatch: versioned.eTag });
+  } catch (error) {
+    if (!isPreconditionFailure(error)) throw error;
+  }
+  await recordApprovalState(context, 'awaiting_review', 'manual_image_preserved', { hex, title: review.title });
+  await notifyGeneratedReview(hex, context, 0);
+  return { status: 'awaiting_review', review };
+}
+
+async function persistCachedImage({ hex, generatedValue, generationId, message }) {
   const imageBytes = Buffer.from(generatedValue.imageBase64, 'base64');
   await s3.send(new PutObjectCommand({
     Bucket: TARGET_BUCKET,
@@ -353,14 +556,103 @@ async function persistCachedImage({ hex, event, generatedValue, generationId }) 
     ContentType: 'image/jpeg',
     CacheControl: 'public, max-age=31536000',
   }));
+
+  const context = approvalContext(message);
+  if (!context) {
+    const event = await loadEvent(hex);
+    if (!event) throw new Error(`HEX ${hex} not found while persisting generated image`);
+    event.metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+    event.metadata.image = event.metadata.image && typeof event.metadata.image === 'object' ? event.metadata.image : {};
+    event.metadata.status = event.metadata.status && typeof event.metadata.status === 'object' ? event.metadata.status : {};
+    event.metadata.image.url = generatedValue.relativeUrl;
+    event.metadata.status.isApproved = false;
+    await saveEvent(hex, event);
+    await publishEvent(hex, event);
+    await markEnrichmentSucceeded({ hex, stage: 'image', generationId });
+    return { status: 'persisted', event };
+  }
+
+  let current = await loadEventVersioned(hex);
+  if (!current?.event) throw new Error(`HEX ${hex} not found while persisting generated image`);
+  const before = buildEventReviewSnapshot(current.event);
+  if (before.revision !== context.approvedRevision) {
+    if (before.imageUrl) {
+      await markEnrichmentSucceeded({ hex, stage: 'image', generationId });
+      await prepareExistingImageForReview(hex, context, current);
+      return { status: 'superseded', event: current.event, review: before };
+    }
+    await markEnrichmentSucceeded({ hex, stage: 'image', generationId });
+    await recordApprovalState(context, 'needs_attention', 'approved_snapshot_changed_before_image_persist', {
+      hex,
+      title: before.title,
+      failure: { type: 'STALE_APPROVAL_REVISION', message: 'Canonical metadata changed while the generated image was in flight.' },
+    });
+    return { status: 'stale', event: current.event, review: before };
+  }
+
+  const event = current.event;
   event.metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
   event.metadata.image = event.metadata.image && typeof event.metadata.image === 'object' ? event.metadata.image : {};
   event.metadata.status = event.metadata.status && typeof event.metadata.status === 'object' ? event.metadata.status : {};
   event.metadata.image.url = generatedValue.relativeUrl;
   event.metadata.status.isApproved = false;
-  await saveEvent(hex, event);
+  const generatedReview = buildEventReviewSnapshot(event);
+  event.approvalWorkflow = {
+    rootRequestId: context.rootRequestId,
+    approvedRevision: context.approvedRevision,
+    reviewRevision: generatedReview.revision,
+    state: 'awaiting_review',
+    source: 'generated_image',
+    generatedImageUrl: generatedValue.relativeUrl,
+    notificationSentAt: null,
+    updatedAt: new Date().toISOString(),
+  };
+
+  try {
+    await saveEvent(hex, event, { ifMatch: current.eTag });
+  } catch (error) {
+    if (!isPreconditionFailure(error)) throw error;
+    current = await loadEventVersioned(hex);
+    const latestReview = current?.event ? buildEventReviewSnapshot(current.event) : null;
+    if (latestReview?.imageUrl) {
+      await markEnrichmentSucceeded({ hex, stage: 'image', generationId });
+      await prepareExistingImageForReview(hex, context, current);
+      return { status: 'superseded', event: current.event, review: latestReview };
+    }
+    throw error;
+  }
+
   await publishEvent(hex, event);
   await markEnrichmentSucceeded({ hex, stage: 'image', generationId });
+  await recordApprovalState(context, 'awaiting_review', 'generated_image_ready', { hex, title: generatedReview.title });
+  await notifyGeneratedReview(hex, context, 0);
+  return { status: 'awaiting_review', event, review: generatedReview };
+}
+
+async function ensureApprovedSnapshotReady(message, hex, event) {
+  const context = approvalContext(message);
+  if (!context) return { ready: true, context: null };
+  const review = buildEventReviewSnapshot(event);
+  if (review.revision === context.approvedRevision) return { ready: true, context, review };
+
+  if (review.imageUrl) {
+    const versioned = await loadEventVersioned(hex);
+    await prepareExistingImageForReview(hex, context, versioned);
+    return { ready: false, terminal: true, context, reason: 'manual_image_superseded_generation' };
+  }
+
+  const waitCount = Math.max(0, Number(message.approvalPersistWaitCount || 0));
+  if (waitCount < APPROVAL_PERSIST_MAX_WAITS && PROCESSING_QUEUE_URL) {
+    await queueProcessingMessage({ ...message, approvalPersistWaitCount: waitCount + 1 }, 2);
+    return { ready: false, requeued: true, context, reason: 'approval_persist_pending' };
+  }
+
+  await recordApprovalState(context, 'needs_attention', 'approval_persist_not_observed', {
+    hex,
+    title: review.title,
+    failure: { type: 'APPROVAL_PERSIST_TIMEOUT', message: 'The approved metadata revision was not visible before image generation.' },
+  });
+  return { ready: false, terminal: true, context, reason: 'approval_persist_timeout' };
 }
 
 async function processCloudflareImage(message) {
@@ -369,6 +661,19 @@ async function processCloudflareImage(message) {
   if (!hex) throw new Error('Cloudflare fullEnrich image request missing HEX');
   const event = await loadEvent(hex);
   if (!event) throw new Error(`HEX ${hex} not found`);
+
+  const approvalReady = await ensureApprovedSnapshotReady(message, hex, event);
+  if (!approvalReady.ready) {
+    return {
+      status: approvalReady.requeued ? 'approval_persist_pending' : 'succeeded',
+      stage: 'image',
+      hex,
+      provider: 'cloudflare',
+      reason: approvalReady.reason,
+      attemptCount: 0,
+    };
+  }
+
   const imageTheme = text(getImageMetadata(event).theme ?? event?.imageTheme);
   const prompt = buildImageGenerationPrompt(imageTheme, await loadScoutsConfig());
   if (!prompt) throw new Error(`HEX ${hex} is missing a valid image theme/prompt configuration`);
@@ -376,7 +681,7 @@ async function processCloudflareImage(message) {
 
   const reusable = await loadReusableGeneration({ hex, stage: 'image', generationId }).catch(() => null);
   if (reusable?.generatedValue?.relativeUrl && reusable?.generatedValue?.imageBase64) {
-    await persistCachedImage({ hex, event, generatedValue: reusable.generatedValue, generationId });
+    await persistCachedImage({ hex, generatedValue: reusable.generatedValue, generationId, message });
     emitImageMetric('ResultReused', 'cloudflare', 'reused');
     logImageEvent({ hex, requestId: message.requestId, generationId, cachedResultReused: true, outcome: 'reused' });
     const state = await getEnrichmentState(hex, 'image');
@@ -456,7 +761,7 @@ async function processCloudflareImage(message) {
 
     await markGeminiSucceeded({ hex, stage: 'image', generationId, generatedValue });
     try {
-      await persistCachedImage({ hex, event, generatedValue, generationId });
+      await persistCachedImage({ hex, generatedValue, generationId, message });
     } catch (persistenceError) {
       emitImageMetric('PersistenceRetry', 'cloudflare', 'persistence_retry');
       logImageEvent({ hex, requestId: message.requestId, generationId, externalRequestAttempted: true, httpStatus: generated.httpStatus, outcome: 'persistence_pending' });
@@ -537,6 +842,17 @@ function isImageStageMessage(message) {
     && normaliseStage(message?.orchestrationStep ?? message?.realm) === 'image';
 }
 
+function isApprovalReviewNotification(message) {
+  return text(message?.realm) === 'approvalReview' && text(message?.action) === 'notify' && Boolean(text(message?.rootRequestId));
+}
+
+async function handleApprovalReviewNotification(message) {
+  const hex = getHex(message);
+  if (!hex) return;
+  const context = { rootRequestId: text(message.rootRequestId), approvedRevision: null };
+  await notifyGeneratedReview(hex, context, Math.max(0, Number(message.attempt || 0)));
+}
+
 async function handleCloudflareRecord(message) {
   const requestedProvider = text(message?.imageProvider)?.toLowerCase() || CONFIGURED_IMAGE_PROVIDER;
   if (requestedProvider !== 'cloudflare') {
@@ -555,10 +871,11 @@ async function handleCloudflareRecord(message) {
     return;
   }
 
-  if (result?.status === 'duplicate_in_progress') {
-    console.log('[ImageGeneration] Duplicate delivery acknowledged without callback; reservation owner retains task token', {
+  if (result?.status === 'duplicate_in_progress' || result?.status === 'approval_persist_pending') {
+    console.log('[ImageGeneration] Delivery acknowledged without callback; ownership continues on another delivery', {
       hex: getHex(message),
       provider: 'cloudflare',
+      status: result.status,
     });
     return;
   }
@@ -583,6 +900,10 @@ export async function lambdaHandler(event) {
   const delegated = [];
   for (const record of records) {
     const message = parseRecord(record);
+    if (message && isApprovalReviewNotification(message)) {
+      await handleApprovalReviewNotification(message);
+      continue;
+    }
     if (!message || !isImageStageMessage(message)) {
       delegated.push(record);
       continue;
