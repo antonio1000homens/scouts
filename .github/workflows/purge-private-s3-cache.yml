@@ -17,7 +17,6 @@ env:
   AWS_REGION: eu-west-2
   AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
   WEBSITE_BUCKET: scouts-2ndtolworth-prod-553490163883
-  PUBLIC_SITE_BASE_URL: https://2ndtolworth.org.uk
   # CloudFront distribution IDs are non-secret deployment identifiers. Keep the
   # emergency purge aligned with the distribution documented in CLOUDFRONT.md.
   CLOUDFRONT_DISTRIBUTION_ID: E3INLSADL3AN6C
@@ -36,10 +35,17 @@ jobs:
       - name: Verify purge target
         run: |
           set -euo pipefail
-          aws cloudfront get-distribution \
+          cloudfront_domain="$(aws cloudfront get-distribution \
             --id "${CLOUDFRONT_DISTRIBUTION_ID}" \
-            --query 'Distribution.{Id:Id,Enabled:DistributionConfig.Enabled,Aliases:DistributionConfig.Aliases.Items}' \
-            --output json >/dev/null
+            --query 'Distribution.DomainName' \
+            --output text)"
+
+          if [ -z "${cloudfront_domain}" ] || [ "${cloudfront_domain}" = 'None' ]; then
+            echo 'Unable to resolve the CloudFront distribution domain.'
+            exit 1
+          fi
+
+          echo "CLOUDFRONT_BASE_URL=https://${cloudfront_domain}" >> "${GITHUB_ENV}"
 
       - name: Purge formerly public private paths
         run: |
@@ -63,7 +69,7 @@ jobs:
 
           is_private_status() {
             case "$1" in
-              3??|401|403|404) return 0 ;;
+              401|403|404) return 0 ;;
               *) return 1 ;;
             esac
           }
@@ -83,21 +89,22 @@ jobs:
             local status
             status="$(status_for "${url}")"
             if ! is_private_status "${status}"; then
-              echo "Expected anonymous access to be denied/redirected; got ${status}: ${url}"
+              echo "Expected anonymous access to be denied; got ${status}: ${url}"
               return 1
             fi
           }
 
-          # The S3 origin should be private immediately after the narrowed bucket
-          # policy was deployed. This proves the origin policy itself is correct.
+          # Verify the backing S3 policy independently of either CloudFront or
+          # Cloudflare. Public website artefacts stay readable while private
+          # calendar/runtime/event objects are denied anonymously.
           assert_public "${origin}/agenda.json"
           assert_private "${origin}/calendar/cubs-events.ics"
           assert_private "${origin}/runtime/scoutsQueued.json"
           assert_private "${origin}/events/6d6565742074686520706f6c696365.json"
 
-          # CloudFront invalidation is asynchronous and the deploy role deliberately
-          # does not have cloudfront:GetInvalidation. Poll the actual anonymous
-          # security boundary instead of granting extra IAM solely for a waiter.
+          # The public custom hostname is proxied by Cloudflare and can block CI
+          # runner traffic independently of CloudFront. Probe the distribution's
+          # own hostname so this test verifies the cache/security boundary itself.
           private_paths=(
             "/calendar/cubs-events.ics"
             "/runtime/scoutsQueued.json"
@@ -107,7 +114,7 @@ jobs:
           for attempt in $(seq 1 30); do
             all_private=true
             for path in "${private_paths[@]}"; do
-              status="$(status_for "${PUBLIC_SITE_BASE_URL}${path}")"
+              status="$(status_for "${CLOUDFRONT_BASE_URL}${path}")"
               if ! is_private_status "${status}"; then
                 all_private=false
                 echo "Attempt ${attempt}: still waiting for ${path} to become private (HTTP ${status})"
@@ -125,7 +132,7 @@ jobs:
             sleep 10
           done
 
-          assert_public "${PUBLIC_SITE_BASE_URL}/agenda.json"
+          assert_public "${CLOUDFRONT_BASE_URL}/agenda.json"
           for path in "${private_paths[@]}"; do
-            assert_private "${PUBLIC_SITE_BASE_URL}${path}"
+            assert_private "${CLOUDFRONT_BASE_URL}${path}"
           done
