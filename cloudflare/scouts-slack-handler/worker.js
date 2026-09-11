@@ -16,6 +16,17 @@ function encodeUtf8(value) {
   return new TextEncoder().encode(value);
 }
 
+async function interactionCorrelationId(payload) {
+  const value = [
+    payload?.type || "",
+    payload?.actions?.[0]?.action_id || "",
+    payload?.trigger_id || "",
+    payload?.container?.message_ts || payload?.message?.ts || "",
+  ].join("|");
+  const digest = await crypto.subtle.digest("SHA-256", encodeUtf8(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 12);
+}
+
 function timingSafeEqual(left, right) {
   const leftBytes = encodeUtf8(left);
   const rightBytes = encodeUtf8(right);
@@ -84,7 +95,7 @@ async function createWorkerProof(signingSecret, rawBody, slackTimestamp, slackSi
   return { timestamp, signature };
 }
 
-async function forwardToAws({ request, rawBody, upstreamUrl, signingSecret, interactionClass }) {
+async function forwardToAws({ request, rawBody, upstreamUrl, signingSecret, interactionClass, correlationId }) {
   const headers = new Headers(request.headers);
   headers.delete("host");
   headers.delete("cookie");
@@ -105,18 +116,31 @@ async function forwardToAws({ request, rawBody, upstreamUrl, signingSecret, inte
   headers.set("x-scouts-worker-timestamp", proof.timestamp);
   headers.set("x-scouts-worker-signature", proof.signature);
   headers.set("x-scouts-interaction-class", interactionClass);
+  headers.set("x-scouts-correlation-id", correlationId);
 
-  const response = await fetch(upstreamUrl, {
-    method: request.method,
-    headers,
-    body: rawBody,
-    redirect: "manual",
-  });
+  let response;
+  try {
+    response = await fetch(upstreamUrl, {
+      method: request.method,
+      headers,
+      body: rawBody,
+      redirect: "manual",
+    });
+  } catch (error) {
+    console.error("[Slack edge] AWS hand-off network error", {
+      interactionClass,
+      correlationId,
+      status: "network_error",
+      message: error?.message || String(error),
+    });
+    throw error;
+  }
 
   if (!response.ok) {
     console.error("[Slack edge] AWS hand-off failed", {
       status: response.status,
       interactionClass,
+      correlationId,
     });
   }
 
@@ -133,10 +157,13 @@ function acknowledgedResponse(interactionClass) {
   });
 }
 
-function backgroundDispatch(ctx, promise, interactionClass) {
+function backgroundDispatch(ctx, promise, interactionClass, { actionId = null, correlationId = null } = {}) {
   ctx.waitUntil(promise.catch((error) => {
     console.error("[Slack edge] Background AWS hand-off failed", {
       interactionClass,
+      actionId,
+      correlationId,
+      status: "network_error",
       message: error?.message || String(error),
     });
   }));
@@ -181,6 +208,13 @@ export default {
     }
 
     const interactionClass = classifySlackInteraction(payload);
+    const actionId = payload?.actions?.[0]?.action_id || null;
+    const correlationId = await interactionCorrelationId(payload);
+    console.log("[Slack edge] Interaction accepted", {
+      interactionClass,
+      actionId,
+      correlationId,
+    });
 
     if (interactionClass === "response-coupled") {
       // Slack view submissions can require response_action payloads (clear,
@@ -192,6 +226,7 @@ export default {
         upstreamUrl,
         signingSecret,
         interactionClass,
+        correlationId,
       });
     }
 
@@ -205,8 +240,9 @@ export default {
         upstreamUrl,
         signingSecret,
         interactionClass,
+        correlationId,
       });
-      backgroundDispatch(ctx, modalFastPath, interactionClass);
+      backgroundDispatch(ctx, modalFastPath, interactionClass, { actionId, correlationId });
       return acknowledgedResponse(interactionClass);
     }
 
@@ -218,7 +254,8 @@ export default {
       upstreamUrl,
       signingSecret,
       interactionClass,
-    }), interactionClass);
+      correlationId,
+    }), interactionClass, { actionId, correlationId });
 
     return acknowledgedResponse(interactionClass);
   },

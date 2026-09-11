@@ -450,6 +450,50 @@ function parseActionValue(rawValue) {
     return { event: {}, meta: {} };
 }
 
+function createInteractionCorrelationId(parsedPayload, actionId = '') {
+    const value = [
+        parsedPayload?.type || '',
+        actionId || parsedPayload?.actions?.[0]?.action_id || '',
+        parsedPayload?.trigger_id || '',
+        parsedPayload?.container?.message_ts || parsedPayload?.message?.ts || '',
+    ].join('|');
+    return crypto.createHash('sha256').update(value).digest('hex').slice(0, 12);
+}
+
+async function handleSkipInteraction(options) {
+    const {
+        eventTitle = 'event',
+        responseUrl = null,
+        correlationId = 'unknown',
+        sendResponse = sendSlackResponse,
+    } = options && typeof options === 'object' ? options : {};
+    let responseStatus = null;
+    if (responseUrl) {
+        try {
+            const response = await sendResponse(responseUrl, `Skipped ${eventTitle}, this will be checked again`);
+            responseStatus = Number.isFinite(Number(response?.statusCode)) ? Number(response.statusCode) : null;
+            if (responseStatus !== null && responseStatus >= 400) {
+                console.warn('[Slack] Skip response replacement returned an error', {
+                    correlationId,
+                    responseStatus,
+                });
+            }
+        } catch (responseError) {
+            console.error('[Slack] Skip response replacement failed', {
+                correlationId,
+                responseStatus,
+                message: responseError?.message || String(responseError),
+            });
+        }
+    }
+    console.log('[Slack] Skip interaction acknowledged', {
+        correlationId,
+        responseUrlAttempted: Boolean(responseUrl),
+        responseStatus,
+    });
+    return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: '' };
+}
+
 function ensureEditableEvent(event) {
     const cloned = cloneEvent(event);
     ensureEditableMetadata(cloned);
@@ -899,6 +943,7 @@ export async function lambdaHandler(event) {
                     ?? actionMeta?.approvalContext?.previewText
                     ?? parsedPayload.message?.text
                     ?? null;
+                const correlationId = createInteractionCorrelationId(parsedPayload, actionId);
                 
                 console.log('[Debug] Extracted values:');
                 console.log('[Debug]   eventTitle:', eventTitle);
@@ -1038,17 +1083,8 @@ export async function lambdaHandler(event) {
                 }
                 
                 if (actionId === 'scouts_request_skip') {
-                    console.log('[Slack] Handling skip action');
-                    
-                    if (responseUrl) {
-                        try {
-                            await sendSlackResponse(responseUrl, `Skipped ${eventTitle}, this will be checked again`);
-                        } catch (responseError) {
-                            console.error('[Slack] Failed to replace message for skip action:', responseError.message);
-                        }
-                    }
-                    
-                    return { statusCode: 200, body: JSON.stringify({ message: 'Request skipped' }) };
+                    console.log('[Slack] Handling skip action', { correlationId });
+                    return handleSkipInteraction({ eventTitle, responseUrl, correlationId });
                 }
                 
                 // NFC-specific actions
