@@ -127,7 +127,65 @@ test('acknowledges valid background interactions at the edge and forwards worker
     assert.ok(headers.get('x-scouts-worker-timestamp'));
     assert.match(headers.get('x-scouts-worker-signature') || '', /^v1=[0-9a-f]{64}$/);
     assert.equal(headers.get('x-scouts-interaction-class'), 'background');
+    assert.match(headers.get('x-scouts-correlation-id') || '', /^[0-9a-f]{12}$/);
     assert.equal(captured[0].init.body, body);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('acknowledges Skip even when the AWS hand-off returns 500', async () => {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const body = buildBody('scouts_request_skip');
+  const request = signedRequest(body, timestamp);
+  const originalFetch = globalThis.fetch;
+  const waits = [];
+
+  globalThis.fetch = async () => new Response('upstream failure', { status: 500 });
+
+  try {
+    const response = await worker.fetch(request, {
+      SCOUTS_SLACK_HANDLER_URL: 'https://example.lambda-url.eu-west-2.on.aws/',
+      SLACK_SIGNING_SECRET: signingSecret,
+    }, {
+      waitUntil(promise) {
+        waits.push(promise);
+      },
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('x-scouts-slack-ack'), 'edge');
+    assert.equal(response.headers.get('x-scouts-interaction-class'), 'background');
+    await Promise.all(waits);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('acknowledges Skip even when the AWS hand-off is unreachable', async () => {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const body = buildBody('scouts_request_skip');
+  const request = signedRequest(body, timestamp);
+  const originalFetch = globalThis.fetch;
+  const waits = [];
+
+  globalThis.fetch = async () => {
+    throw new Error('upstream unavailable');
+  };
+
+  try {
+    const response = await worker.fetch(request, {
+      SCOUTS_SLACK_HANDLER_URL: 'https://example.lambda-url.eu-west-2.on.aws/',
+      SLACK_SIGNING_SECRET: signingSecret,
+    }, {
+      waitUntil(promise) {
+        waits.push(promise);
+      },
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('x-scouts-slack-ack'), 'edge');
+    await Promise.all(waits);
   } finally {
     globalThis.fetch = originalFetch;
   }
