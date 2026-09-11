@@ -26,6 +26,7 @@ import {
 const requestRouter = readFileSync('lambdas/scouts2sqs/function/request-router.mjs', 'utf8');
 const scoutsTemplate = readFileSync('lambdas/cloudformation/templates/scouts.yaml', 'utf8');
 const scouts2sqsTemplate = readFileSync('lambdas/cloudformation/templates/scouts2sqs.yaml', 'utf8');
+const sqs2scoutsTemplate = readFileSync('lambdas/cloudformation/templates/sqs2scouts.yaml', 'utf8');
 const slackTemplate = readFileSync('lambdas/cloudformation/templates/slack-handler.yaml', 'utf8');
 const scoutsDeploy = readFileSync('lambdas/scouts/deploy.sh', 'utf8');
 const scouts2sqsDeploy = readFileSync('lambdas/scouts2sqs/deploy.sh', 'utf8');
@@ -230,7 +231,7 @@ test('issue 91 root activity remains authoritative over child terminal states', 
 });
 
 test('issue 91 least privilege allows only required approval retries and Slack canonical reads', () => {
-  assert.match(scouts2sqsTemplate, /sqs:SendMessage[\s\S]*?- !Ref QueueArn[\s\S]*?- !Ref ScoutsDecisionQueueArn/);
+  assert.match(sqs2scoutsTemplate, /sqs:SendMessage[\s\S]*?- !Ref QueueArn[\s\S]*?- !Ref ScoutsDecisionQueueArn/);
   assert.match(slackTemplate, /s3:GetObject[\s\S]*?\/events\/\*/);
   assert.match(slackTemplate, /runtime\/approval-idempotency\/\*/);
   assert.match(slackTemplate, /s3:PutObject[\s\S]*?runtime\/approval-idempotency\/\*/);
