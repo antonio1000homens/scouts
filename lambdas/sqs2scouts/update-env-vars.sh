@@ -47,6 +47,7 @@ aws lambda update-function-configuration \
     --environment "Variables={
         SLACK_BOT_TOKEN_PARAMETER=${SLACK_BOT_TOKEN_PARAMETER:-/scouts/shared/slack-bot-token},
         SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-https://slack.com/api/chat.postMessage},
+        SCOUTS_NOTIFICATION_CHANNEL=${SCOUTS_NOTIFICATION_CHANNEL:-C0C1996TGQZ},
         SLACK_CHAT_UPDATE_URL=${SLACK_CHAT_UPDATE_URL:-https://slack.com/api/chat.update},
         SLACK_VIEWS_OPEN_URL=${SLACK_VIEWS_OPEN_URL:-https://slack.com/api/views.open},
         SLACK_SIGNING_SECRET_PARAMETER=${SLACK_SIGNING_SECRET_PARAMETER:-/scouts/shared/slack-signing-secret},

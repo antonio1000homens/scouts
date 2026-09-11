@@ -48,7 +48,7 @@ async function testApprovalNotification() {
         console.log('Response:', JSON.stringify(result, null, 2));
         console.log('');
         console.log('📋 Expected behavior:');
-        console.log('1. A Slack notification should be sent to #scouts channel');
+        console.log('1. A Slack notification should be sent to #scouts-website channel');
         console.log('2. The notification should contain editable input fields for:');
         console.log('   - AI Tagline (pre-filled with current value)');
         console.log('   - Image Prompt (pre-filled with current value)');

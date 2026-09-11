@@ -61,7 +61,7 @@ const IMAGE_HEIGHT = Number.isFinite(Number(process.env.GEMINI_IMAGE_OUTPUT_HEIG
   ? Math.max(180, Number(process.env.GEMINI_IMAGE_OUTPUT_HEIGHT))
   : 768;
 const SLACK_WEBHOOK_URL = text(process.env.SLACK_WEBHOOK_URL) || 'https://slack.com/api/chat.postMessage';
-const SLACK_CHANNEL = '#scouts';
+const SLACK_CHANNEL = text(process.env.SCOUTS_NOTIFICATION_CHANNEL) || 'C0C1996TGQZ';
 
 const s3 = new S3Client({ region: AWS_REGION });
 const sfn = new SFNClient({ region: AWS_REGION });

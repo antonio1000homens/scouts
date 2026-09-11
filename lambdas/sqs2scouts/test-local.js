@@ -63,7 +63,7 @@ async function runTests() {
     }
     
     console.log('✅ All tests completed!');
-    console.log('💡 Check your Slack #scouts channel for messages');
+    console.log('💡 Check your Slack #scouts-website channel for messages');
 }
 
 runTests().catch(console.error);
