@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const source = readFileSync('website/admin/admin-activity-centre.js', 'utf8');
+const adminSource = readFileSync('website/admin/admin-script.js', 'utf8');
 const html = readFileSync('website/admin/index.html', 'utf8');
 
 test('activity centre persists request IDs, stacks notices and exposes a seven-day log', () => {
@@ -13,6 +14,9 @@ test('activity centre persists request IDs, stacks notices and exposes a seven-d
   assert.match(source, /activity-centre-drawer/);
   assert.match(source, /activity-log-hex/);
   assert.match(source, /activityCommand\('lookup'|activityCommand\('history'/);
+  assert.match(source, /View event/);
+  assert.match(source, /openAdminEventByHex/);
+  assert.match(adminSource, /no longer present/);
 });
 
 test('raw file viewers and duplicate legacy request panels are removed from the normal view', () => {

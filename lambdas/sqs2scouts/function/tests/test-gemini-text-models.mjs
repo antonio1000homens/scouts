@@ -5,6 +5,8 @@ import {
   generateGeminiTextWithFallback,
   isRetryableGeminiTextError,
   parseGeminiTextModels,
+  GEMINI_TEXT_RESPONSE_SCHEMAS,
+  validateGeminiTextResponse,
 } from '../gemini-text-models.mjs';
 
 test('text fallback defaults to current free-tier compatible Gemini models', () => {
@@ -52,4 +54,17 @@ test('retryability recognises provider quota and transient availability errors',
   assert.equal(isRetryableGeminiTextError({ message: 'RESOURCE_EXHAUSTED' }), true);
   assert.equal(isRetryableGeminiTextError({ status: 503 }), true);
   assert.equal(isRetryableGeminiTextError({ status: 403, message: 'Forbidden' }), false);
+});
+
+test('structured response schemas and semantic validation reject malformed event data', () => {
+  assert.deepEqual(GEMINI_TEXT_RESPONSE_SCHEMAS.tagline.required, ['tagline', 'imageTag']);
+  assert.deepEqual(GEMINI_TEXT_RESPONSE_SCHEMAS.imageTheme.required, ['imageTag']);
+  assert.equal(validateGeminiTextResponse({ tagline: 'Adventure awaits!', imageTag: 'forest ropes course' }, 'tagline').valid, true);
+  assert.equal(validateGeminiTextResponse({ tagline: '', imageTag: 'forest ropes course' }, 'tagline').reason, 'missing_tagline');
+  assert.equal(validateGeminiTextResponse({ tagline: 'x'.repeat(81), imageTag: 'forest ropes course' }, 'tagline').reason, 'tagline_too_long');
+  assert.equal(validateGeminiTextResponse({ imageTag: 'Laser Tag!' }, 'imageTheme').reason, 'invalid_image_tag');
+});
+
+test('429 quota response remains retryable even when provider reports quota exhaustion', () => {
+  assert.equal(isRetryableGeminiTextError({ status: 429, message: 'quota exceeded' }), true);
 });

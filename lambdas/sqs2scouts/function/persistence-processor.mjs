@@ -8,7 +8,7 @@ import sharp from 'sharp';
 import { getOptionalSecret, getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 import { publishCanonicalEventToAgenda } from './agenda-publisher.mjs';
-import { generateGeminiTextWithFallback, parseGeminiTextModels } from './gemini-text-models.mjs';
+import { generateGeminiTextWithFallback, parseGeminiTextModels, GEMINI_TEXT_RESPONSE_SCHEMAS, validateGeminiTextResponse } from './gemini-text-models.mjs';
 import {
     buildGenerationId,
     getEnrichmentState,
@@ -887,23 +887,21 @@ function normaliseGeminiTextResponse(result) {
     }
 
     const tagline = typeof result.tagline === 'string' ? result.tagline.trim() : null;
-    const imagePrompt =
-        typeof result.imagePrompt === 'string'
-            ? normalizeImagePrompt(result.imagePrompt)
-            : null;
     const imageTag =
         typeof result.imageTag === 'string'
             ? normalizeImagePrompt(result.imageTag)
             : null;
 
-    const imageTheme = imagePrompt || imageTag;
-
     return {
         raw: result,
         tagline,
-        imageTheme,
+        imageTheme: imageTag,
         imageTag,
     };
+}
+
+function blockedEnrichmentResult(reason, state = null, failure = null) {
+    return { enrichmentBlocked: true, reason, state: state || reason, failureCategory: failure?.type || reason, failureMessage: failure?.message || reason };
 }
 
 async function generateGeminiTextSuggestion(event, mode, configOverride = null, options = {}) {
@@ -911,11 +909,11 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
         console.log('[Gemini] Feature flag disabled; skipping AI suggestion', {
             geminiFlag: GEMINI_TEXT_FEATURE_FLAG_SOURCE ?? null,
         });
-        return null;
+        return blockedEnrichmentResult('feature_disabled', 'manual_review');
     }
     if (geminiTextRuntimeDisabled) {
         console.log('[Gemini] Runtime disabled; skipping AI suggestion');
-        return null;
+        return blockedEnrichmentResult('runtime_disabled', 'manual_review');
     }
 
     const hexValue = String(options.hexValue ?? event?.hex ?? '').trim().toLowerCase();
@@ -927,13 +925,13 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
         console.warn('[Gemini] GEMINI_API_KEY not set; skipping AI suggestion');
         const failedState = await markEnrichmentFailure({ hex: hexValue, stage, error: new Error('Gemini API key is not configured'), attemptCount: 1 }).catch(() => null);
         await notifyEnrichmentTransition(stage, failedState, { hex: hexValue, generationId, requestId: options.requestId }).catch(() => {});
-        return null;
+        return blockedEnrichmentResult('configuration_failure', 'manual_review');
     }
 
     const prompt = await buildGeminiTextRequestPrompt(event, mode, configOverride);
     if (!prompt) {
         console.warn('[Gemini] Built prompt is empty; skipping suggestion');
-        return null;
+        return blockedEnrichmentResult('empty_prompt', 'manual_review');
     }
 
     // Diagnostic logs
@@ -947,7 +945,7 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
         GoogleGenerativeAILib = (await import('@google/generative-ai')).GoogleGenerativeAI;
     } catch (err) {
         console.warn('[Gemini] @google/generative-ai SDK not available:', err?.message || err);
-        return null;
+        return blockedEnrichmentResult('sdk_unavailable', 'manual_review');
     }
 
     const reusable = await loadReusableGeneration({ hex: hexValue, stage, generationId }).catch((error) => {
@@ -957,12 +955,13 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
     if (reusable) {
         console.log(JSON.stringify({ hex: hexValue, stage, generationId, requestId: options.requestId || null, attemptCount: reusable.state?.attemptCount || 0, stateBefore: reusable.state?.state || 'succeeded', stateAfter: 'succeeded', geminiRequestAttempted: false, geminiResultReused: true, failureCategory: null }));
         emitEnrichmentMetric('GeminiResultReused', stage, 'reused');
-        return normaliseGeminiTextResponse(reusable.generatedValue);
+        const reusableValidation = validateGeminiTextResponse(reusable.generatedValue, stage);
+        return reusableValidation.valid ? normaliseGeminiTextResponse(reusableValidation.value) : blockedEnrichmentResult('invalid_cached_generation', 'manual_review');
     }
 
     const stageEligibility = await checkStageEligibility(hexValue, stage, generationId);
     if (!stageEligibility.eligible) {
-        return { enrichmentBlocked: true, reason: stageEligibility.reason };
+        return blockedEnrichmentResult(stageEligibility.reason, stageEligibility.state?.state);
     }
 
     const reservation = await reserveEnrichmentAttempt({
@@ -976,7 +975,7 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
     });
     if (!reservation?.reserved) {
         emitEnrichmentMetric('EnrichmentSkipped', stage, reservation?.reason || 'reservation_rejected');
-        return { enrichmentBlocked: true, reason: reservation?.reason || 'reservation_rejected' };
+        return blockedEnrichmentResult(reservation?.reason || 'reservation_rejected', reservation?.state?.state);
     }
     console.log(JSON.stringify({ hex: hexValue, stage, generationId, requestId: options.requestId || null, attemptCount: reservation.state?.attemptCount || null, stateBefore: stageEligibility.state?.state || 'pending', stateAfter: 'in_progress', geminiRequestAttempted: true, geminiResultReused: false, failureCategory: null }));
 
@@ -988,8 +987,10 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
                 const suggestionModel = genAI.getGenerativeModel({
                     model: modelName,
                     generationConfig: {
-                        temperature: 0.8,
-                        maxOutputTokens: 200,
+                        temperature: 0.3,
+                        maxOutputTokens: 512,
+                        responseMimeType: 'application/json',
+                        responseSchema: GEMINI_TEXT_RESPONSE_SCHEMAS[stage],
                     },
                 });
                 console.log('[Gemini] Request payload:', { model: modelName, prompt: prompt.substring(0, 200) + '...' });
@@ -1021,10 +1022,21 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
             await notifyEnrichmentTransition(stage, failedState, { hex: hexValue, generationId, requestId: options.requestId }).catch(() => {});
             console.warn('[Gemini] Failed to parse JSON from model response:', jsonErr.message);
             console.warn('[Gemini] Cleaned response was:', cleaned.slice(0, 1000));
-            return null;
+            return blockedEnrichmentResult('invalid_json', 'manual_review', { type: 'INVALID_EVENT_DATA', message: 'Model returned invalid JSON' });
         }
 
-        const normalized = normaliseGeminiTextResponse(parsed);
+        const validation = validateGeminiTextResponse(parsed, stage);
+        if (!validation.valid) {
+            const failedState = await markEnrichmentFailure({
+                hex: hexValue, stage,
+                error: new Error(`Model returned invalid event data: ${validation.reason}`),
+                attemptCount: reservation?.state?.attemptCount,
+            }).catch(() => null);
+            emitEnrichmentMetric('EnrichmentQuarantined', stage, 'INVALID_EVENT_DATA');
+            await notifyEnrichmentTransition(stage, failedState, { hex: hexValue, generationId, requestId: options.requestId }).catch(() => {});
+            return blockedEnrichmentResult(validation.reason, 'manual_review', { type: 'INVALID_EVENT_DATA', message: validation.reason });
+        }
+        const normalized = normaliseGeminiTextResponse(validation.value);
         await markGeminiSucceeded({ hex: hexValue, stage, generationId, generatedValue: normalized.raw ?? parsed });
         emitGeminiMetric('text', 'success');
         return normalized;
@@ -1049,7 +1061,7 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
             geminiTextRuntimeDisabled = true;
             console.warn('[Gemini] Disabling AI suggestions for the remainder of this runtime due to billing restrictions.');
         }
-        return null;
+        return blockedEnrichmentResult(failedState?.state || 'generation_failed', failedState?.state, { type: failedState?.lastErrorType || 'GENERATION_FAILED', message: error?.message || String(error) });
     }
 }
 
@@ -1932,7 +1944,8 @@ async function saveHexEventToS3(hexValue, payload) {
                 versionId: verifyResponse?.VersionId || null,
             });
         } catch (verifyError) {
-            console.warn(`[Hex] Read-after-write verification failed for s3://${bucket}/${key}:`, verifyError?.message || verifyError);
+            console.error(`[Hex] Read-after-write verification failed for s3://${bucket}/${key}:`, verifyError?.message || verifyError);
+            throw verifyError;
         }
     } catch (error) {
         console.error(`[Hex] Failed to save HEX file to s3://${bucket}/${key}:`, error.message);
@@ -3163,7 +3176,7 @@ export async function lambdaHandler(event) {
     const observedHexes = [];
     const observedLinks = [];
     const observedRequests = [];
-    let runtimeOutcome = { status: 'completed' };
+    let runtimeOutcome = { status: 'needs_attention', failure: { type: 'NO_SUCCESS_OUTCOME', message: 'Processing did not reach a verified terminal outcome' } };
     let activityContext = null;
     try {
         if (directInvocation) {
@@ -3282,19 +3295,20 @@ export async function lambdaHandler(event) {
             const result = await generateGeminiTextSuggestion(hexData, 'tagline', scoutsConfig, { hexValue, generationId, requestId: requestContext.requestId });
             if (result?.enrichmentBlocked) {
                 await completeImageEnrichTask(messageBody, {
+                    status: result.state || 'manual_review',
                     hex: hexValue,
                     requestId: requestContext.requestId,
                     orchestrationStep: 'imageTheme',
                     skipped: result.reason || 'enrichment_unavailable',
                 });
+                runtimeOutcome = { status: result.state === 'retry_wait' ? 'waiting_for_retry' : 'manual_review', failure: { type: result.failureCategory || 'ENRICHMENT_BLOCKED', message: result.failureMessage || result.reason } };
                 return {
                     statusCode: 202,
                     body: JSON.stringify({ message: 'Tagline enrichment is currently deferred' }),
                 };
             }
-            if (result?.tagline) {
-                setTagline(hexData, result.tagline);
-            }
+            if (!result?.tagline || !result?.imageTheme) throw Object.assign(new Error('Validated tagline response did not contain required event data'), { name: 'INVALID_EVENT_DATA' });
+            setTagline(hexData, result.tagline);
             if (result?.imageTheme && !hexData.image?.theme) {
                 hexData.image = hexData.image || {};
                 hexData.image.theme = result.imageTheme;
@@ -3311,9 +3325,7 @@ export async function lambdaHandler(event) {
                 throw error;
             }
             if (result) {
-                await markEnrichmentSucceeded({ hex: hexValue, stage: 'tagline', generationId }).catch((error) => {
-                    console.warn('[Enrichment] Failed to mark tagline success:', error?.message || error);
-                });
+                await markEnrichmentSucceeded({ hex: hexValue, stage: 'tagline', generationId });
             }
             await completeImageEnrichTask(messageBody, {
                 status: 'succeeded',
@@ -3322,6 +3334,7 @@ export async function lambdaHandler(event) {
                 orchestrationStep: 'tagline',
                 imageTheme: getImageThemeValue(hexData),
             });
+            runtimeOutcome = { status: 'completed' };
 
             const requiresApproval = hasCompleteApprovalData(hexData);
             if (!requiresApproval || autoApproval) {
@@ -3357,16 +3370,19 @@ export async function lambdaHandler(event) {
             const result = await generateGeminiTextSuggestion(hexData, 'imageTheme', scoutsConfig, { hexValue, generationId, requestId: requestContext.requestId });
             if (result?.enrichmentBlocked) {
                 await completeImageEnrichTask(messageBody, {
+                    status: result.state || 'manual_review',
                     hex: hexValue,
                     requestId: requestContext.requestId,
                     orchestrationStep: 'imageTheme',
                     skipped: result.reason || 'enrichment_unavailable',
                 });
+                runtimeOutcome = { status: result.state === 'retry_wait' ? 'waiting_for_retry' : 'manual_review', failure: { type: result.failureCategory || 'ENRICHMENT_BLOCKED', message: result.failureMessage || result.reason } };
                 return {
                     statusCode: 202,
                     body: JSON.stringify({ message: 'Image theme enrichment is currently deferred' }),
                 };
             }
+            if (!result?.imageTheme) throw Object.assign(new Error('Validated image theme response did not contain imageTheme'), { name: 'INVALID_EVENT_DATA' });
             if (result?.imageTheme) {
                 hexData.image = hexData.image || {};
                 hexData.image.theme = result.imageTheme;
@@ -3384,9 +3400,7 @@ export async function lambdaHandler(event) {
                 throw error;
             }
             if (result) {
-                await markEnrichmentSucceeded({ hex: hexValue, stage: 'imageTheme', generationId }).catch((error) => {
-                    console.warn('[Enrichment] Failed to mark imageTheme success:', error?.message || error);
-                });
+                await markEnrichmentSucceeded({ hex: hexValue, stage: 'imageTheme', generationId });
             }
             await completeImageEnrichTask(messageBody, {
                 status: 'succeeded',
@@ -3395,6 +3409,7 @@ export async function lambdaHandler(event) {
                 orchestrationStep: 'imageTheme',
                 imageTheme: getImageThemeValue(hexData),
             });
+            runtimeOutcome = { status: 'completed' };
 
             const requiresApproval = hasCompleteApprovalData(hexData);
             if (!requiresApproval || autoApproval) {
@@ -3726,7 +3741,7 @@ export async function lambdaHandler(event) {
 
     } catch (error) {
         runtimeOutcome = {
-            status: 'failed',
+            status: 'needs_attention',
             failure: {
                 type: error?.name || 'PROCESSING_FAILED',
                 message: error?.message || String(error),
@@ -3756,12 +3771,13 @@ export async function lambdaHandler(event) {
     } finally {
         if (activityContext?.requestId) {
             const isWorkflowStage = activityContext.invocationType === 'stepFunctions' && activityContext.realm !== 'image';
-            const failed = runtimeOutcome.status === 'failed';
+            const succeeded = runtimeOutcome.status === 'completed';
+            const state = succeeded ? (isWorkflowStage ? 'published' : 'completed') : runtimeOutcome.status;
             await recordRequestActivity({
                 ...activityContext,
-                state: failed ? 'needs_attention' : (isWorkflowStage ? 'published' : 'completed'),
-                stage: failed ? 'failed' : (isWorkflowStage ? 'published' : 'agenda_published'),
-                publication: failed ? 'failed' : 'published',
+                state,
+                stage: succeeded ? (isWorkflowStage ? 'published' : 'agenda_published') : state,
+                publication: succeeded ? 'published' : null,
                 failure: runtimeOutcome.failure || null,
             }).catch((activityError) => console.warn('[Activity] Unable to record worker outcome:', activityError?.message || activityError));
         }
