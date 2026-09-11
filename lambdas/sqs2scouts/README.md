@@ -33,6 +33,7 @@ SSM-backed secrets:
 
 Non-secret environment variables:
 - `SLACK_WEBHOOK_URL` - Slack API endpoint (defaults to chat.postMessage)
+- `SCOUTS_NOTIFICATION_CHANNEL` - Slack channel ID for runtime notifications (defaults to `C0C1996TGQZ`, `#scouts-website`)
 
 ### Gemini image prompt generation
 

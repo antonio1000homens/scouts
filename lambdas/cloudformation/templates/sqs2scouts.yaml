@@ -140,6 +140,10 @@ Parameters:
   SlackWebhookUrl:
     Type: String
     Default: https://slack.com/api/chat.postMessage
+  ScoutsNotificationChannel:
+    Type: String
+    Default: C0C1996TGQZ
+    Description: Slack channel ID for sqs2scouts runtime notifications.
   Scouts2SqsFunctionUrl:
     Type: String
     Default: ''
@@ -330,6 +334,7 @@ Resources:
           CLOUDFLARE_AI_MODEL: !Ref CloudflareAiModel
           CLOUDFLARE_AI_STEPS: !Ref CloudflareAiSteps
           SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
+          SCOUTS_NOTIFICATION_CHANNEL: !Ref ScoutsNotificationChannel
           SCOUTS2SQS_FUNCTION_URL: !Ref Scouts2SqsFunctionUrl
           SCOUTS_DECISION_QUEUE_URL: !Ref ScoutsDecisionQueueUrl
           SCOUTS_PROCESSING_QUEUE_URL: !Ref ProcessingQueueUrl

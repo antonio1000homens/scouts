@@ -26,7 +26,7 @@ import {
 console.log('sqs2scouts: Loading configuration from environment variables');
 
 // Constants from environment variables
-const SLACK_CHANNEL = "#scouts";
+const SLACK_CHANNEL = (process.env.SCOUTS_NOTIFICATION_CHANNEL || 'C0C1996TGQZ').trim() || 'C0C1996TGQZ';
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || 'https://slack.com/api/chat.postMessage';
 const DLQ_URL = process.env.DLQ_URL || "https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ";
 const SLACK_CHAT_UPDATE_URL = process.env.SLACK_CHAT_UPDATE_URL || 'https://slack.com/api/chat.update';
