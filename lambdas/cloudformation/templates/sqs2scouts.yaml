@@ -259,6 +259,7 @@ Resources:
                 Action:
                   - sqs:SendMessage
                 Resource:
+                  - !Ref QueueArn
                   - !Ref ScoutsDecisionQueueArn
                   - !Ref DlqArn
               - Effect: Allow
