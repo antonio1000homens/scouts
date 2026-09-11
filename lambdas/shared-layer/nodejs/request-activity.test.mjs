@@ -18,6 +18,60 @@ test('activity ledger update only supplies DynamoDB placeholders used by the exp
   assert.match(update.command.input.ConditionExpression, /priority <= :priority/);
 });
 
+test('activity ledger defaults rootRequestId to requestId for backwards compatibility', () => {
+  const update = buildRequestActivityUpdate({
+    requestId: 'request-123',
+    hex: '686578',
+    action: 'approve',
+    state: 'processing',
+    at: new Date('2026-09-09T00:00:00.000Z'),
+  });
+  assert.equal(update.rootRequestId, 'request-123');
+  assert.equal(update.command.input.ExpressionAttributeValues[':rootRequestId'].S, 'request-123');
+  assert.match(update.command.input.UpdateExpression, /rootRequestId = if_not_exists\(rootRequestId, :rootRequestId\)/);
+});
+
+test('explicit rootRequestId is persisted independently of child requestId', () => {
+  const update = buildRequestActivityUpdate({
+    requestId: 'child-image-456',
+    rootRequestId: 'approval-root-123',
+    hex: '686578',
+    action: 'imageEnrich',
+    state: 'awaiting_image',
+    at: new Date('2026-09-09T00:00:00.000Z'),
+  });
+  assert.equal(update.requestId, 'child-image-456');
+  assert.equal(update.rootRequestId, 'approval-root-123');
+  assert.equal(update.command.input.ExpressionAttributeValues[':rootRequestId'].S, 'approval-root-123');
+  assert.equal(update.command.input.ExpressionAttributeValues[':state'].S, 'awaiting_image');
+  assert.equal(update.command.input.ExpressionAttributeValues[':terminal'].S, 'false');
+});
+
+test('operationId is accepted as a migration alias for rootRequestId', () => {
+  const update = buildRequestActivityUpdate({
+    requestId: 'child-review-456',
+    operationId: 'approval-root-123',
+    state: 'awaiting_review',
+    at: new Date('2026-09-09T00:00:00.000Z'),
+  });
+  assert.equal(update.rootRequestId, 'approval-root-123');
+  assert.equal(update.command.input.ExpressionAttributeValues[':state'].S, 'awaiting_review');
+  assert.equal(update.command.input.ExpressionAttributeValues[':terminal'].S, 'false');
+});
+
+test('activity context supplies rootRequestId to child writes', async () => {
+  const context = { rootRequestId: 'approval-root-context' };
+  await withRequestActivityContext(context, async () => {
+    const update = buildRequestActivityUpdate({
+      requestId: 'child-from-context',
+      state: 'processing',
+      at: new Date('2026-09-09T00:00:00.000Z'),
+    });
+    assert.equal(update.rootRequestId, 'approval-root-context');
+    assert.equal(update.command.input.ExpressionAttributeValues[':rootRequestId'].S, 'approval-root-context');
+  });
+});
+
 test('reconciliation context is persisted on queued activity', async () => {
   const context = { reconciliationId: 'reconcile-123' };
   await withRequestActivityContext(context, async () => {
