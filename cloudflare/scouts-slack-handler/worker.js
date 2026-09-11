@@ -2,6 +2,7 @@ const ALLOWED_HOST = "slack.2ndtolworth.org.uk";
 const INTERACTIVE_PATH = "/interactive";
 const SLACK_REQUEST_TTL_SECONDS = 60 * 5;
 const MODAL_ACTION_IDS = new Set(["scouts_request_edit"]);
+const RESPONSE_COUPLED_VIEW_CALLBACK_IDS = new Set(["scouts_edit_modal"]);
 const WORKER_PROOF_VERSION = "v1";
 
 function jsonError(status, message) {
@@ -47,6 +48,13 @@ function parseSlackPayload(rawBody) {
 }
 
 export function classifySlackInteraction(payload) {
+  if (
+    payload?.type === "view_submission"
+    && RESPONSE_COUPLED_VIEW_CALLBACK_IDS.has(payload?.view?.callback_id || "")
+  ) {
+    return "response-coupled";
+  }
+
   const actionId = payload?.actions?.[0]?.action_id || "";
   return MODAL_ACTION_IDS.has(actionId) ? "modal" : "background";
 }
@@ -125,6 +133,15 @@ function acknowledgedResponse(interactionClass) {
   });
 }
 
+function backgroundDispatch(ctx, promise, interactionClass) {
+  ctx.waitUntil(promise.catch((error) => {
+    console.error("[Slack edge] Background AWS hand-off failed", {
+      interactionClass,
+      message: error?.message || String(error),
+    });
+  }));
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -165,6 +182,19 @@ export default {
 
     const interactionClass = classifySlackInteraction(payload);
 
+    if (interactionClass === "response-coupled") {
+      // Slack view submissions can require response_action payloads (clear,
+      // errors, update, push). Preserve the Lambda response for these rather
+      // than replacing it with an empty edge acknowledgement.
+      return forwardToAws({
+        request,
+        rawBody,
+        upstreamUrl,
+        signingSecret,
+        interactionClass,
+      });
+    }
+
     if (interactionClass === "modal") {
       // Modal trigger_ids are short-lived. Start the AWS request immediately,
       // before constructing the Slack acknowledgement, and keep it alive after
@@ -176,21 +206,19 @@ export default {
         signingSecret,
         interactionClass,
       });
-      ctx.waitUntil(modalFastPath);
+      backgroundDispatch(ctx, modalFastPath, interactionClass);
       return acknowledgedResponse(interactionClass);
     }
 
-    // Non-modal work does not require a trigger_id. Acknowledge Slack at the
-    // edge and let Cloudflare keep the AWS hand-off alive in the background.
-    ctx.waitUntil((async () => {
-      await forwardToAws({
-        request,
-        rawBody,
-        upstreamUrl,
-        signingSecret,
-        interactionClass,
-      });
-    })());
+    // Other work does not require the HTTP response or a trigger_id. Slack is
+    // acknowledged at the edge while Cloudflare keeps the AWS hand-off alive.
+    backgroundDispatch(ctx, forwardToAws({
+      request,
+      rawBody,
+      upstreamUrl,
+      signingSecret,
+      interactionClass,
+    }), interactionClass);
 
     return acknowledgedResponse(interactionClass);
   },
