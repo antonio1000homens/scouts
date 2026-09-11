@@ -18,6 +18,15 @@ function buildBody(actionId = 'scouts_request_approve') {
   return new URLSearchParams({ payload: JSON.stringify(payload) }).toString();
 }
 
+function buildViewSubmissionBody() {
+  return new URLSearchParams({
+    payload: JSON.stringify({
+      type: 'view_submission',
+      view: { callback_id: 'scouts_edit_modal' },
+    }),
+  }).toString();
+}
+
 function sign(body, timestamp) {
   return `v0=${crypto.createHmac('sha256', signingSecret)
     .update(`v0:${timestamp}:${body}`)
@@ -36,8 +45,12 @@ function signedRequest(body, timestamp) {
   });
 }
 
-test('classifies edit actions as modal fast path only', () => {
+test('classifies modal-open, response-coupled, and background interactions separately', () => {
   assert.equal(classifySlackInteraction({ actions: [{ action_id: 'scouts_request_edit' }] }), 'modal');
+  assert.equal(classifySlackInteraction({
+    type: 'view_submission',
+    view: { callback_id: 'scouts_edit_modal' },
+  }), 'response-coupled');
   assert.equal(classifySlackInteraction({ actions: [{ action_id: 'scouts_request_approve' }] }), 'background');
   assert.equal(classifySlackInteraction({ actions: [{ action_id: 'scouts_request_hide' }] }), 'background');
   assert.equal(classifySlackInteraction({ actions: [{ action_id: 'scouts_request_skip' }] }), 'background');
@@ -148,6 +161,36 @@ test('uses the modal fast path while still acknowledging Slack at the edge', asy
     assert.equal(waits.length, 1);
     await Promise.all(waits);
     assert.equal(started, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('preserves Lambda response for edit modal view submissions', async () => {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const body = buildViewSubmissionBody();
+  const request = signedRequest(body, timestamp);
+  const originalFetch = globalThis.fetch;
+  const waits = [];
+
+  globalThis.fetch = async () => new Response(JSON.stringify({ response_action: 'clear' }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+
+  try {
+    const response = await worker.fetch(request, {
+      SCOUTS_SLACK_HANDLER_URL: 'https://example.lambda-url.eu-west-2.on.aws/',
+      SLACK_SIGNING_SECRET: signingSecret,
+    }, {
+      waitUntil(promise) {
+        waits.push(promise);
+      },
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { response_action: 'clear' });
+    assert.equal(waits.length, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }
