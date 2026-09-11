@@ -4,6 +4,9 @@ import { readFileSync } from 'node:fs';
 import { loadFunctionsFromSource } from './helpers/source-function-loader.mjs';
 
 const adminSource = readFileSync('website/admin/admin-script.js', 'utf8');
+const approvalWorkflowSource = readFileSync('website/admin/admin-approval-workflow.js', 'utf8');
+const privateStorageSource = readFileSync('website/admin/private-storage-client.js', 'utf8');
+const scoutsEntrySource = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
 const TEST_HEX = '746573742d6576656e74';
 
 function actionSandbox(overrides = {}) {
@@ -234,4 +237,39 @@ test('admin actions fail closed when auth is unavailable or the event has no HEX
   const missingHex = actionSandbox({ getEventHex: () => null });
   await invokeAdminFunction('hideEvent', [0, false, 'hide'], missingHex.sandbox);
   assert.equal(missingHex.sent.length, 0);
+});
+
+test('issue 91 loads the revisioned approval controller after the legacy admin bundle', () => {
+  assert.match(privateStorageSource, /admin-approval-workflow\.js/);
+  assert.match(privateStorageSource, /data-scouts-approval-workflow/);
+  assert.match(approvalWorkflowSource, /window\.approveEvent = async function issue91ApproveEvent/);
+  assert.match(approvalWorkflowSource, /Approve shown changes/);
+});
+
+test('issue 91 admin approval submits the complete visible review snapshot', () => {
+  for (const field of ['hex', 'tagline', 'imageTheme', 'imageUrl', 'isHidden']) {
+    assert.match(approvalWorkflowSource, new RegExp(`${field}:`));
+  }
+  assert.match(approvalWorkflowSource, /revision: await sha256Prefix\(JSON\.stringify\(reviewable\)\)/);
+  assert.match(approvalWorkflowSource, /reviewSnapshot,/);
+  assert.match(approvalWorkflowSource, /requiresGeneratedImage/);
+  assert.match(approvalWorkflowSource, /final review required/i);
+});
+
+test('issue 91 backend intercepts revisioned approval and rejects stale review state', () => {
+  assert.match(scoutsEntrySource, /function revisionedApprovalCommand/);
+  assert.match(scoutsEntrySource, /compareEventReviewRevision\(canonical, snapshot\.revision\)/);
+  assert.match(scoutsEntrySource, /response\(409,/);
+  assert.match(scoutsEntrySource, /STALE_REVIEW/);
+  assert.match(scoutsEntrySource, /approvalOperationId/);
+  assert.match(scoutsEntrySource, /approvalIdempotencyKey/);
+  assert.match(scoutsEntrySource, /rootRequestId/);
+});
+
+test('issue 91 missing-image approval queues one correlated image child and keeps final approval false', () => {
+  assert.match(scoutsEntrySource, /if \(patch\.approval\.requiresGeneratedImage\)/);
+  assert.match(scoutsEntrySource, /const imageRequestId = `\$\{rootRequestId\}:image`/);
+  assert.match(scoutsEntrySource, /approvalMode: 'review_generated_image'/);
+  assert.match(scoutsEntrySource, /state: 'awaiting_image'/);
+  assert.match(scoutsEntrySource, /Generating image — final review required/);
 });
