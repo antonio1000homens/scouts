@@ -15,7 +15,7 @@ sqs2scouts/
 ├── function/
 │   ├── lambda-layer/
 │   │   └── nodejs/
-│   └── sqs2scouts.mjs
+│   └── persistence-processor.mjs
 ├── deploy.sh
 ├── test-local.js
 ├── set-env.sh
@@ -37,7 +37,7 @@ Non-secret environment variables:
 
 ### Gemini image prompt generation
 
-Gemini prompt creation for image sentences happens in `function/sqs2scouts.mjs` via:
+Gemini prompt creation for image sentences happens in `function/persistence-processor.mjs` via:
 - `buildGeminiPrompt(event, 'imagePrompt', config)`
 - `buildEventDetailsForPrompt(event)`
 - `generateGeminiSuggestion(event, 'imagePrompt', config)`

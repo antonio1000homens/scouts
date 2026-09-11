@@ -9,6 +9,7 @@ import { getOptionalSecret, getRequiredSecret } from '/opt/nodejs/ssm-secrets.mj
 import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 import { publishCanonicalEventToAgenda } from './agenda-publisher.mjs';
 import { generateGeminiTextWithFallback, parseGeminiTextModels, GEMINI_TEXT_RESPONSE_SCHEMAS, validateGeminiTextResponse } from './gemini-text-models.mjs';
+import { buildRuntimeRequestEntry } from './runtime-request-entry.mjs';
 import {
     buildGenerationId,
     getEnrichmentState,
@@ -332,34 +333,6 @@ function getRequestTimeHint(record, messageBody) {
     }
 
     return null;
-}
-
-function buildRuntimeRequestEntry(record, messageBody, status) {
-    const requestId =
-        (messageBody && typeof messageBody === 'object'
-            ? (messageBody.requestId ?? null)
-            : null)
-        ?? record?.messageId
-        ?? null;
-    const messageId =
-        (messageBody && typeof messageBody === 'object' ? messageBody.messageId ?? null : null)
-        ?? record?.messageId
-        ?? null;
-
-    return {
-        requestTime: getRequestTimeHint(record, messageBody),
-        requestId: requestId ? String(requestId) : null,
-        messageId: messageId ? String(messageId) : null,
-        hex: getHexHintFromMessageBody(messageBody),
-        title: getTitleHintFromMessageBody(messageBody),
-        subject: getSubjectHintFromMessageBody(messageBody),
-        realm: typeof messageBody?.realm === 'string' && messageBody.realm.trim() ? messageBody.realm.trim() : null,
-        action: normaliseActionHint(messageBody?.action),
-        taskToken: normaliseRuntimeText(messageBody?.taskToken ?? null),
-        orchestrationType: normaliseRuntimeText(messageBody?.orchestrationType ?? null),
-        orchestrationStep: normaliseRuntimeText(messageBody?.orchestrationStep ?? null),
-        status,
-    };
 }
 
 function deduplicateRuntimeRequestEntries(entries = []) {

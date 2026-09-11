@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildPersistEventPayload } from './function/sqs2scouts.mjs';
+import { buildPersistEventPayload } from './function/persistence-processor.mjs';
 
 test('buildPersistEventPayload preserves existing HEX data when approval arrives as a patch subject', () => {
     const existingEvent = {
