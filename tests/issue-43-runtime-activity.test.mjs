@@ -177,7 +177,7 @@ test('successful Deferred state remains waiting for retry rather than completed'
   assert.equal(activity[0].health, 'unknown');
 });
 
-test('successful ManualReview state remains needs-attention lifecycle evidence', () => {
+test('successful ManualReview state is presented as awaiting review', () => {
   const activity = buildCanonicalActivity({
     completedSnapshot: snapshot('completed', [request({
       realm: 'scoutsRequest',
@@ -198,8 +198,8 @@ test('successful ManualReview state remains needs-attention lifecycle evidence',
     }],
     now: NOW,
   });
-  assert.equal(activity[0].state, 'manual_review');
-  assert.equal(activity[0].health, 'needs_attention');
+  assert.equal(activity[0].state, 'awaiting_review');
+  assert.equal(activity[0].health, 'unknown');
 });
 
 test('legacy execution ID can still correlate by HEX without replacing the admin request ID', () => {
@@ -280,4 +280,75 @@ test('old queued snapshot becomes explicit orphan only when live queue health pr
   assert.equal(activity[0].stage, 'tracking_orphaned');
   assert.equal(activity[0].failure.type, 'ORPHANED_TRACKING');
   assert.ok(activity[0].timeline.some((entry) => entry.source === 'queue-health'));
+});
+
+test('child requests sharing a rootRequestId collapse into one logical activity item', () => {
+  const rootRequestId = 'approval-root-1';
+  const activity = buildCanonicalActivity({
+    queuedSnapshot: snapshot('queued', [request({
+      requestId: 'approval-request',
+      rootRequestId,
+      realm: 'approval',
+      action: 'approve',
+    })]),
+    processingSnapshot: snapshot('processing', [request({
+      requestId: 'image-child',
+      messageId: 'image-msg',
+      rootRequestId,
+      realm: 'scoutsRequest',
+      action: 'imageEnrich',
+      status: 'awaiting_image',
+      requestTime: '2026-09-07T23:09:12Z',
+    })]),
+    now: NOW,
+  });
+
+  assert.equal(activity.length, 1);
+  assert.equal(activity[0].rootRequestId, rootRequestId);
+  assert.equal(activity[0].state, 'awaiting_image');
+  assert.deepEqual(activity[0].childRequestIds.sort(), ['approval-request', 'image-child']);
+});
+
+test('root-correlated Step Functions execution attaches without HEX fallback', () => {
+  const rootRequestId = 'approval-root-2';
+  const activity = buildCanonicalActivity({
+    queuedSnapshot: snapshot('queued', [request({
+      requestId: 'approval-request-2',
+      rootRequestId,
+      realm: 'approval',
+      action: 'approve',
+    })]),
+    executions: [{
+      requestId: 'image-child-2',
+      rootRequestId,
+      hex: request().hex,
+      orchestrationType: 'fullEnrich',
+      currentStage: 'awaiting_review',
+      stateName: 'AwaitImageApproval',
+      status: 'RUNNING',
+      executionArn: 'arn:root-correlated',
+      startDate: '2026-09-07T23:09:12Z',
+      updatedAt: '2026-09-07T23:10:12Z',
+    }],
+    now: NOW,
+  });
+
+  assert.equal(activity.length, 1);
+  assert.equal(activity[0].rootRequestId, rootRequestId);
+  assert.equal(activity[0].state, 'awaiting_review');
+  assert.equal(activity[0].executionArn, 'arn:root-correlated');
+  assert.ok(activity[0].childRequestIds.includes('image-child-2'));
+});
+
+test('two root operations for the same HEX remain distinct', () => {
+  const activity = buildCanonicalActivity({
+    queuedSnapshot: snapshot('queued', [
+      request({ requestId: 'req-a', messageId: 'msg-a', rootRequestId: 'root-a' }),
+      request({ requestId: 'req-b', messageId: 'msg-b', rootRequestId: 'root-b', requestTime: '2026-09-07T23:09:12Z' }),
+    ]),
+    now: NOW,
+  });
+
+  assert.equal(activity.length, 2);
+  assert.deepEqual(activity.map((entry) => entry.rootRequestId).sort(), ['root-a', 'root-b']);
 });
