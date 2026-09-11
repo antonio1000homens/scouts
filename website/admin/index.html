@@ -231,8 +231,8 @@
                 <p id="runtime-state-details" class="refresh-status admin-runtime-footer-details">No backend requests yet.</p>
                 <div class="admin-runtime-footer-timestamps">
                     <p id="runtime-state-request-id" class="refresh-status admin-runtime-footer-meta">Latest request ID: n/a</p>
-                    <p id="queue-depth-updated" class="refresh-status admin-runtime-footer-meta" title="Last update is the updatedAt timestamp from runtime/scoutsQueued.json fetched from S3.">Last update: n/a</p>
-                    <p id="queue-depth-checked" class="refresh-status admin-runtime-footer-meta" title="Last checked is when this admin page last polled S3 for the runtime request snapshot files.">Last checked: n/a</p>
+                    <p id="queue-depth-updated" class="refresh-status admin-runtime-footer-meta" title="Last update is the updatedAt timestamp from the authenticated runtime status API.">Last update: n/a</p>
+                    <p id="queue-depth-checked" class="refresh-status admin-runtime-footer-meta" title="Last checked is when this admin page last polled the authenticated runtime status API.">Last checked: n/a</p>
                 </div>
             </div>
         </footer>
@@ -364,6 +364,7 @@
 
     <script src="admin-config.js"></script>
     <script src="admin-script.js"></script>
+    <script src="private-storage-client.js"></script>
     <script src="admin-simplify.js"></script>
     <script src="admin-agenda-refresh.js"></script>
     <script src="admin-diagnostics-enhancements.js"></script>
