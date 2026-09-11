@@ -19,8 +19,7 @@ env:
   WEBSITE_BUCKET: scouts-2ndtolworth-prod-553490163883
   PUBLIC_SITE_BASE_URL: https://2ndtolworth.org.uk
   # CloudFront distribution IDs are non-secret deployment identifiers. Keep the
-  # emergency purge aligned with the distribution documented in CLOUDFRONT.md
-  # rather than relying on the stale Bitwarden entry that caused run #1 to fail.
+  # emergency purge aligned with the distribution documented in CLOUDFRONT.md.
   CLOUDFRONT_DISTRIBUTION_ID: E3INLSADL3AN6C
 
 jobs:
@@ -43,23 +42,13 @@ jobs:
             --output json >/dev/null
 
       - name: Purge formerly public private paths
-        id: invalidate
         run: |
           set -euo pipefail
-          INVALIDATION_ID="$(aws cloudfront create-invalidation \
+          aws cloudfront create-invalidation \
             --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
             --paths "/calendar/*" "/runtime/*" "/events/*" \
             --query 'Invalidation.Id' \
-            --output text)"
-          [ -n "${INVALIDATION_ID}" ] && [ "${INVALIDATION_ID}" != "None" ]
-          echo "invalidation_id=${INVALIDATION_ID}" >> "${GITHUB_OUTPUT}"
-
-      - name: Wait for private path eviction
-        run: |
-          set -euo pipefail
-          aws cloudfront wait invalidation-completed \
-            --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
-            --id "${{ steps.invalidate.outputs.invalidation_id }}"
+            --output text
 
       - name: Verify anonymous access boundary
         run: |
@@ -68,8 +57,15 @@ jobs:
           origin="https://${WEBSITE_BUCKET}.s3.${AWS_REGION}.amazonaws.com"
 
           status_for() {
-            curl --silent --show-error --location --max-redirs 0 \
+            curl --silent --show-error --max-time 15 --max-redirs 0 \
               --output /dev/null --write-out '%{http_code}' "$1" 2>/dev/null || true
+          }
+
+          is_private_status() {
+            case "$1" in
+              3??|401|403|404) return 0 ;;
+              *) return 1 ;;
+            esac
           }
 
           assert_public() {
@@ -86,24 +82,50 @@ jobs:
             local url="$1"
             local status
             status="$(status_for "${url}")"
-            case "${status}" in
-              3??|401|403|404) ;;
-              *)
-                echo "Expected anonymous access to be denied/redirected; got ${status}: ${url}"
-                exit 1
-                ;;
-            esac
+            if ! is_private_status "${status}"; then
+              echo "Expected anonymous access to be denied/redirected; got ${status}: ${url}"
+              return 1
+            fi
           }
 
-          # Direct origin: prove the bucket policy still permits deliberate
-          # public data but denies the previously exposed application prefixes.
+          # The S3 origin should be private immediately after the narrowed bucket
+          # policy was deployed. This proves the origin policy itself is correct.
           assert_public "${origin}/agenda.json"
           assert_private "${origin}/calendar/cubs-events.ics"
           assert_private "${origin}/runtime/scoutsQueued.json"
           assert_private "${origin}/events/6d6565742074686520706f6c696365.json"
 
-          # Public hostname: prove stale CloudFront content is no longer exposed.
+          # CloudFront invalidation is asynchronous and the deploy role deliberately
+          # does not have cloudfront:GetInvalidation. Poll the actual anonymous
+          # security boundary instead of granting extra IAM solely for a waiter.
+          private_paths=(
+            "/calendar/cubs-events.ics"
+            "/runtime/scoutsQueued.json"
+            "/events/6d6565742074686520706f6c696365.json"
+          )
+
+          for attempt in $(seq 1 30); do
+            all_private=true
+            for path in "${private_paths[@]}"; do
+              status="$(status_for "${PUBLIC_SITE_BASE_URL}${path}")"
+              if ! is_private_status "${status}"; then
+                all_private=false
+                echo "Attempt ${attempt}: still waiting for ${path} to become private (HTTP ${status})"
+              fi
+            done
+
+            if [ "${all_private}" = 'true' ]; then
+              break
+            fi
+
+            if [ "${attempt}" = '30' ]; then
+              echo 'Private CloudFront paths were still anonymously readable after the verification window.'
+              exit 1
+            fi
+            sleep 10
+          done
+
           assert_public "${PUBLIC_SITE_BASE_URL}/agenda.json"
-          assert_private "${PUBLIC_SITE_BASE_URL}/calendar/cubs-events.ics"
-          assert_private "${PUBLIC_SITE_BASE_URL}/runtime/scoutsQueued.json"
-          assert_private "${PUBLIC_SITE_BASE_URL}/events/6d6565742074686520706f6c696365.json"
+          for path in "${private_paths[@]}"; do
+            assert_private "${PUBLIC_SITE_BASE_URL}${path}"
+          done
