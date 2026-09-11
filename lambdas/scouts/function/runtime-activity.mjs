@@ -58,11 +58,25 @@ function rootKey(request, index) {
   if (requestId) return `request:${requestId}`;
   return `row:${index}`;
 }
+function isExplicitRootRow(request) {
+  const root = text(request?.rootRequestId || request?.operationId);
+  return Boolean(root) && text(request?.requestId) === root;
+}
 function prefer(left, right) {
   const leftPriority = statePriority(left?.state);
   const rightPriority = statePriority(right?.state);
   if (leftPriority !== rightPriority) return rightPriority > leftPriority ? right : left;
   return time(right?.updatedAt || right?.createdAt) >= time(left?.updatedAt || left?.createdAt) ? right : left;
+}
+function choosePrimary(existing, request, incomingIsRoot) {
+  if (existing._hasExplicitRootRow && !incomingIsRoot) return existing;
+  if (!existing._hasExplicitRootRow && incomingIsRoot) return request;
+  if (existing._hasExplicitRootRow && incomingIsRoot) {
+    return time(request?.updatedAt || request?.createdAt) >= time(existing?.updatedAt || existing?.createdAt)
+      ? request
+      : existing;
+  }
+  return prefer(existing, request);
 }
 function collapseRootActivity(rows = []) {
   const grouped = new Map();
@@ -70,6 +84,7 @@ function collapseRootActivity(rows = []) {
     const key = rootKey(request, index);
     const requestId = text(request?.requestId) || null;
     const rootRequestId = text(request?.rootRequestId || request?.operationId) || requestId;
+    const incomingIsRoot = isExplicitRootRow(request);
     const existing = grouped.get(key);
     if (!existing) {
       grouped.set(key, {
@@ -77,11 +92,12 @@ function collapseRootActivity(rows = []) {
         rootRequestId,
         childRequestIds: requestId ? [requestId] : [],
         timeline: Array.isArray(request?.timeline) ? request.timeline : [],
+        _hasExplicitRootRow: incomingIsRoot,
       });
       return;
     }
 
-    const primary = prefer(existing, request);
+    const primary = choosePrimary(existing, request, incomingIsRoot);
     const secondary = primary === existing ? request : existing;
     const childRequestIds = [...new Set([
       ...(Array.isArray(existing.childRequestIds) ? existing.childRequestIds : []),
@@ -105,6 +121,7 @@ function collapseRootActivity(rows = []) {
       failureType: primary.failureType || secondary.failureType || null,
       failureMessage: primary.failureMessage || secondary.failureMessage || null,
       publication: primary.publication || secondary.publication || null,
+      _hasExplicitRootRow: existing._hasExplicitRootRow || incomingIsRoot,
     });
   });
   return [...grouped.values()].sort((a, b) => time(b.updatedAt || b.createdAt) - time(a.updatedAt || a.createdAt));
