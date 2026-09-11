@@ -119,7 +119,7 @@ test('private runtime and HEX objects are reachable only through the Access-prot
   assert.match(scoutsEntry, /`events\/\$\{hex\}\.json`/);
 });
 
-test('formerly public private prefixes are explicitly purged from the documented CloudFront distribution', () => {
+test('formerly public private prefixes are explicitly purged and anonymously verified on the documented CloudFront distribution', () => {
   const workflow = readFileSync('.github/workflows/purge-private-s3-cache.yml', 'utf8');
   const cloudfrontDoc = readFileSync('CLOUDFRONT.md', 'utf8');
   const documentedId = cloudfrontDoc.match(/\*\*Distribution ID\*\*:\s*`([^`]+)`/)?.[1] || '';
@@ -128,11 +128,16 @@ test('formerly public private prefixes are explicitly purged from the documented
   assert.match(workflow, new RegExp(`CLOUDFRONT_DISTRIBUTION_ID: ${documentedId}`));
   assert.match(workflow, /aws cloudfront get-distribution/);
   assert.match(workflow, /aws cloudfront create-invalidation/);
-  assert.match(workflow, /aws cloudfront wait invalidation-completed/);
+  assert.doesNotMatch(workflow, /aws cloudfront wait invalidation-completed/);
   assert.match(workflow, /"\/calendar\/\*"/);
   assert.match(workflow, /"\/runtime\/\*"/);
   assert.match(workflow, /"\/events\/\*"/);
   assert.match(workflow, /Verify anonymous access boundary/);
+  assert.match(workflow, /status_for/);
+  assert.match(workflow, /is_private_status/);
+  assert.match(workflow, /private_paths=\(/);
+  assert.match(workflow, /for attempt in \$\(seq 1 30\)/);
+  assert.match(workflow, /PUBLIC_SITE_BASE_URL/);
   assert.match(workflow, /assert_public/);
   assert.match(workflow, /assert_private/);
   assert.match(workflow, /origin\/agenda\.json|\$\{origin\}\/agenda\.json/);
