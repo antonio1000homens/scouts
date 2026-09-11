@@ -70,7 +70,7 @@ function snapshotLifecycleState(entry, fallbackState) {
 
 function normaliseSnapshotEntry(entry, state, source) {
   const requestId = requestIdOf(entry);
-  const rootRequestId = rootRequestIdOf(entry) || requestId;
+  const rootRequestId = rootRequestIdOf(entry);
   const hex = hexOf(entry);
   if (!requestId && !rootRequestId && !hex) return null;
   const lifecycleState = snapshotLifecycleState(entry, state);
@@ -149,7 +149,7 @@ function mergeLifecycle(existing, incoming) {
     ...secondary,
     ...primary,
     requestId: primary.requestId || secondary.requestId || null,
-    rootRequestId: primary.rootRequestId || secondary.rootRequestId || primary.requestId || secondary.requestId || null,
+    rootRequestId: primary.rootRequestId || secondary.rootRequestId || null,
     childRequestIds: mergeChildRequestIds(
       existing.childRequestIds,
       incoming.childRequestIds,
@@ -317,7 +317,7 @@ export function buildCanonicalActivity({
     const executionEntry = {
       ...(existing || {}),
       requestId: existing?.requestId || requestId || null,
-      rootRequestId: existing?.rootRequestId || rootRequestId || requestId || null,
+      rootRequestId: existing?.rootRequestId || rootRequestId || null,
       childRequestIds: mergeChildRequestIds(existing?.childRequestIds, [], [requestId]),
       hex: existing?.hex || hex || null,
       orchestrationType: text(execution?.orchestrationType) || existing?.orchestrationType || null,
