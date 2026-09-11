@@ -45,7 +45,7 @@ FUNCTION_NAME="${FUNCTION_NAME:-sqs2scouts}"
 LAYER_NAME="${LAYER_NAME:-scouts-shared}"
 ROLE_NAME="${ROLE_NAME:-sqs2scouts-lambda-role}"
 RUNTIME="${RUNTIME:-nodejs24.x}"
-HANDLER="${HANDLER:-approval-lifecycle-adapter.lambdaHandler}"
+HANDLER="${HANDLER:-image-provider-adapter.lambdaHandler}"
 QUEUE_ARN="${QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing}"
 QUEUE_URL="${QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing}"
 SCOUTS_DECISION_QUEUE_ARN="${SCOUTS_DECISION_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsDecision}"
@@ -227,6 +227,7 @@ echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
     full-enrich-helpers.mjs \
     approval-lifecycle-adapter.mjs \
     image-provider-adapter.mjs \
+    image-provider-worker.mjs \
     cloudflare-image-client.mjs \
     gemini-text-models.mjs \
     runtime-request-entry.mjs \
