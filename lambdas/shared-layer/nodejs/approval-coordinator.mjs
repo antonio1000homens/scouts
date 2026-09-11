@@ -1,4 +1,4 @@
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import {
   approvalIdempotencyKey,
@@ -9,6 +9,8 @@ import {
 import { recordRequestActivity } from './request-activity.mjs';
 
 const REGION = process.env.AWS_REGION || 'eu-west-2';
+const IDEMPOTENCY_PREFIX = 'runtime/approval-idempotency/';
+const CLAIM_TAKEOVER_MS = 30_000;
 const s3 = new S3Client({ region: REGION });
 const sqs = new SQSClient({ region: REGION });
 
@@ -36,6 +38,10 @@ function notFound(error) {
     || Number(error?.$metadata?.httpStatusCode) === 404;
 }
 
+function conditionalFailure(error) {
+  return error?.name === 'PreconditionFailed' || Number(error?.$metadata?.httpStatusCode) === 412;
+}
+
 async function loadCanonicalEvent(hex) {
   try {
     const response = await s3.send(new GetObjectCommand({ Bucket: bucketName(), Key: `events/${hex}.json` }));
@@ -43,6 +49,96 @@ async function loadCanonicalEvent(hex) {
   } catch (error) {
     if (notFound(error)) return null;
     throw error;
+  }
+}
+
+async function readIdempotencyRecord(key) {
+  try {
+    const response = await s3.send(new GetObjectCommand({ Bucket: bucketName(), Key: key }));
+    return {
+      value: JSON.parse(await response.Body.transformToString()),
+      eTag: text(response.ETag),
+    };
+  } catch (error) {
+    if (notFound(error)) return null;
+    throw error;
+  }
+}
+
+async function writeIdempotencyRecord(key, value, options = {}) {
+  return s3.send(new PutObjectCommand({
+    Bucket: bucketName(),
+    Key: key,
+    Body: JSON.stringify(value, null, 2),
+    ContentType: 'application/json',
+    CacheControl: 'no-store',
+    ...(options.ifNoneMatch ? { IfNoneMatch: options.ifNoneMatch } : {}),
+    ...(options.ifMatch ? { IfMatch: options.ifMatch } : {}),
+  }));
+}
+
+async function claimApprovalAction({ idempotencyKey, rootRequestId, revision, hex, requiresGeneratedImage }) {
+  const key = `${IDEMPOTENCY_PREFIX}${idempotencyKey}.json`;
+  const claimedAt = new Date().toISOString();
+  const record = {
+    state: 'claimed',
+    idempotencyKey,
+    rootRequestId,
+    revision,
+    hex,
+    requiresGeneratedImage,
+    claimedAt,
+    updatedAt: claimedAt,
+  };
+
+  try {
+    const response = await writeIdempotencyRecord(key, record, { ifNoneMatch: '*' });
+    return { owned: true, key, eTag: text(response.ETag), record };
+  } catch (error) {
+    if (!conditionalFailure(error)) throw error;
+  }
+
+  const existing = await readIdempotencyRecord(key);
+  if (!existing?.value) {
+    return claimApprovalAction({ idempotencyKey, rootRequestId, revision, hex, requiresGeneratedImage });
+  }
+
+  if (existing.value.state === 'queued' || existing.value.state === 'completed') {
+    return { owned: false, key, existing: existing.value, eTag: existing.eTag };
+  }
+
+  const ageMs = Date.now() - Date.parse(existing.value.updatedAt || existing.value.claimedAt || '');
+  if (!Number.isFinite(ageMs) || ageMs < CLAIM_TAKEOVER_MS || !existing.eTag) {
+    return { owned: false, key, existing: existing.value, eTag: existing.eTag, pending: true };
+  }
+
+  try {
+    const response = await writeIdempotencyRecord(key, {
+      ...record,
+      takeoverOf: existing.value.updatedAt || existing.value.claimedAt || null,
+    }, { ifMatch: existing.eTag });
+    return { owned: true, key, eTag: text(response.ETag), record };
+  } catch (error) {
+    if (!conditionalFailure(error)) throw error;
+    const winner = await readIdempotencyRecord(key);
+    return { owned: false, key, existing: winner?.value || existing.value, eTag: winner?.eTag || existing.eTag, pending: true };
+  }
+}
+
+async function completeApprovalClaim(claim, result) {
+  if (!claim?.owned || !claim?.key) return;
+  const value = {
+    ...(claim.record || {}),
+    state: 'queued',
+    result,
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    await writeIdempotencyRecord(claim.key, value, claim.eTag ? { ifMatch: claim.eTag } : {});
+  } catch (error) {
+    // Queue publication is authoritative. Losing the best-effort marker update
+    // must not turn success into an HTTP failure that prompts another publish.
+    console.warn('[ApprovalCoordinator] Unable to finalize idempotency record', error?.message || error);
   }
 }
 
@@ -80,6 +176,27 @@ function existingApprovalRoot(canonical) {
   if (!marker || typeof marker !== 'object') return '';
   if (text(marker.state).toLowerCase() !== 'awaiting_review') return '';
   return text(marker.rootRequestId);
+}
+
+function reusedResult({ existing, rootRequestId, revision, renderedRevision, patch }) {
+  if (existing?.result && typeof existing.result === 'object') {
+    return { ...existing.result, ok: true, statusCode: 200, reused: true };
+  }
+  return {
+    ok: true,
+    statusCode: 200,
+    status: 'ok',
+    message: 'Approval already accepted and is being processed.',
+    rootRequestId,
+    requestId: rootRequestId,
+    revision,
+    baseRevision: renderedRevision,
+    workflowState: patch.approval.nextState,
+    requiresGeneratedImage: patch.approval.requiresGeneratedImage,
+    requiresFinalImageReview: patch.approval.requiresFinalImageReview,
+    queuedMessages: [],
+    reused: true,
+  };
 }
 
 export async function coordinateEventApproval({
@@ -137,6 +254,24 @@ export async function coordinateEventApproval({
   });
   const title = text(reviewSnapshot.title || canonical?.title || canonical?.summary) || null;
   const revision = text(reviewSnapshot.revision);
+
+  const claim = await claimApprovalAction({
+    idempotencyKey,
+    rootRequestId: root,
+    revision,
+    hex,
+    requiresGeneratedImage: patch.approval.requiresGeneratedImage,
+  });
+  if (!claim.owned) {
+    return reusedResult({
+      existing: claim.existing,
+      rootRequestId: root,
+      revision,
+      renderedRevision,
+      patch,
+    });
+  }
+
   const persistRequestId = `${root}:persist:${revision}`;
   const common = {
     hex,
@@ -197,7 +332,7 @@ export async function coordinateEventApproval({
     });
   }
 
-  return {
+  const result = {
     ok: true,
     statusCode: 200,
     status: 'ok',
@@ -212,5 +347,8 @@ export async function coordinateEventApproval({
     requiresGeneratedImage: patch.approval.requiresGeneratedImage,
     requiresFinalImageReview: patch.approval.requiresFinalImageReview,
     queuedMessages,
+    reused: false,
   };
+  await completeApprovalClaim(claim, result);
+  return result;
 }
