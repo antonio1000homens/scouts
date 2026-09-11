@@ -16,6 +16,8 @@ permissions:
 env:
   AWS_REGION: eu-west-2
   AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+  WEBSITE_BUCKET: scouts-2ndtolworth-prod-553490163883
+  PUBLIC_SITE_BASE_URL: https://2ndtolworth.org.uk
   # CloudFront distribution IDs are non-secret deployment identifiers. Keep the
   # emergency purge aligned with the distribution documented in CLOUDFRONT.md
   # rather than relying on the stale Bitwarden entry that caused run #1 to fail.
@@ -41,10 +43,67 @@ jobs:
             --output json >/dev/null
 
       - name: Purge formerly public private paths
+        id: invalidate
         run: |
           set -euo pipefail
-          aws cloudfront create-invalidation \
+          INVALIDATION_ID="$(aws cloudfront create-invalidation \
             --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
             --paths "/calendar/*" "/runtime/*" "/events/*" \
             --query 'Invalidation.Id' \
-            --output text
+            --output text)"
+          [ -n "${INVALIDATION_ID}" ] && [ "${INVALIDATION_ID}" != "None" ]
+          echo "invalidation_id=${INVALIDATION_ID}" >> "${GITHUB_OUTPUT}"
+
+      - name: Wait for private path eviction
+        run: |
+          set -euo pipefail
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+            --id "${{ steps.invalidate.outputs.invalidation_id }}"
+
+      - name: Verify anonymous access boundary
+        run: |
+          set -euo pipefail
+
+          origin="https://${WEBSITE_BUCKET}.s3.${AWS_REGION}.amazonaws.com"
+
+          status_for() {
+            curl --silent --show-error --location --max-redirs 0 \
+              --output /dev/null --write-out '%{http_code}' "$1" 2>/dev/null || true
+          }
+
+          assert_public() {
+            local url="$1"
+            local status
+            status="$(status_for "${url}")"
+            if [ "${status}" != '200' ]; then
+              echo "Expected anonymous HTTP 200 for public object; got ${status}: ${url}"
+              exit 1
+            fi
+          }
+
+          assert_private() {
+            local url="$1"
+            local status
+            status="$(status_for "${url}")"
+            case "${status}" in
+              3??|401|403|404) ;;
+              *)
+                echo "Expected anonymous access to be denied/redirected; got ${status}: ${url}"
+                exit 1
+                ;;
+            esac
+          }
+
+          # Direct origin: prove the bucket policy still permits deliberate
+          # public data but denies the previously exposed application prefixes.
+          assert_public "${origin}/agenda.json"
+          assert_private "${origin}/calendar/cubs-events.ics"
+          assert_private "${origin}/runtime/scoutsQueued.json"
+          assert_private "${origin}/events/6d6565742074686520706f6c696365.json"
+
+          # Public hostname: prove stale CloudFront content is no longer exposed.
+          assert_public "${PUBLIC_SITE_BASE_URL}/agenda.json"
+          assert_private "${PUBLIC_SITE_BASE_URL}/calendar/cubs-events.ics"
+          assert_private "${PUBLIC_SITE_BASE_URL}/runtime/scoutsQueued.json"
+          assert_private "${PUBLIC_SITE_BASE_URL}/events/6d6565742074686520706f6c696365.json"
