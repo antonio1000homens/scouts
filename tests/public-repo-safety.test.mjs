@@ -128,8 +128,13 @@ test('formerly public private prefixes are explicitly purged from the documented
   assert.match(workflow, new RegExp(`CLOUDFRONT_DISTRIBUTION_ID: ${documentedId}`));
   assert.match(workflow, /aws cloudfront get-distribution/);
   assert.match(workflow, /aws cloudfront create-invalidation/);
+  assert.match(workflow, /aws cloudfront wait invalidation-completed/);
   assert.match(workflow, /"\/calendar\/\*"/);
   assert.match(workflow, /"\/runtime\/\*"/);
   assert.match(workflow, /"\/events\/\*"/);
+  assert.match(workflow, /Verify anonymous access boundary/);
+  assert.match(workflow, /assert_public/);
+  assert.match(workflow, /assert_private/);
+  assert.match(workflow, /origin\/agenda\.json|\$\{origin\}\/agenda\.json/);
   assert.match(workflow, /configure-aws-credentials@[0-9a-f]{40}/i);
 });
