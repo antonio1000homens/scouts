@@ -1,7 +1,14 @@
 import crypto from 'crypto';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
-import { withRequestActivityContext } from '/opt/nodejs/request-activity.mjs';
+import { recordRequestActivity, withRequestActivityContext } from '/opt/nodejs/request-activity.mjs';
+import {
+  approvalIdempotencyKey,
+  approvalOperationId,
+  buildApprovedSnapshotPatch,
+  compareEventReviewRevision,
+} from '/opt/nodejs/event-review.mjs';
 import { repairAgendaHexMetadata } from './agenda-hex-repair.mjs';
 import { handler as scoutsServiceHandler } from './scouts-service.mjs';
 import { buildRuntimeActivity } from './runtime-activity.mjs';
@@ -14,7 +21,9 @@ import {
 } from './runtime-schedule.mjs';
 
 const s3 = new S3Client({});
+const sqs = new SQSClient({});
 const TARGET_BUCKET = process.env.TARGET_BUCKET || '';
+const SCOUTS_REQUESTS_QUEUE_URL = process.env.SCOUTS_REQUESTS_QUEUE_URL || '';
 const PRIVATE_RUNTIME_SNAPSHOT_KEYS = Object.freeze({
   queued: 'runtime/scoutsQueued.json',
   processing: 'runtime/scoutsProcessing.json',
@@ -97,6 +106,15 @@ function runtimeCommand(body) {
     action: text(body?.action).toLowerCase(),
     body,
   };
+}
+
+function revisionedApprovalCommand(body) {
+  if (text(body?.realm).toLowerCase() !== 'scouts') return null;
+  if (text(body?.action).toLowerCase() !== 'approve') return null;
+  const reviewSnapshot = body?.reviewSnapshot
+    ?? (body?.subject && typeof body.subject === 'object' ? body.subject.reviewSnapshot : null);
+  if (!reviewSnapshot || typeof reviewSnapshot !== 'object') return null;
+  return { body, reviewSnapshot };
 }
 
 function isCalendarRefreshInvocation(event) {
@@ -213,6 +231,175 @@ function response(statusCode, body) {
   };
 }
 
+async function publishApprovalMessage(payload, activityState = 'queued', activityStage = 'scoutsRequests') {
+  if (!SCOUTS_REQUESTS_QUEUE_URL) {
+    const error = new Error('SCOUTS_REQUESTS_QUEUE_URL is not configured');
+    error.statusCode = 503;
+    throw error;
+  }
+  const result = await sqs.send(new SendMessageCommand({
+    QueueUrl: SCOUTS_REQUESTS_QUEUE_URL,
+    MessageBody: JSON.stringify(payload),
+  }));
+  try {
+    await recordRequestActivity({
+      ...payload,
+      messageId: result?.MessageId || null,
+      state: activityState,
+      stage: activityStage,
+      title: payload?.title || payload?.subject?.title || null,
+    });
+  } catch (error) {
+    // Queue publication is authoritative. Activity telemetry must never turn a
+    // successful at-least-once delivery into a client retry that duplicates work.
+    console.warn('[Approval] Unable to record request activity after queue publication', error?.message || error);
+  }
+  return result?.MessageId || null;
+}
+
+async function recordApprovalRoot({ rootRequestId, hex, title, state, stage, revision }) {
+  try {
+    await recordRequestActivity({
+      requestId: rootRequestId,
+      rootRequestId,
+      hex,
+      title,
+      action: 'approve',
+      state,
+      stage,
+      publication: null,
+      approvalRevision: revision,
+    });
+  } catch (error) {
+    console.warn('[Approval] Unable to record root workflow activity', error?.message || error);
+  }
+}
+
+async function handleRevisionedApproval(event, command) {
+  const requiredApiKey = await getRequiredSecret('REQUIRED_API_KEY_PARAMETER');
+  if (!constantTimeEquals(getApiKey(event), requiredApiKey)) {
+    return response(403, { status: 'error', error: 'Forbidden: Invalid API Key' });
+  }
+
+  const snapshot = command.reviewSnapshot;
+  const hex = normalizePrivateEventHex(snapshot?.hex ?? command.body?.subject?.hex);
+  if (!hex || normalizePrivateEventHex(snapshot?.hex) !== hex) {
+    return response(400, { status: 'error', error: 'Approval review snapshot requires a valid canonical HEX' });
+  }
+
+  let patch;
+  try {
+    patch = buildApprovedSnapshotPatch(snapshot);
+  } catch (error) {
+    return response(400, { status: 'error', error: error?.message || 'Invalid approval review snapshot' });
+  }
+
+  const canonical = await readPrivateJsonObject(`events/${hex}.json`);
+  if (!canonical) {
+    return response(404, { status: 'error', error: 'Event object not found', hex });
+  }
+
+  const comparison = compareEventReviewRevision(canonical, snapshot.revision);
+  if (!comparison.ok) {
+    return response(409, {
+      status: 'conflict',
+      error: 'STALE_REVIEW',
+      message: 'This event changed after the review was rendered. Reload the current review before approving.',
+      submittedRevision: comparison.submittedRevision,
+      currentRevision: comparison.currentRevision,
+      currentReview: comparison.current,
+    });
+  }
+
+  const requestedRoot = text(command.body?.rootRequestId || command.body?.operationId);
+  const rootRequestId = requestedRoot || approvalOperationId({
+    hex,
+    revision: snapshot.revision,
+    action: 'approve',
+  });
+  const idempotencyKey = approvalIdempotencyKey({
+    rootRequestId,
+    revision: snapshot.revision,
+    action: 'approve',
+  });
+  const title = text(snapshot.title || canonical?.title || canonical?.summary) || null;
+  const persistRequestId = `${rootRequestId}:persist`;
+
+  const persistPayload = {
+    realm: 'persist',
+    action: 'persist',
+    subject: { metadata: patch.metadata },
+    hex,
+    requestHex: hex,
+    requestId: persistRequestId,
+    rootRequestId,
+    source: 'scouts-approval',
+    title,
+    approvalRevision: snapshot.revision,
+    approvalState: patch.approval.nextState,
+    approvalIdempotencyKey: idempotencyKey,
+  };
+
+  await publishApprovalMessage(persistPayload);
+
+  const queuedMessages = [{
+    requestId: persistRequestId,
+    type: 'persist',
+  }];
+
+  if (patch.approval.requiresGeneratedImage) {
+    const imageRequestId = `${rootRequestId}:image`;
+    await publishApprovalMessage({
+      realm: 'scoutsRequest',
+      action: 'imageEnrich',
+      subject: { hex },
+      hex,
+      requestHex: hex,
+      requestId: imageRequestId,
+      rootRequestId,
+      source: 'scouts-approval',
+      title,
+      requestMode: 'auto',
+      approvalMode: 'review_generated_image',
+      approvalRevision: snapshot.revision,
+      approvalIdempotencyKey: idempotencyKey,
+    });
+    queuedMessages.push({ requestId: imageRequestId, type: 'image' });
+    await recordApprovalRoot({
+      rootRequestId,
+      hex,
+      title,
+      state: 'awaiting_image',
+      stage: 'approval_accepted',
+      revision: snapshot.revision,
+    });
+  } else {
+    await recordApprovalRoot({
+      rootRequestId,
+      hex,
+      title,
+      state: 'processing',
+      stage: 'approval_persisting',
+      revision: snapshot.revision,
+    });
+  }
+
+  return response(200, {
+    status: 'ok',
+    message: patch.approval.requiresGeneratedImage
+      ? 'Approved shown metadata. Generating image — final review required.'
+      : 'Approved shown changes.',
+    queueAccepted: true,
+    rootRequestId,
+    requestId: rootRequestId,
+    revision: snapshot.revision,
+    workflowState: patch.approval.nextState,
+    requiresGeneratedImage: patch.approval.requiresGeneratedImage,
+    requiresFinalImageReview: patch.approval.requiresFinalImageReview,
+    queuedMessages,
+  });
+}
+
 async function handleScheduledInvocation() {
   try {
     const schedule = await getScheduledRefreshSettings();
@@ -260,7 +447,23 @@ export async function handler(event = {}) {
     return handleScheduledInvocation();
   }
 
-  const command = runtimeCommand(decodeBody(event));
+  const body = decodeBody(event);
+  const approvalCommand = revisionedApprovalCommand(body);
+  if (approvalCommand) {
+    try {
+      return await handleRevisionedApproval(event, approvalCommand);
+    } catch (error) {
+      const statusCode = Number.isFinite(Number(error?.statusCode)) ? Number(error.statusCode) : 503;
+      console.error('[Approval] Revisioned approval failed', error?.message || error);
+      return response(statusCode, {
+        status: 'error',
+        error: 'Approval workflow unavailable',
+        detail: error?.message || String(error),
+      });
+    }
+  }
+
+  const command = runtimeCommand(body);
   if (!isInterceptedRuntimeCommand(command)) {
     return invokeScoutsService(event);
   }
@@ -274,6 +477,7 @@ export async function handler(event = {}) {
     if (command.subject === 'activity') {
       const activity = await buildRuntimeActivity({
         requestIds: command.action === 'lookup' ? command.body?.requestIds : undefined,
+        rootRequestId: command.body?.rootRequestId || command.body?.operationId,
         hex: command.body?.hex,
         states: command.body?.states,
         cursor: command.action === 'history' ? command.body?.cursor : undefined,
