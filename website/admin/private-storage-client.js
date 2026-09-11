@@ -64,4 +64,15 @@
     fetchRawHexEventByHex = async function (hexValue) {
         return fetchPrivateEvent(hexValue, false);
     };
+
+    // Keep issue #91's approval controller isolated from the legacy admin bundle.
+    // Loading it here avoids changing the large static index while guaranteeing it
+    // runs after admin-script.js has established the existing UI helpers/state.
+    if (!document.querySelector('script[data-scouts-approval-workflow]')) {
+        const script = document.createElement('script');
+        script.src = 'admin-approval-workflow.js';
+        script.defer = true;
+        script.dataset.scoutsApprovalWorkflow = 'true';
+        document.body.appendChild(script);
+    }
 })();
