@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildRuntimeRequestEntry } from '../sqs2scouts.mjs';
+import { buildRuntimeRequestEntry } from '../runtime-request-entry.mjs';
 
 test('buildRuntimeRequestEntry preserves translated persist metadata for downstream tracking', () => {
   const entry = buildRuntimeRequestEntry({

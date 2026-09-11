@@ -3,7 +3,7 @@
 // Test script for sqs2scouts Lambda function
 // This simulates SQS messages being sent to the function
 
-import { lambdaHandler } from './function/sqs2scouts.mjs';
+import { lambdaHandler } from './function/persistence-processor.mjs';
 
 // Mock SQS events
 const testEvents = [

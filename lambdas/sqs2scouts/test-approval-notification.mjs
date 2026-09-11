@@ -5,7 +5,7 @@
  * This simulates the approval workflow with editable input fields
  */
 
-import { lambdaHandler } from './function/sqs2scouts.mjs';
+import { lambdaHandler } from './function/persistence-processor.mjs';
 
 async function testApprovalNotification() {
     console.log('🧪 Testing approval notification with editable fields...\n');

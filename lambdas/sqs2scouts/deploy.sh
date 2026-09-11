@@ -228,6 +228,7 @@ echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
     image-provider-adapter.mjs \
     cloudflare-image-client.mjs \
     gemini-text-models.mjs \
+    runtime-request-entry.mjs \
     ../scouts.conf
 )
 
