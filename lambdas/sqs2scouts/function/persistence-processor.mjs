@@ -1217,6 +1217,17 @@ function setTagline(event, value) {
     event.tagline = finalValue;
 }
 
+function setImageTheme(event, value) {
+    const theme = normalizeImagePrompt(value);
+    if (!theme) return;
+    ensureRuntimeMetadata(event);
+    event.image = event.image && typeof event.image === 'object' ? event.image : {};
+    event.image.theme = theme;
+    event.metadata.image = event.metadata.image && typeof event.metadata.image === 'object' ? event.metadata.image : {};
+    event.metadata.image.theme = theme;
+    delete event.image.prompt;
+}
+
 function setImageApprovalState(event, isApproved) {
     if (!event || typeof event !== 'object') return;
     const approved = isApproved === true;
@@ -3309,16 +3320,12 @@ export async function lambdaHandler(event) {
             }
             if (!result?.tagline || !result?.imageTheme) throw Object.assign(new Error('Validated tagline response did not contain required event data'), { name: 'INVALID_EVENT_DATA' });
             setTagline(hexData, result.tagline);
-            if (result?.imageTheme && !hexData.image?.theme) {
-                hexData.image = hexData.image || {};
-                hexData.image.theme = result.imageTheme;
-                if ('prompt' in hexData.image) {
-                    delete hexData.image.prompt;
-                }
-            }
+            if (result?.imageTheme && !getImageThemeValue(hexData)) setImageTheme(hexData, result.imageTheme);
 
             try {
                 await saveHexEventToS3(hexValue, hexData);
+                const persisted = await loadHexEventFromS3(hexValue);
+                if (getTagline(persisted) !== result.tagline || getImageThemeValue(persisted) !== result.imageTheme) throw new Error('Tagline enrichment read-back did not contain the generated fields');
                 await publishHexEventToAgenda(hexValue, hexData);
             } catch (error) {
                 emitEnrichmentMetric('PersistenceRetry', 'tagline', 'publication_failed');
@@ -3384,16 +3391,14 @@ export async function lambdaHandler(event) {
             }
             if (!result?.imageTheme) throw Object.assign(new Error('Validated image theme response did not contain imageTheme'), { name: 'INVALID_EVENT_DATA' });
             if (result?.imageTheme) {
-                hexData.image = hexData.image || {};
-                hexData.image.theme = result.imageTheme;
-                if ('prompt' in hexData.image) {
-                    delete hexData.image.prompt;
-                }
+                setImageTheme(hexData, result.imageTheme);
                 setImageApprovalState(hexData, false);
             }
 
             try {
                 await saveHexEventToS3(hexValue, hexData);
+                const persisted = await loadHexEventFromS3(hexValue);
+                if (getImageThemeValue(persisted) !== result.imageTheme) throw new Error('Image theme enrichment read-back did not contain the generated field');
                 await publishHexEventToAgenda(hexValue, hexData);
             } catch (error) {
                 emitEnrichmentMetric('PersistenceRetry', 'imageTheme', 'publication_failed');
