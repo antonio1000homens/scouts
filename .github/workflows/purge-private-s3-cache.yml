@@ -1,0 +1,56 @@
+name: Purge private S3 cache
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - '.github/workflows/purge-private-s3-cache.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: eu-west-2
+  AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+
+jobs:
+  purge-private-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get CloudFront distribution ID from Bitwarden
+        id: fetch_cloudfront_distribution_id
+        continue-on-error: true
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
+            ${{ vars.BW_CLOUDFRONT_DISTRIBUTION_ID }} > CLOUDFRONT_DISTRIBUTION_ID
+
+      - name: Retry CloudFront distribution ID
+        if: steps.fetch_cloudfront_distribution_id.outcome == 'failure'
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
+            ${{ vars.BW_CLOUDFRONT_DISTRIBUTION_ID }} > CLOUDFRONT_DISTRIBUTION_ID
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: github-actions-scouts-private-cache-purge
+
+      - name: Purge formerly public private paths
+        run: |
+          set -euo pipefail
+          [ -n "${CLOUDFRONT_DISTRIBUTION_ID:-}" ] || { echo 'CloudFront distribution ID is unavailable'; exit 1; }
+          aws cloudfront create-invalidation \
+            --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+            --paths "/calendar/*" "/runtime/*" "/events/*" \
+            --query 'Invalidation.Id' \
+            --output text
