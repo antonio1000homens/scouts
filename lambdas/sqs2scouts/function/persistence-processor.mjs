@@ -988,7 +988,7 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
                     model: modelName,
                     generationConfig: {
                         temperature: 0.3,
-                        maxOutputTokens: 512,
+                        maxOutputTokens: 2048,
                         responseMimeType: 'application/json',
                         responseSchema: GEMINI_TEXT_RESPONSE_SCHEMAS[stage],
                     },
