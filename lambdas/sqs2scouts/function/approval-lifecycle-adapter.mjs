@@ -3,7 +3,6 @@ import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { buildEventReviewSnapshot } from '/opt/nodejs/event-review.mjs';
 import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 import { publishCanonicalEventToAgenda } from './agenda-publisher.mjs';
-import { lambdaHandler as downstreamHandler } from './image-provider-adapter.mjs';
 
 const AWS_REGION = process.env.AWS_REGION || 'eu-west-2';
 const TARGET_BUCKET = process.env.TARGET_BUCKET || 'scouts-2ndtolworth-prod-553490163883';
@@ -36,7 +35,7 @@ function parseRecord(record) {
   try { return typeof record.body === 'string' ? JSON.parse(record.body) : record.body; } catch { return null; }
 }
 
-function isRevisionedApprovalPersist(message) {
+export function isRevisionedApprovalPersist(message) {
   return text(message?.realm) === 'persist'
     && text(message?.action) === 'persist'
     && Boolean(text(message?.approvalRevision))
@@ -188,7 +187,7 @@ function currentMatchesAppliedApproval(current, message) {
   return review.revision === targetRevision && actualApproved === desiredApproved;
 }
 
-async function handleRevisionedPersist(message) {
+export async function handleRevisionedPersist(message) {
   const hex = getHex(message);
   if (!hex) throw new Error('Revisioned approval persistence is missing canonical HEX');
   const approvalState = text(message.approvalState).toLowerCase();
@@ -276,10 +275,7 @@ async function handleRevisionedPersist(message) {
   };
 }
 
-export async function lambdaHandler(event) {
-  const records = Array.isArray(event?.Records) ? event.Records : [];
-  if (records.length === 0) return downstreamHandler(event);
-
+export async function processRevisionedApprovalRecords(records = []) {
   const delegated = [];
   for (const record of records) {
     const message = parseRecord(record);
@@ -304,7 +300,5 @@ export async function lambdaHandler(event) {
       throw error;
     }
   }
-
-  if (delegated.length > 0) return downstreamHandler({ ...event, Records: delegated });
-  return { statusCode: 200, body: JSON.stringify({ message: 'Revisioned approval persistence processed' }) };
+  return delegated;
 }
