@@ -264,10 +264,8 @@ export function buildFullEnrichExecutionInput(message, event, name = null) {
   const startStage = explicitStart || determineStartStage(event);
   const imageProvider = normaliseImageProvider(message?.imageProvider || DEFAULT_IMAGE_PROVIDER);
   const prefix = executionPrefix(hex, event);
-  const requestId = text(message?.requestId) || name || executionName(prefix);
-  return {
-    requestId,
-    rootRequestId: rootRequestIdOf(message, requestId),
+  const input = {
+    requestId: text(message?.requestId) || name || executionName(prefix),
     executionName: name || null,
     hex,
     requestHex: hex,
@@ -278,6 +276,10 @@ export function buildFullEnrichExecutionInput(message, event, name = null) {
     imageProvider,
     startStage,
     generationKey: eventGenerationKey(hex, event),
+  };
+  return {
+    ...input,
+    rootRequestId: rootRequestIdOf(message, input.requestId),
   };
 }
 
