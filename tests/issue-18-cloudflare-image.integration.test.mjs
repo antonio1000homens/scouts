@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 
 const read = (path) => readFileSync(path, 'utf8');
 
+const lifecycleAdapter = read('lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs');
 const adapter = read('lambdas/sqs2scouts/function/image-provider-adapter.mjs');
 const client = read('lambdas/sqs2scouts/function/cloudflare-image-client.mjs');
 const helpers = read('lambdas/sqs2scouts/function/full-enrich-helpers.mjs');
@@ -24,12 +25,14 @@ test('CloudFormation has fail-closed provider defaults and SSM-only Cloudflare t
   assert.match(template, /parameter\$\{CloudflareAiApiTokenParameter\}/);
 });
 
-test('deploy packages the direct provider worker and forces Gemini images off for Cloudflare', () => {
+test('deploy packages the approval lifecycle wrapper and direct provider worker while forcing Gemini images off for Cloudflare', () => {
   assert.doesNotMatch(deploy, /full-enrich-adapter\.mjs/);
   assert.match(deploy, /full-enrich-core\.mjs/);
+  assert.match(deploy, /approval-lifecycle-adapter\.mjs/);
   assert.match(deploy, /image-provider-adapter\.mjs/);
   assert.match(deploy, /cloudflare-image-client\.mjs/);
-  assert.match(deploy, /HANDLER="\$\{HANDLER:-image-provider-adapter\.lambdaHandler\}"/);
+  assert.match(deploy, /HANDLER="\$\{HANDLER:-approval-lifecycle-adapter\.lambdaHandler\}"/);
+  assert.match(lifecycleAdapter, /import \{ lambdaHandler as downstreamHandler \} from '\.\/image-provider-adapter\.mjs'/);
   assert.match(deploy, /ImageGenerationProvider="\$\{IMAGE_GENERATION_PROVIDER\}"/);
   assert.match(deploy, /IMAGE_GENERATION_PROVIDER.*cloudflare[\s\S]*?GEMINI_IMAGES_ENABLED='false'/);
 });
@@ -42,10 +45,11 @@ test('deploy preserves an existing image provider configuration and defaults a n
   assert.match(deploy, /Environment\.Variables\.CLOUDFLARE_AI_MODEL/);
 });
 
-test('provider adapter is the stable Lambda entrypoint and delegates non-image work to full-enrich core', () => {
+test('provider adapter remains the image-stage entrypoint behind the approval wrapper and delegates non-image work to full-enrich core', () => {
   assert.match(adapter, /import \{ lambdaHandler as fullEnrichHandler \} from '\.\/full-enrich-core\.mjs'/);
   assert.match(adapter, /export async function lambdaHandler\(event\)/);
   assert.match(adapter, /if \(records\.length === 0\) return fullEnrichHandler\(event\)/);
+  assert.match(lifecycleAdapter, /return downstreamHandler\(\{ \.\.\.event, Records: delegated \}\)/);
 });
 
 test('Cloudflare path reserves stage before the external inference call', () => {
