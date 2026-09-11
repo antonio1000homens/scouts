@@ -19,6 +19,10 @@ function requestIdOf(entry) {
   return text(entry?.requestId) || text(entry?.messageId);
 }
 
+function rootRequestIdOf(entry) {
+  return text(entry?.rootRequestId) || text(entry?.operationId);
+}
+
 function hexOf(entry) {
   return text(entry?.hex || entry?.requestHex).toLowerCase();
 }
@@ -33,7 +37,10 @@ function lifecyclePriority(state) {
     manual_review: 95,
     failed: 90,
     completed: 80,
+    published: 70,
+    awaiting_review: 65,
     persisting: 60,
+    awaiting_image: 55,
     waiting_for_image: 55,
     waiting_for_image_theme: 54,
     waiting_for_tagline: 53,
@@ -56,20 +63,23 @@ function isStepFunctionsLifecycle(entry) {
 
 function snapshotLifecycleState(entry, fallbackState) {
   const explicit = text(entry?.status).toLowerCase();
-  return ['failed', 'manual_review', 'needs_attention'].includes(explicit)
+  return ['failed', 'manual_review', 'needs_attention', 'awaiting_image', 'awaiting_review'].includes(explicit)
     ? explicit
     : fallbackState;
 }
 
 function normaliseSnapshotEntry(entry, state, source) {
   const requestId = requestIdOf(entry);
+  const rootRequestId = rootRequestIdOf(entry) || requestId;
   const hex = hexOf(entry);
-  if (!requestId && !hex) return null;
+  if (!requestId && !rootRequestId && !hex) return null;
   const lifecycleState = snapshotLifecycleState(entry, state);
   const createdAt = iso(entry?.requestTime || entry?.createdAt || entry?.timestamp);
   const updatedAt = requestTimeOf(entry) || createdAt;
   return {
     requestId: requestId || null,
+    rootRequestId: rootRequestId || null,
+    childRequestIds: requestId ? [requestId] : [],
     hex: hex || null,
     subject: text(entry?.subject) || null,
     title: text(entry?.title || entry?.summary) || null,
@@ -100,6 +110,10 @@ function mergeTimeline(left = [], right = []) {
     byKey.set(key, item);
   }
   return [...byKey.values()].sort((a, b) => timestamp(a?.at) - timestamp(b?.at));
+}
+
+function mergeChildRequestIds(left = [], right = [], requestIds = []) {
+  return [...new Set([...left, ...right, ...requestIds].map(text).filter(Boolean))];
 }
 
 function mergeLifecycle(existing, incoming) {
@@ -135,6 +149,12 @@ function mergeLifecycle(existing, incoming) {
     ...secondary,
     ...primary,
     requestId: primary.requestId || secondary.requestId || null,
+    rootRequestId: primary.rootRequestId || secondary.rootRequestId || primary.requestId || secondary.requestId || null,
+    childRequestIds: mergeChildRequestIds(
+      existing.childRequestIds,
+      incoming.childRequestIds,
+      [existing.requestId, incoming.requestId],
+    ),
     hex: primary.hex || secondary.hex || null,
     title: primary.title || secondary.title || null,
     subject: primary.subject || secondary.subject || null,
@@ -154,6 +174,7 @@ function snapshotRequests(snapshot) {
 }
 
 function canonicalKey(entry, fallbackIndex = 0) {
+  if (entry?.rootRequestId) return `root:${entry.rootRequestId}`;
   if (entry?.requestId) return `request:${entry.requestId}`;
   if (entry?.hex) return `hex:${entry.hex}|${entry.realm || ''}|${entry.operation || ''}`;
   return `anonymous:${fallbackIndex}`;
@@ -166,8 +187,13 @@ function historyForHex(durableHistories, hex) {
 }
 
 function findDurableCompletion(request, durableHistories) {
-  if (!request?.requestId || !request?.hex) return null;
-  return historyForHex(durableHistories, request.hex).find((entry) => text(entry?.requestId) === request.requestId) || null;
+  if (!request?.hex) return null;
+  const requestIds = new Set([
+    request.requestId,
+    ...(Array.isArray(request.childRequestIds) ? request.childRequestIds : []),
+  ].map(text).filter(Boolean));
+  if (!requestIds.size) return null;
+  return historyForHex(durableHistories, request.hex).find((entry) => requestIds.has(text(entry?.requestId))) || null;
 }
 
 function executionStage(execution) {
@@ -182,7 +208,8 @@ function executionState(execution, stage) {
   if (['FAILED', 'TIMED_OUT', 'ABORTED'].includes(status)) return 'needs_attention';
 
   const normalisedStage = text(stage).toLowerCase();
-  if (normalisedStage === 'manual_review') return 'manual_review';
+  if (normalisedStage === 'manual_review' || normalisedStage === 'awaiting_review') return 'awaiting_review';
+  if (normalisedStage === 'awaiting_image') return 'awaiting_image';
   if (normalisedStage === 'waiting_for_retry') return 'waiting_for_retry';
   if (status === 'SUCCEEDED') return 'completed';
   if (normalisedStage === 'persisting') return 'persisting';
@@ -223,6 +250,7 @@ function reconcileOrphanedTracking(request, queueHealth, nowMs) {
 }
 
 function canCorrelateExecutionByHex(execution, request) {
+  if (execution?.rootRequestId || request?.rootRequestId) return false;
   if (!execution?.hex || execution.hex !== request?.hex) return false;
   if (lifecyclePriority(request.state) >= lifecyclePriority('completed')) return false;
 
@@ -272,9 +300,10 @@ export function buildCanonicalActivity({
 
   for (const execution of Array.isArray(executions) ? executions : []) {
     const requestId = text(execution?.requestId);
+    const rootRequestId = rootRequestIdOf(execution);
     const hex = text(execution?.hex).toLowerCase();
-    const normalisedExecution = { ...execution, requestId, hex };
-    let key = requestId ? `request:${requestId}` : '';
+    const normalisedExecution = { ...execution, requestId, rootRequestId, hex };
+    let key = rootRequestId ? `root:${rootRequestId}` : (requestId ? `request:${requestId}` : '');
     if (!key || !byKey.has(key)) {
       const candidates = [...byKey.entries()]
         .filter(([, item]) => canCorrelateExecutionByHex(normalisedExecution, item))
@@ -288,6 +317,8 @@ export function buildCanonicalActivity({
     const executionEntry = {
       ...(existing || {}),
       requestId: existing?.requestId || requestId || null,
+      rootRequestId: existing?.rootRequestId || rootRequestId || requestId || null,
+      childRequestIds: mergeChildRequestIds(existing?.childRequestIds, [], [requestId]),
       hex: existing?.hex || hex || null,
       orchestrationType: text(execution?.orchestrationType) || existing?.orchestrationType || null,
       state,
