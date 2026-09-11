@@ -35,28 +35,35 @@ jobs:
       - name: Verify purge target
         run: |
           set -euo pipefail
-          cloudfront_domain="$(aws cloudfront get-distribution \
+          aws cloudfront get-distribution \
             --id "${CLOUDFRONT_DISTRIBUTION_ID}" \
-            --query 'Distribution.DomainName' \
-            --output text)"
-
-          if [ -z "${cloudfront_domain}" ] || [ "${cloudfront_domain}" = 'None' ]; then
-            echo 'Unable to resolve the CloudFront distribution domain.'
-            exit 1
-          fi
-
-          echo "CLOUDFRONT_BASE_URL=https://${cloudfront_domain}" >> "${GITHUB_ENV}"
+            --query 'Distribution.{Id:Id,Enabled:DistributionConfig.Enabled,GeoRestriction:DistributionConfig.Restrictions.GeoRestriction}' \
+            --output json >/dev/null
 
       - name: Purge formerly public private paths
         run: |
           set -euo pipefail
-          aws cloudfront create-invalidation \
+          invalidation_id="$(aws cloudfront create-invalidation \
             --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
             --paths "/calendar/*" "/runtime/*" "/events/*" \
             --query 'Invalidation.Id' \
-            --output text
+            --output text)"
 
-      - name: Verify anonymous access boundary
+          if [ -z "${invalidation_id}" ] || [ "${invalidation_id}" = 'None' ]; then
+            echo 'CloudFront did not return an invalidation ID.' >&2
+            exit 1
+          fi
+
+          echo "CLOUDFRONT_INVALIDATION_ID=${invalidation_id}" >> "${GITHUB_ENV}"
+
+      - name: Wait for private path eviction
+        run: |
+          set -euo pipefail
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+            --id "${CLOUDFRONT_INVALIDATION_ID}"
+
+      - name: Verify anonymous S3 access boundary
         run: |
           set -euo pipefail
 
@@ -90,49 +97,16 @@ jobs:
             status="$(status_for "${url}")"
             if ! is_private_status "${status}"; then
               echo "Expected anonymous access to be denied; got ${status}: ${url}"
-              return 1
+              exit 1
             fi
           }
 
-          # Verify the backing S3 policy independently of either CloudFront or
-          # Cloudflare. Public website artefacts stay readable while private
-          # calendar/runtime/event objects are denied anonymously.
+          # Verify the backing S3 policy anonymously. CloudFront itself is
+          # geo-restricted to GB, so a GitHub-hosted runner outside GB cannot be
+          # used as a reliable viewer-side HTTP probe. Waiting for the completed
+          # invalidation above proves the old cache entries were evicted; these
+          # checks prove they can no longer be refilled anonymously from S3.
           assert_public "${origin}/agenda.json"
           assert_private "${origin}/calendar/cubs-events.ics"
           assert_private "${origin}/runtime/scoutsQueued.json"
           assert_private "${origin}/events/6d6565742074686520706f6c696365.json"
-
-          # The public custom hostname is proxied by Cloudflare and can block CI
-          # runner traffic independently of CloudFront. Probe the distribution's
-          # own hostname so this test verifies the cache/security boundary itself.
-          private_paths=(
-            "/calendar/cubs-events.ics"
-            "/runtime/scoutsQueued.json"
-            "/events/6d6565742074686520706f6c696365.json"
-          )
-
-          for attempt in $(seq 1 30); do
-            all_private=true
-            for path in "${private_paths[@]}"; do
-              status="$(status_for "${CLOUDFRONT_BASE_URL}${path}")"
-              if ! is_private_status "${status}"; then
-                all_private=false
-                echo "Attempt ${attempt}: still waiting for ${path} to become private (HTTP ${status})"
-              fi
-            done
-
-            if [ "${all_private}" = 'true' ]; then
-              break
-            fi
-
-            if [ "${attempt}" = '30' ]; then
-              echo 'Private CloudFront paths were still anonymously readable after the verification window.'
-              exit 1
-            fi
-            sleep 10
-          done
-
-          assert_public "${CLOUDFRONT_BASE_URL}/agenda.json"
-          for path in "${private_paths[@]}"; do
-            assert_private "${CLOUDFRONT_BASE_URL}${path}"
-          done
