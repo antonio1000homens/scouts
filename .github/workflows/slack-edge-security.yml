@@ -1,0 +1,87 @@
+name: Slack edge security
+
+on:
+  pull_request:
+    paths:
+      - 'cloudflare/scouts-slack-handler/**'
+      - 'lambdas/scouts-slack-handler/**'
+      - 'lambdas/cloudformation/templates/slack-handler.yaml'
+      - '.github/workflows/slack-edge-security.yml'
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'cloudflare/scouts-slack-handler/**'
+      - 'lambdas/scouts-slack-handler/**'
+      - 'lambdas/cloudformation/templates/slack-handler.yaml'
+      - '.github/workflows/slack-edge-security.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  test-slack-edge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Test Slack edge validation and acknowledgement
+        run: node --test cloudflare/scouts-slack-handler/worker.test.mjs
+
+      - name: Verify authenticated Lambda ingress contract
+        run: |
+          set -euo pipefail
+          grep -q 'slack-handler-proxy.lambdaHandler' lambdas/scouts-slack-handler/deploy.sh
+          grep -q 'slack-handler-proxy.lambdaHandler' lambdas/cloudformation/templates/slack-handler.yaml
+          grep -q 'X-Scouts-Worker-Timestamp' lambdas/scouts-slack-handler/function/slack-handler-proxy.mjs
+          grep -q 'X-Scouts-Worker-Signature' lambdas/scouts-slack-handler/function/slack-handler-proxy.mjs
+          grep -q 'SLACK_REQUEST_TTL_SECONDS = 60 \* 5' lambdas/scouts-slack-handler/function/slack-handler-proxy.mjs
+
+  deploy-slack-edge:
+    needs: test-slack-edge
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: scouts-slack-edge-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Get Slack edge deployment secrets from Bitwarden
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
+            ${{ vars.BW_SECRET_ID_CF_DEPLOY_API_TOKEN || vars.BW_SCOUTS_CF_DEPLOY }} > CF_DEPLOY_API_TOKEN
+            ${{ vars.BW_SCOUTS_SLACK_HANDLER_URL }} > SCOUTS_SLACK_HANDLER_URL
+            ${{ vars.BW_SCOUTS_SLACK_SIGNING_SECRET }} > SLACK_SIGNING_SECRET
+
+      - name: Install Wrangler
+        run: npm install --global wrangler@4
+
+      - name: Install Slack signing secret as Worker secret
+        run: |
+          set -euo pipefail
+          test -n "${CF_DEPLOY_API_TOKEN:-}"
+          test -n "${SLACK_SIGNING_SECRET:-}"
+          export CLOUDFLARE_API_TOKEN="${CF_DEPLOY_API_TOKEN}"
+          printf '%s' "${SLACK_SIGNING_SECRET}" | npx wrangler secret put SLACK_SIGNING_SECRET \
+            --config cloudflare/scouts-slack-handler/wrangler.toml
+
+      - name: Deploy Slack edge worker
+        run: bash cloudflare/scouts-slack-handler/deploy-ci.sh
