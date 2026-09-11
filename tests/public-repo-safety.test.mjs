@@ -65,3 +65,56 @@ test('workflow actions are pinned to immutable commit SHAs', () => {
 
   assert.deepEqual(offenders, [], `Unpinned GitHub Actions:\n${offenders.join('\n')}`);
 });
+
+test('private calendar feeds are sourced from masked GitHub Secrets, never ordinary vars', () => {
+  const workflow = readFileSync('.github/workflows/deploy-to-s3.yml', 'utf8');
+  const calendarNames = [
+    'CUBS_EVENTS_CALENDAR_URL',
+    'CUBS_PROGRAMME_CALENDAR_URL',
+    'CUBS_PROGRAME_CALENDAR_URL',
+    'SCOUTS_EVENTS_CALENDAR_URL',
+    'SCOUTS_PROGRAMME_CALENDAR_URL',
+    'BEAVERS_EVENTS_CALENDAR_URL',
+    'BEAVERS_PROGRAMME_CALENDAR_URL',
+  ];
+
+  for (const name of calendarNames) {
+    assert.doesNotMatch(workflow, new RegExp(`\\$\\{\\{\\s*vars\\.${name}\\s*\\}\\}`));
+    assert.match(workflow, new RegExp(`${name}: \\$\\{\\{ secrets\\.${name} \\}\\}`));
+  }
+});
+
+test('anonymous S3 policy exposes only deliberate public website objects', () => {
+  const workflow = readFileSync('.github/workflows/deploy-to-s3.yml', 'utf8');
+  const policyBlock = workflow.match(/cat > bucket-policy\.json << 'EOF'([\s\S]*?)\n\s*EOF/)?.[1] || '';
+
+  assert.ok(policyBlock, 'Unable to locate generated S3 bucket policy');
+  assert.match(policyBlock, /PublicReadWebsiteAllowlist/);
+  assert.match(policyBlock, /WEBSITE_BUCKET_PLACEHOLDER\/index\.html/);
+  assert.match(policyBlock, /WEBSITE_BUCKET_PLACEHOLDER\/agenda\.json/);
+  assert.match(policyBlock, /WEBSITE_BUCKET_PLACEHOLDER\/scouts\.conf/);
+  assert.match(policyBlock, /WEBSITE_BUCKET_PLACEHOLDER\/website\/\*/);
+  assert.doesNotMatch(policyBlock, /WEBSITE_BUCKET_PLACEHOLDER\/\*"/);
+  assert.doesNotMatch(policyBlock, /WEBSITE_BUCKET_PLACEHOLDER\/(?:calendar|runtime|events)\/\*/);
+
+  assert.match(workflow, /BlockPublicAcls=true,IgnorePublicAcls=true/);
+});
+
+test('private runtime and HEX objects are reachable only through the Access-protected admin proxy', () => {
+  const wrangler = readFileSync('cloudflare/scouts-admin-proxy/wrangler.toml', 'utf8');
+  const worker = readFileSync('cloudflare/scouts-admin-proxy/worker.js', 'utf8');
+  const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
+
+  assert.match(wrangler, /2ndtolworth\.org\.uk\/runtime\/\*/);
+  assert.match(wrangler, /2ndtolworth\.org\.uk\/events\/\*/);
+  assert.match(worker, /privateObjectCommand/);
+  assert.match(worker, /requireAccess\(request, env\)/);
+  assert.match(worker, /subject: "snapshot"/);
+  assert.match(worker, /subject: "event"/);
+
+  assert.match(scoutsEntry, /PRIVATE_RUNTIME_SNAPSHOT_KEYS/);
+  assert.match(scoutsEntry, /readPrivateJsonObject/);
+  assert.match(scoutsEntry, /command\.subject === 'snapshot'/);
+  assert.match(scoutsEntry, /command\.subject === 'event'/);
+  assert.match(scoutsEntry, /`events\/\$\{hex\}\.json`/);
+});

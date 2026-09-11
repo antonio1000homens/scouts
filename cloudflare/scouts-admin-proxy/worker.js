@@ -218,6 +218,64 @@ async function proxyToLambda(request, lambdaBaseUrl, apiKey) {
   return fetch(upstreamUrl.toString(), init);
 }
 
+function privateObjectCommand(pathname) {
+  const runtimeSnapshots = new Map([
+    ["/runtime/scoutsQueued.json", "queued"],
+    ["/runtime/scoutsProcessing.json", "processing"],
+    ["/runtime/scoutsComplete.json", "completed"],
+  ]);
+  const snapshot = runtimeSnapshots.get(pathname);
+  if (snapshot) {
+    return { realm: "runtime", subject: "snapshot", action: "get", snapshot };
+  }
+
+  const eventMatch = pathname.match(/^\/events\/([0-9a-fA-F]+)\.json$/);
+  if (eventMatch) {
+    return {
+      realm: "runtime",
+      subject: "event",
+      action: "get",
+      hex: eventMatch[1].toLowerCase(),
+    };
+  }
+
+  return null;
+}
+
+async function fetchPrivateObject(command, env) {
+  const apiKey = (env.SCOUTS_LAMBDA_API_KEY || "").trim();
+  const upstreamUrl = new URL(env.SCOUTS_URL);
+  upstreamUrl.searchParams.set("apiKey", apiKey);
+
+  const upstream = await fetch(upstreamUrl.toString(), {
+    method: "POST",
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "x-api-key": apiKey,
+    },
+    body: JSON.stringify(command),
+  });
+
+  let payload;
+  try {
+    payload = await upstream.json();
+  } catch {
+    return json({ ok: false, code: "INVALID_UPSTREAM_RESPONSE" }, 502);
+  }
+
+  if (!upstream.ok) {
+    return json(payload, upstream.status);
+  }
+
+  if (command.subject === "snapshot") {
+    return json(payload?.snapshot ?? {}, 200);
+  }
+  if (command.subject === "event") {
+    return json(payload?.event ?? {}, 200);
+  }
+  return json({ ok: false, code: "UNSUPPORTED_PRIVATE_OBJECT" }, 500);
+}
+
 function handleOptions() {
   return new Response(null, {
     status: 204,
@@ -243,6 +301,18 @@ export default {
 
     if (url.pathname === "/api/contact") {
       return handleContact(request, env);
+    }
+
+    const privateCommand = privateObjectCommand(url.pathname);
+    if (privateCommand) {
+      if (request.method !== "GET") {
+        return json({ ok: false, code: "METHOD_NOT_ALLOWED" }, 405);
+      }
+      const accessErr = requireAccess(request, env);
+      if (accessErr) return accessErr;
+      const configErr = requireConfig(env);
+      if (configErr) return configErr;
+      return fetchPrivateObject(privateCommand, env);
     }
 
     if (!url.pathname.startsWith("/admin-api/")) {

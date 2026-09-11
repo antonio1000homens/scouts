@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import { withRequestActivityContext } from '/opt/nodejs/request-activity.mjs';
 import { repairAgendaHexMetadata } from './agenda-hex-repair.mjs';
@@ -11,6 +12,14 @@ import {
   isScheduledRefreshInvocation,
   setScheduledRefreshEnabled,
 } from './runtime-schedule.mjs';
+
+const s3 = new S3Client({});
+const TARGET_BUCKET = process.env.TARGET_BUCKET || '';
+const PRIVATE_RUNTIME_SNAPSHOT_KEYS = Object.freeze({
+  queued: 'runtime/scoutsQueued.json',
+  processing: 'runtime/scoutsProcessing.json',
+  completed: 'runtime/scoutsComplete.json',
+});
 
 function text(value) {
   if (value === undefined || value === null) return '';
@@ -48,6 +57,37 @@ function constantTimeEquals(left, right) {
   const b = Buffer.from(String(right || ''));
   if (a.length !== b.length) return false;
   return crypto.timingSafeEqual(a, b);
+}
+
+function privateObjectNotFound(error) {
+  return error?.name === 'NoSuchKey'
+    || error?.name === 'NotFound'
+    || Number(error?.$metadata?.httpStatusCode) === 404;
+}
+
+async function readPrivateJsonObject(key) {
+  if (!TARGET_BUCKET) {
+    const error = new Error('TARGET_BUCKET is not configured');
+    error.statusCode = 503;
+    throw error;
+  }
+
+  try {
+    const result = await s3.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: key }));
+    const raw = await result.Body.transformToString();
+    return JSON.parse(raw);
+  } catch (error) {
+    if (privateObjectNotFound(error)) return null;
+    throw error;
+  }
+}
+
+function normalizePrivateEventHex(value) {
+  const hex = text(value).toLowerCase();
+  if (!hex || hex.length % 2 !== 0 || hex.length > 512 || !/^[0-9a-f]+$/.test(hex)) {
+    return '';
+  }
+  return hex;
 }
 
 function runtimeCommand(body) {
@@ -156,6 +196,8 @@ async function invokeScoutsService(event) {
 function isInterceptedRuntimeCommand(command) {
   if (!command) return false;
   if (command.subject === 'activity' && ['status', 'history', 'lookup'].includes(command.action)) return true;
+  if (command.subject === 'snapshot' && command.action === 'get') return true;
+  if (command.subject === 'event' && command.action === 'get') return true;
   if (command.subject === 'dlq' && ['inspect', 'redrive'].includes(command.action)) return true;
   return command.subject === 'schedule' && ['status', 'enable', 'disable'].includes(command.action);
 }
@@ -241,6 +283,31 @@ export async function handler(event = {}) {
       return response(200, { status: 'ok', activity });
     }
 
+    if (command.subject === 'snapshot') {
+      const snapshotName = text(command.body?.snapshot).toLowerCase();
+      const key = PRIVATE_RUNTIME_SNAPSHOT_KEYS[snapshotName];
+      if (!key) {
+        return response(400, { status: 'error', error: 'Unsupported runtime snapshot' });
+      }
+      const snapshot = await readPrivateJsonObject(key);
+      if (!snapshot) {
+        return response(404, { status: 'error', error: 'Runtime snapshot not found' });
+      }
+      return response(200, { status: 'ok', snapshot });
+    }
+
+    if (command.subject === 'event') {
+      const hex = normalizePrivateEventHex(command.body?.hex);
+      if (!hex) {
+        return response(400, { status: 'error', error: 'Invalid event HEX' });
+      }
+      const eventObject = await readPrivateJsonObject(`events/${hex}.json`);
+      if (!eventObject) {
+        return response(404, { status: 'error', error: 'Event object not found' });
+      }
+      return response(200, { status: 'ok', event: eventObject });
+    }
+
     if (command.subject === 'schedule') {
       if (command.action === 'status') {
         const schedule = await getScheduledRefreshStatus();
@@ -267,7 +334,11 @@ export async function handler(event = {}) {
       ? 'DLQ diagnostics'
       : command?.subject === 'schedule'
         ? 'Scheduled refresh controls'
-        : 'Runtime activity status';
+        : command?.subject === 'snapshot'
+          ? 'Private runtime snapshot'
+          : command?.subject === 'event'
+            ? 'Private event object'
+            : 'Runtime activity status';
     console.error(`[RuntimeActivity] ${subject} command failed`, error?.message || error);
     return response(statusCode, {
       status: 'error',

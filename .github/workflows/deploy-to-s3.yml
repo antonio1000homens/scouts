@@ -137,7 +137,7 @@ jobs:
                 ;;
             esac
             case "${file}" in
-              deploy.sh|lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|tests/issue-34-admin-ui.integration.test.mjs|tests/issue-39-*.test.mjs|tests/issue-39-*.integration.test.mjs|tests/issue-43-*.test.mjs|tests/admin-notifications.test.mjs|tests/helpers/*|docs/TESTING-STRATEGY.md|website/admin/*|.github/workflows/deploy-to-s3.yml)
+              deploy.sh|lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|tests/issue-34-admin-ui.integration.test.mjs|tests/issue-39-*.test.mjs|tests/issue-39-*.integration.test.mjs|tests/issue-43-*.test.mjs|tests/admin-notifications.test.mjs|tests/public-repo-safety.test.mjs|tests/helpers/*|docs/TESTING-STRATEGY.md|website/admin/*|.github/workflows/deploy-to-s3.yml)
                 retry_safety=true
                 ;;
             esac
@@ -260,6 +260,10 @@ jobs:
             tests/issue-39-synthetic-workflow.integration.test.mjs \
             tests/issue-39-security-contract.test.mjs
 
+      - name: Run issue 66 public repository safety contracts
+        if: steps.plan.outputs.retry_safety == 'true'
+        run: node --test tests/public-repo-safety.test.mjs
+
   deploy-web:
     needs: plan-and-test
     if: github.event_name != 'pull_request' && (needs.plan-and-test.outputs.website == 'true' || needs.plan-and-test.outputs.cloudflare == 'true')
@@ -339,20 +343,25 @@ jobs:
           aws s3 website "s3://${WEBSITE_BUCKET}/" --index-document index.html --error-document index.html
           aws s3api put-public-access-block \
             --bucket "${WEBSITE_BUCKET}" \
-            --public-access-block-configuration BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false
+            --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=false,RestrictPublicBuckets=false
 
-      - name: Set S3 public-read bucket policy
+      - name: Set S3 public-read allowlist policy
         if: needs.plan-and-test.outputs.website == 'true'
         run: |
           cat > bucket-policy.json << 'EOF'
           {
             "Version": "2012-10-17",
             "Statement": [{
-              "Sid": "PublicReadGetObject",
+              "Sid": "PublicReadWebsiteAllowlist",
               "Effect": "Allow",
               "Principal": "*",
               "Action": "s3:GetObject",
-              "Resource": "arn:aws:s3:::WEBSITE_BUCKET_PLACEHOLDER/*"
+              "Resource": [
+                "arn:aws:s3:::WEBSITE_BUCKET_PLACEHOLDER/index.html",
+                "arn:aws:s3:::WEBSITE_BUCKET_PLACEHOLDER/agenda.json",
+                "arn:aws:s3:::WEBSITE_BUCKET_PLACEHOLDER/scouts.conf",
+                "arn:aws:s3:::WEBSITE_BUCKET_PLACEHOLDER/website/*"
+              ]
             }]
           }
           EOF
@@ -398,7 +407,7 @@ jobs:
         if: needs.plan-and-test.outputs.website == 'true'
         run: |
           if [ -n "${CLOUDFRONT_DISTRIBUTION_ID:-}" ] && aws cloudfront get-distribution --id "${CLOUDFRONT_DISTRIBUTION_ID}" >/dev/null 2>&1; then
-            aws cloudfront create-invalidation --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" --paths "/index.html" "/scouts.conf" "/website/*" "/agenda.json" "/runtime/*" "/events/*"
+            aws cloudfront create-invalidation --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" --paths "/index.html" "/scouts.conf" "/website/*" "/agenda.json"
           fi
 
   deploy-aws:
@@ -594,13 +603,16 @@ jobs:
           CREATE_DATA_BUCKET: 'true'
           SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
           SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
-          CUBS_EVENTS_CALENDAR_URL: ${{ vars.CUBS_EVENTS_CALENDAR_URL }}
-          CUBS_PROGRAMME_CALENDAR_URL: ${{ vars.CUBS_PROGRAMME_CALENDAR_URL }}
-          CUBS_PROGRAME_CALENDAR_URL: ${{ vars.CUBS_PROGRAME_CALENDAR_URL }}
-          SCOUTS_EVENTS_CALENDAR_URL: ${{ vars.SCOUTS_EVENTS_CALENDAR_URL }}
-          SCOUTS_PROGRAMME_CALENDAR_URL: ${{ vars.SCOUTS_PROGRAMME_CALENDAR_URL }}
-          BEAVERS_EVENTS_CALENDAR_URL: ${{ vars.BEAVERS_EVENTS_CALENDAR_URL }}
-          BEAVERS_PROGRAMME_CALENDAR_URL: ${{ vars.BEAVERS_PROGRAMME_CALENDAR_URL }}
+          # Calendar feeds are bearer/private URLs. GitHub Secrets are masked in
+          # logs; ordinary vars are not. If a secret is not set, deploy.sh safely
+          # reuses the existing Lambda environment value without printing it.
+          CUBS_EVENTS_CALENDAR_URL: ${{ secrets.CUBS_EVENTS_CALENDAR_URL }}
+          CUBS_PROGRAMME_CALENDAR_URL: ${{ secrets.CUBS_PROGRAMME_CALENDAR_URL }}
+          CUBS_PROGRAME_CALENDAR_URL: ${{ secrets.CUBS_PROGRAME_CALENDAR_URL }}
+          SCOUTS_EVENTS_CALENDAR_URL: ${{ secrets.SCOUTS_EVENTS_CALENDAR_URL }}
+          SCOUTS_PROGRAMME_CALENDAR_URL: ${{ secrets.SCOUTS_PROGRAMME_CALENDAR_URL }}
+          BEAVERS_EVENTS_CALENDAR_URL: ${{ secrets.BEAVERS_EVENTS_CALENDAR_URL }}
+          BEAVERS_PROGRAMME_CALENDAR_URL: ${{ secrets.BEAVERS_PROGRAMME_CALENDAR_URL }}
         run: cd lambdas/scouts && bash ./deploy.sh
 
       - name: Deploy Scouts Slack handler
