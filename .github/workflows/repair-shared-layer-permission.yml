@@ -72,6 +72,30 @@ jobs:
             --policy-name ScoutsSharedLayerDeploy \
             --policy-document file:///tmp/scouts-shared-layer-policy.json
 
+      - name: Grant CloudFront invalidation status permission
+        run: |
+          set -euo pipefail
+          cat > /tmp/scouts-cloudfront-invalidation-policy.json <<'JSON'
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "ReadScoutsCloudFrontInvalidation",
+                "Effect": "Allow",
+                "Action": [
+                  "cloudfront:GetInvalidation"
+                ],
+                "Resource": "arn:aws:cloudfront::553490163883:distribution/E3INLSADL3AN6C"
+              }
+            ]
+          }
+          JSON
+
+          aws iam put-role-policy \
+            --role-name GitHubActionsScoutsDeployRole \
+            --policy-name ScoutsCloudFrontInvalidationStatus \
+            --policy-document file:///tmp/scouts-cloudfront-invalidation-policy.json
+
       - name: Grant CloudFormation EventBridge deployment permission
         run: |
           set -euo pipefail
@@ -110,6 +134,12 @@ jobs:
           aws iam get-role-policy \
             --role-name GitHubActionsScoutsDeployRole \
             --policy-name ScoutsSharedLayerDeploy \
+            --query 'PolicyDocument.Statement[].Sid' \
+            --output text
+
+          aws iam get-role-policy \
+            --role-name GitHubActionsScoutsDeployRole \
+            --policy-name ScoutsCloudFrontInvalidationStatus \
             --query 'PolicyDocument.Statement[].Sid' \
             --output text
 
