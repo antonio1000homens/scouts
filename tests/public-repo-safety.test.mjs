@@ -127,8 +127,12 @@ test('formerly public private prefixes are explicitly purged and anonymously ver
   assert.ok(documentedId, 'CLOUDFRONT.md must document the active distribution ID');
   assert.match(workflow, new RegExp(`CLOUDFRONT_DISTRIBUTION_ID: ${documentedId}`));
   assert.match(workflow, /aws cloudfront get-distribution/);
+  assert.match(workflow, /Distribution\.DomainName/);
+  assert.match(workflow, /GITHUB_ENV/);
+  assert.match(workflow, /CLOUDFRONT_BASE_URL/);
   assert.match(workflow, /aws cloudfront create-invalidation/);
   assert.doesNotMatch(workflow, /aws cloudfront wait invalidation-completed/);
+  assert.doesNotMatch(workflow, /PUBLIC_SITE_BASE_URL/);
   assert.match(workflow, /"\/calendar\/\*"/);
   assert.match(workflow, /"\/runtime\/\*"/);
   assert.match(workflow, /"\/events\/\*"/);
@@ -137,9 +141,9 @@ test('formerly public private prefixes are explicitly purged and anonymously ver
   assert.match(workflow, /is_private_status/);
   assert.match(workflow, /private_paths=\(/);
   assert.match(workflow, /for attempt in \$\(seq 1 30\)/);
-  assert.match(workflow, /PUBLIC_SITE_BASE_URL/);
   assert.match(workflow, /assert_public/);
   assert.match(workflow, /assert_private/);
   assert.match(workflow, /origin\/agenda\.json|\$\{origin\}\/agenda\.json/);
+  assert.match(workflow, /\$\{CLOUDFRONT_BASE_URL\}\/agenda\.json/);
   assert.match(workflow, /configure-aws-credentials@[0-9a-f]{40}/i);
 });
