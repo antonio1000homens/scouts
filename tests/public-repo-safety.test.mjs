@@ -118,3 +118,14 @@ test('private runtime and HEX objects are reachable only through the Access-prot
   assert.match(scoutsEntry, /command\.subject === 'event'/);
   assert.match(scoutsEntry, /`events\/\$\{hex\}\.json`/);
 });
+
+test('formerly public private prefixes are explicitly purged from CloudFront cache', () => {
+  const workflow = readFileSync('.github/workflows/purge-private-s3-cache.yml', 'utf8');
+
+  assert.match(workflow, /aws cloudfront create-invalidation/);
+  assert.match(workflow, /"\/calendar\/\*"/);
+  assert.match(workflow, /"\/runtime\/\*"/);
+  assert.match(workflow, /"\/events\/\*"/);
+  assert.match(workflow, /configure-aws-credentials@[0-9a-f]{40}/i);
+  assert.match(workflow, /bitwarden\/sm-action@[0-9a-f]{40}/i);
+});
