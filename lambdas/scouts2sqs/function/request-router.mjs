@@ -21,6 +21,10 @@ function text(value) {
   return result || null;
 }
 
+function rootRequestIdOf(message, fallback = null) {
+  return text(message?.rootRequestId ?? message?.operationId ?? fallback ?? message?.requestId);
+}
+
 function bool(value) {
   if (value === undefined || value === null) return null;
   if (typeof value === 'boolean') return value;
@@ -134,6 +138,7 @@ export function translateFullEnrichStageRequest(message) {
   if (!stage) throw new Error(`Unsupported fullEnrich stage: ${requestedField(message) || 'missing'}`);
   const hex = getHexFromMessage(message);
   if (!hex) throw new Error('fullEnrich stage request missing HEX');
+  const requestId = text(message?.requestId);
 
   return {
     realm: stage.realm,
@@ -142,7 +147,8 @@ export function translateFullEnrichStageRequest(message) {
     subjectLabel: stage.subjectLabel,
     hex,
     requestHex: text(message?.requestHex) || hex,
-    requestId: text(message?.requestId),
+    requestId,
+    rootRequestId: rootRequestIdOf(message, requestId),
     taskToken: text(message?.taskToken),
     orchestrationType: 'fullEnrich',
     orchestrationStep: text(message?.orchestrationStep) || stage.stage,
@@ -184,6 +190,7 @@ export function translateCompactPersistRequest(message) {
 
   const patchFieldCount = Object.keys(canonicalMetadata).filter((key) => key !== 'hex').length;
   if (patchFieldCount === 0) throw new Error('Persist request did not include any patchable fields');
+  const requestId = text(message?.requestId);
 
   return {
     realm: 'persist',
@@ -191,7 +198,8 @@ export function translateCompactPersistRequest(message) {
     subject: { metadata: canonicalMetadata },
     hex,
     requestHex: text(message?.requestHex) || hex,
-    requestId: text(message?.requestId),
+    requestId,
+    rootRequestId: rootRequestIdOf(message, requestId),
     source: text(message?.source) || 'scouts2sqs',
   };
 }
@@ -256,7 +264,7 @@ export function buildFullEnrichExecutionInput(message, event, name = null) {
   const startStage = explicitStart || determineStartStage(event);
   const imageProvider = normaliseImageProvider(message?.imageProvider || DEFAULT_IMAGE_PROVIDER);
   const prefix = executionPrefix(hex, event);
-  return {
+  const input = {
     requestId: text(message?.requestId) || name || executionName(prefix),
     executionName: name || null,
     hex,
@@ -268,6 +276,10 @@ export function buildFullEnrichExecutionInput(message, event, name = null) {
     imageProvider,
     startStage,
     generationKey: eventGenerationKey(hex, event),
+  };
+  return {
+    ...input,
+    rootRequestId: rootRequestIdOf(message, input.requestId),
   };
 }
 
@@ -310,11 +322,11 @@ async function startFullEnrich(message) {
 
   const input = buildFullEnrichExecutionInput(message, event);
   if (input.startStage === 'complete') {
-    console.log('[FullEnrich] Event already complete; no execution required', { hex, requestId: input.requestId });
+    console.log('[FullEnrich] Event already complete; no execution required', { hex, requestId: input.requestId, rootRequestId: input.rootRequestId });
     return { status: 'complete', input, reused: false };
   }
   if (input.imageProvider === 'disabled' && input.startStage === 'image') {
-    console.warn('[FullEnrich] Image provider disabled; image-only enrichment is intentionally blocked', { hex, startStage: input.startStage, requestId: input.requestId });
+    console.warn('[FullEnrich] Image provider disabled; image-only enrichment is intentionally blocked', { hex, startStage: input.startStage, requestId: input.requestId, rootRequestId: input.rootRequestId });
     return { status: 'blocked', reason: 'image_provider_disabled', input, reused: false };
   }
 
@@ -327,6 +339,7 @@ async function startFullEnrich(message) {
       executionArn: active.executionArn || null,
       generationKey: input.generationKey,
       requestId: input.requestId,
+      rootRequestId: input.rootRequestId,
       executionName: active.name || null,
     });
     return { status: 'running', executionArn: active.executionArn || null, input: reusedInput, reused: true };
@@ -344,6 +357,7 @@ async function startFullEnrich(message) {
     executionArn: response.executionArn || null,
     executionName: name,
     requestId: finalInput.requestId,
+    rootRequestId: finalInput.rootRequestId,
     startStage: finalInput.startStage,
     imageProvider: finalInput.imageProvider,
     generationKey: finalInput.generationKey,
@@ -359,6 +373,7 @@ async function forwardStageRequest(message) {
     stage: translated.orchestrationStep,
     provider: translated.imageProvider || null,
     requestId: translated.requestId || null,
+    rootRequestId: translated.rootRequestId || null,
   });
 }
 
@@ -368,6 +383,7 @@ async function forwardPersistRequest(message) {
   console.log('[FullEnrich] Forwarded canonical sparse persist patch to processing queue', {
     hex: payload.hex,
     requestId: payload.requestId || null,
+    rootRequestId: payload.rootRequestId || null,
   });
 }
 
@@ -410,11 +426,11 @@ async function isAuthorisedHttpRequest(event) {
 async function handleMessage(message) {
   if (isCompactPersistRequest(message)) {
     await forwardPersistRequest(message);
-    return { intercepted: true, result: { status: 'forwarded', requestId: text(message?.requestId) } };
+    return { intercepted: true, result: { status: 'forwarded', requestId: text(message?.requestId), rootRequestId: rootRequestIdOf(message) } };
   }
   if (isFullEnrichStageRequest(message)) {
     await forwardStageRequest(message);
-    return { intercepted: true, result: { status: 'forwarded', requestId: text(message?.requestId) } };
+    return { intercepted: true, result: { status: 'forwarded', requestId: text(message?.requestId), rootRequestId: rootRequestIdOf(message) } };
   }
   if (isDirectImageEnrichRequest(message) || isFullEnrichStartRequest(message)) {
     return { intercepted: true, result: await startFullEnrich(message) };
@@ -441,6 +457,7 @@ export async function lambdaHandler(event) {
           action: message?.action || null,
           hex: getHexFromMessage(message),
           requestId: text(message?.requestId),
+          rootRequestId: rootRequestIdOf(message),
         });
         throw error;
       }

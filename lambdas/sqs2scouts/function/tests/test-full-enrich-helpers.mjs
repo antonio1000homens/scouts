@@ -8,6 +8,12 @@ import './test-agenda-publisher.mjs';
 import './test-deployment-artifact.mjs';
 import '../../../../tests/issue-18-cloudflare-image.integration.test.mjs';
 import {
+  buildApprovedSnapshotPatch,
+  buildEventReviewSnapshot,
+  compareEventReviewRevision,
+} from '../../../shared-layer/nodejs/event-review.mjs';
+import { buildCanonicalActivity } from '../../../shared-layer/nodejs/runtime-activity-model.mjs';
+import {
   normaliseStage,
   isFullEnrichMessage,
   normaliseImageProvider,
@@ -119,6 +125,64 @@ test('full-enrich preserves the ingress request ID separately from execution nam
   assert.match(requestRouter, /executionName: name \|\| null/);
   assert.match(requestRouter, /const finalInput = \{ \.\.\.input, executionName: name \}/);
   assert.doesNotMatch(requestRouter, /const finalInput = \{ \.\.\.input, requestId: name \}/);
+});
+
+test('issue 91 root correlation is carried through full-enrich and persist contracts', () => {
+  assert.match(requestRouter, /rootRequestId: rootRequestIdOf\(message, requestId\)/);
+  assert.match(requestRouter, /rootRequestId: rootRequestIdOf\(message, input\.requestId\)/);
+  assert.match(requestRouter, /rootRequestId: translated\.rootRequestId \|\| null/);
+  assert.match(requestRouter, /rootRequestId: payload\.rootRequestId \|\| null/);
+});
+
+test('issue 91 review revision rejects stale state and missing-image approval stays pending', () => {
+  const canonical = {
+    uid: 'osm-123',
+    title: 'Campfire night',
+    metadata: {
+      hex: 'abcd',
+      tagline: 'Join us by the fire',
+      image: { theme: 'campfire at dusk', url: null },
+      status: { isHidden: false, isApproved: false },
+    },
+  };
+  const snapshot = buildEventReviewSnapshot(canonical);
+  const changed = {
+    ...canonical,
+    metadata: { ...canonical.metadata, tagline: 'Changed elsewhere' },
+  };
+  assert.equal(compareEventReviewRevision(changed, snapshot.revision).ok, false);
+
+  const patch = buildApprovedSnapshotPatch(snapshot);
+  assert.equal(patch.metadata.status.isApproved, false);
+  assert.equal(patch.approval.nextState, 'awaiting_image');
+  assert.equal(patch.approval.requiresGeneratedImage, true);
+  assert.equal(patch.approval.requiresFinalImageReview, true);
+});
+
+test('issue 91 root-correlated child requests collapse without merging separate same-HEX operations', () => {
+  const request = (requestId, rootRequestId) => ({
+    requestId,
+    messageId: `${requestId}-message`,
+    rootRequestId,
+    hex: 'abcd',
+    title: 'Campfire night',
+    requestTime: '2026-09-11T20:00:00.000Z',
+  });
+  const grouped = buildCanonicalActivity({
+    queuedSnapshot: { requests: [request('approval', 'root-a')] },
+    processingSnapshot: { requests: [{ ...request('image-child', 'root-a'), status: 'awaiting_image' }] },
+    now: new Date('2026-09-11T20:01:00.000Z'),
+  });
+  assert.equal(grouped.length, 1);
+  assert.equal(grouped[0].rootRequestId, 'root-a');
+  assert.equal(grouped[0].state, 'awaiting_image');
+  assert.deepEqual(grouped[0].childRequestIds.sort(), ['approval', 'image-child']);
+
+  const separate = buildCanonicalActivity({
+    queuedSnapshot: { requests: [request('approval-a', 'root-a'), request('approval-b', 'root-b')] },
+    now: new Date('2026-09-11T20:01:00.000Z'),
+  });
+  assert.equal(separate.length, 2);
 });
 
 test('historical imageEnrich action is only a compatibility alias into full-enrich', () => {

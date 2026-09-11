@@ -9,7 +9,21 @@ const client = new DynamoDBClient({ region: REGION });
 const requestActivityContext = new AsyncLocalStorage();
 
 const TERMINAL = new Set(['completed', 'failed', 'needs_attention', 'manual_review']);
-const PRIORITY = Object.freeze({ accepted: 10, queued: 20, processing: 40, orchestrating: 50, persisting: 60, published: 70, completed: 80, failed: 90, needs_attention: 100, manual_review: 100 });
+const PRIORITY = Object.freeze({
+  accepted: 10,
+  queued: 20,
+  processing: 40,
+  orchestrating: 50,
+  waiting_for_retry: 52,
+  awaiting_image: 55,
+  persisting: 60,
+  awaiting_review: 65,
+  published: 70,
+  completed: 80,
+  failed: 90,
+  needs_attention: 100,
+  manual_review: 100,
+});
 const RECONCILIATION_ENRICHMENT_ACTIONS = new Set(['new', 'imageenrich']);
 
 function text(value) { return value === undefined || value === null ? '' : String(value).trim(); }
@@ -22,6 +36,14 @@ function titleOf(value) {
   return text(value?.title || value?.summary || subject?.title || subject?.summary || subject?.name) || null;
 }
 function requestIdOf(value) { return text(value?.requestId || value?.messageId) || null; }
+function rootRequestIdOf(value) {
+  return text(
+    value?.rootRequestId
+    || value?.operationId
+    || requestActivityContext.getStore()?.rootRequestId
+    || requestIdOf(value),
+  ) || null;
+}
 function itemValue(value) { return value == null ? { NULL: true } : { S: String(value) }; }
 function reconciliationIdOf(value) {
   return text(value?.reconciliationId || requestActivityContext.getStore()?.reconciliationId) || null;
@@ -43,6 +65,8 @@ export function withRequestActivityContext(context = {}, callback) {
   const store = context && typeof context === 'object' ? context : {};
   const reconciliationId = text(store.reconciliationId);
   if (reconciliationId) store.reconciliationId = reconciliationId;
+  const rootRequestId = text(store.rootRequestId || store.operationId);
+  if (rootRequestId) store.rootRequestId = rootRequestId;
   if (!(store.enrichmentRequestIds instanceof Set)) store.enrichmentRequestIds = new Set();
   if (!Number.isFinite(Number(store.enrichmentRequestsStarted))) store.enrichmentRequestsStarted = 0;
   return requestActivityContext.run(store, callback);
@@ -71,13 +95,19 @@ export function buildRequestActivityUpdate(input = {}) {
   if (!TABLE_NAME) return null;
   const requestId = requestIdOf(input);
   if (!requestId) return null;
+  const rootRequestId = rootRequestIdOf(input) || requestId;
   const now = input.at instanceof Date ? input.at : new Date();
   const timestamp = now.toISOString();
   const state = text(input.state || 'processing').toLowerCase();
   const stage = text(input.stage || state) || state;
   const failure = input.failure && typeof input.failure === 'object' ? input.failure : null;
   const reconciliationId = reconciliationIdOf(input);
-  const timelineEntry = JSON.stringify({ state, stage, at: timestamp, ...(failure ? { failure: { type: text(failure.type) || 'PROCESSING_FAILED', message: text(failure.message) || null } } : {}) });
+  const timelineEntry = JSON.stringify({
+    state,
+    stage,
+    at: timestamp,
+    ...(failure ? { failure: { type: text(failure.type) || 'PROCESSING_FAILED', message: text(failure.message) || null } } : {}),
+  });
   const strictTerminal = input.strictTerminal === true;
   const attrs = {
     ':feed': { S: 'activity' }, ':updatedAt': { S: timestamp },
@@ -86,7 +116,7 @@ export function buildRequestActivityUpdate(input = {}) {
     ':expiresAt': { N: String(Math.floor(now.getTime() / 1000) + RETENTION_SECONDS) },
     ':priority': { N: String(PRIORITY[state] || 0) }, ':terminal': { S: TERMINAL.has(state) ? 'true' : 'false' },
     ':hex': itemValue(hexOf(input)), ':title': itemValue(titleOf(input)), ':action': itemValue(text(input.action || input.operation) || null),
-    ':reconciliationId': itemValue(reconciliationId),
+    ':rootRequestId': itemValue(rootRequestId), ':reconciliationId': itemValue(reconciliationId),
     ':publication': itemValue(text(input.publication) || (state === 'completed' ? 'published' : null)),
     ':failureType': itemValue(failure ? text(failure.type) || 'PROCESSING_FAILED' : null),
     ':failureMessage': itemValue(failure ? text(failure.message) || null : null),
@@ -101,18 +131,18 @@ export function buildRequestActivityUpdate(input = {}) {
     attrs[':manualReview'] = { S: 'manual_review' };
   }
   return {
-    requestId, state, stage, updatedAt: timestamp, reconciliationId,
+    requestId, rootRequestId, state, stage, updatedAt: timestamp, reconciliationId,
     command: new UpdateItemCommand({
-    TableName: TABLE_NAME,
-    Key: { requestId: { S: requestId } },
-    UpdateExpression: 'SET feed = :feed, updatedAt = :updatedAt, createdAt = if_not_exists(createdAt, :createdAt), #state = :state, stage = :stage, timeline = list_append(if_not_exists(timeline, :empty), :timeline), expiresAt = :expiresAt, priority = :priority, terminal = :terminal, hex = if_not_exists(hex, :hex), title = if_not_exists(title, :title), #action = if_not_exists(#action, :action), reconciliationId = if_not_exists(reconciliationId, :reconciliationId), publication = :publication, failureType = :failureType, failureMessage = :failureMessage',
-    // A DLQ terminal state is authoritative over delayed processing updates. A
-    // later successful publish/completion is the only permitted recovery path.
-    ConditionExpression: strictTerminal
-      ? 'attribute_not_exists(priority) OR (terminal = :notTerminal AND priority < :priority)'
-      : 'attribute_not_exists(priority) OR priority <= :priority OR (#state IN (:needsAttention, :failed, :manualReview) AND (:state = :completed OR :state = :published))',
-    ExpressionAttributeNames: { '#state': 'state', '#action': 'action' },
-    ExpressionAttributeValues: attrs,
+      TableName: TABLE_NAME,
+      Key: { requestId: { S: requestId } },
+      UpdateExpression: 'SET feed = :feed, updatedAt = :updatedAt, createdAt = if_not_exists(createdAt, :createdAt), #state = :state, stage = :stage, timeline = list_append(if_not_exists(timeline, :empty), :timeline), expiresAt = :expiresAt, priority = :priority, terminal = :terminal, hex = if_not_exists(hex, :hex), title = if_not_exists(title, :title), #action = if_not_exists(#action, :action), rootRequestId = if_not_exists(rootRequestId, :rootRequestId), reconciliationId = if_not_exists(reconciliationId, :reconciliationId), publication = :publication, failureType = :failureType, failureMessage = :failureMessage',
+      // A DLQ terminal state is authoritative over delayed processing updates. A
+      // later successful publish/completion is the only permitted recovery path.
+      ConditionExpression: strictTerminal
+        ? 'attribute_not_exists(priority) OR (terminal = :notTerminal AND priority < :priority)'
+        : 'attribute_not_exists(priority) OR priority <= :priority OR (#state IN (:needsAttention, :failed, :manualReview) AND (:state = :completed OR :state = :published))',
+      ExpressionAttributeNames: { '#state': 'state', '#action': 'action' },
+      ExpressionAttributeValues: attrs,
     }),
   };
 }
@@ -125,7 +155,14 @@ export async function recordRequestActivity(input = {}) {
   const update = buildRequestActivityUpdate(input);
   if (!update) return null;
   await client.send(update.command);
-  return { requestId: update.requestId, state: update.state, stage: update.stage, updatedAt: update.updatedAt, reconciliationId: update.reconciliationId };
+  return {
+    requestId: update.requestId,
+    rootRequestId: update.rootRequestId,
+    state: update.state,
+    stage: update.stage,
+    updatedAt: update.updatedAt,
+    reconciliationId: update.reconciliationId,
+  };
 }
 
 export async function recordWorkerDeliveryExhausted(input = {}) {
@@ -133,16 +170,29 @@ export async function recordWorkerDeliveryExhausted(input = {}) {
   if (!update) return null;
   try {
     await client.send(update.command);
-    return { requestId: update.requestId, state: update.state, stage: update.stage, updatedAt: update.updatedAt, recorded: true };
+    return {
+      requestId: update.requestId,
+      rootRequestId: update.rootRequestId,
+      state: update.state,
+      stage: update.stage,
+      updatedAt: update.updatedAt,
+      recorded: true,
+    };
   } catch (error) {
     if (error?.name === 'ConditionalCheckFailedException') {
-      return { requestId: update.requestId, state: update.state, stage: update.stage, recorded: false };
+      return {
+        requestId: update.requestId,
+        rootRequestId: update.rootRequestId,
+        state: update.state,
+        stage: update.stage,
+        recorded: false,
+      };
     }
     throw error;
   }
 }
 
-export async function listRequestActivity({ requestIds = [], hex = '', states = [], cursor = null, limit = 50, activeOnly = false } = {}) {
+export async function listRequestActivity({ requestIds = [], rootRequestId = '', hex = '', states = [], cursor = null, limit = 50, activeOnly = false } = {}) {
   if (!TABLE_NAME) return { requests: [], nextCursor: null };
   const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 100));
   const normalizedIds = [...new Set((Array.isArray(requestIds) ? requestIds : []).map(text).filter(Boolean))];
@@ -155,6 +205,7 @@ export async function listRequestActivity({ requestIds = [], hex = '', states = 
   }
   const values = { ':feed': { S: 'activity' } };
   const filters = [];
+  if (text(rootRequestId)) { values[':rootRequestId'] = { S: text(rootRequestId) }; filters.push('rootRequestId = :rootRequestId'); }
   if (text(hex)) { values[':hex'] = { S: text(hex).toLowerCase() }; filters.push('hex = :hex'); }
   const allowedStates = [...new Set((Array.isArray(states) ? states : []).map((state) => text(state).toLowerCase()).filter(Boolean))];
   if (activeOnly) { values[':terminal'] = { S: 'false' }; filters.push('terminal = :terminal'); }
