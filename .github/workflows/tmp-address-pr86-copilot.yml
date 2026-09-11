@@ -25,22 +25,22 @@ jobs:
           from pathlib import Path
 
           channel = 'C0C1996TGQZ'
+          shell_open = '$' + '{'
 
           deploy = Path('lambdas/sqs2scouts/deploy.sh')
           data = deploy.read_text()
           anchor = 'SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://slack.com/api/chat.postMessage}"\n'
-          line = f'SCOUTS_NOTIFICATION_CHANNEL="${{SCOUTS_NOTIFICATION_CHANNEL:-{channel}}}"\n'
+          line = 'SCOUTS_NOTIFICATION_CHANNEL="' + shell_open + 'SCOUTS_NOTIFICATION_CHANNEL:-' + channel + '}"\n'
           if line not in data:
               if anchor not in data:
                   raise SystemExit('deploy.sh Slack webhook anchor not found')
               data = data.replace(anchor, anchor + line, 1)
 
-          # Pass the CloudFormation parameter on every standard deployment.
-          candidates = [
-              'SlackWebhookUrl="${SLACK_WEBHOOK_URL}"',
-              'SlackWebhookUrl=${SLACK_WEBHOOK_URL}',
-          ]
           if 'ScoutsNotificationChannel=' not in data:
+              candidates = [
+                  'SlackWebhookUrl="${SLACK_WEBHOOK_URL}"',
+                  'SlackWebhookUrl=${SLACK_WEBHOOK_URL}',
+              ]
               replaced = False
               for candidate in candidates:
                   if candidate in data:
@@ -48,19 +48,13 @@ jobs:
                       replaced = True
                       break
               if not replaced:
-                  # Fall back to the parameter override block near SlackWebhookUrl.
-                  marker = 'SlackWebhookUrl'
-                  idx = data.rfind(marker)
-                  if idx < 0:
-                      raise SystemExit('deploy.sh CloudFormation SlackWebhookUrl override not found')
-                  end = data.find('\n', idx)
-                  data = data[:end] + ' ScoutsNotificationChannel="${SCOUTS_NOTIFICATION_CHANNEL}"' + data[end:]
+                  raise SystemExit('deploy.sh CloudFormation SlackWebhookUrl override not found')
           deploy.write_text(data)
 
           env = Path('lambdas/sqs2scouts/update-env-vars.sh')
           data = env.read_text()
           env_anchor = '        SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-https://slack.com/api/chat.postMessage},\n'
-          env_line = f'        SCOUTS_NOTIFICATION_CHANNEL=${{SCOUTS_NOTIFICATION_CHANNEL:-{channel}}},\n'
+          env_line = '        SCOUTS_NOTIFICATION_CHANNEL=' + shell_open + 'SCOUTS_NOTIFICATION_CHANNEL:-' + channel + '},\n'
           if env_line not in data:
               if env_anchor not in data:
                   raise SystemExit('update-env-vars.sh Slack webhook anchor not found')
@@ -79,7 +73,7 @@ jobs:
           test.write_text(data)
           PY
 
-          rm .github/workflows/tmp-address-pr86-copilot.yml
+          rm .github/workflows/tmp-address-pr86-copilot.yml .tmp-pr86-copilot-trigger
 
       - name: Validate fixes
         shell: bash
