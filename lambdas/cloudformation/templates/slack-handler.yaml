@@ -115,6 +115,12 @@ Resources:
                 Resource:
                   - !Sub arn:aws:s3:::${TargetBucket}/events/*
                   - !Sub arn:aws:s3:::${TargetBucket}/${ScoutsConfigKey}
+                  - !Sub arn:aws:s3:::${TargetBucket}/runtime/approval-idempotency/*
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub arn:aws:s3:::${TargetBucket}/runtime/approval-idempotency/*
               - Effect: Allow
                 Action:
                   - ssm:GetParameter
