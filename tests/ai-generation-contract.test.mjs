@@ -9,7 +9,7 @@ test('text generation uses JSON schemas and deterministic output limits', () => 
   assert.match(worker, /responseMimeType:\s*'application\/json'/);
   assert.match(worker, /responseSchema:\s*GEMINI_TEXT_RESPONSE_SCHEMAS\[stage\]/);
   assert.match(worker, /temperature:\s*0\.3/);
-  assert.match(worker, /maxOutputTokens:\s*512/);
+  assert.match(worker, /maxOutputTokens:\s*2048/);
   assert.match(worker, /validateGeminiTextResponse\(parsed, stage\)/);
 });
 
