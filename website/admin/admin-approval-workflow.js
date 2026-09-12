@@ -110,10 +110,18 @@
     function relabelApprovalButtons(root = document) {
         root.querySelectorAll('button[value="approve"]').forEach((button) => {
             const generatedReview = isGeneratedImageReview(eventForApprovalButton(button));
-            button.textContent = generatedReview ? 'Approve generated image' : 'Approve shown changes';
-            button.title = generatedReview
+            const label = generatedReview ? 'Approve generated image' : 'Approve shown changes';
+            const title = generatedReview
                 ? 'Approve the generated image and complete this event workflow.'
                 : 'Approve the tagline, image theme, image and visibility currently shown for this event.';
+
+            // This controller observes DOM mutations so dynamically rendered
+            // event cards get the right approval copy. Assigning textContent
+            // unconditionally creates another child-list mutation, which would
+            // immediately re-enter this observer and starve the browser's UI
+            // thread. Only write when the rendered value actually differs.
+            if (button.textContent !== label) button.textContent = label;
+            if (button.title !== title) button.title = title;
         });
     }
 

@@ -66,6 +66,13 @@ test('issue 91 admin final generated-image review keeps the original root and us
   assert.match(approvalWorkflow, /Activity Centre owns that long-lived phase/);
 });
 
+test('issue 91 approval-label observer does not create a self-sustaining mutation loop', () => {
+  assert.match(approvalWorkflow, /const label = generatedReview \? 'Approve generated image' : 'Approve shown changes';/);
+  assert.match(approvalWorkflow, /if \(button\.textContent !== label\) button\.textContent = label;/);
+  assert.match(approvalWorkflow, /if \(button\.title !== title\) button\.title = title;/);
+  assert.doesNotMatch(approvalWorkflow, /button\.textContent = generatedReview \?/);
+});
+
 test('issue 91 generated review notification has durable external identity and Slack reference', () => {
   const identity = imageWorker.indexOf('ensureReviewNotificationIdentity');
   const send = imageWorker.indexOf('await sendSlackMessage(message.text, message.blocks', identity);
