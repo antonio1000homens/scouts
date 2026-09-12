@@ -175,7 +175,10 @@ export function normalizeEventDocument(input, { expectedHex = null } = {}) {
     ? input.status
     : {};
 
-  const title = firstText(input.title, input.summary, input.name);
+  const source = input.source && typeof input.source === 'object' && !Array.isArray(input.source)
+    ? input.source
+    : {};
+  const title = firstText(input.title, input.summary, input.name, source.title, source.summary);
   if (!title) throw new Error('event document is missing title');
 
   const hex = normalizeCanonicalHex(
