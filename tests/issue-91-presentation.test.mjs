@@ -6,6 +6,7 @@ import { loadFunctionsFromSource } from './helpers/source-function-loader.mjs';
 
 const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
 const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
+const adminHtml = readFileSync('website/admin/index.html', 'utf8');
 const activityCentre = readFileSync('website/admin/admin-activity-centre.js', 'utf8');
 const approvalWorkflow = readFileSync('website/admin/admin-approval-workflow.js', 'utf8');
 const privateStorage = readFileSync('website/admin/private-storage-client.js', 'utf8');
@@ -44,15 +45,33 @@ test('issue 91 admin activity consumes canonical display state and refreshes rev
   assert.doesNotMatch(activityCentre, /request\.action \|\| 'change' ·/);
 });
 
+test('issue 91 activity reads bypass mutation wrappers and mutation tracking does not launch a duplicate immediate poll', () => {
+  assert.match(activityCentre, /window\.sendScoutsReadCommand/);
+  assert.match(activityCentre, /if \(requestId\) \{ tracked\.add\(requestId\); saveTracked\(\); \}/);
+  assert.doesNotMatch(activityCentre, /saveTracked\(\); poll\(\);/);
+  assert.match(privateStorage, /const readOnlySendScoutsCommand = sendScoutsCommand/);
+  assert.match(privateStorage, /window\.sendScoutsReadCommand/);
+});
+
 test('issue 91 Admin consumes a server-issued canonical revision before approval', () => {
   assert.match(scoutsEntry, /buildEventReviewSnapshot/);
   assert.match(scoutsEntry, /\['get', 'review'\]\.includes\(command\.action\)/);
   assert.match(scoutsEntry, /review: buildEventReviewSnapshot\(eventObject\)/);
   assert.match(approvalWorkflow, /subject: 'event'/);
   assert.match(approvalWorkflow, /action: 'review'/);
+  assert.match(approvalWorkflow, /window\.sendScoutsReadCommand/);
   assert.match(approvalWorkflow, /sameReviewableValues/);
   assert.match(approvalWorkflow, /baseRevision: reviewSnapshot\.revision/);
   assert.doesNotMatch(approvalWorkflow, /crypto\?\.subtle|sha256Prefix|TextEncoder/);
+});
+
+test('issue 91 read-only review preflight is bounded and stage-specific while approval submission stays authoritative', () => {
+  assert.match(approvalWorkflow, /REVIEW_REQUEST_TIMEOUT_MS = 15000/);
+  assert.match(approvalWorkflow, /withReadTimeout/);
+  assert.match(approvalWorkflow, /REVIEW_TIMEOUT: canonical review did not respond within 15 seconds/);
+  assert.match(approvalWorkflow, /let operationStage = 'canonical review'/);
+  assert.match(approvalWorkflow, /operationStage = 'approval submission'/);
+  assert.match(approvalWorkflow, /Approval failed during \$\{operationStage\}/);
 });
 
 test('issue 91 approval refuses an impossible image-generation request', () => {
@@ -67,6 +86,11 @@ test('issue 91 admin final generated-image review keeps the original root and us
   assert.match(approvalWorkflow, /rootRequestId: workflow\.rootRequestId/);
   assert.match(approvalWorkflow, /!result\?\.requiresGeneratedImage/);
   assert.match(approvalWorkflow, /Activity Centre owns that long-lived phase/);
+});
+
+test('issue 91 successful final approval updates the event entry, not the raw event object', () => {
+  assert.match(approvalWorkflow, /applyLocalApprovalState\(entry, true\)/);
+  assert.doesNotMatch(approvalWorkflow, /applyLocalApprovalState\(event, true\)/);
 });
 
 test('issue 91 approval labels are render-driven and idempotent without a document-wide observer', () => {
@@ -102,10 +126,17 @@ test('issue 91 approval acceptance is not blocked by a secondary activity refres
   assert.doesNotMatch(approvalWorkflow, /await pollQueueDepthSnapshots\(\{ updatePanels: true \}\)/);
 });
 
-test('issue 91 approval controller bootstrap is ordered and observable', () => {
-  assert.match(privateStorage, /script\.async = false/);
-  assert.match(privateStorage, /scoutsApprovalWorkflowReady = true/);
-  assert.match(privateStorage, /Approval controls failed to load/);
+test('issue 91 approval controller loads statically in dependency order and fails closed', () => {
+  const privateStorageIndex = adminHtml.indexOf('<script src="private-storage-client.js"></script>');
+  const approvalIndex = adminHtml.indexOf('<script src="admin-approval-workflow.js"');
+  const simplifyIndex = adminHtml.indexOf('<script src="admin-simplify.js"></script>');
+  assert.ok(privateStorageIndex >= 0 && approvalIndex > privateStorageIndex);
+  assert.ok(simplifyIndex > approvalIndex);
+  assert.match(adminHtml, /onerror="window\.handleApprovalWorkflowLoadError\?\.\(\)"/);
+  assert.match(privateStorage, /approvalBootstrapGuard/);
+  assert.match(privateStorage, /handleApprovalWorkflowLoadError/);
+  assert.match(approvalWorkflow, /window\.scoutsApprovalWorkflowReady = true/);
+  assert.doesNotMatch(privateStorage, /createElement\('script'\)/);
 });
 
 test('admin direct-image controls are render-driven and cannot self-trigger a child-list observer', () => {
