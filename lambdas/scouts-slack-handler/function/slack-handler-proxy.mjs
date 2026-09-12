@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import { coordinateEventApproval } from '/opt/nodejs/approval-coordinator.mjs';
 import { buildEventReviewSnapshot } from '/opt/nodejs/event-review.mjs';
@@ -7,6 +8,9 @@ import { lambdaHandler as downstreamHandler } from './slack-handler.mjs';
 const SLACK_REQUEST_TTL_SECONDS = 60 * 5;
 const WORKER_PROOF_TTL_SECONDS = 60;
 const WORKER_PROOF_VERSION = 'v1';
+const AWS_REGION = process.env.AWS_REGION || 'eu-west-2';
+const TARGET_BUCKET = String(process.env.TARGET_BUCKET || 'scouts-2ndtolworth-prod-553490163883').trim();
+const s3 = new S3Client({ region: AWS_REGION });
 
 function getHeader(headers, name) {
     if (!headers) return undefined;
@@ -101,6 +105,19 @@ function parseActionValue(rawValue) {
     }
 }
 
+function reviewReferenceHex(event, meta) {
+    const candidate = String(event?.metadata?.hex || event?.hex || meta?.hex || '').trim().toLowerCase();
+    return /^[0-9a-f]+$/i.test(candidate) ? candidate : '';
+}
+
+async function hydrateApprovalEvent(event, meta) {
+    if (meta?.reviewReference !== true) return event;
+    const hex = reviewReferenceHex(event, meta);
+    if (!hex) throw new Error('Slack approval review reference is missing canonical HEX');
+    const response = await s3.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: `events/${hex}.json` }));
+    return JSON.parse(await response.Body.transformToString());
+}
+
 function decodePrivateEvent(value) {
     if (!value || typeof value !== 'string') return {};
     try {
@@ -155,7 +172,8 @@ function reviewBlocks(review, { stale = false, rootRequestId = null, generatedRe
     const title = review?.title || 'Scouts event';
     const imageUrl = review?.imageUrl || null;
     const actionValue = JSON.stringify({
-        event: review,
+        event: { hex: review?.hex || null },
+        reviewReference: true,
         ...(rootRequestId ? { rootRequestId } : {}),
         reviewRevision: review?.revision || null,
         action: generatedReview ? 'approve_generated_image' : 'approve_shown_changes',
@@ -224,7 +242,8 @@ async function interceptApprovalInteraction(parsedPayload) {
         const action = parsedPayload.actions?.[0];
         if (action?.action_id !== 'scouts_request_approve') return null;
         const { event, meta } = parseActionValue(action.value);
-        const snapshot = buildEventReviewSnapshot(event);
+        const approvalEvent = await hydrateApprovalEvent(event, meta);
+        const snapshot = buildEventReviewSnapshot(approvalEvent);
         const rootRequestId = meta?.rootRequestId || meta?.operationId || null;
         const generatedReview = meta?.action === 'approve_generated_image';
         const title = snapshot.title || 'Scouts event';
