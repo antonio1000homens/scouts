@@ -34,6 +34,7 @@ const sqs2scoutsDeploy = readFileSync('lambdas/sqs2scouts/deploy.sh', 'utf8');
 const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
 const persistenceProcessor = readFileSync('lambdas/sqs2scouts/function/persistence-processor.mjs', 'utf8');
 const imageProviderAdapter = readFileSync('lambdas/sqs2scouts/function/image-provider-adapter.mjs', 'utf8');
+const imageProviderWorker = readFileSync('lambdas/sqs2scouts/function/image-provider-worker.mjs', 'utf8');
 const approvalLifecycleAdapter = readFileSync('lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs', 'utf8');
 const approvalCoordinator = readFileSync('lambdas/shared-layer/nodejs/approval-coordinator.mjs', 'utf8');
 const slackProxy = readFileSync('lambdas/scouts-slack-handler/function/slack-handler-proxy.mjs', 'utf8');
@@ -204,14 +205,14 @@ test('issue 91 second slice uses one idempotent coordinator for admin and Slack'
 });
 
 test('issue 91 generated image persistence is concurrency guarded and requires final review', () => {
-  assert.match(imageProviderAdapter, /function approvalContext\(message\)/);
-  assert.match(imageProviderAdapter, /IfMatch: text\(options\.ifMatch\)/);
-  assert.match(imageProviderAdapter, /manual_image_superseded_generation/);
-  assert.match(imageProviderAdapter, /state: 'awaiting_review'/);
-  assert.match(imageProviderAdapter, /Approve generated image/);
-  assert.match(imageProviderAdapter, /realm: 'approvalReview'/);
-  assert.match(imageProviderAdapter, /review_notification_pending/);
-  assert.match(imageProviderAdapter, /approval_persist_pending/);
+  assert.match(imageProviderWorker, /function approvalContext\(message\)/);
+  assert.match(imageProviderWorker, /IfMatch: text\(options\.ifMatch\)/);
+  assert.match(imageProviderWorker, /manual_image_superseded_generation/);
+  assert.match(imageProviderWorker, /state: 'awaiting_review'/);
+  assert.match(imageProviderWorker, /Approve generated image/);
+  assert.match(imageProviderWorker, /realm: 'approvalReview'/);
+  assert.match(imageProviderWorker, /review_notification_pending/);
+  assert.match(imageProviderWorker, /approval_persist_pending/);
 });
 
 test('issue 91 revisioned persistence bypasses legacy auto-approval and completes only the root', () => {
@@ -220,8 +221,11 @@ test('issue 91 revisioned persistence bypasses legacy auto-approval and complete
   assert.match(approvalLifecycleAdapter, /IfMatch: text\(eTag\)/);
   assert.match(approvalLifecycleAdapter, /approvalState === 'approved' \? 'completed' : 'awaiting_image'/);
   assert.match(approvalLifecycleAdapter, /await publishEvent\(hex, accepted\)/);
-  assert.match(sqs2scoutsDeploy, /HANDLER="\$\{HANDLER:-approval-lifecycle-adapter\.lambdaHandler\}"/);
+  assert.match(approvalLifecycleAdapter, /export async function processRevisionedApprovalRecords\(records\)/);
+  assert.match(imageProviderAdapter, /processRevisionedApprovalRecords/);
+  assert.match(sqs2scoutsDeploy, /HANDLER="\$\{HANDLER:-image-provider-adapter\.lambdaHandler\}"/);
   assert.match(sqs2scoutsDeploy, /approval-lifecycle-adapter\.mjs/);
+  assert.match(sqs2scoutsDeploy, /image-provider-worker\.mjs/);
 });
 
 test('issue 91 root activity remains authoritative over child terminal states', () => {
@@ -288,5 +292,6 @@ test('all direct enrichment persistence paths publish their canonical HEX event 
   assert.match(persistenceProcessor, /await saveHexEventToS3\(hexValue, event\);\s*await publishHexEventToAgenda\(hexValue, event\);/);
   assert.match(persistenceProcessor, /orchestrationStep: 'tagline'/);
   assert.match(persistenceProcessor, /orchestrationStep: 'imageTheme'/);
-  assert.match(imageProviderAdapter, /await saveEvent\(hex, event\);\s*await publishEvent\(hex, event\);/);
+  assert.match(imageProviderWorker, /await saveEvent\(hex, event\);\s*await publishEvent\(hex, event\);/);
+  assert.match(approvalLifecycleAdapter, /await saveEvent\(hex, accepted, current\.eTag\);[\s\S]*?await publishEvent\(hex, accepted\);/);
 });
