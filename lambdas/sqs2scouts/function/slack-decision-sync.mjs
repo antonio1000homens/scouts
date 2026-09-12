@@ -33,8 +33,11 @@ export function canonicalSlackDecision(event) {
   return { status: 'VISIBLE', label: 'Visible', emoji: '👁️' };
 }
 
-export function buildTerminalSlackPayload(event, { hexValue = null, resolveImageUrl = (value) => value } = {}) {
-  const decision = canonicalSlackDecision(event);
+export function buildTerminalSlackPayload(event, { hexValue = null, resolveImageUrl = (value) => value, decisionOverride = null } = {}) {
+  const canonicalDecision = canonicalSlackDecision(event);
+  const decision = decisionOverride?.status
+    ? { ...canonicalDecision, ...decisionOverride }
+    : canonicalDecision;
   const title = text(event?.title || event?.summary || event?.name) || 'Scouts event';
   const hex = text(hexValue || event?.metadata?.hex || event?.hex);
   const context = hex ? `\n*HEX:* \`${hex}\`` : '';
@@ -85,11 +88,12 @@ export async function reconcileSlackDecision({
   updateMessage,
   postResponseUrl,
   resolveImageUrl,
+  decisionOverride = null,
   logger = console,
   now = () => new Date(),
 } = {}) {
   const hexValue = text(event?.metadata?.hex || event?.hex).toLowerCase() || null;
-  const { decision, payload } = buildTerminalSlackPayload(event, { hexValue, resolveImageUrl });
+  const { decision, payload } = buildTerminalSlackPayload(event, { hexValue, resolveImageUrl, decisionOverride });
   const direct = messageBody?.slackMetadata && typeof messageBody.slackMetadata === 'object'
     ? messageBody.slackMetadata
     : {};

@@ -126,3 +126,25 @@ test('sqs2scouts deployment includes the Slack decision synchronizer module', ()
   const deploy = readFileSync('lambdas/sqs2scouts/deploy.sh', 'utf8');
   assert.match(deploy, /slack-decision-sync\.mjs/);
 });
+
+
+test('revisioned Admin approval also reconciles the stored Slack review card', () => {
+  const approvalAdapter = readFileSync('lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs', 'utf8');
+  assert.match(approvalAdapter, /reconcileSlackDecision/);
+  assert.match(approvalAdapter, /async function reconcileApprovalSlack/);
+  assert.match(approvalAdapter, /loadApprovalMessageMetadata/);
+  assert.match(approvalAdapter, /await reconcileApprovalSlack\(message, hex, accepted, approvalState\)/);
+});
+
+test('approval awaiting generated image replaces stale review actions with a pending state', () => {
+  const { decision, payload } = buildTerminalSlackPayload(event({ isApproved: false }), {
+    decisionOverride: {
+      status: 'AWAITING_IMAGE',
+      label: 'Approval accepted — generating image',
+      emoji: '⏳',
+    },
+  });
+  assert.equal(decision.status, 'AWAITING_IMAGE');
+  assert.match(payload.text, /generating image/i);
+  assert.equal(payload.blocks.some((block) => block.type === 'actions'), false);
+});
