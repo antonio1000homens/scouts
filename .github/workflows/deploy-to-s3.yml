@@ -593,6 +593,15 @@ jobs:
           IMAGE_GENERATION_PROVIDER: ${{ vars.IMAGE_GENERATION_PROVIDER || 'disabled' }}
         run: cd lambdas/scouts2sqs && bash ./deploy.sh
 
+      - name: Get Beavers calendar URLs
+        if: needs.plan-and-test.outputs.scouts_function == 'true'
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
+            ${{ vars.BEAVERS_EVENTS_CALENDAR_URL }} > BEAVERS_EVENTS_CALENDAR_URL
+            ${{ vars.BEAVERS_PROGRAMME_CALENDAR_URL }} > BEAVERS_PROGRAMME_CALENDAR_URL
+
       - name: Deploy Scouts function
         if: needs.plan-and-test.outputs.scouts_function == 'true'
         env:
@@ -611,8 +620,6 @@ jobs:
           CUBS_PROGRAME_CALENDAR_URL: ${{ secrets.CUBS_PROGRAME_CALENDAR_URL }}
           SCOUTS_EVENTS_CALENDAR_URL: ${{ secrets.SCOUTS_EVENTS_CALENDAR_URL }}
           SCOUTS_PROGRAMME_CALENDAR_URL: ${{ secrets.SCOUTS_PROGRAMME_CALENDAR_URL }}
-          BEAVERS_EVENTS_CALENDAR_URL: ${{ secrets.BEAVERS_EVENTS_CALENDAR_URL }}
-          BEAVERS_PROGRAMME_CALENDAR_URL: ${{ secrets.BEAVERS_PROGRAMME_CALENDAR_URL }}
         run: cd lambdas/scouts && bash ./deploy.sh
 
       - name: Deploy Scouts Slack handler
