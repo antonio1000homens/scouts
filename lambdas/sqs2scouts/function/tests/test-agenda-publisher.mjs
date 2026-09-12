@@ -30,6 +30,7 @@ function canonical(overrides = {}) {
       image: { theme: null, url: null },
       status: { isHidden: false, isApproved: false },
     },
+    requests: [],
     ...overrides,
   };
 }
@@ -57,6 +58,25 @@ test('publishes image, approval, and visibility changes from the canonical HEX e
     image: { theme: 'Watercolour water fight', url: 'website/eventImages/water-games.jpg' },
     status: { isHidden: true, isApproved: true },
   });
+});
+
+test('publisher rejects compatibility fields in canonical metadata', () => {
+  const legacy = canonical();
+  legacy.metadata.hexId = HEX;
+  assert.throws(
+    () => mergeCanonicalEventIntoAgenda(agenda(), legacy, HEX),
+    /metadata contains unsupported fields: hexId/,
+  );
+});
+
+test('publisher only matches agenda entries by canonical metadata.hex', () => {
+  const legacyAgenda = agenda();
+  legacyAgenda.events[0].hex = HEX;
+  delete legacyAgenda.events[0].metadata.hex;
+  assert.throws(
+    () => mergeCanonicalEventIntoAgenda(legacyAgenda, canonical(), HEX),
+    (error) => error?.code === 'AGENDA_EVENT_NOT_FOUND',
+  );
 });
 
 test('missing agenda event fails publication instead of claiming completion', () => {
