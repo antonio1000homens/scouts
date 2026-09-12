@@ -3,6 +3,13 @@ const JSON_HEADERS = {
   "cache-control": "no-store",
 };
 
+const ACCESS_JWKS_TTL_MS = 5 * 60 * 1000;
+let accessJwksCache = {
+  url: "",
+  expiresAt: 0,
+  keys: [],
+};
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
 }
@@ -40,7 +47,6 @@ async function handleContact(request, env) {
     );
   }
 
-  // Validate required secrets
   const turnstileSecret = (env.TURNSTILE_SECRET_KEY || "").trim();
   const iftttKey = (env.IFTTT_WEBHOOK_KEY || "").trim();
   const iftttEvent = (env.IFTTT_EVENT_NAME || "scouts_contact").trim();
@@ -66,7 +72,6 @@ async function handleContact(request, env) {
     );
   }
 
-  // Parse request body
   let body;
   try {
     body = await request.json();
@@ -79,7 +84,6 @@ async function handleContact(request, env) {
 
   const { name, email, message, turnstileToken } = body;
 
-  // Validate required fields
   if (!name || !email || !message || !turnstileToken) {
     return new Response(
       JSON.stringify({
@@ -91,7 +95,6 @@ async function handleContact(request, env) {
     );
   }
 
-  // Verify Turnstile CAPTCHA
   const remoteIp =
     request.headers.get("cf-connecting-ip") ||
     request.headers.get("x-forwarded-for") ||
@@ -109,7 +112,6 @@ async function handleContact(request, env) {
     );
   }
 
-  // Forward to the IFTTT JSON-payload webhook endpoint.
   const iftttUrl = `https://maker.ifttt.com/trigger/${encodeURIComponent(iftttEvent)}/json/with/key/${encodeURIComponent(iftttKey)}`;
   const iftttResp = await fetch(iftttUrl, {
     method: "POST",
@@ -124,15 +126,12 @@ async function handleContact(request, env) {
   });
 
   if (!iftttResp.ok) {
-    const responseText = await iftttResp.text();
     return new Response(
       JSON.stringify({
         ok: false,
         code: "NOTIFICATION_FAILED",
         message: "Failed to send notification. Please try again later.",
         upstreamStatus: iftttResp.status,
-        upstreamStatusText: iftttResp.statusText,
-        upstreamBody: responseText,
       }),
       { status: 502, headers: { ...JSON_HEADERS, ...corsHeaders } },
     );
@@ -144,15 +143,145 @@ async function handleContact(request, env) {
   );
 }
 
-function isAccessAuthenticated(request) {
-  const jwt = request.headers.get("cf-access-jwt-assertion");
-  return Boolean(jwt && jwt.trim());
+function normalizeTeamDomain(value) {
+  const raw = (value || "").trim().replace(/\/+$/, "");
+  if (!raw) return "";
+
+  try {
+    const url = new URL(raw.includes("://") ? raw : `https://${raw}`);
+    if (url.protocol !== "https:") return "";
+    if (!url.hostname.endsWith(".cloudflareaccess.com")) return "";
+    if (url.pathname !== "/" || url.search || url.hash) return "";
+    return url.origin;
+  } catch {
+    return "";
+  }
 }
 
-function requireAccess(request, env) {
+function base64UrlBytes(value) {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function decodeJwtJson(value) {
+  return JSON.parse(new TextDecoder().decode(base64UrlBytes(value)));
+}
+
+function audienceMatches(actual, expected) {
+  if (typeof actual === "string") return actual === expected;
+  return Array.isArray(actual) && actual.includes(expected);
+}
+
+async function getAccessJwks(teamDomain) {
+  const certsUrl = `${teamDomain}/cdn-cgi/access/certs`;
+  const now = Date.now();
+  if (
+    accessJwksCache.url === certsUrl &&
+    accessJwksCache.expiresAt > now &&
+    accessJwksCache.keys.length > 0
+  ) {
+    return accessJwksCache.keys;
+  }
+
+  const response = await fetch(certsUrl, {
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) throw new Error("Unable to retrieve Cloudflare Access signing keys");
+
+  const payload = await response.json();
+  if (!Array.isArray(payload?.keys) || payload.keys.length === 0) {
+    throw new Error("Cloudflare Access signing keys are unavailable");
+  }
+
+  accessJwksCache = {
+    url: certsUrl,
+    expiresAt: now + ACCESS_JWKS_TTL_MS,
+    keys: payload.keys,
+  };
+  return payload.keys;
+}
+
+async function verifyAccessJwt(token, env) {
+  const teamDomain = normalizeTeamDomain(env.TEAM_DOMAIN);
+  const policyAudience = (env.POLICY_AUD || "").trim();
+  if (!teamDomain || !policyAudience) {
+    return { ok: false, configError: true };
+  }
+
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return { ok: false };
+
+    const [encodedHeader, encodedPayload, encodedSignature] = parts;
+    const header = decodeJwtJson(encodedHeader);
+    const payload = decodeJwtJson(encodedPayload);
+
+    if (header?.alg !== "RS256" || typeof header?.kid !== "string" || !header.kid) {
+      return { ok: false };
+    }
+
+    const keys = await getAccessJwks(teamDomain);
+    const jwk = keys.find((key) => key?.kid === header.kid && key?.kty === "RSA");
+    if (!jwk) return { ok: false };
+
+    const publicKey = await crypto.subtle.importKey(
+      "jwk",
+      jwk,
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+    const signatureValid = await crypto.subtle.verify(
+      "RSASSA-PKCS1-v1_5",
+      publicKey,
+      base64UrlBytes(encodedSignature),
+      new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`),
+    );
+    if (!signatureValid) return { ok: false };
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (payload?.iss !== teamDomain) return { ok: false };
+    if (!audienceMatches(payload?.aud, policyAudience)) return { ok: false };
+    if (typeof payload?.exp !== "number" || payload.exp <= nowSeconds) return { ok: false };
+    if (typeof payload?.nbf === "number" && payload.nbf > nowSeconds + 30) return { ok: false };
+
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+}
+
+async function requireAccess(request, env) {
   const mustRequire = (env.REQUIRE_CF_ACCESS || "true").toLowerCase() === "true";
   if (!mustRequire) return null;
-  if (isAccessAuthenticated(request)) return null;
+
+  const jwt = (request.headers.get("cf-access-jwt-assertion") || "").trim();
+  if (!jwt) {
+    return json(
+      {
+        ok: false,
+        code: "ACCESS_UNAUTHENTICATED",
+        message: "Cloudflare Access session missing or expired. Re-login required.",
+      },
+      401,
+    );
+  }
+
+  const verification = await verifyAccessJwt(jwt, env);
+  if (verification.ok) return null;
+  if (verification.configError) {
+    return json(
+      {
+        ok: false,
+        code: "ACCESS_CONFIG_MISSING",
+        message: "Cloudflare Access JWT validation is not configured.",
+      },
+      500,
+    );
+  }
+
   return json(
     {
       ok: false,
@@ -188,13 +317,6 @@ function requireConfig(env) {
   return null;
 }
 
-function keySuffix(value) {
-  const key = (value || "").trim();
-  if (!key) return "";
-  if (key.length <= 4) return key;
-  return key.slice(-4);
-}
-
 async function proxyToLambda(request, lambdaBaseUrl, apiKey) {
   const safeApiKey = (apiKey || "").trim();
   const upstreamUrl = new URL(lambdaBaseUrl);
@@ -206,7 +328,6 @@ async function proxyToLambda(request, lambdaBaseUrl, apiKey) {
   headers.delete("cf-connecting-ip");
   headers.delete("x-forwarded-for");
   upstreamUrl.searchParams.set("apiKey", safeApiKey);
-  // Support Lambdas expecting either query-string apiKey or x-api-key header.
   headers.set("x-api-key", safeApiKey);
 
   const init = {
@@ -308,7 +429,7 @@ export default {
       if (request.method !== "GET") {
         return json({ ok: false, code: "METHOD_NOT_ALLOWED" }, 405);
       }
-      const accessErr = requireAccess(request, env);
+      const accessErr = await requireAccess(request, env);
       if (accessErr) return accessErr;
       const configErr = requireConfig(env);
       if (configErr) return configErr;
@@ -319,7 +440,7 @@ export default {
       return json({ ok: false, code: "NOT_FOUND", message: "Not found" }, 404);
     }
 
-    const accessErr = requireAccess(request, env);
+    const accessErr = await requireAccess(request, env);
     if (accessErr) return accessErr;
 
     const configErr = requireConfig(env);
@@ -332,7 +453,6 @@ export default {
           code: "READY",
           message: "Proxy and API key are configured.",
           scoutsEndpoint: "/admin-api/scouts",
-          apiKeyLast4: keySuffix(env.SCOUTS_LAMBDA_API_KEY),
         },
         200,
       );

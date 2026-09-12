@@ -1,16 +1,15 @@
 name: Repair Scouts deployment permissions
 
 on:
-  push:
-    branches:
-      - master
-    paths:
-      - .github/workflows/repair-shared-layer-permission.yml
   workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type REPAIR to confirm this exceptional IAM mutation
+        required: true
+        type: string
 
 permissions:
   contents: read
-  id-token: write
 
 env:
   AWS_REGION: eu-west-2
@@ -19,6 +18,13 @@ env:
 
 jobs:
   repair-deployment-permissions:
+    if: >-
+      github.ref == 'refs/heads/master' &&
+      github.actor == github.repository_owner &&
+      github.event.inputs.confirmation == 'REPAIR'
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     steps:
       - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6

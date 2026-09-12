@@ -2,6 +2,7 @@ name = "scouts-admin-proxy"
 main = "worker.js"
 compatibility_date = "2026-03-03"
 account_id = "9a5523112f1460d0f77c9ba239d00029"
+workers_dev = false
 
 routes = [
   { pattern = "2ndtolworth.org.uk/admin-api/*", zone_name = "2ndtolworth.org.uk" },
@@ -11,7 +12,9 @@ routes = [
 ]
 
 [vars]
-# Set to "true" to require a Cloudflare Access JWT on incoming requests.
+# Production admin/private routes require a cryptographically validated Cloudflare
+# Access assertion. TEAM_DOMAIN and POLICY_AUD are intentionally managed as remote
+# Worker variables and preserved by deploy-ci.sh rather than committed here.
 REQUIRE_CF_ACCESS = "true"
 SCOUTS_URL = "https://w6yfull3fisjxefw2lknyblezu0kbokv.lambda-url.eu-west-2.on.aws/"
 IFTTT_EVENT_NAME = "scoutsContactForm"
