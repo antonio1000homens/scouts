@@ -36,10 +36,6 @@ test('tracked text does not contain developer home-directory paths', () => {
 
   for (const path of trackedFiles) {
     const bytes = readFileSync(path);
-
-    // Git-tracked text files do not necessarily have a conventional extension
-    // (.gitignore, .env.example, Dockerfile, etc.). Inspect every tracked file
-    // and skip only files that are clearly binary based on an embedded NUL byte.
     if (bytes.includes(0)) continue;
 
     const content = bytes.toString('utf8');
@@ -102,8 +98,6 @@ test('empty or pending calendar values disable feeds and Lambda reuse is explici
   assert.doesNotMatch(deployScript, /missing_calendar_variables/);
   assert.doesNotMatch(deployScript, /Normal deployments fail closed/);
 
-  // The historical typo remains only as a deploy.sh compatibility alias; it is
-  // deliberately absent from the CI workflow above.
   assert.match(deployScript, /CUBS_PROGRAME_CALENDAR_URL/);
 });
 
@@ -181,6 +175,40 @@ test('private runtime and HEX objects are reachable only through the Access-prot
   assert.match(scoutsEntry, /command\.subject === 'snapshot'/);
   assert.match(scoutsEntry, /command\.subject === 'event'/);
   assert.match(scoutsEntry, /`events\/\$\{hex\}\.json`/);
+});
+
+test('admin proxy validates Cloudflare Access JWTs cryptographically and disables alternate Worker endpoints', () => {
+  const wrangler = readFileSync('cloudflare/scouts-admin-proxy/wrangler.toml', 'utf8');
+  const worker = readFileSync('cloudflare/scouts-admin-proxy/worker.js', 'utf8');
+  const deployScript = readFileSync('cloudflare/scouts-admin-proxy/deploy-ci.sh', 'utf8');
+
+  assert.match(wrangler, /^workers_dev\s*=\s*false$/m);
+  assert.match(worker, /TEAM_DOMAIN/);
+  assert.match(worker, /POLICY_AUD/);
+  assert.match(worker, /cloudflareaccess\.com/);
+  assert.match(worker, /\/cdn-cgi\/access\/certs/);
+  assert.match(worker, /crypto\.subtle\.importKey/);
+  assert.match(worker, /crypto\.subtle\.verify/);
+  assert.match(worker, /header\?\.alg !== "RS256"/);
+  assert.match(worker, /payload\?\.iss !== teamDomain/);
+  assert.match(worker, /audienceMatches\(payload\?\.aud, policyAudience\)/);
+  assert.match(worker, /payload\.exp <= nowSeconds/);
+  assert.match(worker, /await requireAccess\(request, env\)/);
+  assert.doesNotMatch(worker, /isAccessAuthenticated/);
+  assert.doesNotMatch(worker, /apiKeyLast4/);
+  assert.match(deployScript, /wrangler deploy .*--keep-vars/);
+});
+
+test('exceptional IAM repair workflow is manual, owner-gated and explicitly confirmed', () => {
+  const workflow = readFileSync('.github/workflows/repair-shared-layer-permission.yml', 'utf8');
+
+  assert.match(workflow, /\n  workflow_dispatch:\n/);
+  assert.doesNotMatch(workflow, /\n  push:\n/);
+  assert.match(workflow, /confirmation:/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/master'/);
+  assert.match(workflow, /github\.actor == github\.repository_owner/);
+  assert.match(workflow, /github\.event\.inputs\.confirmation == 'REPAIR'/);
+  assert.match(workflow, /\n    permissions:\n      contents: read\n      id-token: write\n/);
 });
 
 test('formerly public private prefixes are invalidated and the S3 origin is anonymously private', () => {
