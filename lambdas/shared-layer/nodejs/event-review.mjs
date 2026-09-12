@@ -96,6 +96,9 @@ export function buildApprovedSnapshotPatch(snapshot) {
 
   const imageUrl = text(snapshot.imageUrl);
   const imageTheme = text(snapshot.imageTheme);
+  if (!imageUrl && !imageTheme) {
+    throw new Error('Approval without an image requires an image theme before generation can start');
+  }
   return {
     metadata: {
       hex,
