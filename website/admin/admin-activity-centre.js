@@ -1,4 +1,4 @@
-// Single browser-facing request lifecycle client. Request IDs own progress;
+// Single browser-facing request lifecycle client. Root operation IDs own progress;
 // agenda polling only confirms that the affected HEX is now rendered.
 (function () {
     const STORAGE_KEY = 'scouts_admin_tracked_request_ids';
@@ -12,10 +12,28 @@
     let unread = 0;
 
     function text(value) { return value == null ? '' : String(value).trim(); }
+    function escapeHtml(value) {
+        return text(value)
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#039;');
+    }
     function saveTracked() { localStorage.setItem(STORAGE_KEY, JSON.stringify([...tracked].slice(-100))); }
     function requestLabel(request) { return request.title || request.hex || 'Event change'; }
     function activityCommand(action, extra = {}) { return originalSend({ realm: 'runtime', subject: 'activity', action, ...extra }); }
-    function stateLabel(request) { return text(request?.state).replaceAll('_', ' ') || 'processing'; }
+    function stateLabel(request) {
+        if (text(request?.displayMessage)) return text(request.displayMessage);
+        const state = text(request?.state).toLowerCase();
+        if (state === 'awaiting_review') return 'Published — awaiting image approval';
+        if (state === 'awaiting_image') return 'Generating image — final review required';
+        if (state === 'waiting_for_retry') return 'Waiting for retry';
+        if (state === 'needs_attention' || state === 'manual_review' || state === 'failed') return 'Needs attention';
+        if (state === 'completed') return 'Completed';
+        if (state === 'queued' || state === 'accepted') return 'Waiting';
+        return state.replaceAll('_', ' ') || 'Processing';
+    }
 
     function ensureUi() {
         if (document.getElementById('activity-centre-open')) return;
@@ -27,7 +45,7 @@
 
         const stack = document.createElement('div'); stack.id = 'activity-toast-stack'; stack.setAttribute('aria-live', 'polite'); document.body.appendChild(stack);
         const drawer = document.createElement('aside'); drawer.id = 'activity-centre-drawer'; drawer.setAttribute('aria-label', 'Activity log');
-        drawer.innerHTML = '<header><div><h2>Activity</h2><p>Changes from the last seven days.</p></div><button type="button" class="btn btn-secondary" id="activity-centre-close">Close</button></header><div class="activity-log-filters"><input id="activity-log-hex" placeholder="Filter by HEX"><select id="activity-log-state"><option value="">All states</option><option value="completed">Completed</option><option value="needs_attention">Needs attention</option><option value="failed">Failed</option><option value="processing">Processing</option></select><button type="button" class="btn btn-secondary" id="activity-log-filter">Filter</button></div><div id="activity-log-list"><p>Loading activity…</p></div>';
+        drawer.innerHTML = '<header><div><h2>Activity</h2><p>Changes from the last seven days.</p></div><button type="button" class="btn btn-secondary" id="activity-centre-close">Close</button></header><div class="activity-log-filters"><input id="activity-log-hex" placeholder="Filter by HEX"><select id="activity-log-state"><option value="">All states</option><option value="completed">Completed</option><option value="needs_attention">Needs attention</option><option value="failed">Failed</option><option value="processing">Processing</option><option value="awaiting_image">Generating image</option><option value="awaiting_review">Awaiting image approval</option></select><button type="button" class="btn btn-secondary" id="activity-log-filter">Filter</button></div><div id="activity-log-list"><p>Loading activity…</p></div>';
         document.body.appendChild(drawer);
         drawer.querySelector('#activity-centre-close').addEventListener('click', () => drawer.classList.remove('open'));
         drawer.querySelector('#activity-log-filter').addEventListener('click', () => loadHistory());
@@ -37,9 +55,9 @@
     function notify(request, initial = false) {
         if (initial) return;
         unread += 1; renderUnread();
-        const toast = document.createElement('article'); toast.className = `activity-toast activity-${request.state}`;
+        const toast = document.createElement('article'); toast.className = `activity-toast activity-${request.displayState || request.state}`;
         const failure = request.failure?.message ? `: ${request.failure.message}` : '';
-        toast.innerHTML = `<button type="button" aria-label="Dismiss">×</button><strong>${requestLabel(request)}</strong><span>${stateLabel(request)}${failure}</span><a href="#">View activity</a>`;
+        toast.innerHTML = `<button type="button" aria-label="Dismiss">×</button><strong>${escapeHtml(requestLabel(request))}</strong><span>${escapeHtml(stateLabel(request))}${escapeHtml(failure)}</span><a href="#">View activity</a>`;
         toast.querySelector('button').addEventListener('click', () => toast.remove());
         toast.querySelector('a').addEventListener('click', (event) => { event.preventDefault(); document.getElementById('activity-centre-open')?.click(); });
         document.getElementById('activity-toast-stack')?.appendChild(toast);
@@ -47,7 +65,7 @@
     }
     function notifyMessage(message, tone = 'info', duration = 5000) {
         const toast = document.createElement('article'); toast.className = `activity-toast activity-${tone}`;
-        toast.innerHTML = `<button type="button" aria-label="Dismiss">×</button><strong>${message}</strong><a href="#">View activity</a>`;
+        toast.innerHTML = `<button type="button" aria-label="Dismiss">×</button><strong>${escapeHtml(message)}</strong><a href="#">View activity</a>`;
         toast.querySelector('button').addEventListener('click', () => toast.remove());
         toast.querySelector('a').addEventListener('click', (event) => { event.preventDefault(); document.getElementById('activity-centre-open')?.click(); });
         document.getElementById('activity-toast-stack')?.appendChild(toast);
@@ -55,9 +73,14 @@
     }
 
     async function reconcileAgenda(requests) {
-        const published = requests.filter((request) => request.state === 'completed' && request.hex);
-        if (!published.length || typeof window.loadEvents !== 'function') return;
-        await window.loadEvents({ silent: true, notifyOnAgendaChanges: true, onlyIfChanged: true, notificationSource: 'Activity published' });
+        const refreshable = requests.filter((request) => request.hex && (
+            request.state === 'completed'
+            || request.state === 'awaiting_review'
+            || request.publication === 'published'
+        ));
+        if (!refreshable.length || typeof window.loadEvents !== 'function') return;
+        await window.loadEvents({ silent: true, notifyOnAgendaChanges: true, onlyIfChanged: true, notificationSource: 'Activity workflow update' });
+        if (typeof window.updateModalContent === 'function') window.updateModalContent();
     }
 
     async function viewEvent(hex) {
@@ -83,15 +106,19 @@
                 : { activity: { requests: [] } };
             const requests = [...statusRequests, ...(lookup?.activity?.requests || [])]
                 .filter((request, index, list) => list.findIndex((candidate) => candidate.requestId === request.requestId) === index);
+            const changed = [];
             for (const request of requests) {
-                const fingerprint = `${request.state}|${request.stage}|${request.updatedAt}|${request.failure?.message || ''}`;
+                const fingerprint = `${request.state}|${request.stage}|${request.displayMessage || ''}|${request.publication || ''}|${request.updatedAt}|${request.failure?.message || ''}`;
                 const previous = known.get(request.requestId);
                 known.set(request.requestId, fingerprint);
                 if (request.requestId && !TERMINAL.has(request.state)) { tracked.add(request.requestId); saveTracked(); }
                 if (request.requestId && TERMINAL.has(request.state)) { tracked.delete(request.requestId); saveTracked(); }
-                if (previous !== fingerprint) notify(request, previous === undefined && !tracked.has(request.requestId));
+                if (previous !== fingerprint) {
+                    changed.push(request);
+                    notify(request, previous === undefined && !tracked.has(request.requestId));
+                }
             }
-            await reconcileAgenda(requests);
+            await reconcileAgenda(changed);
         } catch (error) { console.warn('[ActivityCentre] Activity refresh failed', error); }
     }
 
@@ -100,10 +127,19 @@
         target.replaceChildren();
         if (!requests.length) { target.textContent = 'No activity found.'; return; }
         requests.forEach((request) => {
-            const item = document.createElement('article'); item.className = `activity-log-item activity-${request.state}`;
-            const failure = request.failure?.message ? `<p>${request.failure.message}</p>` : '';
-            const timeline = (request.timeline || []).map((entry) => `<li>${new Date(entry.at).toLocaleString('en-GB')} · ${text(entry.state).replaceAll('_', ' ')}</li>`).join('');
-            item.innerHTML = `<h3>${requestLabel(request)}</h3><p>${stateLabel(request)} · ${request.action || 'change'} · ${request.publication || 'not published'}</p><code>${request.hex || ''}</code>${failure}<details><summary>Timeline</summary><ol>${timeline}</ol></details>`;
+            const item = document.createElement('article'); item.className = `activity-log-item activity-${request.displayState || request.state}`;
+            const failure = request.failure?.message ? `<p>${escapeHtml(request.failure.message)}</p>` : '';
+            const timeline = (request.timeline || []).map((entry) => `<li>${new Date(entry.at).toLocaleString('en-GB')} · ${escapeHtml(stateLabel(entry))}</li>`).join('');
+            const childIds = Array.isArray(request.childRequestIds) ? request.childRequestIds.filter(Boolean) : [];
+            const diagnostics = [
+                request.rootRequestId ? `<p><strong>Operation:</strong> <code>${escapeHtml(request.rootRequestId)}</code></p>` : '',
+                request.hex ? `<p><strong>Event HEX:</strong> <code>${escapeHtml(request.hex)}</code></p>` : '',
+                request.stage ? `<p><strong>Internal stage:</strong> <code>${escapeHtml(request.stage)}</code></p>` : '',
+                request.action ? `<p><strong>Internal action:</strong> <code>${escapeHtml(request.action)}</code></p>` : '',
+                request.publication ? `<p><strong>Publication:</strong> <code>${escapeHtml(request.publication)}</code></p>` : '',
+                childIds.length ? `<p><strong>Child requests:</strong> ${childIds.map((id) => `<code>${escapeHtml(id)}</code>`).join(' ')}</p>` : '',
+            ].join('');
+            item.innerHTML = `<h3>${escapeHtml(requestLabel(request))}</h3><p>${escapeHtml(stateLabel(request))}</p>${failure}<details><summary>Timeline and diagnostics</summary><ol>${timeline}</ol>${diagnostics}</details>`;
             if (request.hex) {
                 const button = document.createElement('button');
                 button.type = 'button'; button.className = 'btn btn-secondary activity-view-event'; button.textContent = 'View event';
@@ -142,7 +178,7 @@
     window.sendScoutsCommand = async function activityAwareCommand(payload) {
         const result = await originalSend(payload);
         if (payload?.realm !== 'runtime') {
-            const requestId = text(result?.requestId || result?.request?.requestId || result?.activity?.requestId);
+            const requestId = text(result?.rootRequestId || result?.requestId || result?.request?.requestId || result?.activity?.requestId);
             if (requestId) { tracked.add(requestId); saveTracked(); poll(); }
         }
         return result;
