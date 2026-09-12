@@ -9,7 +9,6 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
 
 const AGENDA_URL = '/agenda.json';
 const FALLBACK_AGENDA_URL = 'https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com/agenda.json';
-const LEGACY_S3_SITE_ORIGIN = 'https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com';
 const S3_OBJECT_BASE_URL = 'https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com';
 const EVENT_LOADER_SCRIPT_URL = new URL(
     document.currentScript?.src || 'event-loader.js',
@@ -19,6 +18,14 @@ const LOCAL_WEBSITE_BASE_URL = new URL('..', EVENT_LOADER_SCRIPT_URL);
 const LOCAL_AGENDA_URL = new URL('../agenda.json', LOCAL_WEBSITE_BASE_URL).href;
 const CONTACT_PAGE_URL = new URL('contact/index.html', LOCAL_WEBSITE_BASE_URL).href;
 
+const CANONICAL_METADATA_KEYS = ['hex', 'tagline', 'image', 'status'];
+const CANONICAL_IMAGE_KEYS = ['theme', 'url'];
+const CANONICAL_STATUS_KEYS = ['isHidden', 'isApproved'];
+const LEGACY_ENRICHMENT_TOP_LEVEL_KEYS = [
+    'hex', 'hexId', 'tagline', 'AI', 'ai', 'image', 'imageTheme', 'imageUrl', 'sourceImg',
+    'status', 'approved', 'isApproved', 'isHidden', 'hidden', 'hiddenAt'
+];
+
 async function fetchAgendaJson() {
     const requestUrls = [AGENDA_URL, LOCAL_AGENDA_URL, FALLBACK_AGENDA_URL].map((url) => `${url}?ts=${Date.now()}`);
     let lastError = null;
@@ -26,9 +33,7 @@ async function fetchAgendaJson() {
     for (const url of requestUrls) {
         try {
             const response = await fetch(url, { cache: 'no-store' });
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             return await response.json();
         } catch (error) {
             lastError = error;
@@ -36,6 +41,47 @@ async function fetchAgendaJson() {
     }
 
     throw lastError ?? new Error('Failed to load agenda.json');
+}
+
+function isObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function assertExactKeys(value, allowedKeys, label) {
+    const extras = Object.keys(value || {}).filter((key) => !allowedKeys.includes(key));
+    if (extras.length > 0) throw new Error(`${label} contains unsupported fields: ${extras.sort().join(', ')}`);
+}
+
+function canonicalText(value, label, { nullable = true } = {}) {
+    if (value === null && nullable) return null;
+    if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} must be a non-empty string${nullable ? ' or null' : ''}`);
+    return value.trim();
+}
+
+function assertCanonicalAgendaEvent(event) {
+    if (!isObject(event)) throw new Error('agenda event must be an object');
+    const legacyFields = LEGACY_ENRICHMENT_TOP_LEVEL_KEYS.filter((key) => Object.prototype.hasOwnProperty.call(event, key));
+    if (legacyFields.length > 0) {
+        throw new Error(`agenda event contains legacy enrichment fields: ${legacyFields.sort().join(', ')}`);
+    }
+
+    const metadata = event.metadata;
+    if (!isObject(metadata)) throw new Error('agenda event metadata must be an object');
+    assertExactKeys(metadata, CANONICAL_METADATA_KEYS, 'metadata');
+    const hex = canonicalText(metadata.hex, 'metadata.hex', { nullable: false }).toLowerCase();
+    if (!/^[0-9a-f]+$/.test(hex)) throw new Error('metadata.hex must be lowercase hexadecimal');
+    if (metadata.tagline !== null) canonicalText(metadata.tagline, 'metadata.tagline');
+
+    if (!isObject(metadata.image)) throw new Error('metadata.image must be an object');
+    assertExactKeys(metadata.image, CANONICAL_IMAGE_KEYS, 'metadata.image');
+    if (metadata.image.theme !== null) canonicalText(metadata.image.theme, 'metadata.image.theme');
+    if (metadata.image.url !== null) canonicalText(metadata.image.url, 'metadata.image.url');
+
+    if (!isObject(metadata.status)) throw new Error('metadata.status must be an object');
+    assertExactKeys(metadata.status, CANONICAL_STATUS_KEYS, 'metadata.status');
+    if (typeof metadata.status.isHidden !== 'boolean') throw new Error('metadata.status.isHidden must be boolean');
+    if (typeof metadata.status.isApproved !== 'boolean') throw new Error('metadata.status.isApproved must be boolean');
+    return event;
 }
 
 function normaliseDateString(value) {
@@ -52,26 +98,18 @@ function normaliseDateString(value) {
     return value;
 }
 
-function getSourceData(event) {
-    return event?.source && typeof event.source === 'object' ? event.source : null;
-}
-
 function getMetadataData(event) {
-    return event?.metadata && typeof event.metadata === 'object' ? event.metadata : null;
+    return isObject(event?.metadata) ? event.metadata : null;
 }
 
 function getStatusData(event) {
     const metadata = getMetadataData(event);
-    if (metadata?.status && typeof metadata.status === 'object') {
-        return metadata.status;
-    }
-    return event?.status && typeof event.status === 'object' ? event.status : null;
+    return isObject(metadata?.status) ? metadata.status : null;
 }
 
 function getEventDate(event) {
     if (!event) return null;
-    const source = getSourceData(event);
-    const candidate = source?.dtstart || event.dtstart || event.start?.iso || event.start?.raw || event.start;
+    const candidate = event.dtstart || event.start?.iso || event.start?.raw || event.start;
     const normalised = normaliseDateString(candidate);
     if (!normalised) return null;
     const parsed = new Date(normalised);
@@ -86,64 +124,30 @@ function formatDisplayDate(dateOrString) {
 }
 
 function isApprovedEventImage(event) {
-    if (!event || typeof event !== 'object') return false;
-    const metadata = getMetadataData(event);
-    const status = getStatusData(event);
-    const image = metadata?.image ?? event.image;
-    if (status?.isApproved === true) return true;
-    if (event.approved === true || event.isApproved === true) return true;
-    if (image && typeof image === 'object' && image.isApproved === true) return true;
-    return false;
+    return getStatusData(event)?.isApproved === true;
 }
 
 function resolveImageUrl(event) {
-    if (!event) return null;
     if (!isApprovedEventImage(event)) return null;
-    const metadata = getMetadataData(event);
-    const image = metadata?.image ?? event.image;
-    const imageUrl = event.imageUrl;
-    if (typeof image === 'string') return normaliseImagePath(image);
-    if (typeof imageUrl === 'string') return normaliseImagePath(imageUrl);
-    if (image && typeof image === 'object') {
-        if (typeof image.url === 'string') return normaliseImagePath(image.url);
-        if (typeof image.src === 'string') return normaliseImagePath(image.src);
-        if (typeof image.href === 'string') return normaliseImagePath(image.href);
-    }
-    return null;
+    const imageUrl = getMetadataData(event)?.image?.url;
+    return typeof imageUrl === 'string' ? normaliseImagePath(imageUrl) : null;
 }
 
 function normaliseImagePath(url) {
     if (!url || typeof url !== 'string') return url;
     const trimmed = url.trim();
     if (!trimmed) return trimmed;
-    if (trimmed.startsWith(`${LEGACY_S3_SITE_ORIGIN}/website/`)) {
-        return `${S3_OBJECT_BASE_URL}${trimmed.slice(LEGACY_S3_SITE_ORIGIN.length)}`;
-    }
-    if (/^https?:\/\//i.test(trimmed)) {
-        return trimmed;
-    }
-    if (trimmed.startsWith('/website/eventImages/')) {
-        return `${S3_OBJECT_BASE_URL}${trimmed}`;
-    }
-    if (trimmed.startsWith('website/eventImages/')) {
-        return `${S3_OBJECT_BASE_URL}/${trimmed}`;
-    }
-    if (!trimmed.includes('/') && /\.(?:avif|gif|jpe?g|png|webp)$/i.test(trimmed)) {
-        return `${S3_OBJECT_BASE_URL}/website/eventImages/${trimmed}`;
-    }
-    if (trimmed.startsWith('/')) {
-        return trimmed;
-    }
-    return `/${trimmed.replace(/^(\.\/)+/, '')}`;
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    if (trimmed.startsWith('/website/eventImages/')) return `${S3_OBJECT_BASE_URL}${trimmed}`;
+    if (trimmed.startsWith('website/eventImages/')) return `${S3_OBJECT_BASE_URL}/${trimmed}`;
+    throw new Error(`Unsupported canonical event image path: ${trimmed}`);
 }
 
 function withImageWidthParam(imageUrl, width = 400) {
     if (!imageUrl || typeof imageUrl !== 'string') return null;
     const trimmed = imageUrl.trim();
     if (!trimmed) return null;
-    if (/[?&]w=\d+/i.test(trimmed)) {
-        return trimmed;
-    }
+    if (/[?&]w=\d+/i.test(trimmed)) return trimmed;
     const separator = trimmed.includes('?') ? '&' : '?';
     return `${trimmed}${separator}w=${width}`;
 }
@@ -172,31 +176,18 @@ const SECTION_BADGE_CONFIG = {
 };
 
 function normaliseSectionValue(value) {
-    if (value === undefined || value === null) {
-        return 'cubs';
-    }
+    if (value === undefined || value === null) return 'cubs';
     const normalized = String(value).trim().toLowerCase();
     if (!normalized) return 'cubs';
-    if (normalized === 'all' || normalized === 'group' || normalized === 'scouts' || normalized === 'all scouts') {
-        return 'all';
-    }
-    if (normalized.startsWith('beaver')) {
-        return 'beavers';
-    }
-    if (normalized.startsWith('cub')) {
-        return 'cubs';
-    }
+    if (normalized === 'all' || normalized === 'group' || normalized === 'scouts' || normalized === 'all scouts') return 'all';
+    if (normalized.startsWith('beaver')) return 'beavers';
+    if (normalized.startsWith('cub')) return 'cubs';
     return 'cubs';
 }
 
 function resolveEventSection(event) {
-    if (!event) return 'cubs';
-    const source = getSourceData(event);
-    return normaliseSectionValue(
-        source?.icsType ?? source?.section ?? event.icsType ?? event.section ?? event.audience ?? event.group ?? null,
-    );
+    return normaliseSectionValue(event?.icsType ?? event?.section ?? null);
 }
-
 
 function createEventBadgeMarkup(event) {
     const sectionKey = resolveEventSection(event);
@@ -211,65 +202,18 @@ function createEventHeading(tagName, event) {
 }
 
 function getTagline(event) {
-    if (!event || typeof event !== 'object') return null;
-    const metadata = getMetadataData(event);
-    return metadata?.tagline || event.tagline || event.AI || event.ai || event.aiPrompt || null;
+    return getMetadataData(event)?.tagline ?? null;
 }
 
 function isHiddenEvent(event) {
-    if (!event || typeof event !== 'object') return false;
-    const status = getStatusData(event);
-    if (status?.isHidden === true) return true;
-    if (typeof event.isHidden === 'boolean') return event.isHidden;
-    if (typeof event.isHidden === 'string') {
-        const normalized = event.isHidden.trim().toLowerCase();
-        if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
-        if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
-    }
-    return event.status === 'hidden' || event.hidden === true;
+    return getStatusData(event)?.isHidden === true;
 }
 
 function normaliseEventRecord(event) {
-    if (!event || typeof event !== 'object') return null;
-    const source = getSourceData(event);
-    const metadata = getMetadataData(event);
-    const status = getStatusData(event);
-    const normalised = {
-        ...event,
-        uid: source?.uid ?? event.uid,
-        title: source?.title ?? event.title ?? source?.summary ?? event.summary,
-        summary: source?.summary ?? event.summary ?? source?.title ?? event.title,
-        location: source?.location ?? event.location,
-        dtstart: source?.dtstart ?? event.dtstart,
-        section: source?.section ?? event.section,
-        icsType: source?.icsType ?? event.icsType,
-        tagline: metadata?.tagline ?? event.tagline,
-        image: metadata?.image ?? event.image,
-        hexId: metadata?.hex ?? metadata?.hexId ?? event.hexId ?? event.hex ?? null,
-        hex: metadata?.hex ?? metadata?.hexId ?? event.hexId ?? event.hex ?? null,
-        approved: status?.isApproved === true || event.approved === true,
-        status: status?.isHidden === true ? 'hidden' : event.status,
-    };
-
-    if (!normalised.title) {
-        normalised.title = normalised.summary || normalised.name || 'Scout event';
-    }
-
-    if (normalised.tagline === undefined) {
-        normalised.tagline = getTagline(normalised);
-    }
-
-    if (!normalised.location && normalised.place) {
-        normalised.location = normalised.place;
-    }
-
-    const imageUrl = resolveImageUrl(normalised);
-    if (imageUrl) {
-        normalised.imageUrl = imageUrl;
-    }
-
+    assertCanonicalAgendaEvent(event);
+    const normalised = { ...event };
+    if (!normalised.title) normalised.title = normalised.summary || normalised.name || 'Scout event';
     normalised.section = resolveEventSection(normalised);
-
     return normalised;
 }
 
@@ -337,12 +281,13 @@ function renderFutureEvents(events, container) {
         const sectionKey = resolveEventSection(event);
         const headingMarkup = createEventHeading('h4', event);
         const nextLabel = index === 0 ? '<p class="event-card-kicker">Coming next</p>' : '';
+        const tagline = getTagline(event);
         return `
             <div class="event-card${index === 0 ? ' event-card--next' : ''}" data-section="${sectionKey}">
                 ${nextLabel}
                 ${image}
                 ${headingMarkup}
-                ${getTagline(event) ? `<p class="ai-text">${getTagline(event)}</p>` : ''}
+                ${tagline ? `<p class="ai-text">${tagline}</p>` : ''}
             </div>
         `;
     }).join('');
@@ -424,17 +369,14 @@ function renderPastEventsCarousel(events, container) {
     const updateButtons = () => {
         const columns = getColumns();
         const maxIndex = Math.max(0, items.length - columns);
-        const atStart = currentIndex <= 0;
-        const atEnd = currentIndex >= maxIndex;
-        prevButton.disabled = atStart;
-        nextButton.disabled = atEnd;
+        prevButton.disabled = currentIndex <= 0;
+        nextButton.disabled = currentIndex >= maxIndex;
         const hideControls = maxIndex === 0;
         [prevButton, nextButton].forEach(btn => btn.classList.toggle('is-hidden', hideControls));
     };
 
     const updatePosition = () => {
-        const offset = getItemOffset() * currentIndex;
-        track.style.transform = `translateX(-${offset}px)`;
+        track.style.transform = `translateX(-${getItemOffset() * currentIndex}px)`;
     };
 
     const goTo = (index) => {
@@ -460,23 +402,35 @@ function renderPastEventsCarousel(events, container) {
 document.addEventListener('DOMContentLoaded', () => {
     fetchAgendaJson()
         .then(data => {
-            const events = (data.events || [])
-                .filter(event => {
-                    // Filter out hidden events
-                    if (isHiddenEvent(event)) {
-                        console.log('Filtering out hidden event:', event.uid ?? event.title);
-                        return false;
+            const rawEvents = Array.isArray(data.events) ? data.events : [];
+            const canonicalEvents = rawEvents
+                .map((event) => {
+                    try {
+                        return normaliseEventRecord(event);
+                    } catch (error) {
+                        console.error('[EventsLoader] Rejecting non-canonical agenda event', {
+                            title: event?.title ?? event?.summary ?? null,
+                            error: error?.message || String(error),
+                        });
+                        return null;
                     }
-                    return true;
                 })
-                .map(normaliseEventRecord)
                 .filter(Boolean);
-            console.log('[EventsLoader] S3 agenda.json fetched', {
-                totalEvents: data.events?.length ?? 0,
+            const events = canonicalEvents.filter(event => {
+                if (isHiddenEvent(event)) {
+                    console.log('Filtering out hidden event:', event.uid ?? event.title);
+                    return false;
+                }
+                return true;
+            });
+
+            console.log('[EventsLoader] agenda.json fetched', {
+                totalEvents: rawEvents.length,
+                canonicalEvents: canonicalEvents.length,
                 visibleEvents: events.length,
             });
-            const now = new Date();
 
+            const now = new Date();
             const parsedEvents = events
                 .map(event => {
                     const eventDate = getEventDate(event);
@@ -495,16 +449,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const futureEvents = parsedEvents
                 .filter(event => event.__eventDate > now)
                 .sort((a, b) => a.__eventDate - b.__eventDate);
-            console.log('[EventsLoader] Future events count:', futureEvents.length);
-
             const pastEvents = parsedEvents
                 .filter(event => event.__eventDate <= now)
                 .sort((a, b) => b.__eventDate - a.__eventDate);
-                    console.log('[EventsLoader] Past events count:', pastEvents.length);
-                    const upcomingEvents = futureEvents.slice(0, 3);
 
-                    renderFutureEvents(upcomingEvents, document.getElementById('future-events'));
-                    renderPastEventsCarousel(pastEvents, document.getElementById('past-events'));
+            console.log('[EventsLoader] Future events count:', futureEvents.length);
+            console.log('[EventsLoader] Past events count:', pastEvents.length);
+
+            renderFutureEvents(futureEvents.slice(0, 3), document.getElementById('future-events'));
+            renderPastEventsCarousel(pastEvents, document.getElementById('past-events'));
         })
         .catch(error => {
             console.error('Error loading events:', error);
@@ -514,15 +467,3 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 });
-
-function isHiddenEvent(event) {
-    const status = getStatusData(event);
-    if (status?.isHidden === true) return true;
-    if (typeof event?.isHidden === 'boolean') return event.isHidden;
-    if (typeof event?.isHidden === 'string') {
-        const normalized = event.isHidden.trim().toLowerCase();
-        if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
-        if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
-    }
-    return event?.status === 'hidden' || event?.hidden === true;
-}
