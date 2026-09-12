@@ -1,0 +1,52 @@
+name: Recover issue 94 implementation
+
+on:
+  push:
+    branches:
+      - issue-94-sync-admin-slack
+
+permissions:
+  contents: write
+
+jobs:
+  recover:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply implementation from guarded patch
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/issue-94-apply.yml')
+          source = workflow.read_text()
+          source = source.replace("from './lambdas/sqs2scouts/function/slack-decision-sync.mjs';", "from '../lambdas/sqs2scouts/function/slack-decision-sync.mjs';")
+          marker = "          python3 <<'PY'\n"
+          start = source.index(marker) + len(marker)
+          end = source.index("\n          PY\n", start)
+          patch = source[start:end]
+          # Undo YAML indentation before executing the embedded Python patch.
+          patch = '\n'.join(line[10:] if line.startswith('          ') else line for line in patch.splitlines())
+          exec(compile(patch, 'issue-94-embedded-patch.py', 'exec'), {})
+          PY
+
+      - name: Run targeted tests
+        run: |
+          node --check lambdas/sqs2scouts/function/slack-decision-sync.mjs
+          node --check lambdas/sqs2scouts/function/persistence-processor.mjs
+          node --check lambdas/scouts-slack-handler/function/slack-handler.mjs
+          node --test tests/issue-94-admin-slack-sync.integration.test.mjs
+          node --test lambdas/sqs2scouts/test-persist-patch-merge.mjs
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/issue-94-apply.yml .github/workflows/issue-94-recover.yml
+          git add -A
+          git commit -m "Synchronise admin and Slack event decisions"
+          git push origin HEAD:issue-94-sync-admin-slack
