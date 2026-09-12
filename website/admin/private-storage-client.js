@@ -2,6 +2,14 @@
 // This script loads after admin-script.js and replaces the direct S3 readers
 // with authenticated calls through /admin-api/scouts.
 (function () {
+    // Capture the base transport before presentation/activity layers wrap the
+    // mutation path. Runtime reads must not schedule mutation-side Activity
+    // refreshes simply because they share the same HTTP endpoint.
+    const readOnlySendScoutsCommand = sendScoutsCommand;
+    window.sendScoutsReadCommand = async function sendScoutsReadCommand(payload) {
+        return readOnlySendScoutsCommand(payload);
+    };
+
     function snapshotName(value) {
         const textValue = String(value || '').toLowerCase();
         if (textValue === 'queued' || textValue.includes('scoutsqueued')) return 'queued';
@@ -14,7 +22,7 @@
         const snapshot = snapshotName(snapshotRef);
         if (!snapshot) return null;
         try {
-            const result = await sendScoutsCommand({
+            const result = await window.sendScoutsReadCommand({
                 realm: 'runtime',
                 subject: 'snapshot',
                 action: 'get',
@@ -37,7 +45,7 @@
         if (nextRetryAt > now) return null;
 
         try {
-            const result = await sendScoutsCommand({
+            const result = await window.sendScoutsReadCommand({
                 realm: 'runtime',
                 subject: 'event',
                 action: 'get',
