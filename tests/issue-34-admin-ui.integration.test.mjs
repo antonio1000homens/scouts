@@ -16,7 +16,7 @@ const scoutsService = readFileSync('lambdas/scouts/function/scouts-service.mjs',
 const requestActivity = readFileSync('lambdas/shared-layer/nodejs/request-activity.mjs', 'utf8');
 const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
 const enrichmentState = readFileSync('lambdas/shared-layer/nodejs/enrichment-state.mjs', 'utf8');
-const imageProvider = readFileSync('lambdas/sqs2scouts/function/image-provider-adapter.mjs', 'utf8');
+const imageProvider = readFileSync('lambdas/sqs2scouts/function/image-provider-worker.mjs', 'utf8');
 
 function assertSyntax(path) {
   const result = spawnSync(process.execPath, ['--check', path], { encoding: 'utf8' });
