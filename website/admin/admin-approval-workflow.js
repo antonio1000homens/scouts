@@ -31,6 +31,46 @@
         };
     }
 
+    function approvalReadiness(event) {
+        return {
+            tagline: typeof getAIPrompt === 'function' && hasText(getAIPrompt(event)),
+            imageTheme: typeof getImageThemeOrLegacyPrompt === 'function' && hasText(getImageThemeOrLegacyPrompt(event)),
+            imageUrl: typeof hasRelativeImageUrl === 'function' && hasRelativeImageUrl(event),
+        };
+    }
+
+    function isEventReadyForApproval(event) {
+        if (!event || typeof event !== 'object') return false;
+        const readiness = approvalReadiness(event);
+        return readiness.tagline && readiness.imageTheme && readiness.imageUrl;
+    }
+    window.isEventReadyForApproval = isEventReadyForApproval;
+
+    function missingApprovalMetadata(event) {
+        const readiness = approvalReadiness(event);
+        const missing = [];
+        if (!readiness.tagline) missing.push('Tagline');
+        if (!readiness.imageTheme) missing.push('Image Theme');
+        if (!readiness.imageUrl) missing.push('Image URL');
+        return missing;
+    }
+
+    function isEntryReadyForApproval(entry) {
+        if (!entry || typeof entry !== 'object') return false;
+        if (typeof isEntryHidden === 'function' && isEntryHidden(entry)) return false;
+        if (typeof isEntryApproved === 'function' && isEntryApproved(entry)) return false;
+        const event = entry?.event && typeof entry.event === 'object' ? entry.event : entry;
+        const hex = typeof getEventHex === 'function' ? getEventHex(event) : event?.hex;
+        return hasText(hex) && isEventReadyForApproval(event);
+    }
+
+    // "Need Approval" is a workflow state only after enrichment has completed.
+    // Incomplete events remain under Missing Metadata and must not expose any
+    // approval affordance.
+    window.isEntryPendingApproval = function enrichedEntryPendingApproval(entry) {
+        return isEntryReadyForApproval(entry);
+    };
+
     function sameReviewableValues(left, right) {
         if (!left || !right) return false;
         return String(left.hex || '').toLowerCase() === String(right.hex || '').toLowerCase()
@@ -120,19 +160,40 @@
         ].join(' · ');
     }
 
-    function eventForApprovalButton(button) {
+    function entryForApprovalButton(button) {
         if (button?.id === 'modal-approve-button') {
-            return eventFromEntry(selectedEntry(typeof currentEventIndex === 'number' ? currentEventIndex : 0, true));
+            return selectedEntry(typeof currentEventIndex === 'number' ? currentEventIndex : 0, true);
         }
         const onclick = button?.getAttribute?.('onclick') || '';
         const match = onclick.match(/approveEvent\((\d+)/);
         if (!match) return null;
-        return eventFromEntry(selectedEntry(Number(match[1]), false));
+        return selectedEntry(Number(match[1]), false);
+    }
+
+    function eventForApprovalButton(button) {
+        return eventFromEntry(entryForApprovalButton(button));
+    }
+
+    function syncApprovalBadges(root = document) {
+        root.querySelectorAll('#events-container .event-card[data-event-card-index]').forEach((card) => {
+            const index = Number(card.dataset.eventCardIndex);
+            const entry = Number.isInteger(index) ? selectedEntry(index, false) : null;
+            const showApproval = isEntryReadyForApproval(entry);
+            card.querySelectorAll('.event-badge.approval').forEach((badge) => {
+                if (badge.hidden === showApproval) badge.hidden = !showApproval;
+            });
+        });
     }
 
     function relabelApprovalButtons(root = document) {
         root.querySelectorAll('button[value="approve"]').forEach((button) => {
-            const generatedReview = isGeneratedImageReview(eventForApprovalButton(button));
+            const entry = entryForApprovalButton(button);
+            const event = eventFromEntry(entry);
+            const showApproval = isEntryReadyForApproval(entry);
+            if (button.hidden === showApproval) button.hidden = !showApproval;
+            if (!showApproval) return;
+
+            const generatedReview = isGeneratedImageReview(event);
             const label = generatedReview ? 'Approve generated image' : 'Approve shown changes';
             const title = generatedReview
                 ? 'Approve the generated image and complete this event workflow.'
@@ -140,6 +201,7 @@
             if (button.textContent !== label) button.textContent = label;
             if (button.title !== title) button.title = title;
         });
+        syncApprovalBadges(root);
     }
 
     function relabelAfterRender(original) {
@@ -181,9 +243,9 @@
         if (typeof closeUploadModal === 'function') closeUploadModal();
     }
 
-    // Approval copy is derived from application state at the points where the
-    // event grid/modal are rendered. Do not observe the entire document: broad
-    // MutationObservers can turn presentation writes into self-sustaining
+    // Approval copy and visibility are derived from application state at the points
+    // where the event grid/modal are rendered. Do not observe the entire document:
+    // broad MutationObservers can turn presentation writes into self-sustaining
     // microtask loops and starve clicks/timers on the main thread.
     if (typeof window.renderEvents === 'function') window.renderEvents = relabelAfterRender(window.renderEvents);
     if (typeof window.openUploadModal === 'function') window.openUploadModal = relabelAfterRender(window.openUploadModal);
@@ -213,6 +275,14 @@
         }
         if (typeof isEntryApproved === 'function' && isEntryApproved(entry)) {
             updateRuntimeDetails('This event is already approved.', 'success');
+            return null;
+        }
+        if (!isEventReadyForApproval(event)) {
+            const missing = missingApprovalMetadata(event);
+            const message = `Cannot approve until enrichment completes. Missing: ${missing.join(', ') || 'metadata'}.`;
+            updateRuntimeDetails(message, 'error');
+            if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(message, 'error');
+            relabelApprovalButtons();
             return null;
         }
 
