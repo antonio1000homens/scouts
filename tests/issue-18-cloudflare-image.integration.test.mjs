@@ -32,10 +32,12 @@ test('deploy packages the approval-aware provider facade and direct provider wor
   assert.match(deploy, /approval-lifecycle-adapter\.mjs/);
   assert.match(deploy, /image-provider-adapter\.mjs/);
   assert.match(deploy, /image-provider-worker\.mjs/);
+  assert.match(deploy, /legacy-approval-card-normalizer\.mjs/);
   assert.match(deploy, /cloudflare-image-client\.mjs/);
   assert.match(deploy, /HANDLER="\$\{HANDLER:-image-provider-adapter\.lambdaHandler\}"/);
   assert.match(adapter, /processRevisionedApprovalRecords/);
   assert.match(adapter, /imageProviderWorkerHandler/);
+  assert.match(adapter, /normalizeLegacyApprovalCards/);
   assert.match(lifecycleAdapter, /export async function processRevisionedApprovalRecords\(records = \[\]\)/);
   assert.match(deploy, /ImageGenerationProvider="\$\{IMAGE_GENERATION_PROVIDER\}"/);
   assert.match(deploy, /IMAGE_GENERATION_PROVIDER.*cloudflare[\s\S]*?GEMINI_IMAGES_ENABLED='false'/);
@@ -49,13 +51,16 @@ test('deploy preserves an existing image provider configuration and defaults a n
   assert.match(deploy, /Environment\.Variables\.CLOUDFLARE_AI_MODEL/);
 });
 
-test('provider facade intercepts revisioned approval work and delegates provider work to the worker', () => {
+test('provider facade intercepts revisioned approval work, delegates provider work, then normalizes legacy review copy', () => {
   assert.match(adapter, /import \{ processRevisionedApprovalRecords \} from '\.\/approval-lifecycle-adapter\.mjs'/);
   assert.match(adapter, /import \{ lambdaHandler as imageProviderWorkerHandler \} from '\.\/image-provider-worker\.mjs'/);
+  assert.match(adapter, /import \{ normalizeLegacyApprovalCards \} from '\.\/legacy-approval-card-normalizer\.mjs'/);
   assert.match(adapter, /export async function lambdaHandler\(event\)/);
   assert.match(adapter, /if \(records\.length === 0\) return imageProviderWorkerHandler\(event\)/);
   assert.match(adapter, /const delegated = await processRevisionedApprovalRecords\(records\)/);
-  assert.match(adapter, /return imageProviderWorkerHandler\(\{ \.\.\.event, Records: delegated \}\)/);
+  assert.match(adapter, /const result = await imageProviderWorkerHandler\(\{ \.\.\.event, Records: delegated \}\)/);
+  assert.match(adapter, /await normalizeLegacyApprovalCards\(delegated\)/);
+  assert.match(adapter, /return result/);
   assert.match(worker, /import \{ lambdaHandler as fullEnrichHandler \} from '\.\/full-enrich-core\.mjs'/);
   assert.match(worker, /if \(records\.length === 0\) return fullEnrichHandler\(event\)/);
 });
