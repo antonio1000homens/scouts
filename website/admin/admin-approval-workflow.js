@@ -114,16 +114,28 @@
             const title = generatedReview
                 ? 'Approve the generated image and complete this event workflow.'
                 : 'Approve the tagline, image theme, image and visibility currently shown for this event.';
-
-            // This controller observes DOM mutations so dynamically rendered
-            // event cards get the right approval copy. Assigning textContent
-            // unconditionally creates another child-list mutation, which would
-            // immediately re-enter this observer and starve the browser's UI
-            // thread. Only write when the rendered value actually differs.
             if (button.textContent !== label) button.textContent = label;
             if (button.title !== title) button.title = title;
         });
     }
+
+    function relabelAfterRender(original) {
+        if (typeof original !== 'function') return original;
+        return function approvalAwareRender(...args) {
+            const result = original.apply(this, args);
+            relabelApprovalButtons();
+            return result;
+        };
+    }
+
+    // Approval copy is derived from application state at the points where the
+    // event grid/modal are rendered. Do not observe the entire document: broad
+    // MutationObservers can turn presentation writes into self-sustaining
+    // microtask loops and starve clicks/timers on the main thread.
+    if (typeof window.renderEvents === 'function') window.renderEvents = relabelAfterRender(window.renderEvents);
+    if (typeof window.openUploadModal === 'function') window.openUploadModal = relabelAfterRender(window.openUploadModal);
+    if (typeof window.updateModalContent === 'function') window.updateModalContent = relabelAfterRender(window.updateModalContent);
+    window.refreshApprovalButtonLabels = relabelApprovalButtons;
 
     const legacyApproveEvent = typeof approveEvent === 'function' ? approveEvent : null;
 
@@ -198,8 +210,11 @@
                 if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(message, 'success');
             }
 
+            // The mutation has already been accepted at this point. Activity is
+            // presentation/telemetry and must never keep the approval button locked
+            // while a secondary status request is slow or unavailable.
             if (typeof pollQueueDepthSnapshots === 'function') {
-                await pollQueueDepthSnapshots({ updatePanels: true }).catch(() => {});
+                void Promise.resolve(pollQueueDepthSnapshots({ updatePanels: true })).catch(() => {});
             }
             // Generated-image workflows deliberately remain active while waiting for
             // a human final review. The Activity Centre owns that long-lived phase
@@ -236,8 +251,4 @@
     };
 
     relabelApprovalButtons();
-    if (typeof MutationObserver === 'function') {
-        const observer = new MutationObserver(() => relabelApprovalButtons());
-        observer.observe(document.documentElement, { childList: true, subtree: true });
-    }
 })();
