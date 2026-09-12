@@ -74,6 +74,17 @@ test('issue 91 read-only review preflight is bounded and stage-specific while ap
   assert.match(approvalWorkflow, /Approval failed during \$\{operationStage\}/);
 });
 
+test('issue 91 approval is unavailable until all enrichment metadata is complete', () => {
+  assert.match(approvalWorkflow, /function approvalReadiness\(event\)/);
+  assert.match(approvalWorkflow, /hasText\(getAIPrompt\(event\)\)/);
+  assert.match(approvalWorkflow, /hasText\(getImageThemeOrLegacyPrompt\(event\)\)/);
+  assert.match(approvalWorkflow, /hasRelativeImageUrl\(event\)/);
+  assert.match(approvalWorkflow, /window\.isEntryPendingApproval = function enrichedEntryPendingApproval/);
+  assert.match(approvalWorkflow, /function syncApprovalBadges/);
+  assert.match(approvalWorkflow, /button\.hidden/);
+  assert.match(approvalWorkflow, /Cannot approve until enrichment completes\. Missing:/);
+});
+
 test('issue 91 approval refuses an impossible image-generation request', () => {
   assert.match(eventReview, /!imageUrl && !imageTheme/);
   assert.match(eventReview, /requires an image theme before generation can start/);
@@ -108,15 +119,22 @@ test('issue 91 approval labels are render-driven and idempotent without a docume
   let labelWrites = 0;
   let titleWrites = 0;
   const button = {
+    hidden: false,
     get textContent() { return label; },
     set textContent(value) { labelWrites += 1; label = value; },
     get title() { return title; },
     set title(value) { titleWrites += 1; title = value; },
   };
-  const root = { querySelectorAll: () => [button] };
+  const root = {
+    querySelectorAll: (selector) => selector === 'button[value="approve"]' ? [button] : [],
+  };
+  const entry = { event: {} };
   const { functions } = loadFunctionsFromSource(approvalWorkflow, ['relabelApprovalButtons'], {
+    entryForApprovalButton: () => entry,
+    eventFromEntry: () => entry.event,
+    isEntryReadyForApproval: () => true,
     isGeneratedImageReview: () => false,
-    eventForApprovalButton: () => ({}),
+    syncApprovalBadges: () => {},
   });
 
   functions.relabelApprovalButtons(root);
