@@ -66,7 +66,7 @@ test('workflow actions are pinned to immutable commit SHAs', () => {
   assert.deepEqual(offenders, [], `Unpinned GitHub Actions:\n${offenders.join('\n')}`);
 });
 
-test('private calendar feeds are resolved from Bitwarden UID variables', () => {
+test('configured private calendar feeds resolve from Bitwarden UID variables', () => {
   const workflow = readFileSync('.github/workflows/deploy-to-s3.yml', 'utf8');
   const calendarNames = [
     'CUBS_EVENTS_CALENDAR_URL',
@@ -77,26 +77,28 @@ test('private calendar feeds are resolved from Bitwarden UID variables', () => {
     'BEAVERS_PROGRAMME_CALENDAR_URL',
   ];
 
-  assert.match(workflow, /- name: Get calendar URLs/);
+  assert.match(workflow, /- name: Reject plaintext calendar URL variables/);
   assert.match(workflow, /uses: bitwarden\/sm-action@[0-9a-f]{40}/i);
   assert.match(workflow, /access_token: \$\{\{ secrets\.BW_ACCESS_TOKEN \}\}/);
 
   for (const name of calendarNames) {
     assert.doesNotMatch(workflow, new RegExp(`${name}: \\$\\{\\{ secrets\\.${name} \\}\\}`));
-    assert.match(workflow, new RegExp(`vars\\.${name} \\}\\} > ${name}`));
+    assert.match(workflow, new RegExp(`vars\\.${name} != ''`), `${name} should be optional when its UID variable is empty`);
+    assert.match(workflow, new RegExp(`vars\\.${name} \\}\\} > ${name}`), `${name} should resolve through Bitwarden when configured`);
   }
   assert.doesNotMatch(workflow, /CUBS_PROGRAME_CALENDAR_URL/);
 });
 
-test('calendar deployment fails closed unless explicit local recovery is enabled', () => {
+test('empty calendar values disable feeds and Lambda reuse is explicit local recovery only', () => {
   const deployScript = readFileSync('lambdas/scouts/deploy.sh', 'utf8');
 
   assert.match(deployScript, /ALLOW_EXISTING_CALENDAR_ENV_REUSE="\$\{ALLOW_EXISTING_CALENDAR_ENV_REUSE:-false\}"/);
   assert.match(deployScript, /GITHUB_ACTIONS:-.*ALLOW_EXISTING_CALENDAR_ENV_REUSE/);
   assert.match(deployScript, /ALLOW_EXISTING_CALENDAR_ENV_REUSE.*manual\/local recovery option/);
   assert.match(deployScript, /if \[ "\$\{ALLOW_EXISTING_CALENDAR_ENV_REUSE\}" = "true" \]; then/);
-  assert.match(deployScript, /missing_calendar_variables=\(\)/);
-  assert.match(deployScript, /Normal deployments fail closed/);
+  assert.match(deployScript, /Calendar source disabled:/);
+  assert.doesNotMatch(deployScript, /missing_calendar_variables/);
+  assert.doesNotMatch(deployScript, /Normal deployments fail closed/);
 
   // The historical typo remains only as a deploy.sh compatibility alias; it is
   // deliberately absent from the CI workflow above.
@@ -128,16 +130,17 @@ test('calendar CloudFormation parameters stay NoEcho and wire directly into Lamb
   }
 });
 
-test('tracked files do not hardcode calendar URLs beside calendar configuration names', () => {
+test('tracked files do not hardcode private calendar URLs', () => {
   const offenders = [];
-  const plaintextCalendarAssignment = /(?:CUBS|SCOUTS|BEAVERS)_[A-Z_]*CALENDAR_URL[^\n]{0,120}https?:\/\//i;
+  const plaintextCalendarAssignment = /(?:CUBS|SCOUTS|BEAVERS)_[A-Z_]*CALENDAR_URL\s*(?::|=)\s*["']?https?:\/\//i;
+  const osmPrivateCalendarUrl = /onlinescoutmanager\.co\.uk\/ext\/cal\/\?/i;
 
   for (const path of trackedFiles) {
     const bytes = readFileSync(path);
     if (bytes.includes(0)) continue;
 
     const content = bytes.toString('utf8');
-    if (plaintextCalendarAssignment.test(content)) offenders.push(path);
+    if (plaintextCalendarAssignment.test(content) || osmPrivateCalendarUrl.test(content)) offenders.push(path);
   }
 
   assert.deepEqual(offenders, [], `Plaintext calendar URLs found in:\n${offenders.join('\n')}`);
