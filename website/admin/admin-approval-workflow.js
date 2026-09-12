@@ -207,7 +207,7 @@
                 updateRuntimeDetails(message, 'info');
                 if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(message, 'info');
             } else {
-                if (typeof applyLocalApprovalState === 'function') applyLocalApprovalState(event, true);
+                if (typeof applyLocalApprovalState === 'function') applyLocalApprovalState(entry, true);
                 const message = result?.message || (generatedReview ? 'Generated image approval submitted.' : 'Approve shown changes submitted.');
                 updateRuntimeDetails(message, 'success');
                 if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(message, 'success');
