@@ -31,6 +31,10 @@ jobs:
         working-directory: lambdas/shared-layer/nodejs
         run: npm install --package-lock-only --ignore-scripts
 
+      - name: Install shared-layer dependencies for tests
+        working-directory: lambdas/shared-layer/nodejs
+        run: npm ci --ignore-scripts
+
       - name: Verify deprecated SDK is gone from runtime sources and manifests
         run: |
           if grep -R --line-number --fixed-strings '@google/generative-ai' \
