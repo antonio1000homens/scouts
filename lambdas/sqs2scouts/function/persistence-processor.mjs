@@ -3620,7 +3620,7 @@ export async function lambdaHandler(event) {
                 loadMetadata: loadApprovalMessageMetadata,
                 persistMetadata: persistApprovalMetadata,
                 updateMessage: updateSlackApprovalMessage,
-                postResponseUrl,
+                postResponseUrl: postToResponseUrl,
                 resolveImageUrl: resolveImageUrlForDisplay,
                 logger: console,
             });
