@@ -9,7 +9,10 @@ const activityCentre = readFileSync('website/admin/admin-activity-centre.js', 'u
 const approvalWorkflow = readFileSync('website/admin/admin-approval-workflow.js', 'utf8');
 const eventReview = readFileSync('lambdas/shared-layer/nodejs/event-review.mjs', 'utf8');
 const approvalLifecycle = readFileSync('lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs', 'utf8');
+const imageAdapter = readFileSync('lambdas/sqs2scouts/function/image-provider-adapter.mjs', 'utf8');
 const imageWorker = readFileSync('lambdas/sqs2scouts/function/image-provider-worker.mjs', 'utf8');
+const legacyNormalizer = readFileSync('lambdas/sqs2scouts/function/legacy-approval-card-normalizer.mjs', 'utf8');
+const sqs2scoutsDeploy = readFileSync('lambdas/sqs2scouts/deploy.sh', 'utf8');
 const slackProxy = readFileSync('lambdas/scouts-slack-handler/function/slack-handler-proxy.mjs', 'utf8');
 
 function assertSyntax(path) {
@@ -83,6 +86,15 @@ test('issue 91 final approval reconciles both stored and generated-image Slack c
   assert.match(approvalLifecycle, /seen\.has\(key\)/);
 });
 
+test('issue 91 reachable legacy reviews are normalized to event-level approval copy', () => {
+  assert.match(imageAdapter, /normalizeLegacyApprovalCards/);
+  assert.match(imageAdapter, /await normalizeLegacyApprovalCards\(delegated\)/);
+  assert.match(legacyNormalizer, /text: \{ type: 'plain_text', text: 'Approve shown changes'/);
+  assert.match(legacyNormalizer, /buildEventReviewSnapshot\(event\)/);
+  assert.match(legacyNormalizer, /text\(metadata\?\.status\)\.toUpperCase\(\) === 'PENDING'/);
+  assert.match(sqs2scoutsDeploy, /legacy-approval-card-normalizer\.mjs/);
+});
+
 test('issue 91 Slack labels generated review only when the action explicitly identifies it', () => {
   assert.match(slackProxy, /generatedReview = meta\?\.action === 'approve_generated_image'/);
   assert.match(slackProxy, /generatedReview \? 'Approve generated image' : 'Approve shown changes'/);
@@ -98,7 +110,9 @@ test('issue 91 presentation and closure files remain syntactically valid', () =>
     'website/admin/admin-approval-workflow.js',
     'lambdas/shared-layer/nodejs/event-review.mjs',
     'lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs',
+    'lambdas/sqs2scouts/function/image-provider-adapter.mjs',
     'lambdas/sqs2scouts/function/image-provider-worker.mjs',
+    'lambdas/sqs2scouts/function/legacy-approval-card-normalizer.mjs',
     'lambdas/scouts-slack-handler/function/slack-handler-proxy.mjs',
   ]) assertSyntax(path);
 });
