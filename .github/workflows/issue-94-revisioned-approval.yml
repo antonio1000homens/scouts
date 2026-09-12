@@ -1,0 +1,245 @@
+name: Complete issue 94 revisioned approval sync
+
+on:
+  push:
+    branches:
+      - issue-94-sync-admin-slack
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch revisioned approval path
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          sync_path = Path('lambdas/sqs2scouts/function/slack-decision-sync.mjs')
+          sync = sync_path.read_text()
+          old = "export function buildTerminalSlackPayload(event, { hexValue = null, resolveImageUrl = (value) => value } = {}) {\n  const decision = canonicalSlackDecision(event);"
+          new = "export function buildTerminalSlackPayload(event, { hexValue = null, resolveImageUrl = (value) => value, decisionOverride = null } = {}) {\n  const canonicalDecision = canonicalSlackDecision(event);\n  const decision = decisionOverride?.status\n    ? { ...canonicalDecision, ...decisionOverride }\n    : canonicalDecision;"
+          assert old in sync
+          sync = sync.replace(old, new, 1)
+          old = "  resolveImageUrl,\n  logger = console,"
+          new = "  resolveImageUrl,\n  decisionOverride = null,\n  logger = console,"
+          assert old in sync
+          sync = sync.replace(old, new, 1)
+          old = "  const { decision, payload } = buildTerminalSlackPayload(event, { hexValue, resolveImageUrl });"
+          new = "  const { decision, payload } = buildTerminalSlackPayload(event, { hexValue, resolveImageUrl, decisionOverride });"
+          assert old in sync
+          sync = sync.replace(old, new, 1)
+          sync_path.write_text(sync)
+
+          adapter_path = Path('lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs')
+          adapter = adapter_path.read_text()
+          import_anchor = "import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';\n"
+          imports = "import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';\nimport { reconcileSlackDecision } from './slack-decision-sync.mjs';\n"
+          assert import_anchor in adapter
+          adapter = adapter.replace(import_anchor, import_anchor + imports, 1)
+
+          constants_anchor = "const SCOUTS_DECISION_QUEUE_URL = String(process.env.SCOUTS_DECISION_QUEUE_URL || '').trim();\n"
+          constants = "const APPROVAL_METADATA_PREFIX = String(process.env.APPROVAL_METADATA_PREFIX || 'approvals').trim() || 'approvals';\nconst SLACK_CHAT_UPDATE_URL = String(process.env.SLACK_CHAT_UPDATE_URL || 'https://slack.com/api/chat.update').trim();\nconst S3_WEBSITE_BASE_URL = String(process.env.S3_WEBSITE_BASE_URL || `https://${TARGET_BUCKET}.s3.${AWS_REGION}.amazonaws.com`).replace(/\\/$/, '');\nconst APPROVAL_PERSISTENCE_ENABLED = !['false', '0', 'off', 'disabled'].includes(String(process.env.APPROVAL_PERSISTENCE ?? process.env.APPROVAL_METADATA_PERSISTENCE ?? 'true').trim().toLowerCase());\n"
+          assert constants_anchor in adapter
+          adapter = adapter.replace(constants_anchor, constants_anchor + constants, 1)
+
+          text_anchor = "function getHex(message) {\n"
+          helpers = r'''function approvalMetadataKey(identifier, realm = 'approval') {
+            const safeIdentifier = text(identifier).replace(/[^a-zA-Z0-9._-]/g, '-');
+            if (!safeIdentifier) throw new Error('Cannot build approval metadata key without identifier');
+            const safeRealm = (text(realm) || 'unknown').toLowerCase().replace(/[^a-z0-9._-]/g, '-');
+            return `${APPROVAL_METADATA_PREFIX}/${safeIdentifier}/${safeRealm}.json`;
+          }
+
+          function approvalIdentifiers(event, hex) {
+            const identifiers = new Set();
+            if (text(hex)) identifiers.add(text(hex).toLowerCase());
+            for (const candidate of [event?.hex, event?.uid, event?.originalUid]) {
+              if (text(candidate)) identifiers.add(text(candidate));
+            }
+            return Array.from(identifiers);
+          }
+
+          async function loadApprovalMessageMetadata(identifiers, realm = 'approval') {
+            for (const identifier of identifiers) {
+              const key = approvalMetadataKey(identifier, realm);
+              try {
+                const response = await s3.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: key }));
+                const metadata = JSON.parse(await response.Body.transformToString());
+                const storedIdentifiers = Array.isArray(metadata?.identifiers) && metadata.identifiers.length > 0
+                  ? metadata.identifiers
+                  : identifiers;
+                metadata._keys = storedIdentifiers.map((entry) => approvalMetadataKey(entry, realm));
+                return metadata;
+              } catch (error) {
+                if (error?.name === 'NoSuchKey' || error?.name === 'NotFound' || Number(error?.$metadata?.httpStatusCode) === 404) continue;
+                console.warn('[ApprovalPersist] Approval metadata lookup failed', { key, error: error?.message || String(error) });
+              }
+            }
+            return null;
+          }
+
+          async function persistApprovalMetadata(metadata, overrides = {}) {
+            if (!metadata || !APPROVAL_PERSISTENCE_ENABLED) return;
+            const merged = { ...metadata, ...overrides, updatedAt: new Date().toISOString() };
+            delete merged._keys;
+            const identifiers = Array.from(new Set(
+              (Array.isArray(merged.identifiers) ? merged.identifiers : [])
+                .map((entry) => text(entry))
+                .filter(Boolean),
+            ));
+            if (identifiers.length === 0) return;
+            merged.identifiers = identifiers;
+            const keys = Array.isArray(metadata._keys) && metadata._keys.length > 0
+              ? metadata._keys
+              : identifiers.map((entry) => approvalMetadataKey(entry, merged.realm || 'approval'));
+            await Promise.all(keys.map((key) => s3.send(new PutObjectCommand({
+              Bucket: TARGET_BUCKET,
+              Key: key,
+              Body: JSON.stringify(merged, null, 2),
+              ContentType: 'application/json',
+              CacheControl: 'no-store',
+            }))));
+          }
+
+          async function updateSlackApprovalMessage(channel, ts, messageText, blocks = null) {
+            const slackBotToken = await getRequiredSecret('SLACK_BOT_TOKEN_PARAMETER');
+            const response = await fetch(SLACK_CHAT_UPDATE_URL, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${slackBotToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ channel, ts, text: messageText, ...(blocks ? { blocks } : {}) }),
+            });
+            let body = {};
+            try { body = await response.json(); } catch {}
+            if (!response.ok || body?.ok !== true) {
+              throw new Error(`Slack chat.update failed: ${body?.error || `HTTP ${response.status}`}`);
+            }
+            return body;
+          }
+
+          async function postToResponseUrl(responseUrl, payload) {
+            const response = await fetch(responseUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            if (!response.ok) throw new Error(`Slack response_url failed: HTTP ${response.status}`);
+          }
+
+          function resolveImageUrlForDisplay(value) {
+            const imageUrl = text(value);
+            if (!imageUrl) return null;
+            if (/^https?:\/\//i.test(imageUrl)) return imageUrl;
+            return `${S3_WEBSITE_BASE_URL}/${imageUrl.replace(/^\/+/, '')}`;
+          }
+
+          async function reconcileApprovalSlack(message, hex, event, approvalState) {
+            const directMetadata = message?.approvalMetadata && typeof message.approvalMetadata === 'object'
+              ? message.approvalMetadata
+              : null;
+            const source = text(message?.source).toLowerCase();
+            const decisionOverride = approvalState === 'awaiting_image'
+              ? {
+                  status: 'AWAITING_IMAGE',
+                  label: 'Approval accepted — generating image',
+                  emoji: '⏳',
+                }
+              : null;
+            try {
+              return await reconcileSlackDecision({
+                event,
+                messageBody: {
+                  decisionSource: source.startsWith('slack') ? 'slack' : 'admin',
+                  ...(directMetadata ? { slackMetadata: directMetadata } : {}),
+                },
+                identifiers: approvalIdentifiers(event, hex),
+                loadMetadata: loadApprovalMessageMetadata,
+                persistMetadata: persistApprovalMetadata,
+                updateMessage: updateSlackApprovalMessage,
+                postResponseUrl,
+                resolveImageUrl: resolveImageUrlForDisplay,
+                decisionOverride,
+                logger: console,
+              });
+            } catch (error) {
+              console.warn('[ApprovalPersist] Slack reconciliation failed after canonical persistence', error?.message || error);
+              return null;
+            }
+          }
+
+          '''
+          assert text_anchor in adapter
+          adapter = adapter.replace(text_anchor, helpers + text_anchor, 1)
+
+          already_anchor = "    await recordRoot(message, hex, current.event, rootState, rootStage, 'published');\n    return { status: 'already_applied', hex, rootState };"
+          already_replacement = "    await recordRoot(message, hex, current.event, rootState, rootStage, 'published');\n    await reconcileApprovalSlack(message, hex, current.event, approvalState);\n    return { status: 'already_applied', hex, rootState };"
+          assert already_anchor in adapter
+          adapter = adapter.replace(already_anchor, already_replacement, 1)
+
+          conflict_retry_anchor = "      await recordRoot(message, hex, current.event, rootState, rootStage, 'published');\n      return { status: 'already_applied', hex, rootState };"
+          conflict_retry_replacement = "      await recordRoot(message, hex, current.event, rootState, rootStage, 'published');\n      await reconcileApprovalSlack(message, hex, current.event, approvalState);\n      return { status: 'already_applied', hex, rootState };"
+          assert conflict_retry_anchor in adapter
+          adapter = adapter.replace(conflict_retry_anchor, conflict_retry_replacement, 1)
+
+          publish_anchor = "  await publishEvent(hex, accepted);\n  await notifyDecision(message, hex, accepted);"
+          publish_replacement = "  await publishEvent(hex, accepted);\n  await reconcileApprovalSlack(message, hex, accepted, approvalState);\n  await notifyDecision(message, hex, accepted);"
+          assert publish_anchor in adapter
+          adapter = adapter.replace(publish_anchor, publish_replacement, 1)
+          adapter_path.write_text(adapter)
+
+          test_path = Path('tests/issue-94-admin-slack-sync.integration.test.mjs')
+          tests = test_path.read_text()
+          if "const approvalAdapter = readFileSync('lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs', 'utf8');" not in tests:
+            append = r'''
+
+          test('revisioned Admin approval also reconciles the stored Slack review card', () => {
+            const approvalAdapter = readFileSync('lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs', 'utf8');
+            assert.match(approvalAdapter, /reconcileSlackDecision/);
+            assert.match(approvalAdapter, /async function reconcileApprovalSlack/);
+            assert.match(approvalAdapter, /loadApprovalMessageMetadata/);
+            assert.match(approvalAdapter, /await reconcileApprovalSlack\(message, hex, accepted, approvalState\)/);
+          });
+
+          test('approval awaiting generated image replaces stale review actions with a pending state', () => {
+            const { decision, payload } = buildTerminalSlackPayload(event({ isApproved: false }), {
+              decisionOverride: {
+                status: 'AWAITING_IMAGE',
+                label: 'Approval accepted — generating image',
+                emoji: '⏳',
+              },
+            });
+            assert.equal(decision.status, 'AWAITING_IMAGE');
+            assert.match(payload.text, /generating image/i);
+            assert.equal(payload.blocks.some((block) => block.type === 'actions'), false);
+          });
+          '''
+            tests += append
+            test_path.write_text(tests)
+          PY
+
+      - name: Run issue 94 checks
+        run: |
+          node --check lambdas/sqs2scouts/function/slack-decision-sync.mjs
+          node --check lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs
+          node --check lambdas/sqs2scouts/function/persistence-processor.mjs
+          node --check lambdas/scouts-slack-handler/function/slack-handler.mjs
+          node --test tests/issue-94-admin-slack-sync.integration.test.mjs
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/issue-94-revisioned-approval.yml
+          git add -A
+          git commit -m "Cover revisioned approvals in Slack synchronisation"
+          git push origin HEAD:issue-94-sync-admin-slack
