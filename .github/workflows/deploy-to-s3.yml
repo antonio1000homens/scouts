@@ -553,7 +553,7 @@ jobs:
           QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing
           QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
           SCOUTS_DECISION_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsDecision
-          SCOUTS_DECISION_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883:scoutsDecision
+          SCOUTS_DECISION_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsDecision
           DLQ_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessingDLQ
           DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
           S3_WEBSITE_BASE_URL: https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com
