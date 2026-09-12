@@ -70,8 +70,24 @@
         return entry?.event && typeof entry.event === 'object' ? entry.event : entry;
     }
 
-    function fieldChecklist(snapshot) {
-        const imageLabel = snapshot.imageUrl ? 'image ✓' : 'image missing — final review required';
+    function approvalWorkflow(event) {
+        return event?.approvalWorkflow && typeof event.approvalWorkflow === 'object'
+            ? event.approvalWorkflow
+            : null;
+    }
+
+    function isGeneratedImageReview(event) {
+        const workflow = approvalWorkflow(event);
+        const review = eventReviewValues(event, null);
+        return workflow?.state === 'awaiting_review'
+            && workflow?.source === 'generated_image'
+            && Boolean(review.imageUrl);
+    }
+
+    function fieldChecklist(snapshot, generatedReview = false) {
+        const imageLabel = generatedReview
+            ? 'generated image ✓'
+            : (snapshot.imageUrl ? 'image ✓' : 'image missing — final review required');
         return [
             `tagline ${snapshot.tagline ? '✓' : '—'}`,
             `image theme ${snapshot.imageTheme ? '✓' : '—'}`,
@@ -80,10 +96,23 @@
         ].join(' · ');
     }
 
+    function eventForApprovalButton(button) {
+        if (button?.id === 'modal-approve-button') {
+            return eventFromEntry(selectedEntry(typeof currentEventIndex === 'number' ? currentEventIndex : 0, true));
+        }
+        const onclick = button?.getAttribute?.('onclick') || '';
+        const match = onclick.match(/approveEvent\((\d+)/);
+        if (!match) return null;
+        return eventFromEntry(selectedEntry(Number(match[1]), false));
+    }
+
     function relabelApprovalButtons(root = document) {
         root.querySelectorAll('button[value="approve"]').forEach((button) => {
-            button.textContent = 'Approve shown changes';
-            button.title = 'Approve the tagline, image theme, image and visibility currently shown for this event.';
+            const generatedReview = isGeneratedImageReview(eventForApprovalButton(button));
+            button.textContent = generatedReview ? 'Approve generated image' : 'Approve shown changes';
+            button.title = generatedReview
+                ? 'Approve the generated image and complete this event workflow.'
+                : 'Approve the tagline, image theme, image and visibility currently shown for this event.';
         });
     }
 
@@ -119,21 +148,25 @@
             return null;
         }
 
+        const generatedReview = isGeneratedImageReview(event);
+        const workflow = approvalWorkflow(event);
         uiCommandInFlight = true;
         if (typeof refreshApiActionButtons === 'function') refreshApiActionButtons();
         try {
             const reviewSnapshot = await buildReviewSnapshot(event, hex);
-            const checklist = fieldChecklist(reviewSnapshot);
+            const checklist = fieldChecklist(reviewSnapshot, generatedReview);
+            const approvalLabel = generatedReview ? 'generated image' : 'shown changes';
             if (fromModal && typeof updateModalStatus === 'function') {
-                updateModalStatus(`Approving shown changes: ${checklist}`, 'info');
+                updateModalStatus(`Approving ${approvalLabel}: ${checklist}`, 'info');
             }
-            updateRuntimeDetails(`Approving shown changes for "${reviewSnapshot.title || hex}": ${checklist}`, 'info');
+            updateRuntimeDetails(`Approving ${approvalLabel} for "${reviewSnapshot.title || hex}": ${checklist}`, 'info');
 
             const result = await sendScoutsCommand({
                 realm: 'scouts',
                 subject: { hex: reviewSnapshot.hex },
                 action: 'approve',
                 reviewSnapshot,
+                ...(generatedReview && workflow?.rootRequestId ? { rootRequestId: workflow.rootRequestId } : {}),
             });
             const rootRequestId = result?.rootRequestId || extractBackendRequestId(result);
             if (rootRequestId) updateRuntimeRequestId(rootRequestId, 'Approval operation ID');
@@ -144,7 +177,7 @@
                 if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(message, 'info');
             } else {
                 if (typeof applyLocalApprovalState === 'function') applyLocalApprovalState(event, true);
-                const message = 'Approve shown changes submitted.';
+                const message = result?.message || (generatedReview ? 'Generated image approval submitted.' : 'Approve shown changes submitted.');
                 updateRuntimeDetails(message, 'success');
                 if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(message, 'success');
             }
@@ -152,12 +185,15 @@
             if (typeof pollQueueDepthSnapshots === 'function') {
                 await pollQueueDepthSnapshots({ updatePanels: true }).catch(() => {});
             }
-            if (rootRequestId && typeof pollGeneratedRequestUntilSettled === 'function') {
+            // Generated-image workflows deliberately remain active while waiting for
+            // a human final review. The Activity Centre owns that long-lived phase
+            // and refreshes agenda/modal state when awaiting_review is reached.
+            if (rootRequestId && !result?.requiresGeneratedImage && typeof pollGeneratedRequestUntilSettled === 'function') {
                 pollGeneratedRequestUntilSettled(rootRequestId, {
                     hex: reviewSnapshot.hex,
                     config: {
-                        label: result?.requiresGeneratedImage ? 'Approval workflow' : 'Approval',
-                        queueLabel: result?.requiresGeneratedImage ? 'image generation' : 'approval',
+                        label: generatedReview ? 'Generated image approval' : 'Approval',
+                        queueLabel: generatedReview ? 'generated image approval' : 'approval',
                     },
                     eventLabel: reviewSnapshot.title || reviewSnapshot.hex,
                 }).catch(() => {});
