@@ -77,11 +77,70 @@ test('private calendar feeds are resolved from Bitwarden UID variables', () => {
     'BEAVERS_PROGRAMME_CALENDAR_URL',
   ];
 
+  assert.match(workflow, /- name: Get calendar URLs/);
+  assert.match(workflow, /uses: bitwarden\/sm-action@[0-9a-f]{40}/i);
+  assert.match(workflow, /access_token: \$\{\{ secrets\.BW_ACCESS_TOKEN \}\}/);
+
   for (const name of calendarNames) {
     assert.doesNotMatch(workflow, new RegExp(`${name}: \\$\\{\\{ secrets\\.${name} \\}\\}`));
     assert.match(workflow, new RegExp(`vars\\.${name} \\}\\} > ${name}`));
   }
   assert.doesNotMatch(workflow, /CUBS_PROGRAME_CALENDAR_URL/);
+});
+
+test('calendar deployment fails closed unless explicit local recovery is enabled', () => {
+  const deployScript = readFileSync('lambdas/scouts/deploy.sh', 'utf8');
+
+  assert.match(deployScript, /ALLOW_EXISTING_CALENDAR_ENV_REUSE="\$\{ALLOW_EXISTING_CALENDAR_ENV_REUSE:-false\}"/);
+  assert.match(deployScript, /GITHUB_ACTIONS:-.*ALLOW_EXISTING_CALENDAR_ENV_REUSE/);
+  assert.match(deployScript, /ALLOW_EXISTING_CALENDAR_ENV_REUSE.*manual\/local recovery option/);
+  assert.match(deployScript, /if \[ "\$\{ALLOW_EXISTING_CALENDAR_ENV_REUSE\}" = "true" \]; then/);
+  assert.match(deployScript, /missing_calendar_variables=\(\)/);
+  assert.match(deployScript, /Normal deployments fail closed/);
+
+  // The historical typo remains only as a deploy.sh compatibility alias; it is
+  // deliberately absent from the CI workflow above.
+  assert.match(deployScript, /CUBS_PROGRAME_CALENDAR_URL/);
+});
+
+test('calendar CloudFormation parameters stay NoEcho and wire directly into Lambda', () => {
+  const template = readFileSync('lambdas/cloudformation/templates/scouts.yaml', 'utf8');
+  const mappings = [
+    ['CUBS_EVENTS_CALENDAR_URL', 'CubsEventsCalendarUrl'],
+    ['CUBS_PROGRAMME_CALENDAR_URL', 'CubsProgrammeCalendarUrl'],
+    ['SCOUTS_EVENTS_CALENDAR_URL', 'ScoutsEventsCalendarUrl'],
+    ['SCOUTS_PROGRAMME_CALENDAR_URL', 'ScoutsProgrammeCalendarUrl'],
+    ['BEAVERS_EVENTS_CALENDAR_URL', 'BeaversEventsCalendarUrl'],
+    ['BEAVERS_PROGRAMME_CALENDAR_URL', 'BeaversProgrammeCalendarUrl'],
+  ];
+
+  for (const [environmentName, parameterName] of mappings) {
+    assert.match(
+      template,
+      new RegExp(`${parameterName}:\\n\\s+Type: String\\n\\s+Default: ''\\n\\s+NoEcho: true`),
+      `${parameterName} must remain an empty-default NoEcho parameter`,
+    );
+    assert.match(
+      template,
+      new RegExp(`${environmentName}: !Ref ${parameterName}`),
+      `${environmentName} must be populated from ${parameterName}`,
+    );
+  }
+});
+
+test('tracked files do not hardcode calendar URLs beside calendar configuration names', () => {
+  const offenders = [];
+  const plaintextCalendarAssignment = /(?:CUBS|SCOUTS|BEAVERS)_[A-Z_]*CALENDAR_URL[^\n]{0,120}https?:\/\//i;
+
+  for (const path of trackedFiles) {
+    const bytes = readFileSync(path);
+    if (bytes.includes(0)) continue;
+
+    const content = bytes.toString('utf8');
+    if (plaintextCalendarAssignment.test(content)) offenders.push(path);
+  }
+
+  assert.deepEqual(offenders, [], `Plaintext calendar URLs found in:\n${offenders.join('\n')}`);
 });
 
 test('anonymous S3 policy exposes only deliberate public website objects', () => {
