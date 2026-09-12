@@ -9,6 +9,7 @@ const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'ut
 const activityCentre = readFileSync('website/admin/admin-activity-centre.js', 'utf8');
 const approvalWorkflow = readFileSync('website/admin/admin-approval-workflow.js', 'utf8');
 const privateStorage = readFileSync('website/admin/private-storage-client.js', 'utf8');
+const diagnosticsEnhancements = readFileSync('website/admin/admin-diagnostics-enhancements.js', 'utf8');
 const eventReview = readFileSync('lambdas/shared-layer/nodejs/event-review.mjs', 'utf8');
 const approvalLifecycle = readFileSync('lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs', 'utf8');
 const imageAdapter = readFileSync('lambdas/sqs2scouts/function/image-provider-adapter.mjs', 'utf8');
@@ -107,6 +108,15 @@ test('issue 91 approval controller bootstrap is ordered and observable', () => {
   assert.match(privateStorage, /Approval controls failed to load/);
 });
 
+test('admin direct-image controls are render-driven and cannot self-trigger a child-list observer', () => {
+  assert.match(diagnosticsEnhancements, /function installEventCardRenderHook/);
+  assert.match(diagnosticsEnhancements, /window\.renderEvents = diagnosticsAwareRender/);
+  assert.doesNotMatch(diagnosticsEnhancements, /new MutationObserver/);
+  assert.match(diagnosticsEnhancements, /existing\.textContent !== desiredLabel/);
+  assert.match(diagnosticsEnhancements, /void Promise\.resolve\(pollQueueDepthSnapshots\(\)\)/);
+  assert.doesNotMatch(diagnosticsEnhancements, /await pollQueueDepthSnapshots\(\)/);
+});
+
 test('issue 91 generated review notification has durable external identity and Slack reference', () => {
   const identity = imageWorker.indexOf('ensureReviewNotificationIdentity');
   const send = imageWorker.indexOf('await sendSlackMessage(message.text, message.blocks', identity);
@@ -171,6 +181,7 @@ test('issue 91 presentation and closure files remain syntactically valid', () =>
     'website/admin/admin-activity-centre.js',
     'website/admin/admin-approval-workflow.js',
     'website/admin/private-storage-client.js',
+    'website/admin/admin-diagnostics-enhancements.js',
     'lambdas/shared-layer/nodejs/event-review.mjs',
     'lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs',
     'lambdas/sqs2scouts/function/image-provider-adapter.mjs',
