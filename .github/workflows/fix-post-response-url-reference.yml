@@ -1,4 +1,4 @@
-name: Apply postResponseUrl persistence hotfix
+name: Apply persistence hotfix
 
 on:
   push:
@@ -9,8 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  apply-fix:
-    if: github.actor != 'github-actions[bot]'
+  apply:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -18,66 +17,55 @@ jobs:
           ref: fix/post-response-url-reference
           fetch-depth: 0
 
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
-        with:
-          node-version: '24'
-
-      - name: Fix response URL callback bindings
+      - name: Apply callback binding fix
+        shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
+          set -euo pipefail
+          sed -i 's/^        postResponseUrl,$/        postResponseUrl: postToResponseUrl,/' lambdas/sqs2scouts/function/persistence-processor.mjs
+          sed -i 's/^      postResponseUrl,$/      postResponseUrl: postToResponseUrl,/' lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs
+          if grep -R -n -E '^\s*postResponseUrl,$' lambdas/sqs2scouts/function/persistence-processor.mjs lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs; then
+            echo 'Unbound postResponseUrl callback remains' >&2
+            exit 1
+          fi
+          grep -n 'postResponseUrl: postToResponseUrl' lambdas/sqs2scouts/function/persistence-processor.mjs lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs
 
-          files = [
-              Path('lambdas/sqs2scouts/function/persistence-processor.mjs'),
-              Path('lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs'),
-          ]
-          for path in files:
-              text = path.read_text()
-              old = '        postResponseUrl,\n'
-              replacement = '        postResponseUrl: postToResponseUrl,\n'
-              count = text.count(old)
-              if count == 0:
-                  if replacement not in text:
-                      raise SystemExit(f'{path}: expected postResponseUrl binding not found')
-                  continue
-              path.write_text(text.replace(old, replacement))
-              print(f'{path}: replaced {count} callback binding(s)')
-
-          test_path = Path('tests/issue-94-admin-slack-sync.integration.test.mjs')
-          test_text = test_path.read_text()
-          marker = "test('Slack response URL callback bindings use the defined helper in both persistence paths'"
-          if marker not in test_text:
-              test_text += r'''
-
-test('Slack response URL callback bindings use the defined helper in both persistence paths', () => {
-  const persistenceProcessor = readFileSync('lambdas/sqs2scouts/function/persistence-processor.mjs', 'utf8');
-  const approvalAdapter = readFileSync('lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs', 'utf8');
-  for (const source of [persistenceProcessor, approvalAdapter]) {
-    assert.match(source, /async function postToResponseUrl\(/);
-    assert.match(source, /postResponseUrl: postToResponseUrl/);
-    assert.doesNotMatch(source, /\n\s*postResponseUrl,\n/);
-  }
-});
-'''
-              test_path.write_text(test_text)
-          PY
-
-      - name: Verify hotfix
+      - name: Add regression test
+        shell: bash
         run: |
+          set -euo pipefail
+          marker='Slack response URL callback bindings use the defined helper in both persistence paths'
+          if ! grep -Fq "$marker" tests/issue-94-admin-slack-sync.integration.test.mjs; then
+            cat >> tests/issue-94-admin-slack-sync.integration.test.mjs <<'EOF'
+
+          test('Slack response URL callback bindings use the defined helper in both persistence paths', () => {
+            const persistenceProcessor = readFileSync('lambdas/sqs2scouts/function/persistence-processor.mjs', 'utf8');
+            const approvalAdapter = readFileSync('lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs', 'utf8');
+            for (const source of [persistenceProcessor, approvalAdapter]) {
+              assert.match(source, /async function postToResponseUrl\(/);
+              assert.match(source, /postResponseUrl: postToResponseUrl/);
+              assert.doesNotMatch(source, /\n\s*postResponseUrl,\n/);
+            }
+          });
+          EOF
+          fi
+
+      - name: Verify
+        shell: bash
+        run: |
+          set -euo pipefail
           node --check lambdas/sqs2scouts/function/persistence-processor.mjs
           node --check lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs
           node --test tests/issue-94-admin-slack-sync.integration.test.mjs
 
-      - name: Commit fix
+      - name: Commit source fix
+        shell: bash
         run: |
+          set -euo pipefail
           if git diff --quiet; then
-            echo 'No changes required.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add lambdas/sqs2scouts/function/persistence-processor.mjs \
-                  lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs \
-                  tests/issue-94-admin-slack-sync.integration.test.mjs
+          git add lambdas/sqs2scouts/function/persistence-processor.mjs lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs tests/issue-94-admin-slack-sync.integration.test.mjs
           git commit -m 'Fix Slack response URL callback binding'
           git push origin HEAD:fix/post-response-url-reference
