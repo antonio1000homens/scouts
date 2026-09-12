@@ -4,6 +4,8 @@
 // approval action. The legacy handler remains available during deployment
 // rollback, while all normal approval clicks use the revisioned backend contract.
 (function () {
+    const REVIEW_REQUEST_TIMEOUT_MS = 15000;
+
     function optionalText(value) {
         if (value === undefined || value === null) return null;
         const result = String(value).trim();
@@ -38,13 +40,34 @@
             && Boolean(left.isHidden) === Boolean(right.isHidden);
     }
 
+    async function withReadTimeout(promise, timeoutMs, message) {
+        let timer = null;
+        try {
+            return await Promise.race([
+                promise,
+                new Promise((_, reject) => {
+                    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+                }),
+            ]);
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+    }
+
     async function fetchServerReview(hex) {
-        const result = await sendScoutsCommand({
-            realm: 'runtime',
-            subject: 'event',
-            action: 'review',
-            hex,
-        });
+        const sendRead = typeof window.sendScoutsReadCommand === 'function'
+            ? window.sendScoutsReadCommand
+            : sendScoutsCommand;
+        const result = await withReadTimeout(
+            sendRead({
+                realm: 'runtime',
+                subject: 'event',
+                action: 'review',
+                hex,
+            }),
+            REVIEW_REQUEST_TIMEOUT_MS,
+            'REVIEW_TIMEOUT: canonical review did not respond within 15 seconds',
+        );
         if (!result?.review?.revision) {
             throw new Error('Server review snapshot is unavailable.');
         }
@@ -114,16 +137,58 @@
             const title = generatedReview
                 ? 'Approve the generated image and complete this event workflow.'
                 : 'Approve the tagline, image theme, image and visibility currently shown for this event.';
-
-            // This controller observes DOM mutations so dynamically rendered
-            // event cards get the right approval copy. Assigning textContent
-            // unconditionally creates another child-list mutation, which would
-            // immediately re-enter this observer and starve the browser's UI
-            // thread. Only write when the rendered value actually differs.
             if (button.textContent !== label) button.textContent = label;
             if (button.title !== title) button.title = title;
         });
     }
+
+    function relabelAfterRender(original) {
+        if (typeof original !== 'function') return original;
+        return function approvalAwareRender(...args) {
+            const result = original.apply(this, args);
+            relabelApprovalButtons();
+            return result;
+        };
+    }
+
+    function refreshApprovedPresentation(entry, fromModal = false) {
+        const approvedHex = typeof getEventHex === 'function'
+            ? String(getEventHex(entry?.event) || '').trim().toLowerCase()
+            : '';
+
+        if (typeof updateEventsCount === 'function') {
+            updateEventsCount(
+                uniqueEventEntries.length,
+                eventsData.length,
+                uniqueEventEntries.filter((candidate) => isEntryHidden(candidate)).length,
+                uniqueEventEntries.filter((candidate) => isEntryComplete(candidate)).length,
+            );
+        }
+        if (typeof updateSidebarUi === 'function') updateSidebarUi();
+        if (typeof renderEvents === 'function') renderEvents();
+
+        if (!fromModal) return;
+        const refreshedIndex = approvedHex && Array.isArray(visibleEventEntries)
+            ? visibleEventEntries.findIndex((candidate) => {
+                return String(getEventHex(candidate?.event) || '').trim().toLowerCase() === approvedHex;
+            })
+            : -1;
+        if (refreshedIndex >= 0 && typeof updateModalContent === 'function') {
+            currentEventIndex = refreshedIndex;
+            updateModalContent(refreshedIndex);
+            return;
+        }
+        if (typeof closeUploadModal === 'function') closeUploadModal();
+    }
+
+    // Approval copy is derived from application state at the points where the
+    // event grid/modal are rendered. Do not observe the entire document: broad
+    // MutationObservers can turn presentation writes into self-sustaining
+    // microtask loops and starve clicks/timers on the main thread.
+    if (typeof window.renderEvents === 'function') window.renderEvents = relabelAfterRender(window.renderEvents);
+    if (typeof window.openUploadModal === 'function') window.openUploadModal = relabelAfterRender(window.openUploadModal);
+    if (typeof window.updateModalContent === 'function') window.updateModalContent = relabelAfterRender(window.updateModalContent);
+    window.refreshApprovalButtonLabels = relabelApprovalButtons;
 
     const legacyApproveEvent = typeof approveEvent === 'function' ? approveEvent : null;
 
@@ -159,8 +224,13 @@
 
         uiCommandInFlight = true;
         if (typeof refreshApiActionButtons === 'function') refreshApiActionButtons();
+        let operationStage = 'canonical review';
         try {
             const displayedReview = eventReviewValues(event, hex);
+            const reviewMessage = `Checking current review for "${displayedReview.title || hex}"…`;
+            updateRuntimeDetails(reviewMessage, 'info');
+            if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(reviewMessage, 'info');
+
             const serverResult = await fetchServerReview(hex);
             const reviewSnapshot = serverResult.review;
             if (!sameReviewableValues(displayedReview, reviewSnapshot)) {
@@ -176,6 +246,7 @@
             }
             updateRuntimeDetails(`Approving ${approvalLabel} for "${reviewSnapshot.title || hex}": ${checklist}`, 'info');
 
+            operationStage = 'approval submission';
             const result = await sendScoutsCommand({
                 realm: 'scouts',
                 subject: { hex: reviewSnapshot.hex },
@@ -192,14 +263,18 @@
                 updateRuntimeDetails(message, 'info');
                 if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(message, 'info');
             } else {
-                if (typeof applyLocalApprovalState === 'function') applyLocalApprovalState(event, true);
+                if (typeof applyLocalApprovalState === 'function') applyLocalApprovalState(entry, true);
+                refreshApprovedPresentation(entry, fromModal);
                 const message = result?.message || (generatedReview ? 'Generated image approval submitted.' : 'Approve shown changes submitted.');
                 updateRuntimeDetails(message, 'success');
                 if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(message, 'success');
             }
 
+            // The mutation has already been accepted at this point. Activity is
+            // presentation/telemetry and must never keep the approval button locked
+            // while a secondary status request is slow or unavailable.
             if (typeof pollQueueDepthSnapshots === 'function') {
-                await pollQueueDepthSnapshots({ updatePanels: true }).catch(() => {});
+                void Promise.resolve(pollQueueDepthSnapshots({ updatePanels: true })).catch(() => {});
             }
             // Generated-image workflows deliberately remain active while waiting for
             // a human final review. The Activity Centre owns that long-lived phase
@@ -225,8 +300,9 @@
                 if (fromModal && typeof updateModalContent === 'function') updateModalContent();
                 return null;
             }
-            updateRuntimeDetails(`Approval failed: ${message}`, 'error');
-            if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(`Approval failed: ${message}`, 'error');
+            const failureMessage = `Approval failed during ${operationStage}: ${message}`;
+            updateRuntimeDetails(failureMessage, 'error');
+            if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(failureMessage, 'error');
             throw error;
         } finally {
             uiCommandInFlight = false;
@@ -236,8 +312,5 @@
     };
 
     relabelApprovalButtons();
-    if (typeof MutationObserver === 'function') {
-        const observer = new MutationObserver(() => relabelApprovalButtons());
-        observer.observe(document.documentElement, { childList: true, subtree: true });
-    }
+    window.scoutsApprovalWorkflowReady = true;
 })();

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { loadFunctionsFromSource } from './helpers/source-function-loader.mjs';
 
 const adminSource = readFileSync('website/admin/admin-script.js', 'utf8');
+const adminHtml = readFileSync('website/admin/index.html', 'utf8');
 const approvalWorkflowSource = readFileSync('website/admin/admin-approval-workflow.js', 'utf8');
 const privateStorageSource = readFileSync('website/admin/private-storage-client.js', 'utf8');
 const scoutsEntrySource = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
@@ -240,9 +241,15 @@ test('admin actions fail closed when auth is unavailable or the event has no HEX
   assert.equal(missingHex.sent.length, 0);
 });
 
-test('issue 91 loads the revisioned approval controller after the legacy admin bundle', () => {
-  assert.match(privateStorageSource, /admin-approval-workflow\.js/);
-  assert.match(privateStorageSource, /data-scouts-approval-workflow/);
+test('issue 91 loads the revisioned approval controller immediately after its bootstrap dependencies', () => {
+  const privateStorageIndex = adminHtml.indexOf('<script src="private-storage-client.js"></script>');
+  const approvalIndex = adminHtml.indexOf('<script src="admin-approval-workflow.js"');
+  const simplifyIndex = adminHtml.indexOf('<script src="admin-simplify.js"></script>');
+  assert.ok(privateStorageIndex >= 0 && approvalIndex > privateStorageIndex, 'approval controller must load after private storage bootstrap');
+  assert.ok(simplifyIndex > approvalIndex, 'approval controller must load before mutation/presentation wrappers');
+  assert.match(privateStorageSource, /approvalBootstrapGuard/);
+  assert.match(privateStorageSource, /handleApprovalWorkflowLoadError/);
+  assert.match(approvalWorkflowSource, /window\.scoutsApprovalWorkflowReady = true/);
   assert.match(approvalWorkflowSource, /window\.approveEvent = async function issue91ApproveEvent/);
   assert.match(approvalWorkflowSource, /Approve shown changes/);
 });

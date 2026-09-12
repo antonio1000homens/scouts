@@ -2,6 +2,14 @@
 // This script loads after admin-script.js and replaces the direct S3 readers
 // with authenticated calls through /admin-api/scouts.
 (function () {
+    // Capture the base transport before presentation/activity layers wrap the
+    // mutation path. Runtime reads must not schedule mutation-side Activity
+    // refreshes simply because they share the same HTTP endpoint.
+    const readOnlySendScoutsCommand = sendScoutsCommand;
+    window.sendScoutsReadCommand = async function sendScoutsReadCommand(payload) {
+        return readOnlySendScoutsCommand(payload);
+    };
+
     function snapshotName(value) {
         const textValue = String(value || '').toLowerCase();
         if (textValue === 'queued' || textValue.includes('scoutsqueued')) return 'queued';
@@ -14,7 +22,7 @@
         const snapshot = snapshotName(snapshotRef);
         if (!snapshot) return null;
         try {
-            const result = await sendScoutsCommand({
+            const result = await window.sendScoutsReadCommand({
                 realm: 'runtime',
                 subject: 'snapshot',
                 action: 'get',
@@ -37,7 +45,7 @@
         if (nextRetryAt > now) return null;
 
         try {
-            const result = await sendScoutsCommand({
+            const result = await window.sendScoutsReadCommand({
                 realm: 'runtime',
                 subject: 'event',
                 action: 'get',
@@ -65,14 +73,27 @@
         return fetchPrivateEvent(hexValue, false);
     };
 
-    // Keep issue #91's approval controller isolated from the legacy admin bundle.
-    // Loading it here avoids changing the large static index while guaranteeing it
-    // runs after admin-script.js has established the existing UI helpers/state.
-    if (!document.querySelector('script[data-scouts-approval-workflow]')) {
-        const script = document.createElement('script');
-        script.src = 'admin-approval-workflow.js';
-        script.defer = true;
-        script.dataset.scoutsApprovalWorkflow = 'true';
-        document.body.appendChild(script);
-    }
+    // Do not allow a fast click during controller bootstrap to fall back to the
+    // legacy approval contract. Non-approval legacy actions remain delegated.
+    const bootstrapLegacyApproveEvent = typeof approveEvent === 'function' ? approveEvent : null;
+    window.scoutsApprovalWorkflowReady = false;
+    window.approveEvent = function approvalBootstrapGuard(eventIndex, fromModal = false, action = 'approve') {
+        if (String(action || '').toLowerCase() === 'approve' && !window.scoutsApprovalWorkflowReady) {
+            const message = 'Approval controls are still loading. Reload the Admin page if this message persists.';
+            if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(message, 'error');
+            else if (typeof updateRuntimeDetails === 'function') updateRuntimeDetails(message, 'error');
+            return null;
+        }
+        return bootstrapLegacyApproveEvent?.(eventIndex, fromModal, action);
+    };
+
+    window.handleApprovalWorkflowLoadError = function handleApprovalWorkflowLoadError() {
+        window.scoutsApprovalWorkflowReady = false;
+        console.error('[ApprovalWorkflow] Failed to load admin-approval-workflow.js');
+        if (typeof showAdminNotification === 'function') {
+            showAdminNotification('Approval controls failed to load. Reload the Admin page before approving events.', 'error', 10000);
+        } else if (typeof updateRuntimeDetails === 'function') {
+            updateRuntimeDetails('Approval controls failed to load. Reload the Admin page before approving events.', 'error');
+        }
+    };
 })();

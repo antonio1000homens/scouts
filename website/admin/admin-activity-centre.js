@@ -22,7 +22,12 @@
     }
     function saveTracked() { localStorage.setItem(STORAGE_KEY, JSON.stringify([...tracked].slice(-100))); }
     function requestLabel(request) { return request.title || request.hex || 'Event change'; }
-    function activityCommand(action, extra = {}) { return originalSend({ realm: 'runtime', subject: 'activity', action, ...extra }); }
+    function activityCommand(action, extra = {}) {
+        const sendRead = typeof window.sendScoutsReadCommand === 'function'
+            ? window.sendScoutsReadCommand
+            : originalSend;
+        return sendRead({ realm: 'runtime', subject: 'activity', action, ...extra });
+    }
     function stateLabel(request) {
         if (text(request?.displayMessage)) return text(request.displayMessage);
         const state = text(request?.state).toLowerCase();
@@ -179,7 +184,11 @@
         const result = await originalSend(payload);
         if (payload?.realm !== 'runtime') {
             const requestId = text(result?.rootRequestId || result?.requestId || result?.request?.requestId || result?.activity?.requestId);
-            if (requestId) { tracked.add(requestId); saveTracked(); poll(); }
+            // Tracking is immediate, but canonical status refresh has one owner:
+            // admin-simplify schedules it after the mutation. The Activity Centre's
+            // own 5-second timer handles notifications/history without launching a
+            // second request burst for the same click.
+            if (requestId) { tracked.add(requestId); saveTracked(); }
         }
         return result;
     };

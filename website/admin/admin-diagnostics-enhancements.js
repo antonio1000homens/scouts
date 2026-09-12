@@ -14,7 +14,6 @@
     let latestDlqActivity = null;
     let scheduledRefreshSettings = null;
     let scheduledRefreshBusy = false;
-    let cardObserver = null;
 
     function text(value) {
         if (value === undefined || value === null) return '';
@@ -546,7 +545,7 @@
         uiCommandInFlight = true;
         if (button) {
             button.disabled = true;
-            button.textContent = 'Requesting image…';
+            if (button.textContent !== 'Requesting image…') button.textContent = 'Requesting image…';
         }
         refreshApiActionButtons();
         pinRuntimeDetails(`Requesting image for "${title}"…`, 'loading');
@@ -561,8 +560,10 @@
             const message = `Image requested for "${title}"${requestId ? ` · request ${requestId}` : ''}.`;
             pinRuntimeDetails(message, 'success');
             if (typeof showAdminNotification === 'function') showAdminNotification(message, 'success', 5000);
-            if (button) button.textContent = 'Image requested';
-            await pollQueueDepthSnapshots();
+            if (button && button.textContent !== 'Image requested') button.textContent = 'Image requested';
+            if (typeof pollQueueDepthSnapshots === 'function') {
+                void Promise.resolve(pollQueueDepthSnapshots()).catch(() => {});
+            }
             setTimeout(() => {
                 loadEvents({ silent: true });
             }, 2000);
@@ -579,6 +580,11 @@
         } finally {
             uiCommandInFlight = false;
             refreshApiActionButtons();
+            // Generic API button refresh enables every `.requires-api` control.
+            // Reapply the direct-image pending state immediately so a request that
+            // has already been accepted cannot look clickable while its duplicate
+            // guard still rejects clicks.
+            enhanceEventCards();
         }
     }
 
@@ -599,18 +605,21 @@
                 if (!prerequisites.imageMissing && prerequisites.hex) pendingDirectImageHexes.delete(prerequisites.hex);
                 return;
             }
+            const pending = pendingDirectImageHexes.has(prerequisites.hex);
             if (existing) {
-                existing.disabled = !apiAuthReady || uiCommandInFlight || pendingDirectImageHexes.has(prerequisites.hex);
-                if (pendingDirectImageHexes.has(prerequisites.hex)) existing.textContent = 'Image requested';
+                const shouldDisable = !apiAuthReady || uiCommandInFlight || pending;
+                const desiredLabel = pending ? 'Image requested' : 'Request Image';
+                if (existing.disabled !== shouldDisable) existing.disabled = shouldDisable;
+                if (existing.textContent !== desiredLabel) existing.textContent = desiredLabel;
                 return;
             }
 
             const button = document.createElement('button');
             button.type = 'button';
             button.className = 'btn btn-secondary requires-api event-direct-image-request';
-            button.textContent = pendingDirectImageHexes.has(prerequisites.hex) ? 'Image requested' : 'Request Image';
+            button.textContent = pending ? 'Image requested' : 'Request Image';
             button.title = 'Image theme/prompt is already available. Generate the missing image without opening View Details.';
-            button.disabled = !apiAuthReady || uiCommandInFlight || pendingDirectImageHexes.has(prerequisites.hex);
+            button.disabled = !apiAuthReady || uiCommandInFlight || pending;
             button.addEventListener('click', () => requestDirectImage(index, button));
 
             const detailsButton = actions.querySelector('button');
@@ -619,12 +628,16 @@
         });
     }
 
-    function observeEventCards() {
-        const container = document.getElementById('events-container');
-        if (!container || cardObserver) return;
-        cardObserver = new MutationObserver(() => enhanceEventCards());
-        cardObserver.observe(container, { childList: true, subtree: true });
-        enhanceEventCards();
+    function installEventCardRenderHook() {
+        const originalRenderEvents = window.renderEvents;
+        if (typeof originalRenderEvents !== 'function' || originalRenderEvents.__scoutsDiagnosticsEnhanced) return;
+        function diagnosticsAwareRender(...args) {
+            const result = originalRenderEvents.apply(this, args);
+            enhanceEventCards();
+            return result;
+        }
+        diagnosticsAwareRender.__scoutsDiagnosticsEnhanced = true;
+        window.renderEvents = diagnosticsAwareRender;
     }
 
     function refreshOperationalStatusWhenReady(attempt = 0) {
@@ -645,7 +658,8 @@
         clarifyPollingControls();
         ensureScheduledRefreshSection();
         ensureDlqSection();
-        observeEventCards();
+        installEventCardRenderHook();
+        enhanceEventCards();
         document.getElementById('diagnostics-open')?.addEventListener('click', () => {
             if (!apiAuthReady) return;
             refreshDlqOverview(false);
