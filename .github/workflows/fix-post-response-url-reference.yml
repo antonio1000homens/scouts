@@ -21,8 +21,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sed -i 's/^        postResponseUrl,$/        postResponseUrl: postToResponseUrl,/' lambdas/sqs2scouts/function/persistence-processor.mjs
-          sed -i 's/^      postResponseUrl,$/      postResponseUrl: postToResponseUrl,/' lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs
+          for file in \
+            lambdas/sqs2scouts/function/persistence-processor.mjs \
+            lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs
+          do
+            perl -0pi -e 's/^(\s*)postResponseUrl,\s*$/${1}postResponseUrl: postToResponseUrl,/mg' "$file"
+          done
           if grep -R -n -E '^\s*postResponseUrl,$' lambdas/sqs2scouts/function/persistence-processor.mjs lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs; then
             echo 'Unbound postResponseUrl callback remains' >&2
             exit 1
