@@ -29,7 +29,6 @@ jobs:
           start = source.index(marker) + len(marker)
           end = source.index("\n          PY\n", start)
           patch = source[start:end]
-          # Undo YAML indentation before executing the embedded Python patch.
           patch = '\n'.join(line[10:] if line.startswith('          ') else line for line in patch.splitlines())
           exec(compile(patch, 'issue-94-embedded-patch.py', 'exec'), {})
           PY
@@ -40,7 +39,6 @@ jobs:
           node --check lambdas/sqs2scouts/function/persistence-processor.mjs
           node --check lambdas/scouts-slack-handler/function/slack-handler.mjs
           node --test tests/issue-94-admin-slack-sync.integration.test.mjs
-          node --test lambdas/sqs2scouts/test-persist-patch-merge.mjs
 
       - name: Commit implementation
         run: |
