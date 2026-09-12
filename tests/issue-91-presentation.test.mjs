@@ -78,20 +78,41 @@ test('issue 91 generated review notification has durable external identity and S
   assert.match(imageWorker, /REVIEW_NOTIFICATION_MARKER_RETRIES/);
 });
 
+test('issue 91 Slack review references are scoped to one root operation', () => {
+  assert.match(approvalLifecycle, /function generatedReviewReference\(event, rootRequestId = null\)/);
+  assert.match(approvalLifecycle, /text\(workflow\.rootRequestId\) !== expectedRoot/);
+  assert.match(approvalLifecycle, /const sameRoot = text\(previous\.rootRequestId\) === rootRequestId/);
+  assert.match(approvalLifecycle, /\.\.\.\(sameRoot \? previous : \{\}\)/);
+  assert.match(approvalLifecycle, /generatedReviewReference\(event, message\?\.rootRequestId\)/);
+});
+
+test('issue 91 final approval waits for an in-flight generated-review Slack reference', () => {
+  assert.match(approvalLifecycle, /function finalApprovalNotificationReferencePending/);
+  assert.match(approvalLifecycle, /notificationClientMsgId/);
+  assert.match(approvalLifecycle, /notificationChannel/);
+  assert.match(approvalLifecycle, /notificationTs/);
+  assert.match(approvalLifecycle, /ApprovalReviewNotificationPending/);
+  assert.match(approvalLifecycle, /Deferring final approval until generated-review Slack reference is durable/);
+});
+
 test('issue 91 final approval reconciles both stored and generated-image Slack cards', () => {
-  assert.match(approvalLifecycle, /function generatedReviewReference\(event\)/);
   assert.match(approvalLifecycle, /notificationChannel/);
   assert.match(approvalLifecycle, /notificationTs/);
   assert.match(approvalLifecycle, /for \(const reference of \[generatedMetadata, directMetadata\]\)/);
   assert.match(approvalLifecycle, /seen\.has\(key\)/);
 });
 
-test('issue 91 reachable legacy reviews are normalized to event-level approval copy', () => {
+test('issue 91 reachable legacy reviews use bounded reference-only Slack actions', () => {
   assert.match(imageAdapter, /normalizeLegacyApprovalCards/);
   assert.match(imageAdapter, /await normalizeLegacyApprovalCards\(delegated\)/);
   assert.match(legacyNormalizer, /text: \{ type: 'plain_text', text: 'Approve shown changes'/);
-  assert.match(legacyNormalizer, /buildEventReviewSnapshot\(event\)/);
-  assert.match(legacyNormalizer, /text\(metadata\?\.status\)\.toUpperCase\(\) === 'PENDING'/);
+  assert.match(legacyNormalizer, /event: \{ hex: review\.hex \}/);
+  assert.match(legacyNormalizer, /reviewReference: true/);
+  assert.match(legacyNormalizer, /value\.length > 2000/);
+  assert.doesNotMatch(legacyNormalizer, /scouts_request_edit|scouts_request_skip|scouts_request_hide/);
+  assert.match(slackProxy, /async function hydrateApprovalEvent/);
+  assert.match(slackProxy, /new GetObjectCommand\(\{ Bucket: TARGET_BUCKET, Key: `events\/\$\{hex\}\.json` \}\)/);
+  assert.match(slackProxy, /const approvalEvent = await hydrateApprovalEvent\(event, meta\)/);
   assert.match(sqs2scoutsDeploy, /legacy-approval-card-normalizer\.mjs/);
 });
 
