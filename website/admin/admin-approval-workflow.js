@@ -4,6 +4,8 @@
 // approval action. The legacy handler remains available during deployment
 // rollback, while all normal approval clicks use the revisioned backend contract.
 (function () {
+    const REVIEW_REQUEST_TIMEOUT_MS = 15000;
+
     function optionalText(value) {
         if (value === undefined || value === null) return null;
         const result = String(value).trim();
@@ -38,16 +40,34 @@
             && Boolean(left.isHidden) === Boolean(right.isHidden);
     }
 
+    async function withReadTimeout(promise, timeoutMs, message) {
+        let timer = null;
+        try {
+            return await Promise.race([
+                promise,
+                new Promise((_, reject) => {
+                    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+                }),
+            ]);
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+    }
+
     async function fetchServerReview(hex) {
         const sendRead = typeof window.sendScoutsReadCommand === 'function'
             ? window.sendScoutsReadCommand
             : sendScoutsCommand;
-        const result = await sendRead({
-            realm: 'runtime',
-            subject: 'event',
-            action: 'review',
-            hex,
-        });
+        const result = await withReadTimeout(
+            sendRead({
+                realm: 'runtime',
+                subject: 'event',
+                action: 'review',
+                hex,
+            }),
+            REVIEW_REQUEST_TIMEOUT_MS,
+            'REVIEW_TIMEOUT: canonical review did not respond within 15 seconds',
+        );
         if (!result?.review?.revision) {
             throw new Error('Server review snapshot is unavailable.');
         }
@@ -174,8 +194,13 @@
 
         uiCommandInFlight = true;
         if (typeof refreshApiActionButtons === 'function') refreshApiActionButtons();
+        let operationStage = 'canonical review';
         try {
             const displayedReview = eventReviewValues(event, hex);
+            const reviewMessage = `Checking current review for "${displayedReview.title || hex}"…`;
+            updateRuntimeDetails(reviewMessage, 'info');
+            if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(reviewMessage, 'info');
+
             const serverResult = await fetchServerReview(hex);
             const reviewSnapshot = serverResult.review;
             if (!sameReviewableValues(displayedReview, reviewSnapshot)) {
@@ -191,6 +216,7 @@
             }
             updateRuntimeDetails(`Approving ${approvalLabel} for "${reviewSnapshot.title || hex}": ${checklist}`, 'info');
 
+            operationStage = 'approval submission';
             const result = await sendScoutsCommand({
                 realm: 'scouts',
                 subject: { hex: reviewSnapshot.hex },
@@ -243,8 +269,9 @@
                 if (fromModal && typeof updateModalContent === 'function') updateModalContent();
                 return null;
             }
-            updateRuntimeDetails(`Approval failed: ${message}`, 'error');
-            if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(`Approval failed: ${message}`, 'error');
+            const failureMessage = `Approval failed during ${operationStage}: ${message}`;
+            updateRuntimeDetails(failureMessage, 'error');
+            if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(failureMessage, 'error');
             throw error;
         } finally {
             uiCommandInFlight = false;
