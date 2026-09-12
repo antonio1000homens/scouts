@@ -23,7 +23,7 @@ function text(value) {
 
 function approvalMetadataKey(identifier, realm = 'approval') {
   const safeIdentifier = text(identifier).replace(/[^a-zA-Z0-9._-]/g, '-');
-  if (!safeIdentifier) throw new Error('Cannot build approval metadata key without identifier');
+  if (!safeIdentifier) throw new Error('Cannot build metadata key without identifier');
   const safeRealm = (text(realm) || 'unknown').toLowerCase().replace(/[^a-z0-9._-]/g, '-');
   return `${APPROVAL_METADATA_PREFIX}/${safeIdentifier}/${safeRealm}.json`;
 }
@@ -113,11 +113,40 @@ function resolveImageUrlForDisplay(value) {
   return `${S3_WEBSITE_BASE_URL}/${imageUrl.replace(/^\/+/, '')}`;
 }
 
+function slackReference(value = {}) {
+  const channel = text(value?.channel || value?.notificationChannel);
+  const ts = text(value?.ts || value?.notificationTs);
+  const responseUrl = text(value?.responseUrl || value?.response_url);
+  return {
+    ...(channel ? { channel } : {}),
+    ...(ts ? { ts } : {}),
+    ...(responseUrl ? { responseUrl } : {}),
+  };
+}
+
+function generatedReviewReference(event, rootRequestId = null) {
+  const workflow = event?.approvalWorkflow && typeof event.approvalWorkflow === 'object'
+    ? event.approvalWorkflow
+    : null;
+  if (!workflow) return null;
+  const expectedRoot = text(rootRequestId);
+  if (expectedRoot && text(workflow.rootRequestId) !== expectedRoot) return null;
+  const reference = slackReference(workflow);
+  return reference.channel && reference.ts ? reference : null;
+}
+
+function slackReferenceKey(reference) {
+  const ref = slackReference(reference);
+  return ref.channel && ref.ts ? `${ref.channel}:${ref.ts}` : '';
+}
+
 async function reconcileApprovalSlack(message, hex, event, approvalState) {
   const directMetadata = message?.approvalMetadata && typeof message.approvalMetadata === 'object'
-    ? message.approvalMetadata
+    ? slackReference(message.approvalMetadata)
     : null;
+  const generatedMetadata = generatedReviewReference(event, message?.rootRequestId);
   const source = text(message?.source).toLowerCase();
+  const decisionSource = source.startsWith('slack') ? 'slack' : 'admin';
   const decisionOverride = approvalState === 'awaiting_image'
     ? {
         status: 'AWAITING_IMAGE',
@@ -125,14 +154,16 @@ async function reconcileApprovalSlack(message, hex, event, approvalState) {
         emoji: '⏳',
       }
     : null;
+  const identifiers = approvalIdentifiers(event, hex);
+
   try {
-    return await reconcileSlackDecision({
+    const primary = await reconcileSlackDecision({
       event,
       messageBody: {
-        decisionSource: source.startsWith('slack') ? 'slack' : 'admin',
-        ...(directMetadata ? { slackMetadata: directMetadata } : {}),
+        decisionSource,
+        ...(directMetadata?.responseUrl ? { responseUrl: directMetadata.responseUrl } : {}),
       },
-      identifiers: approvalIdentifiers(event, hex),
+      identifiers,
       loadMetadata: loadApprovalMessageMetadata,
       persistMetadata: persistApprovalMetadata,
       updateMessage: updateSlackApprovalMessage,
@@ -141,6 +172,33 @@ async function reconcileApprovalSlack(message, hex, event, approvalState) {
       decisionOverride,
       logger: console,
     });
+
+    const seen = new Set();
+    const primaryKey = slackReferenceKey(primary);
+    if (primaryKey) seen.add(primaryKey);
+
+    for (const reference of [generatedMetadata, directMetadata]) {
+      const key = slackReferenceKey(reference);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      await reconcileSlackDecision({
+        event,
+        messageBody: {
+          decisionSource,
+          slackMetadata: reference,
+        },
+        identifiers: [],
+        loadMetadata: async () => null,
+        persistMetadata: async () => {},
+        updateMessage: updateSlackApprovalMessage,
+        postResponseUrl,
+        resolveImageUrl: resolveImageUrlForDisplay,
+        decisionOverride,
+        logger: console,
+      });
+    }
+
+    return primary;
   } catch (error) {
     console.warn('[ApprovalPersist] Slack reconciliation failed after canonical persistence', error?.message || error);
     return null;
@@ -298,17 +356,30 @@ async function notifyDecision(message, hex, event) {
 
 function markWorkflow(event, message, state) {
   const now = new Date().toISOString();
+  const rootRequestId = text(message.rootRequestId);
   const previous = event?.approvalWorkflow && typeof event.approvalWorkflow === 'object'
     ? event.approvalWorkflow
     : {};
+  const sameRoot = text(previous.rootRequestId) === rootRequestId;
   event.approvalWorkflow = {
-    ...previous,
-    rootRequestId: text(message.rootRequestId),
+    ...(sameRoot ? previous : {}),
+    rootRequestId,
     approvedRevision: text(message.approvalRevision),
     state,
     updatedAt: now,
     ...(state === 'approved' ? { approvedAt: now } : {}),
   };
+}
+
+function finalApprovalNotificationReferencePending(event, message, approvalState) {
+  if (approvalState !== 'approved') return false;
+  const workflow = event?.approvalWorkflow && typeof event.approvalWorkflow === 'object'
+    ? event.approvalWorkflow
+    : null;
+  if (!workflow || text(workflow.rootRequestId) !== text(message?.rootRequestId)) return false;
+  const identityPrepared = Boolean(text(workflow.notificationClientMsgId));
+  const referenceRecorded = Boolean(text(workflow.notificationChannel) && text(workflow.notificationTs));
+  return identityPrepared && !referenceRecorded;
 }
 
 function currentMatchesAppliedApproval(current, message) {
@@ -329,6 +400,12 @@ export async function handleRevisionedPersist(message) {
 
   let current = await loadEventVersioned(hex);
   if (!current?.event) throw new Error(`HEX ${hex} not found`);
+
+  if (finalApprovalNotificationReferencePending(current.event, message, approvalState)) {
+    const error = new Error('Generated-review Slack message reference is still being recorded; retry final approval persistence');
+    error.name = 'ApprovalReviewNotificationPending';
+    throw error;
+  }
 
   if (currentMatchesAppliedApproval(current.event, message)) {
     const rootState = approvalState === 'approved' ? 'completed' : 'awaiting_image';
@@ -423,6 +500,13 @@ export async function processRevisionedApprovalRecords(records = []) {
       const result = await handleRevisionedPersist(message);
       console.log('[ApprovalPersist] Revisioned approval persistence handled', result);
     } catch (error) {
+      if (error?.name === 'ApprovalReviewNotificationPending') {
+        console.warn('[ApprovalPersist] Deferring final approval until generated-review Slack reference is durable', {
+          requestId: message?.requestId || null,
+          rootRequestId: message?.rootRequestId || null,
+        });
+        throw error;
+      }
       console.error('[ApprovalPersist] Revisioned approval persistence failed', {
         requestId: message?.requestId || null,
         rootRequestId: message?.rootRequestId || null,

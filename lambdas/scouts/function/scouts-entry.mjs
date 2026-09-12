@@ -3,6 +3,7 @@ import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import { withRequestActivityContext } from '/opt/nodejs/request-activity.mjs';
 import { coordinateEventApproval } from '/opt/nodejs/approval-coordinator.mjs';
+import { buildEventReviewSnapshot } from '/opt/nodejs/event-review.mjs';
 import { repairAgendaHexMetadata } from './agenda-hex-repair.mjs';
 import { handler as scoutsServiceHandler } from './scouts-service.mjs';
 import { buildRuntimeActivity } from './runtime-activity.mjs';
@@ -207,7 +208,7 @@ function isInterceptedRuntimeCommand(command) {
   if (!command) return false;
   if (command.subject === 'activity' && ['status', 'history', 'lookup'].includes(command.action)) return true;
   if (command.subject === 'snapshot' && command.action === 'get') return true;
-  if (command.subject === 'event' && command.action === 'get') return true;
+  if (command.subject === 'event' && ['get', 'review'].includes(command.action)) return true;
   if (command.subject === 'dlq' && ['inspect', 'redrive'].includes(command.action)) return true;
   return command.subject === 'schedule' && ['status', 'enable', 'disable'].includes(command.action);
 }
@@ -352,6 +353,15 @@ export async function handler(event = {}) {
       const eventObject = await readPrivateJsonObject(`events/${hex}.json`);
       if (!eventObject) {
         return response(404, { status: 'error', error: 'Event object not found' });
+      }
+      if (command.action === 'review') {
+        return response(200, {
+          status: 'ok',
+          review: buildEventReviewSnapshot(eventObject),
+          approvalWorkflow: eventObject?.approvalWorkflow && typeof eventObject.approvalWorkflow === 'object'
+            ? eventObject.approvalWorkflow
+            : null,
+        });
       }
       return response(200, { status: 'ok', event: eventObject });
     }

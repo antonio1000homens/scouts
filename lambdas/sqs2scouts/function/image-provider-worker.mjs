@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { readFileSync } from 'fs';
 import sharp from 'sharp';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
@@ -64,6 +65,7 @@ const PROCESSING_QUEUE_URL = text(process.env.SCOUTS_PROCESSING_QUEUE_URL);
 const S3_WEBSITE_BASE_URL = (text(process.env.S3_WEBSITE_BASE_URL) || `https://${TARGET_BUCKET}.s3.${AWS_REGION}.amazonaws.com`).replace(/\/$/, '');
 const APPROVAL_PERSIST_MAX_WAITS = 5;
 const REVIEW_NOTIFICATION_MAX_ATTEMPTS = 3;
+const REVIEW_NOTIFICATION_MARKER_RETRIES = 4;
 
 const s3 = new S3Client({ region: AWS_REGION });
 const sqs = new SQSClient({ region: AWS_REGION });
@@ -243,16 +245,22 @@ function logImageEvent({
   }));
 }
 
-async function sendSlackMessage(textValue, blocks = null) {
+async function sendSlackMessage(textValue, blocks = null, options = {}) {
   const token = await getOptionalSecret('SLACK_BOT_TOKEN_PARAMETER', '').catch(() => '');
   if (!token) throw new Error('Slack bot token is unavailable');
+  const clientMsgId = text(options?.clientMsgId);
   const response = await fetch(SLACK_WEBHOOK_URL, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ channel: SLACK_CHANNEL, text: textValue, ...(blocks ? { blocks } : {}) }),
+    body: JSON.stringify({
+      channel: text(options?.channel) || SLACK_CHANNEL,
+      text: textValue,
+      ...(blocks ? { blocks } : {}),
+      ...(clientMsgId ? { client_msg_id: clientMsgId } : {}),
+    }),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body?.ok === false) throw new Error(`Slack notification failed: ${body?.error || `HTTP ${response.status}`}`);
@@ -335,24 +343,88 @@ async function queueProcessingMessage(message, delaySeconds = 0) {
   }));
 }
 
-async function markReviewNotificationSent(hex, rootRequestId, reviewRevision) {
-  const current = await loadEventVersioned(hex);
-  if (!current?.event || !current.eTag) return false;
-  const marker = current.event.approvalWorkflow;
-  if (!marker || marker.rootRequestId !== rootRequestId || marker.reviewRevision !== reviewRevision) return false;
-  if (getMetadata(current.event).status?.isApproved === true) return true;
-  current.event.approvalWorkflow = {
-    ...marker,
-    notificationSentAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  try {
-    await saveEvent(hex, current.event, { ifMatch: current.eTag });
-    return true;
-  } catch (error) {
-    if (isPreconditionFailure(error)) return false;
-    throw error;
+function deterministicReviewClientMsgId(rootRequestId, reviewRevision) {
+  const digest = crypto.createHash('sha256')
+    .update(`${text(rootRequestId)}\n${text(reviewRevision)}\ngenerated-image-review`)
+    .digest('hex')
+    .slice(0, 32)
+    .split('');
+  digest[12] = '4';
+  digest[16] = ((Number.parseInt(digest[16], 16) & 0x3) | 0x8).toString(16);
+  const value = digest.join('');
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+}
+
+async function ensureReviewNotificationIdentity(hex, rootRequestId, reviewRevision) {
+  for (let attempt = 0; attempt < REVIEW_NOTIFICATION_MARKER_RETRIES; attempt += 1) {
+    const current = await loadEventVersioned(hex);
+    if (!current?.event || !current.eTag) return { state: 'event_missing' };
+    const marker = current.event.approvalWorkflow;
+    if (getMetadata(current.event).status?.isApproved === true) return { state: 'already_approved' };
+    if (!marker || marker.rootRequestId !== rootRequestId || marker.reviewRevision !== reviewRevision) {
+      return { state: 'review_moved_on' };
+    }
+    if (marker.notificationSentAt) {
+      return {
+        state: 'already_sent',
+        event: current.event,
+        clientMsgId: text(marker.notificationClientMsgId),
+        channel: text(marker.notificationChannel),
+        ts: text(marker.notificationTs),
+      };
+    }
+
+    const clientMsgId = text(marker.notificationClientMsgId)
+      || deterministicReviewClientMsgId(rootRequestId, reviewRevision);
+    if (text(marker.notificationClientMsgId)) {
+      return { state: 'ready', event: current.event, clientMsgId };
+    }
+
+    current.event.approvalWorkflow = {
+      ...marker,
+      notificationClientMsgId: clientMsgId,
+      notificationPreparedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      await saveEvent(hex, current.event, { ifMatch: current.eTag });
+      return { state: 'ready', event: current.event, clientMsgId };
+    } catch (error) {
+      if (!isPreconditionFailure(error)) throw error;
+    }
   }
+  throw new Error('Could not persist generated-review notification identity before Slack delivery');
+}
+
+async function markReviewNotificationSent(hex, rootRequestId, reviewRevision, slackResponse, clientMsgId) {
+  const channel = text(slackResponse?.channel || slackResponse?.message?.channel);
+  const ts = text(slackResponse?.ts || slackResponse?.message?.ts);
+  if (!channel || !ts) throw new Error('Slack generated-review response did not include channel and ts');
+
+  for (let attempt = 0; attempt < REVIEW_NOTIFICATION_MARKER_RETRIES; attempt += 1) {
+    const current = await loadEventVersioned(hex);
+    if (!current?.event || !current.eTag) return false;
+    const marker = current.event.approvalWorkflow;
+    if (!marker || marker.rootRequestId !== rootRequestId || marker.reviewRevision !== reviewRevision) return false;
+    if (getMetadata(current.event).status?.isApproved === true) return true;
+    if (marker.notificationSentAt && marker.notificationChannel && marker.notificationTs) return true;
+
+    current.event.approvalWorkflow = {
+      ...marker,
+      notificationClientMsgId: clientMsgId,
+      notificationChannel: channel,
+      notificationTs: ts,
+      notificationSentAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      await saveEvent(hex, current.event, { ifMatch: current.eTag });
+      return true;
+    } catch (error) {
+      if (!isPreconditionFailure(error)) throw error;
+    }
+  }
+  return false;
 }
 
 async function notifyGeneratedReview(hex, context, attempt = 0) {
@@ -367,11 +439,27 @@ async function notifyGeneratedReview(hex, context, attempt = 0) {
   if (marker.notificationSentAt) return { sent: false, reason: 'already_sent' };
 
   try {
-    const message = generatedReviewBlocks(current.event, context);
-    await sendSlackMessage(message.text, message.blocks);
-    await markReviewNotificationSent(hex, context.rootRequestId, review.revision).catch(() => false);
+    const identity = await ensureReviewNotificationIdentity(hex, context.rootRequestId, review.revision);
+    if (identity.state === 'already_sent') return { sent: false, reason: 'already_sent' };
+    if (identity.state !== 'ready') return { sent: false, reason: identity.state };
+
+    const message = generatedReviewBlocks(identity.event || current.event, context);
+    const slackResponse = await sendSlackMessage(message.text, message.blocks, { clientMsgId: identity.clientMsgId });
+    const marked = await markReviewNotificationSent(
+      hex,
+      context.rootRequestId,
+      review.revision,
+      slackResponse,
+      identity.clientMsgId,
+    );
+    if (!marked) throw new Error('Generated-review Slack message was sent but its durable reference could not be recorded');
     await recordApprovalState(context, 'awaiting_review', 'review_notified', { hex, title: review.title });
-    return { sent: true, review };
+    return {
+      sent: true,
+      review,
+      channel: text(slackResponse?.channel || slackResponse?.message?.channel),
+      ts: text(slackResponse?.ts || slackResponse?.message?.ts),
+    };
   } catch (error) {
     console.warn('[ApprovalImage] Final review notification failed', error?.message || error);
     if (attempt < REVIEW_NOTIFICATION_MAX_ATTEMPTS && PROCESSING_QUEUE_URL) {
@@ -528,14 +616,18 @@ async function prepareExistingImageForReview(hex, context, versioned) {
     return { status: 'completed', review };
   }
 
+  const previousWorkflow = event.approvalWorkflow && typeof event.approvalWorkflow === 'object'
+    ? event.approvalWorkflow
+    : {};
   event.approvalWorkflow = {
+    ...previousWorkflow,
     rootRequestId: context.rootRequestId,
     approvedRevision: context.approvedRevision,
     reviewRevision: review.revision,
     state: 'awaiting_review',
     source: 'manual_image_superseded_generation',
     updatedAt: new Date().toISOString(),
-    notificationSentAt: event.approvalWorkflow?.notificationSentAt || null,
+    notificationSentAt: previousWorkflow.notificationSentAt || null,
   };
   try {
     await saveEvent(hex, event, { ifMatch: versioned.eTag });
@@ -597,7 +689,11 @@ async function persistCachedImage({ hex, generatedValue, generationId, message }
   event.metadata.image.url = generatedValue.relativeUrl;
   event.metadata.status.isApproved = false;
   const generatedReview = buildEventReviewSnapshot(event);
+  const previousWorkflow = event.approvalWorkflow && typeof event.approvalWorkflow === 'object'
+    ? event.approvalWorkflow
+    : {};
   event.approvalWorkflow = {
+    ...previousWorkflow,
     rootRequestId: context.rootRequestId,
     approvedRevision: context.approvedRevision,
     reviewRevision: generatedReview.revision,
@@ -605,6 +701,10 @@ async function persistCachedImage({ hex, generatedValue, generationId, message }
     source: 'generated_image',
     generatedImageUrl: generatedValue.relativeUrl,
     notificationSentAt: null,
+    notificationClientMsgId: null,
+    notificationPreparedAt: null,
+    notificationChannel: null,
+    notificationTs: null,
     updatedAt: new Date().toISOString(),
   };
 

@@ -1,5 +1,6 @@
 import { processRevisionedApprovalRecords } from './approval-lifecycle-adapter.mjs';
 import { lambdaHandler as imageProviderWorkerHandler } from './image-provider-worker.mjs';
+import { normalizeLegacyApprovalCards } from './legacy-approval-card-normalizer.mjs';
 
 export async function lambdaHandler(event) {
   const records = Array.isArray(event?.Records) ? event.Records : [];
@@ -13,5 +14,7 @@ export async function lambdaHandler(event) {
     };
   }
 
-  return imageProviderWorkerHandler({ ...event, Records: delegated });
+  const result = await imageProviderWorkerHandler({ ...event, Records: delegated });
+  await normalizeLegacyApprovalCards(delegated);
+  return result;
 }

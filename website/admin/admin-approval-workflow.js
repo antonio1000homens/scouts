@@ -29,31 +29,26 @@
         };
     }
 
-    async function sha256Prefix(value) {
-        if (!globalThis.crypto?.subtle || typeof TextEncoder !== 'function') {
-            throw new Error('This browser cannot create the approval revision token.');
-        }
-        const encoded = new TextEncoder().encode(value);
-        const digest = await globalThis.crypto.subtle.digest('SHA-256', encoded);
-        return [...new Uint8Array(digest)]
-            .map((byte) => byte.toString(16).padStart(2, '0'))
-            .join('')
-            .slice(0, 24);
+    function sameReviewableValues(left, right) {
+        if (!left || !right) return false;
+        return String(left.hex || '').toLowerCase() === String(right.hex || '').toLowerCase()
+            && optionalText(left.tagline) === optionalText(right.tagline)
+            && optionalText(left.imageTheme) === optionalText(right.imageTheme)
+            && optionalText(left.imageUrl) === optionalText(right.imageUrl)
+            && Boolean(left.isHidden) === Boolean(right.isHidden);
     }
 
-    async function buildReviewSnapshot(event, hex) {
-        const snapshot = eventReviewValues(event, hex);
-        const reviewable = {
-            hex: snapshot.hex,
-            tagline: snapshot.tagline,
-            imageTheme: snapshot.imageTheme,
-            imageUrl: snapshot.imageUrl,
-            isHidden: snapshot.isHidden,
-        };
-        return {
-            ...snapshot,
-            revision: await sha256Prefix(JSON.stringify(reviewable)),
-        };
+    async function fetchServerReview(hex) {
+        const result = await sendScoutsCommand({
+            realm: 'runtime',
+            subject: 'event',
+            action: 'review',
+            hex,
+        });
+        if (!result?.review?.revision) {
+            throw new Error('Server review snapshot is unavailable.');
+        }
+        return result;
     }
 
     function selectedEntry(eventIndex, fromModal) {
@@ -82,6 +77,12 @@
         return workflow?.state === 'awaiting_review'
             && workflow?.source === 'generated_image'
             && Boolean(review.imageUrl);
+    }
+
+    function isGeneratedServerReview(workflow, review) {
+        return workflow?.state === 'awaiting_review'
+            && workflow?.source === 'generated_image'
+            && Boolean(review?.imageUrl);
     }
 
     function fieldChecklist(snapshot, generatedReview = false) {
@@ -148,12 +149,18 @@
             return null;
         }
 
-        const generatedReview = isGeneratedImageReview(event);
-        const workflow = approvalWorkflow(event);
         uiCommandInFlight = true;
         if (typeof refreshApiActionButtons === 'function') refreshApiActionButtons();
         try {
-            const reviewSnapshot = await buildReviewSnapshot(event, hex);
+            const displayedReview = eventReviewValues(event, hex);
+            const serverResult = await fetchServerReview(hex);
+            const reviewSnapshot = serverResult.review;
+            if (!sameReviewableValues(displayedReview, reviewSnapshot)) {
+                throw new Error('STALE_REVIEW: server review no longer matches the values displayed in Admin');
+            }
+
+            const workflow = serverResult.approvalWorkflow || approvalWorkflow(event);
+            const generatedReview = isGeneratedServerReview(workflow, reviewSnapshot);
             const checklist = fieldChecklist(reviewSnapshot, generatedReview);
             const approvalLabel = generatedReview ? 'generated image' : 'shown changes';
             if (fromModal && typeof updateModalStatus === 'function') {
@@ -166,6 +173,7 @@
                 subject: { hex: reviewSnapshot.hex },
                 action: 'approve',
                 reviewSnapshot,
+                baseRevision: reviewSnapshot.revision,
                 ...(generatedReview && workflow?.rootRequestId ? { rootRequestId: workflow.rootRequestId } : {}),
             });
             const rootRequestId = result?.rootRequestId || extractBackendRequestId(result);
