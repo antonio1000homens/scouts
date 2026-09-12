@@ -15,7 +15,7 @@ Fetches the two Online Scout Manager calendars, converts them into tidy JSON, an
 
 The `lambda-layer/lambda-layer.zip` bundle contains the shared runtime dependencies:
 - `@aws-sdk/client-s3` for S3 operations
-- `@google/generative-ai` for Gemini API integration
+- `@google/genai` for Gemini API integration
 
 1. Publish the layer archive to your AWS account (for example with `aws lambda publish-layer-version --layer-name scouts-shared --zip-file fileb://lambda-layer/lambda-layer.zip`).
 2. Attach the newly published layer version to the `scouts` Lambda function so the handler can resolve the SDK package from `/opt/nodejs/node_modules`.

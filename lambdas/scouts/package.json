@@ -28,8 +28,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.592.0",
     "@aws-sdk/client-sqs": "^3.910.0",
-    "@google/genai": "^1.29.1",
-    "@google/generative-ai": "^0.21.0"
+    "@google/genai": "^1.29.1"
   },
   "engines": {
     "node": ">=24.0.0"
