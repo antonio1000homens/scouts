@@ -95,6 +95,7 @@ test('failure classification distinguishes retryable and terminal categories', (
   for (const status of [500, 502, 503, 504]) assert.equal(classifyGeminiError({ status }), 'PROVIDER_5XX');
   assert.equal(classifyGeminiError(new Error('socket timeout')), 'NETWORK_TIMEOUT');
   assert.equal(classifyGeminiError(new Error('ECONNRESET from upstream')), 'NETWORK_TIMEOUT');
+  assert.equal(classifyGeminiError({ name: 'MALFORMED_MODEL_RESPONSE', message: 'Malformed model response: invalid JSON structured output' }), 'MALFORMED_MODEL_RESPONSE');
   assert.equal(classifyGeminiError({ status: 401 }), 'AUTH_FAILURE');
   assert.equal(classifyGeminiError({ status: 403 }), 'AUTH_FAILURE');
   assert.equal(classifyGeminiError({ status: 404, message: 'model not found' }), 'MODEL_CONFIGURATION');

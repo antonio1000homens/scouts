@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_GEMINI_TEXT_MODELS,
+  assertGeminiStructuredTextResult,
   generateGeminiTextWithFallback,
   isRetryableGeminiTextError,
   parseGeminiTextModels,
@@ -54,6 +55,7 @@ test('retryability recognises provider quota and transient availability errors',
   assert.equal(isRetryableGeminiTextError({ message: 'RESOURCE_EXHAUSTED' }), true);
   assert.equal(isRetryableGeminiTextError({ status: 503 }), true);
   assert.equal(isRetryableGeminiTextError({ status: 403, message: 'Forbidden' }), false);
+  assert.equal(isRetryableGeminiTextError({ name: 'MALFORMED_MODEL_RESPONSE' }), true);
 });
 
 test('structured response schemas and semantic validation reject malformed event data', () => {
@@ -67,4 +69,81 @@ test('structured response schemas and semantic validation reject malformed event
 
 test('429 quota response remains retryable even when provider reports quota exhaustion', () => {
   assert.equal(isRetryableGeminiTextError({ status: 429, message: 'quota exceeded' }), true);
+});
+
+test('truncated JSON is treated as a retryable malformed model response', () => {
+  const result = {
+    response: {
+      text: () => '{"imageTag":"street festival',
+      candidates: [{ finishReason: 'STOP' }],
+      usageMetadata: { candidatesTokenCount: 6 },
+    },
+  };
+  assert.throws(
+    () => assertGeminiStructuredTextResult(result, { model: 'primary' }),
+    (error) => error?.name === 'MALFORMED_MODEL_RESPONSE' && error?.retryable === true,
+  );
+});
+
+test('MAX_TOKENS completion is retryable even before JSON parsing', () => {
+  const result = {
+    response: {
+      text: () => '{"imageTag":"street festival',
+      candidates: [{ finishReason: 'MAX_TOKENS' }],
+      usageMetadata: { candidatesTokenCount: 2048 },
+    },
+  };
+  assert.throws(
+    () => assertGeminiStructuredTextResult(result, { model: 'primary' }),
+    (error) => error?.name === 'MALFORMED_MODEL_RESPONSE' && error?.finishReason === 'MAX_TOKENS',
+  );
+});
+
+test('malformed structured output retries the same model once before succeeding', async () => {
+  const attempts = [];
+  const result = await generateGeminiTextWithFallback({
+    models: ['primary', 'fallback'],
+    generate: async (model) => {
+      attempts.push(model);
+      const text = attempts.length === 1
+        ? '{"imageTag":"street festival'
+        : '{"imageTag":"street festival parade"}';
+      return {
+        response: {
+          text: () => text,
+          candidates: [{ finishReason: 'STOP' }],
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(attempts, ['primary', 'primary']);
+  assert.equal(result.model, 'primary');
+});
+
+test('repeated malformed output falls back to the next configured model', async () => {
+  const attempts = [];
+  const result = await generateGeminiTextWithFallback({
+    models: ['primary', 'fallback'],
+    generate: async (model) => {
+      attempts.push(model);
+      if (model === 'primary') {
+        return {
+          response: {
+            text: () => '{"imageTag":"street festival',
+            candidates: [{ finishReason: 'STOP' }],
+          },
+        };
+      }
+      return {
+        response: {
+          text: () => '{"imageTag":"street festival parade"}',
+          candidates: [{ finishReason: 'STOP' }],
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(attempts, ['primary', 'primary', 'fallback']);
+  assert.equal(result.model, 'fallback');
 });
