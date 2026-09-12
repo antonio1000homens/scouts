@@ -7,7 +7,9 @@ const config = JSON.parse(readFileSync('lambdas/sqs2scouts/scouts.conf', 'utf8')
 
 test('text generation uses JSON schemas and deterministic output limits', () => {
   assert.match(worker, /responseMimeType:\s*'application\/json'/);
-  assert.match(worker, /responseSchema:\s*GEMINI_TEXT_RESPONSE_SCHEMAS\[stage\]/);
+  assert.match(worker, /responseJsonSchema:\s*GEMINI_TEXT_RESPONSE_SCHEMAS\[stage\]/);
+  assert.match(worker, /import\('@google\/genai'\)/);
+  assert.doesNotMatch(worker, /@google\/generative-ai/);
   assert.match(worker, /temperature:\s*0\.3/);
   assert.match(worker, /maxOutputTokens:\s*2048/);
   assert.match(worker, /validateGeminiTextResponse\(parsed, stage\)/);

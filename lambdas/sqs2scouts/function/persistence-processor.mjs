@@ -913,12 +913,14 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
         console.log(`[Gemini] Preparing to generate suggestion (mode=${mode}). Prompt length: ${String(prompt.length)}`);
     } catch {}
 
-    // Load SDK lazily so local tests don't fail if package is not installed
-    let GoogleGenerativeAILib;
+    // Load SDK lazily so local tests don't fail if package is not installed.
+    // @google/genai is the supported Google Gen AI SDK; image generation already
+    // uses the same client elsewhere in this worker.
+    let GoogleGenAIClient;
     try {
-        GoogleGenerativeAILib = (await import('@google/generative-ai')).GoogleGenerativeAI;
+        GoogleGenAIClient = (await import('@google/genai')).GoogleGenAI;
     } catch (err) {
-        console.warn('[Gemini] @google/generative-ai SDK not available:', err?.message || err);
+        console.warn('[Gemini] @google/genai SDK not available:', err?.message || err);
         return blockedEnrichmentResult('sdk_unavailable', 'manual_review');
     }
 
@@ -954,29 +956,38 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
     console.log(JSON.stringify({ hex: hexValue, stage, generationId, requestId: options.requestId || null, attemptCount: reservation.state?.attemptCount || null, stateBefore: stageEligibility.state?.state || 'pending', stateAfter: 'in_progress', geminiRequestAttempted: true, geminiResultReused: false, failureCategory: null }));
 
     try {
-        const genAI = new GoogleGenerativeAILib(geminiApiKey);
+        const genAI = new GoogleGenAIClient({
+            apiKey: geminiApiKey,
+            httpOptions: { apiVersion: GEMINI_API_VERSION },
+        });
         const { result, model, attemptedModels } = await generateGeminiTextWithFallback({
             models: GEMINI_TEXT_MODEL_PREFERENCES,
             generate: async (modelName) => {
-                const suggestionModel = genAI.getGenerativeModel({
+                console.log('[Gemini] Request payload:', { model: modelName, prompt: prompt.substring(0, 200) + '...' });
+                return genAI.models.generateContent({
                     model: modelName,
-                    generationConfig: {
+                    contents: prompt,
+                    config: {
                         temperature: 0.3,
                         maxOutputTokens: 2048,
                         responseMimeType: 'application/json',
-                        responseSchema: GEMINI_TEXT_RESPONSE_SCHEMAS[stage],
+                        // These schemas are JSON Schema-shaped (lowercase type names),
+                        // so use responseJsonSchema rather than the SDK Type enum form.
+                        responseJsonSchema: GEMINI_TEXT_RESPONSE_SCHEMAS[stage],
                     },
                 });
-                console.log('[Gemini] Request payload:', { model: modelName, prompt: prompt.substring(0, 200) + '...' });
-                return suggestionModel.generateContent(prompt);
             },
             onFailure: (modelName, modelError) => {
                 console.warn(`[Gemini] Text model ${modelName} failed with ${modelError?.status || modelError?.code || 'unknown'}; trying the next model when retryable.`);
             },
         });
         console.log('[Gemini] Text suggestion generated', { model, attemptedModels });
-        const responseObj = result?.response;
-        const responseText = typeof responseObj?.text === 'function' ? responseObj.text().trim() : String(responseObj || '').trim();
+        const responseObj = result?.response ?? result;
+        const responseText = typeof responseObj?.text === 'function'
+            ? responseObj.text().trim()
+            : typeof responseObj?.text === 'string'
+                ? responseObj.text.trim()
+                : String(responseObj || '').trim();
 
         console.log('[Gemini] Raw response snippet:', responseText.slice(0, 200).replace(/\n/g, ' '));
 
