@@ -38,7 +38,7 @@ require_env "CF_DEPLOY_API_TOKEN"
 
 export CLOUDFLARE_API_TOKEN="$CF_DEPLOY_API_TOKEN"
 
-# TEAM_DOMAIN and POLICY_AUD are non-secret Cloudflare Access configuration.
-# They are managed as remote Worker variables in Cloudflare. --keep-vars is
-# required so a source-controlled deployment cannot silently delete them.
+# Preserve remotely managed Worker configuration, including optional TEAM_DOMAIN
+# and POLICY_AUD pins used by the raw-JWT fallback verifier. Normal production
+# Access-authenticated requests use Cloudflare's ctx.access context directly.
 npx wrangler deploy --config "$CONFIG_PATH" --keep-vars
