@@ -142,6 +142,17 @@ test('admin commands stay on the same-origin proxy and derive missing agenda HEX
   assert.match(adminScript, /byte\.toString\(16\)\.padStart\(2, '0'\)/);
 });
 
+test('missing metadata classification excludes approval and visibility workflow state', () => {
+  const classificationBody = agendaRefresh.match(
+    /window\.getMissingMetadataFields = function \(event\) \{([\s\S]*?)\n    \};/,
+  )?.[1] || '';
+
+  assert.match(classificationBody, /missing\.push\('Tagline'\)/);
+  assert.match(classificationBody, /missing\.push\('Image Theme'\)/);
+  assert.match(classificationBody, /missing\.push\('Image URL'\)/);
+  assert.doesNotMatch(classificationBody, /Approval|Visibility|isEventApproved|isHiddenEvent/);
+});
+
 test('activity rendering uses lifecycle data and textContent rather than cloned diagnostics DOM', () => {
   assert.match(simplify, /function renderCanonicalActivity/);
   assert.match(simplify, /statusEl\.textContent = stateLabel\(request\)/);
