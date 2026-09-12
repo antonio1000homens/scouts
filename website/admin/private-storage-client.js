@@ -73,6 +73,20 @@
         return fetchPrivateEvent(hexValue, false);
     };
 
+    // Do not allow a fast click during controller bootstrap to fall back to the
+    // legacy approval contract. Non-approval legacy actions remain delegated.
+    const bootstrapLegacyApproveEvent = typeof approveEvent === 'function' ? approveEvent : null;
+    window.scoutsApprovalWorkflowReady = false;
+    window.approveEvent = function approvalBootstrapGuard(eventIndex, fromModal = false, action = 'approve') {
+        if (String(action || '').toLowerCase() === 'approve' && !window.scoutsApprovalWorkflowReady) {
+            const message = 'Approval controls are still loading. Reload the Admin page if this message persists.';
+            if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(message, 'error');
+            else if (typeof updateRuntimeDetails === 'function') updateRuntimeDetails(message, 'error');
+            return null;
+        }
+        return bootstrapLegacyApproveEvent?.(eventIndex, fromModal, action);
+    };
+
     // Keep issue #91's approval controller isolated from the legacy admin bundle.
     // Dynamic scripts are async by default; explicitly disable async so this
     // bootstrap has deterministic ordering relative to any future dynamically
