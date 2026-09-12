@@ -63,12 +63,17 @@ function publicImageUrl(value) {
   return `${S3_WEBSITE_BASE_URL}/${imageUrl.replace(/^\/+/, '')}`;
 }
 
-function actionValue(event, action, reviewRevision = null) {
-  return JSON.stringify({
-    event,
-    action,
-    ...(reviewRevision ? { reviewRevision } : {}),
+function approvalActionValue(review) {
+  const value = JSON.stringify({
+    event: { hex: review.hex },
+    action: 'approve_shown_changes',
+    reviewRevision: review.revision,
+    reviewReference: true,
   });
+  if (value.length > 2000) {
+    throw new Error('Legacy approval action value exceeds Slack 2000-character limit');
+  }
+  return value;
 }
 
 function canonicalReviewBlocks(event) {
@@ -102,26 +107,7 @@ function canonicalReviewBlocks(event) {
             action_id: 'scouts_request_approve',
             text: { type: 'plain_text', text: 'Approve shown changes', emoji: true },
             style: 'primary',
-            value: actionValue(event, 'approve_shown_changes', review.revision),
-          },
-          {
-            type: 'button',
-            action_id: 'scouts_request_edit',
-            text: { type: 'plain_text', text: 'Edit', emoji: true },
-            value: actionValue(event, 'EDIT'),
-          },
-          {
-            type: 'button',
-            action_id: 'scouts_request_skip',
-            text: { type: 'plain_text', text: 'Skip', emoji: true },
-            style: 'danger',
-            value: actionValue(event, 'REJECT'),
-          },
-          {
-            type: 'button',
-            action_id: 'scouts_request_hide',
-            text: { type: 'plain_text', text: 'Hide', emoji: true },
-            value: actionValue(event, 'HIDE'),
+            value: approvalActionValue(review),
           },
         ],
       },
@@ -169,7 +155,6 @@ export async function normalizeLegacyApprovalCards(records = []) {
       await updateSlackCard(metadata);
       console.log('[Issue91] Normalized reachable legacy Slack review card', { hex });
     } catch (error) {
-      // Compatibility copy must never make a successfully persisted enrichment fail.
       console.warn('[Issue91] Legacy Slack review normalization failed', { hex, error: error?.message || String(error) });
     }
   }
