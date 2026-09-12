@@ -54,11 +54,13 @@ MEMORY_SIZE="${MEMORY_SIZE:-256}"
 REQUIRED_API_KEY="${REQUIRED_API_KEY:-${SCOUTS_REQUIRED_API_KEY:-}}"
 REQUIRED_API_KEY_PARAMETER="${REQUIRED_API_KEY_PARAMETER:-/scouts/shared/required-api-key}"
 CUBS_EVENTS_CALENDAR_URL="${CUBS_EVENTS_CALENDAR_URL:-}"
+# Keep the misspelled alias for explicit manual/local compatibility only.
 CUBS_PROGRAMME_CALENDAR_URL="${CUBS_PROGRAMME_CALENDAR_URL:-${CUBS_PROGRAME_CALENDAR_URL:-}}"
 SCOUTS_EVENTS_CALENDAR_URL="${SCOUTS_EVENTS_CALENDAR_URL:-}"
 SCOUTS_PROGRAMME_CALENDAR_URL="${SCOUTS_PROGRAMME_CALENDAR_URL:-}"
 BEAVERS_EVENTS_CALENDAR_URL="${BEAVERS_EVENTS_CALENDAR_URL:-}"
 BEAVERS_PROGRAMME_CALENDAR_URL="${BEAVERS_PROGRAMME_CALENDAR_URL:-}"
+ALLOW_EXISTING_CALENDAR_ENV_REUSE="${ALLOW_EXISTING_CALENDAR_ENV_REUSE:-false}"
 SCOUTS_REQUESTS_QUEUE_ARN="${SCOUTS_REQUESTS_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsRequests}"
 SCOUTS_REQUESTS_QUEUE_URL="${SCOUTS_REQUESTS_QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests}"
 SCOUTS2SQS_FUNCTION_URL="${SCOUTS2SQS_FUNCTION_URL:-}"
@@ -140,14 +142,13 @@ CALENDAR_VARIABLE_NAMES=(
   BEAVERS_PROGRAMME_CALENDAR_URL
 )
 
-if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
-  for calendar_variable_name in "${CALENDAR_VARIABLE_NAMES[@]}"; do
-    if [ -z "${!calendar_variable_name:-}" ]; then
-      echo -e "${RED}Required Bitwarden calendar value was not resolved: ${calendar_variable_name}${NC}"
-      exit 1
-    fi
-  done
-else
+if [ "${GITHUB_ACTIONS:-}" = "true" ] && [ "${ALLOW_EXISTING_CALENDAR_ENV_REUSE}" = "true" ]; then
+  echo -e "${RED}ALLOW_EXISTING_CALENDAR_ENV_REUSE is a manual/local recovery option and cannot be enabled in GitHub Actions.${NC}"
+  exit 1
+fi
+
+if [ "${ALLOW_EXISTING_CALENDAR_ENV_REUSE}" = "true" ]; then
+  echo -e "${YELLOW}Calendar recovery mode enabled; empty values may be reused from the deployed Lambda environment.${NC}"
   if [ -z "${CUBS_EVENTS_CALENDAR_URL}" ]; then CUBS_EVENTS_CALENDAR_URL="$(reuse_lambda_env_if_unset "CUBS_EVENTS_CALENDAR_URL")"; fi
   if [ -z "${CUBS_PROGRAMME_CALENDAR_URL}" ]; then CUBS_PROGRAMME_CALENDAR_URL="$(reuse_lambda_env_if_unset "CUBS_PROGRAMME_CALENDAR_URL")"; fi
   if [ -z "${SCOUTS_EVENTS_CALENDAR_URL}" ]; then SCOUTS_EVENTS_CALENDAR_URL="$(reuse_lambda_env_if_unset "SCOUTS_EVENTS_CALENDAR_URL")"; fi
@@ -155,6 +156,16 @@ else
   if [ -z "${BEAVERS_EVENTS_CALENDAR_URL}" ]; then BEAVERS_EVENTS_CALENDAR_URL="$(reuse_lambda_env_if_unset "BEAVERS_EVENTS_CALENDAR_URL")"; fi
   if [ -z "${BEAVERS_PROGRAMME_CALENDAR_URL}" ]; then BEAVERS_PROGRAMME_CALENDAR_URL="$(reuse_lambda_env_if_unset "BEAVERS_PROGRAMME_CALENDAR_URL")"; fi
 fi
+
+# Empty calendar values are deliberate: they disable that feed centrally. Report
+# only enabled/disabled state so private calendar URLs never reach logs.
+for calendar_variable_name in "${CALENDAR_VARIABLE_NAMES[@]}"; do
+  if [ -n "${!calendar_variable_name:-}" ]; then
+    echo "Calendar source enabled: ${calendar_variable_name}"
+  else
+    echo "Calendar source disabled: ${calendar_variable_name}"
+  fi
+done
 
 if [ -z "${SCOUTS2SQS_FUNCTION_URL}" ]; then
   DISCOVERED_SCOUTS2SQS_URL="$(aws lambda get-function-url-config --function-name scouts2sqs --region "${REGION}" --query 'FunctionUrl' --output text 2>/dev/null || true)"
