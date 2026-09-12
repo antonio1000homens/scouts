@@ -22,8 +22,8 @@ function statusMetadata(event) {
 }
 
 export function getSyntheticHex(event) {
-  const candidate = String(event?.metadata?.hex ?? event?.hex ?? '').trim().toLowerCase();
-  if (!candidate || !/^[0-9a-f]+$/.test(candidate)) throw new Error('synthetic event missing valid HEX');
+  const candidate = String(event?.metadata?.hex ?? '').trim().toLowerCase();
+  if (!candidate || !/^[0-9a-f]+$/.test(candidate)) throw new Error('synthetic event missing valid metadata.hex');
   return candidate;
 }
 
@@ -81,12 +81,29 @@ function imageGenerationKey(event) {
   return crypto.createHash('sha256').update(`${hex}\n${theme}`).digest('hex').slice(0, 20);
 }
 
+export function persistSyntheticEvent(state, eventInput, stage = 'manual') {
+  const event = clone(eventInput);
+  const hex = getSyntheticHex(event);
+  if (!(state.persisted instanceof Map)) state.persisted = new Map();
+  state.persisted.set(hex, clone(event));
+  return { stage, event: clone(event) };
+}
+
+export function removeSyntheticEvent(state, hex) {
+  const normalizedHex = String(hex ?? '').trim().toLowerCase();
+  if (!normalizedHex || !/^[0-9a-f]+$/.test(normalizedHex)) throw new Error('remove boundary: invalid HEX');
+  if (!(state.persisted instanceof Map)) return false;
+  return state.persisted.delete(normalizedHex);
+}
+
 export async function enrichSyntheticEvent(eventInput, provider, state = {}) {
   const event = clone(eventInput);
   const trace = [];
+  const snapshots = [];
   const cache = state.imageCache ?? new Map();
   const persisted = state.persisted ?? new Map();
   const hex = getSyntheticHex(event);
+  let imageArtifact = null;
 
   while (true) {
     const stage = determineSyntheticStage(event);
@@ -110,14 +127,21 @@ export async function enrichSyntheticEvent(eventInput, provider, state = {}) {
         trace.push({ boundary: 'provider', stage, status: 'reused', generationKey });
       }
       imageMetadata(event).url = `website/eventImages/test/${hex}-${generationKey}.png`;
-      event.__testImage = generated;
+      imageArtifact = generated;
     }
 
     persisted.set(hex, clone(event));
+    snapshots.push({ stage, event: clone(event) });
     trace.push({ boundary: 'persistence', stage, status: 'persisted' });
   }
 
-  return { event, trace, state: { imageCache: cache, persisted } };
+  return {
+    event,
+    trace,
+    snapshots,
+    artifacts: { image: imageArtifact },
+    state: { imageCache: cache, persisted },
+  };
 }
 
 export function applySyntheticAdminAction(eventInput, payload) {
