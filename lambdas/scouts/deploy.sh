@@ -157,6 +157,15 @@ if [ "${ALLOW_EXISTING_CALENDAR_ENV_REUSE}" = "true" ]; then
   if [ -z "${BEAVERS_PROGRAMME_CALENDAR_URL}" ]; then BEAVERS_PROGRAMME_CALENDAR_URL="$(reuse_lambda_env_if_unset "BEAVERS_PROGRAMME_CALENDAR_URL")"; fi
 fi
 
+# A Bitwarden secret created before its URL is available contains this exact
+# marker. Treat it as deliberately disabled rather than deploying it as a URL.
+# The marker is never logged and is cleared before CloudFormation is invoked.
+for calendar_variable_name in "${CALENDAR_VARIABLE_NAMES[@]}"; do
+  if [ "${!calendar_variable_name:-}" = "__PENDING_${calendar_variable_name}__" ]; then
+    export "${calendar_variable_name}="
+  fi
+done
+
 # Empty calendar values are deliberate: they disable that feed centrally. Report
 # only enabled/disabled state so private calendar URLs never reach logs.
 for calendar_variable_name in "${CALENDAR_VARIABLE_NAMES[@]}"; do

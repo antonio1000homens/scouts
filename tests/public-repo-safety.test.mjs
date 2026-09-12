@@ -89,13 +89,15 @@ test('configured private calendar feeds resolve from Bitwarden UID variables', (
   assert.doesNotMatch(workflow, /CUBS_PROGRAME_CALENDAR_URL/);
 });
 
-test('empty calendar values disable feeds and Lambda reuse is explicit local recovery only', () => {
+test('empty or pending calendar values disable feeds and Lambda reuse is explicit local recovery only', () => {
   const deployScript = readFileSync('lambdas/scouts/deploy.sh', 'utf8');
 
   assert.match(deployScript, /ALLOW_EXISTING_CALENDAR_ENV_REUSE="\$\{ALLOW_EXISTING_CALENDAR_ENV_REUSE:-false\}"/);
   assert.match(deployScript, /GITHUB_ACTIONS:-.*ALLOW_EXISTING_CALENDAR_ENV_REUSE/);
   assert.match(deployScript, /ALLOW_EXISTING_CALENDAR_ENV_REUSE.*manual\/local recovery option/);
   assert.match(deployScript, /if \[ "\$\{ALLOW_EXISTING_CALENDAR_ENV_REUSE\}" = "true" \]; then/);
+  assert.match(deployScript, /"__PENDING_\$\{calendar_variable_name\}__"/);
+  assert.match(deployScript, /export "\$\{calendar_variable_name\}="/);
   assert.match(deployScript, /Calendar source disabled:/);
   assert.doesNotMatch(deployScript, /missing_calendar_variables/);
   assert.doesNotMatch(deployScript, /Normal deployments fail closed/);
