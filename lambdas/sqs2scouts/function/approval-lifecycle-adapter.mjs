@@ -113,11 +113,38 @@ function resolveImageUrlForDisplay(value) {
   return `${S3_WEBSITE_BASE_URL}/${imageUrl.replace(/^\/+/, '')}`;
 }
 
+function slackReference(value = {}) {
+  const channel = text(value?.channel || value?.notificationChannel);
+  const ts = text(value?.ts || value?.notificationTs);
+  const responseUrl = text(value?.responseUrl || value?.response_url);
+  return {
+    ...(channel ? { channel } : {}),
+    ...(ts ? { ts } : {}),
+    ...(responseUrl ? { responseUrl } : {}),
+  };
+}
+
+function generatedReviewReference(event) {
+  const workflow = event?.approvalWorkflow && typeof event.approvalWorkflow === 'object'
+    ? event.approvalWorkflow
+    : null;
+  if (!workflow) return null;
+  const reference = slackReference(workflow);
+  return reference.channel && reference.ts ? reference : null;
+}
+
+function slackReferenceKey(reference) {
+  const ref = slackReference(reference);
+  return ref.channel && ref.ts ? `${ref.channel}:${ref.ts}` : '';
+}
+
 async function reconcileApprovalSlack(message, hex, event, approvalState) {
   const directMetadata = message?.approvalMetadata && typeof message.approvalMetadata === 'object'
-    ? message.approvalMetadata
+    ? slackReference(message.approvalMetadata)
     : null;
+  const generatedMetadata = generatedReviewReference(event);
   const source = text(message?.source).toLowerCase();
+  const decisionSource = source.startsWith('slack') ? 'slack' : 'admin';
   const decisionOverride = approvalState === 'awaiting_image'
     ? {
         status: 'AWAITING_IMAGE',
@@ -125,14 +152,18 @@ async function reconcileApprovalSlack(message, hex, event, approvalState) {
         emoji: '⏳',
       }
     : null;
+  const identifiers = approvalIdentifiers(event, hex);
+
   try {
-    return await reconcileSlackDecision({
+    // Always reconcile the canonical stored review card first. Direct Slack
+    // interaction metadata must not mask that stored reference after #94/#97.
+    const primary = await reconcileSlackDecision({
       event,
       messageBody: {
-        decisionSource: source.startsWith('slack') ? 'slack' : 'admin',
-        ...(directMetadata ? { slackMetadata: directMetadata } : {}),
+        decisionSource,
+        ...(directMetadata?.responseUrl ? { responseUrl: directMetadata.responseUrl } : {}),
       },
-      identifiers: approvalIdentifiers(event, hex),
+      identifiers,
       loadMetadata: loadApprovalMessageMetadata,
       persistMetadata: persistApprovalMetadata,
       updateMessage: updateSlackApprovalMessage,
@@ -141,6 +172,36 @@ async function reconcileApprovalSlack(message, hex, event, approvalState) {
       decisionOverride,
       logger: console,
     });
+
+    const seen = new Set();
+    const primaryKey = slackReferenceKey(primary);
+    if (primaryKey) seen.add(primaryKey);
+
+    // A generated-image review can be a distinct Slack card, and a Slack-originated
+    // final click can carry a direct card reference. Reconcile every distinct card
+    // so Admin/Slack convergence never leaves an actionable stale review behind.
+    for (const reference of [generatedMetadata, directMetadata]) {
+      const key = slackReferenceKey(reference);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      await reconcileSlackDecision({
+        event,
+        messageBody: {
+          decisionSource,
+          slackMetadata: reference,
+        },
+        identifiers: [],
+        loadMetadata: async () => null,
+        persistMetadata: async () => {},
+        updateMessage: updateSlackApprovalMessage,
+        postResponseUrl,
+        resolveImageUrl: resolveImageUrlForDisplay,
+        decisionOverride,
+        logger: console,
+      });
+    }
+
+    return primary;
   } catch (error) {
     console.warn('[ApprovalPersist] Slack reconciliation failed after canonical persistence', error?.message || error);
     return null;
