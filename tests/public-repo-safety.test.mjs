@@ -166,7 +166,7 @@ test('private runtime and HEX objects are reachable only through the Access-prot
   assert.match(wrangler, /2ndtolworth\.org\.uk\/runtime\/\*/);
   assert.match(wrangler, /2ndtolworth\.org\.uk\/events\/\*/);
   assert.match(worker, /privateObjectCommand/);
-  assert.match(worker, /requireAccess\(request, env\)/);
+  assert.match(worker, /requireAccess\(request, env, ctx\)/);
   assert.match(worker, /subject: "snapshot"/);
   assert.match(worker, /subject: "event"/);
 
@@ -177,12 +177,19 @@ test('private runtime and HEX objects are reachable only through the Access-prot
   assert.match(scoutsEntry, /`events\/\$\{hex\}\.json`/);
 });
 
-test('admin proxy validates Cloudflare Access JWTs cryptographically and disables alternate Worker endpoints', () => {
+test('admin proxy prefers Cloudflare authenticated Access context and retains cryptographic JWT fallback', () => {
   const wrangler = readFileSync('cloudflare/scouts-admin-proxy/wrangler.toml', 'utf8');
   const worker = readFileSync('cloudflare/scouts-admin-proxy/worker.js', 'utf8');
   const deployScript = readFileSync('cloudflare/scouts-admin-proxy/deploy-ci.sh', 'utf8');
 
   assert.match(wrangler, /^workers_dev\s*=\s*false$/m);
+  assert.match(worker, /async fetch\(request, env, ctx\)/);
+  assert.match(worker, /if \(ctx\?\.access\)/);
+  assert.match(worker, /ctx\.access\.aud/);
+  assert.match(worker, /expectedAudience && actualAudience !== expectedAudience/);
+  assert.match(worker, /await requireAccess\(request, env, ctx\)/);
+
+  // The raw assertion fallback remains fully pinned and cryptographically checked.
   assert.match(worker, /TEAM_DOMAIN/);
   assert.match(worker, /POLICY_AUD/);
   assert.match(worker, /cloudflareaccess\.com/);
@@ -193,7 +200,6 @@ test('admin proxy validates Cloudflare Access JWTs cryptographically and disable
   assert.match(worker, /payload\?\.iss !== teamDomain/);
   assert.match(worker, /audienceMatches\(payload\?\.aud, policyAudience\)/);
   assert.match(worker, /payload\.exp <= nowSeconds/);
-  assert.match(worker, /await requireAccess\(request, env\)/);
   assert.doesNotMatch(worker, /isAccessAuthenticated/);
   assert.doesNotMatch(worker, /apiKeyLast4/);
   assert.match(deployScript, /wrangler deploy .*--keep-vars/);
