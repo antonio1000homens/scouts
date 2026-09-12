@@ -421,6 +421,20 @@ function cloneEvent(event) {
     }
 }
 
+function stripStaleDecisionStatus(event) {
+  const subject = cloneEvent(event);
+  delete subject.status;
+  delete subject.approved;
+  delete subject.isApproved;
+  delete subject.isHidden;
+  delete subject.hidden;
+  delete subject.hiddenAt;
+  if (subject.metadata && typeof subject.metadata === 'object') {
+      delete subject.metadata.status;
+  }
+  return subject;
+}
+
 function parseActionValue(rawValue) {
     if (rawValue === undefined || rawValue === null) {
         return { event: {}, meta: {} };
@@ -833,7 +847,8 @@ async function handleEditModalSubmission(parsedPayload) {
     const payload = {
         realm,
         action,
-        subject: baseEvent,
+        subject: stripStaleDecisionStatus(baseEvent),
+        decisionSource: 'slack',
     };
     normaliseTaglineFields(payload.subject);
     ensureEditableMetadata(payload.subject);
@@ -989,7 +1004,8 @@ export async function lambdaHandler(event) {
                     const persistPayload = {
                         realm,
                         action: 'persist',
-                        subject: eventData,
+                        subject: stripStaleDecisionStatus(eventData),
+                        decisionSource: 'slack',
                         slackMetadata: {
                             channel,
                             ts,
@@ -1033,17 +1049,9 @@ export async function lambdaHandler(event) {
 
                     const hidePayload = {
                         realm,
-                        subject: {
-                            ...eventData,
-                            metadata: {
-                                ...(eventData.metadata && typeof eventData.metadata === 'object' ? eventData.metadata : {}),
-                                status: {
-                                    ...((eventData.metadata && typeof eventData.metadata.status === 'object') ? eventData.metadata.status : {}),
-                                    isHidden: true,
-                                },
-                            },
-                        },
+                        subject: stripStaleDecisionStatus(eventData),
                         action: 'hidden',
+                        decisionSource: 'slack',
                         slackMetadata: {
                             channel,
                             ts,

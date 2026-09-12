@@ -231,6 +231,7 @@ echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
     cloudflare-image-client.mjs \
     gemini-text-models.mjs \
     runtime-request-entry.mjs \
+    slack-decision-sync.mjs \
     ../scouts.conf
 )
 
