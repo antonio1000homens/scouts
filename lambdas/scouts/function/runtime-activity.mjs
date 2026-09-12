@@ -126,8 +126,55 @@ function collapseRootActivity(rows = []) {
   });
   return [...grouped.values()].sort((a, b) => time(b.updatedAt || b.createdAt) - time(a.updatedAt || a.createdAt));
 }
+
+function canonicalDisplay(request = {}) {
+  const state = text(request.state).toLowerCase();
+  const stage = text(request.stage).toLowerCase();
+  if (state === 'completed') return { displayState: 'completed', displayMessage: 'Completed' };
+  if (['failed', 'needs_attention', 'manual_review'].includes(state)) {
+    return { displayState: 'needs_attention', displayMessage: 'Needs attention' };
+  }
+  if (state === 'awaiting_review') {
+    return { displayState: 'awaiting_review', displayMessage: 'Published — awaiting image approval' };
+  }
+  if (state === 'awaiting_image') {
+    return { displayState: 'awaiting_image', displayMessage: 'Generating image — final review required' };
+  }
+  if (state === 'waiting_for_retry') {
+    return { displayState: 'waiting_for_retry', displayMessage: 'Waiting for retry' };
+  }
+  if (state === 'persisting') {
+    return { displayState: 'processing', displayMessage: 'Saving approved changes' };
+  }
+  if (state === 'published') {
+    return { displayState: 'processing', displayMessage: 'Published — finalising workflow' };
+  }
+  if (stage.includes('image') && stage.includes('theme')) {
+    return { displayState: 'processing', displayMessage: 'Creating image theme' };
+  }
+  if (stage.includes('image')) {
+    return { displayState: 'processing', displayMessage: 'Generating image' };
+  }
+  if (stage.includes('tagline')) {
+    return { displayState: 'processing', displayMessage: 'Generating tagline' };
+  }
+  if (state === 'accepted' || state === 'queued') {
+    return { displayState: 'queued', displayMessage: 'Waiting' };
+  }
+  if (state === 'processing' || state === 'orchestrating') {
+    return { displayState: 'processing', displayMessage: 'Processing' };
+  }
+  const fallback = state ? state.replaceAll('_', ' ') : 'processing';
+  return { displayState: state || 'processing', displayMessage: fallback.charAt(0).toUpperCase() + fallback.slice(1) };
+}
+
 function present(request, now) {
   const updated = Date.parse(request.updatedAt || request.createdAt || '');
+  const display = canonicalDisplay(request);
+  const timeline = (Array.isArray(request.timeline) ? request.timeline : []).map((entry) => ({
+    ...entry,
+    ...canonicalDisplay(entry),
+  }));
   return {
     requestId: request.requestId,
     rootRequestId: request.rootRequestId || request.requestId || null,
@@ -139,11 +186,12 @@ function present(request, now) {
     state: request.state || 'processing',
     stage: request.stage || request.state || 'processing',
     publication: request.publication || null,
+    ...display,
     failure: request.failureType ? { type: request.failureType, message: request.failureMessage || null } : null,
     createdAt: request.createdAt || null,
     updatedAt: request.updatedAt || null,
     ageSeconds: Number.isFinite(updated) ? Math.max(0, Math.floor((now.getTime() - updated) / 1000)) : null,
-    timeline: Array.isArray(request.timeline) ? request.timeline : [],
+    timeline,
     health: ['failed', 'needs_attention', 'manual_review'].includes(request.state) ? 'needs_attention' : 'ok',
   };
 }
