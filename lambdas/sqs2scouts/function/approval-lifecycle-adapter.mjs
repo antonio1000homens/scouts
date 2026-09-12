@@ -2,17 +2,149 @@ import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3
 import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { buildEventReviewSnapshot } from '/opt/nodejs/event-review.mjs';
 import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
+import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
+import { reconcileSlackDecision } from './slack-decision-sync.mjs';
 import { publishCanonicalEventToAgenda } from './agenda-publisher.mjs';
 
 const AWS_REGION = process.env.AWS_REGION || 'eu-west-2';
 const TARGET_BUCKET = process.env.TARGET_BUCKET || 'scouts-2ndtolworth-prod-553490163883';
 const SCOUTS_DECISION_QUEUE_URL = String(process.env.SCOUTS_DECISION_QUEUE_URL || '').trim();
+const APPROVAL_METADATA_PREFIX = String(process.env.APPROVAL_METADATA_PREFIX || 'approvals').trim() || 'approvals';
+const SLACK_CHAT_UPDATE_URL = String(process.env.SLACK_CHAT_UPDATE_URL || 'https://slack.com/api/chat.update').trim();
+const S3_WEBSITE_BASE_URL = String(process.env.S3_WEBSITE_BASE_URL || `https://${TARGET_BUCKET}.s3.${AWS_REGION}.amazonaws.com`).replace(/\/$/, '');
+const APPROVAL_PERSISTENCE_ENABLED = !['false', '0', 'off', 'disabled'].includes(String(process.env.APPROVAL_PERSISTENCE ?? process.env.APPROVAL_METADATA_PERSISTENCE ?? 'true').trim().toLowerCase());
 const s3 = new S3Client({ region: AWS_REGION });
 const sqs = new SQSClient({ region: AWS_REGION });
 
 function text(value) {
   if (value === undefined || value === null) return '';
   return String(value).trim();
+}
+
+function approvalMetadataKey(identifier, realm = 'approval') {
+  const safeIdentifier = text(identifier).replace(/[^a-zA-Z0-9._-]/g, '-');
+  if (!safeIdentifier) throw new Error('Cannot build approval metadata key without identifier');
+  const safeRealm = (text(realm) || 'unknown').toLowerCase().replace(/[^a-z0-9._-]/g, '-');
+  return `${APPROVAL_METADATA_PREFIX}/${safeIdentifier}/${safeRealm}.json`;
+}
+
+function approvalIdentifiers(event, hex) {
+  const identifiers = new Set();
+  if (text(hex)) identifiers.add(text(hex).toLowerCase());
+  for (const candidate of [event?.hex, event?.uid, event?.originalUid]) {
+    if (text(candidate)) identifiers.add(text(candidate));
+  }
+  return Array.from(identifiers);
+}
+
+async function loadApprovalMessageMetadata(identifiers, realm = 'approval') {
+  for (const identifier of identifiers) {
+    const key = approvalMetadataKey(identifier, realm);
+    try {
+      const response = await s3.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: key }));
+      const metadata = JSON.parse(await response.Body.transformToString());
+      const storedIdentifiers = Array.isArray(metadata?.identifiers) && metadata.identifiers.length > 0
+        ? metadata.identifiers
+        : identifiers;
+      metadata._keys = storedIdentifiers.map((entry) => approvalMetadataKey(entry, realm));
+      return metadata;
+    } catch (error) {
+      if (error?.name === 'NoSuchKey' || error?.name === 'NotFound' || Number(error?.$metadata?.httpStatusCode) === 404) continue;
+      console.warn('[ApprovalPersist] Approval metadata lookup failed', { key, error: error?.message || String(error) });
+    }
+  }
+  return null;
+}
+
+async function persistApprovalMetadata(metadata, overrides = {}) {
+  if (!metadata || !APPROVAL_PERSISTENCE_ENABLED) return;
+  const merged = { ...metadata, ...overrides, updatedAt: new Date().toISOString() };
+  delete merged._keys;
+  const identifiers = Array.from(new Set(
+    (Array.isArray(merged.identifiers) ? merged.identifiers : [])
+      .map((entry) => text(entry))
+      .filter(Boolean),
+  ));
+  if (identifiers.length === 0) return;
+  merged.identifiers = identifiers;
+  const keys = Array.isArray(metadata._keys) && metadata._keys.length > 0
+    ? metadata._keys
+    : identifiers.map((entry) => approvalMetadataKey(entry, merged.realm || 'approval'));
+  await Promise.all(keys.map((key) => s3.send(new PutObjectCommand({
+    Bucket: TARGET_BUCKET,
+    Key: key,
+    Body: JSON.stringify(merged, null, 2),
+    ContentType: 'application/json',
+    CacheControl: 'no-store',
+  }))));
+}
+
+async function updateSlackApprovalMessage(channel, ts, messageText, blocks = null) {
+  const slackBotToken = await getRequiredSecret('SLACK_BOT_TOKEN_PARAMETER');
+  const response = await fetch(SLACK_CHAT_UPDATE_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${slackBotToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ channel, ts, text: messageText, ...(blocks ? { blocks } : {}) }),
+  });
+  let body = {};
+  try { body = await response.json(); } catch {}
+  if (!response.ok || body?.ok !== true) {
+    throw new Error(`Slack chat.update failed: ${body?.error || `HTTP ${response.status}`}`);
+  }
+  return body;
+}
+
+async function postToResponseUrl(responseUrl, payload) {
+  const response = await fetch(responseUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(`Slack response_url failed: HTTP ${response.status}`);
+}
+
+function resolveImageUrlForDisplay(value) {
+  const imageUrl = text(value);
+  if (!imageUrl) return null;
+  if (/^https?:\/\//i.test(imageUrl)) return imageUrl;
+  return `${S3_WEBSITE_BASE_URL}/${imageUrl.replace(/^\/+/, '')}`;
+}
+
+async function reconcileApprovalSlack(message, hex, event, approvalState) {
+  const directMetadata = message?.approvalMetadata && typeof message.approvalMetadata === 'object'
+    ? message.approvalMetadata
+    : null;
+  const source = text(message?.source).toLowerCase();
+  const decisionOverride = approvalState === 'awaiting_image'
+    ? {
+        status: 'AWAITING_IMAGE',
+        label: 'Approval accepted — generating image',
+        emoji: '⏳',
+      }
+    : null;
+  try {
+    return await reconcileSlackDecision({
+      event,
+      messageBody: {
+        decisionSource: source.startsWith('slack') ? 'slack' : 'admin',
+        ...(directMetadata ? { slackMetadata: directMetadata } : {}),
+      },
+      identifiers: approvalIdentifiers(event, hex),
+      loadMetadata: loadApprovalMessageMetadata,
+      persistMetadata: persistApprovalMetadata,
+      updateMessage: updateSlackApprovalMessage,
+      postResponseUrl,
+      resolveImageUrl: resolveImageUrlForDisplay,
+      decisionOverride,
+      logger: console,
+    });
+  } catch (error) {
+    console.warn('[ApprovalPersist] Slack reconciliation failed after canonical persistence', error?.message || error);
+    return null;
+  }
 }
 
 function getHex(message) {
@@ -209,6 +341,7 @@ export async function handleRevisionedPersist(message) {
       publication: 'published',
     });
     await recordRoot(message, hex, current.event, rootState, rootStage, 'published');
+    await reconcileApprovalSlack(message, hex, current.event, approvalState);
     return { status: 'already_applied', hex, rootState };
   }
 
@@ -243,6 +376,7 @@ export async function handleRevisionedPersist(message) {
       const rootState = approvalState === 'approved' ? 'completed' : 'awaiting_image';
       const rootStage = approvalState === 'approved' ? 'agenda_published' : 'metadata_published';
       await recordRoot(message, hex, current.event, rootState, rootStage, 'published');
+      await reconcileApprovalSlack(message, hex, current.event, approvalState);
       return { status: 'already_applied', hex, rootState };
     }
     await recordRoot(message, hex, current?.event || accepted, 'needs_attention', 'approval_persist_conflict', null, {
@@ -253,6 +387,7 @@ export async function handleRevisionedPersist(message) {
   }
 
   await publishEvent(hex, accepted);
+  await reconcileApprovalSlack(message, hex, accepted, approvalState);
   await notifyDecision(message, hex, accepted);
   await recordActivity({
     ...message,

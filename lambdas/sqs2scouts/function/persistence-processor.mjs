@@ -10,6 +10,7 @@ import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 import { publishCanonicalEventToAgenda } from './agenda-publisher.mjs';
 import { generateGeminiTextWithFallback, parseGeminiTextModels, GEMINI_TEXT_RESPONSE_SCHEMAS, validateGeminiTextResponse } from './gemini-text-models.mjs';
 import { buildRuntimeRequestEntry } from './runtime-request-entry.mjs';
+import { reconcileSlackDecision } from './slack-decision-sync.mjs';
 import {
     buildGenerationId,
     getEnrichmentState,
@@ -3609,79 +3610,23 @@ export async function lambdaHandler(event) {
             await saveHexEventToS3(hexValue, event);
             await publishHexEventToAgenda(hexValue, event);
             
-            // Send Slack notification without UIDs
+            // Reconcile the existing review card with canonical persisted state.
+            // This is deliberately best-effort: Slack failures must never roll back a successful event write.
             const eventTitle = event.title || event.summary || event.name || 'Unknown Event';
-            let notificationText = `Hex *${hexValue}* persisted for title "${eventTitle}"`;
-            let headerText = 'Event Persisted';
+            const slackSyncResult = await reconcileSlackDecision({
+                event,
+                messageBody,
+                identifiers: deriveApprovalIdentifiers(event),
+                loadMetadata: loadApprovalMessageMetadata,
+                persistMetadata: persistApprovalMetadata,
+                updateMessage: updateSlackApprovalMessage,
+                postResponseUrl,
+                resolveImageUrl: resolveImageUrlForDisplay,
+                logger: console,
+            });
 
-            if (actionIsHidden || statusIsHidden) {
-                headerText = `Event Hidden for ${eventTitle} (${hexValue})`;
-                notificationText = 'The event has been hidden and will not be processed further.';
-            }
-            
-            const blocks = [
-                {
-                    type: 'header',
-                    text: {
-                        type: 'plain_text',
-                        text: headerText,
-                        emoji: true
-                    }
-                },
-                {
-                    type: 'section',
-                    text: {
-                        type: 'mrkdwn',
-                        text: `✅ ${notificationText}`
-                    }
-                }
-            ];
-            
-            // Add image block if URL exists and event is not hidden
-            const shouldIncludeImageBlock = !(actionIsHidden || statusIsHidden);
-            if (shouldIncludeImageBlock && event.image?.url) {
-                const fullImageUrl = resolveImageUrlForDisplay(event.image.url);
-                if (fullImageUrl) {
-                    blocks.push({
-                        type: 'image',
-                        image_url: fullImageUrl,
-                        alt_text: `Image for ${eventTitle}`
-                    });
-                }
-            }
-            
-            const slackMetadata = (messageBody.slackMetadata && typeof messageBody.slackMetadata === 'object')
-                ? messageBody.slackMetadata
-                : null;
-            const responseUrl = slackMetadata?.responseUrl
-                ?? slackMetadata?.response_url
-                ?? messageBody.responseUrl
-                ?? messageBody.response_url
-                ?? null;
-            const slackText = `✅ ${notificationText}`;
-            const slackPayload = { text: slackText, blocks };
-            let delivered = false;
-
-            if (responseUrl) {
-                try {
-                    console.log('[Persist] Sending confirmation via response_url with replace_original');
-                    const responsePayload = {
-                        replace_original: true,
-                        ...slackPayload,
-                    };
-                    await postToResponseUrl(responseUrl, responsePayload);
-                    delivered = true;
-                } catch (err) {
-                    console.warn('[Persist] response_url delivery failed, sending new Slack message instead:', err.message);
-                }
-            }
-
-            if (!delivered) {
-                await postSlackMessage(slackPayload);
-            }
-            
             console.log(`[Persist] Successfully persisted HEX file for ${eventTitle}`);
-            const decisionAction = actionIsHidden || statusIsHidden ? 'hidden' : 'persisted';
+            const decisionAction = slackSyncResult.decision.status === 'HIDDEN' ? 'hidden' : 'persisted';
             const decisionSubject = {
                 hex: hexValue,
                 title: eventTitle,
