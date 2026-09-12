@@ -281,4 +281,5 @@
     };
 
     relabelApprovalButtons();
+    window.scoutsApprovalWorkflowReady = true;
 })();
