@@ -148,7 +148,7 @@ if [ "${GITHUB_ACTIONS:-}" = "true" ] && [ "${ALLOW_EXISTING_CALENDAR_ENV_REUSE}
 fi
 
 if [ "${ALLOW_EXISTING_CALENDAR_ENV_REUSE}" = "true" ]; then
-  echo -e "${YELLOW}Calendar recovery mode enabled; unresolved values may be reused from the deployed Lambda environment.${NC}"
+  echo -e "${YELLOW}Calendar recovery mode enabled; empty values may be reused from the deployed Lambda environment.${NC}"
   if [ -z "${CUBS_EVENTS_CALENDAR_URL}" ]; then CUBS_EVENTS_CALENDAR_URL="$(reuse_lambda_env_if_unset "CUBS_EVENTS_CALENDAR_URL")"; fi
   if [ -z "${CUBS_PROGRAMME_CALENDAR_URL}" ]; then CUBS_PROGRAMME_CALENDAR_URL="$(reuse_lambda_env_if_unset "CUBS_PROGRAMME_CALENDAR_URL")"; fi
   if [ -z "${SCOUTS_EVENTS_CALENDAR_URL}" ]; then SCOUTS_EVENTS_CALENDAR_URL="$(reuse_lambda_env_if_unset "SCOUTS_EVENTS_CALENDAR_URL")"; fi
@@ -157,17 +157,15 @@ if [ "${ALLOW_EXISTING_CALENDAR_ENV_REUSE}" = "true" ]; then
   if [ -z "${BEAVERS_PROGRAMME_CALENDAR_URL}" ]; then BEAVERS_PROGRAMME_CALENDAR_URL="$(reuse_lambda_env_if_unset "BEAVERS_PROGRAMME_CALENDAR_URL")"; fi
 fi
 
-missing_calendar_variables=()
+# Empty calendar values are deliberate: they disable that feed centrally. Report
+# only enabled/disabled state so private calendar URLs never reach logs.
 for calendar_variable_name in "${CALENDAR_VARIABLE_NAMES[@]}"; do
-  if [ -z "${!calendar_variable_name:-}" ]; then
-    missing_calendar_variables+=("${calendar_variable_name}")
+  if [ -n "${!calendar_variable_name:-}" ]; then
+    echo "Calendar source enabled: ${calendar_variable_name}"
+  else
+    echo "Calendar source disabled: ${calendar_variable_name}"
   fi
 done
-if [ "${#missing_calendar_variables[@]}" -gt 0 ]; then
-  echo -e "${RED}Required calendar values are unresolved: ${missing_calendar_variables[*]}${NC}"
-  echo -e "${RED}Normal deployments fail closed. For explicit manual/local recovery only, set ALLOW_EXISTING_CALENDAR_ENV_REUSE=true.${NC}"
-  exit 1
-fi
 
 if [ -z "${SCOUTS2SQS_FUNCTION_URL}" ]; then
   DISCOVERED_SCOUTS2SQS_URL="$(aws lambda get-function-url-config --function-name scouts2sqs --region "${REGION}" --query 'FunctionUrl' --output text 2>/dev/null || true)"
