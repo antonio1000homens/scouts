@@ -151,13 +151,14 @@ async function replaceSlackMessage(responseUrl, text, blocks = null) {
     if (!response.ok) throw new Error(`Slack response URL returned HTTP ${response.status}`);
 }
 
-function reviewBlocks(review, { stale = false, rootRequestId = null } = {}) {
+function reviewBlocks(review, { stale = false, rootRequestId = null, generatedReview = false } = {}) {
     const title = review?.title || 'Scouts event';
     const imageUrl = review?.imageUrl || null;
     const actionValue = JSON.stringify({
         event: review,
         ...(rootRequestId ? { rootRequestId } : {}),
         reviewRevision: review?.revision || null,
+        action: generatedReview ? 'approve_generated_image' : 'approve_shown_changes',
     });
     const fields = [
         `• Tagline: ${review?.tagline || 'Not set'}`,
@@ -165,10 +166,13 @@ function reviewBlocks(review, { stale = false, rootRequestId = null } = {}) {
         `• Image: ${imageUrl ? 'Present' : 'Not set'}`,
         `• Visibility: ${review?.isHidden ? 'Hidden' : 'Visible'}`,
     ].join('\n');
+    const header = stale
+        ? (generatedReview ? 'Generated image review changed — refreshed' : 'Review changed — refreshed')
+        : (generatedReview ? 'Generated image — final review required' : 'Review shown changes');
     return [
         {
             type: 'header',
-            text: { type: 'plain_text', text: stale ? 'Review changed — refreshed' : 'Review event', emoji: true },
+            text: { type: 'plain_text', text: header, emoji: true },
         },
         { type: 'section', text: { type: 'mrkdwn', text: `*${title}*\n${fields}` } },
         ...(imageUrl && /^https?:\/\//i.test(imageUrl)
@@ -179,7 +183,7 @@ function reviewBlocks(review, { stale = false, rootRequestId = null } = {}) {
             elements: [{
                 type: 'button',
                 action_id: 'scouts_request_approve',
-                text: { type: 'plain_text', text: imageUrl ? 'Approve generated image' : 'Approve shown changes', emoji: true },
+                text: { type: 'plain_text', text: generatedReview ? 'Approve generated image' : 'Approve shown changes', emoji: true },
                 style: 'primary',
                 value: actionValue,
             }],
@@ -187,7 +191,12 @@ function reviewBlocks(review, { stale = false, rootRequestId = null } = {}) {
     ];
 }
 
-async function handleApprovalResult(result, { responseUrl, title, rootRequestId = null } = {}) {
+async function handleApprovalResult(result, {
+    responseUrl,
+    title,
+    rootRequestId = null,
+    generatedReview = false,
+} = {}) {
     if (result.ok) {
         const text = result.requiresGeneratedImage
             ? `✅ Approved shown metadata for ${title}. Generating image — final review required.`
@@ -202,7 +211,7 @@ async function handleApprovalResult(result, { responseUrl, title, rootRequestId 
         await replaceSlackMessage(
             responseUrl,
             `Review changed for ${result.currentReview.title || title}. Please review the refreshed values.`,
-            reviewBlocks(result.currentReview, { stale: true, rootRequestId }),
+            reviewBlocks(result.currentReview, { stale: true, rootRequestId, generatedReview }),
         ).catch((error) => console.warn('[SlackApproval] Unable to refresh stale review message', error?.message || error));
         return;
     }
@@ -217,6 +226,7 @@ async function interceptApprovalInteraction(parsedPayload) {
         const { event, meta } = parseActionValue(action.value);
         const snapshot = buildEventReviewSnapshot(event);
         const rootRequestId = meta?.rootRequestId || meta?.operationId || null;
+        const generatedReview = meta?.action === 'approve_generated_image';
         const title = snapshot.title || 'Scouts event';
         const result = await coordinateEventApproval({
             reviewSnapshot: snapshot,
@@ -233,6 +243,7 @@ async function interceptApprovalInteraction(parsedPayload) {
             responseUrl: parsedPayload.response_url,
             title,
             rootRequestId,
+            generatedReview,
         });
         return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true }) };
     }
@@ -259,6 +270,7 @@ async function interceptApprovalInteraction(parsedPayload) {
             responseUrl: metadata.responseUrl,
             title: editedSnapshot.title || baseSnapshot.title || 'Scouts event',
             rootRequestId,
+            generatedReview: metadata.action === 'approve_generated_image',
         });
         return {
             statusCode: 200,
