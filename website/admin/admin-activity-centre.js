@@ -5,6 +5,7 @@
     const SEEN_KEY = 'scouts_admin_activity_seen';
     const POLL_MS = 5000;
     const TERMINAL = new Set(['completed', 'failed', 'needs_attention', 'manual_review']);
+    const RETRYABLE_ENRICHMENT_STAGES = new Set(['tagline', 'imageTheme', 'image']);
     const originalSend = window.sendScoutsCommand;
     const tracked = new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]').filter(Boolean));
     const known = new Map();
@@ -102,6 +103,41 @@
         }
     }
 
+    function enrichmentStage(request) {
+        const stage = text(request?.stage);
+        return RETRYABLE_ENRICHMENT_STAGES.has(stage) ? stage : '';
+    }
+
+    async function retryManualReview(request, button) {
+        const hex = text(request?.hex).toLowerCase();
+        const stage = enrichmentStage(request);
+        if (!hex || !stage || text(request?.state).toLowerCase() !== 'manual_review') return;
+        if (!window.confirm(`Retry ${stage} enrichment for ${requestLabel(request)}?`)) return;
+
+        const originalLabel = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Retrying…';
+        try {
+            const result = await window.sendScoutsCommand({
+                realm: 'runtime',
+                subject: 'enrichment',
+                action: 'retry',
+                hex,
+                stage,
+                requestedBy: 'admin',
+            });
+            const requestId = text(result?.rootRequestId || result?.requestId || result?.request?.requestId || result?.activity?.requestId);
+            if (requestId) { tracked.add(requestId); saveTracked(); }
+            notifyMessage(`${stage} enrichment retry queued for ${requestLabel(request)}.`, 'success', 6000);
+            await loadHistory();
+            setTimeout(() => poll(), 500);
+        } catch (error) {
+            notifyMessage(`Enrichment retry failed: ${error?.message || error}`, 'error', 8000);
+            button.disabled = false;
+            button.textContent = originalLabel;
+        }
+    }
+
     async function poll() {
         try {
             const result = await activityCommand('status');
@@ -131,6 +167,13 @@
         const target = document.getElementById('activity-log-list'); if (!target) return;
         target.replaceChildren();
         if (!requests.length) { target.textContent = 'No activity found.'; return; }
+        const latestByEnrichmentStage = new Map();
+        requests.forEach((request) => {
+            const stage = enrichmentStage(request);
+            const hex = text(request?.hex).toLowerCase();
+            const key = hex && stage ? `${hex}|${stage}` : '';
+            if (key && !latestByEnrichmentStage.has(key)) latestByEnrichmentStage.set(key, request);
+        });
         requests.forEach((request) => {
             const item = document.createElement('article'); item.className = `activity-log-item activity-${request.displayState || request.state}`;
             const failure = request.failure?.message ? `<p>${escapeHtml(request.failure.message)}</p>` : '';
@@ -145,6 +188,17 @@
                 childIds.length ? `<p><strong>Child requests:</strong> ${childIds.map((id) => `<code>${escapeHtml(id)}</code>`).join(' ')}</p>` : '',
             ].join('');
             item.innerHTML = `<h3>${escapeHtml(requestLabel(request))}</h3><p>${escapeHtml(stateLabel(request))}</p>${failure}<details><summary>Timeline and diagnostics</summary><ol>${timeline}</ol>${diagnostics}</details>`;
+            const stage = enrichmentStage(request);
+            const stageKey = text(request?.hex) && stage ? `${text(request.hex).toLowerCase()}|${stage}` : '';
+            if (request.state === 'manual_review' && stageKey && latestByEnrichmentStage.get(stageKey) === request) {
+                const retryButton = document.createElement('button');
+                retryButton.type = 'button';
+                retryButton.className = 'btn btn-primary requires-api activity-retry-enrichment';
+                retryButton.textContent = 'Retry enrichment';
+                retryButton.title = `Reset the ${stage} manual-review state and queue a new provider attempt.`;
+                retryButton.addEventListener('click', () => retryManualReview(request, retryButton));
+                item.appendChild(retryButton);
+            }
             if (request.hex) {
                 const button = document.createElement('button');
                 button.type = 'button'; button.className = 'btn btn-secondary activity-view-event'; button.textContent = 'View event';

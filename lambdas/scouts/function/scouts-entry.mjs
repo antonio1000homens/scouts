@@ -4,6 +4,7 @@ import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import { withRequestActivityContext } from '/opt/nodejs/request-activity.mjs';
 import { coordinateEventApproval } from '/opt/nodejs/approval-coordinator.mjs';
 import { buildEventReviewSnapshot } from '/opt/nodejs/event-review.mjs';
+import { normaliseEnrichmentStage, retryManualReviewEnrichment } from '/opt/nodejs/enrichment-state.mjs';
 import { repairAgendaHexMetadata } from './agenda-hex-repair.mjs';
 import { handler as scoutsServiceHandler } from './scouts-service.mjs';
 import { buildRuntimeActivity } from './runtime-activity.mjs';
@@ -209,6 +210,7 @@ function isInterceptedRuntimeCommand(command) {
   if (command.subject === 'activity' && ['status', 'history', 'lookup'].includes(command.action)) return true;
   if (command.subject === 'snapshot' && command.action === 'get') return true;
   if (command.subject === 'event' && ['get', 'review'].includes(command.action)) return true;
+  if (command.subject === 'enrichment' && command.action === 'retry') return true;
   if (command.subject === 'dlq' && ['inspect', 'redrive'].includes(command.action)) return true;
   return command.subject === 'schedule' && ['status', 'enable', 'disable'].includes(command.action);
 }
@@ -222,6 +224,22 @@ function response(statusCode, body) {
     },
     body: JSON.stringify(body),
   };
+}
+
+function appendResponseBodyFields(result, extra) {
+  if (!result || typeof result !== 'object' || typeof result.body !== 'string') return result;
+  try {
+    const body = JSON.parse(result.body);
+    return { ...result, body: JSON.stringify({ ...body, ...extra }) };
+  } catch {
+    return result;
+  }
+}
+
+function enrichmentRetrySubject(stage) {
+  if (stage === 'image') return 'imageUrl';
+  if (stage === 'tagline' || stage === 'imageTheme') return stage;
+  return '';
 }
 
 async function handleRevisionedApproval(event, command) {
@@ -366,6 +384,57 @@ export async function handler(event = {}) {
       return response(200, { status: 'ok', event: eventObject });
     }
 
+    if (command.subject === 'enrichment') {
+      const hex = normalizePrivateEventHex(command.body?.hex);
+      const stage = normaliseEnrichmentStage(command.body?.stage);
+      const retrySubject = enrichmentRetrySubject(stage);
+      if (!hex || !stage || !retrySubject) {
+        return response(400, { status: 'error', error: 'A valid event HEX and enrichment stage are required' });
+      }
+
+      const reset = await retryManualReviewEnrichment({
+        hex,
+        stage,
+        requestedBy: text(command.body?.requestedBy) || 'admin',
+      });
+      if (!reset.reset) {
+        const statusCode = reset.reason === 'not_found' ? 404 : reset.reason === 'invalid_request' ? 400 : 409;
+        return response(statusCode, {
+          status: 'error',
+          error: reset.reason === 'not_found'
+            ? 'Enrichment state not found'
+            : reset.reason === 'not_manual_review'
+              ? 'Enrichment stage is no longer in manual review'
+              : reset.reason === 'state_changed'
+                ? 'Enrichment state changed before retry could be reserved'
+                : 'Enrichment retry could not be prepared',
+          retry: { reset: false, reason: reset.reason, hex, stage },
+        });
+      }
+
+      const trustedInternalEvent = {
+        requestContext: { http: { method: 'POST' } },
+        headers: { 'x-api-key': requiredApiKey },
+        body: JSON.stringify({
+          realm: 'scouts',
+          subject: retrySubject,
+          action: 'request',
+          hex,
+          source: 'admin-manual-review-retry',
+        }),
+      };
+      const queued = await invokeScoutsService(trustedInternalEvent);
+      return appendResponseBodyFields(queued, {
+        retry: {
+          reset: true,
+          hex,
+          stage,
+          retryCount: Number(reset.state?.manualReviewRetryCount || 1),
+          previousFailure: reset.previousFailure,
+        },
+      });
+    }
+
     if (command.subject === 'schedule') {
       if (command.action === 'status') {
         const schedule = await getScheduledRefreshStatus();
@@ -396,7 +465,9 @@ export async function handler(event = {}) {
           ? 'Private runtime snapshot'
           : command?.subject === 'event'
             ? 'Private event object'
-            : 'Runtime activity status';
+            : command?.subject === 'enrichment'
+              ? 'Enrichment retry'
+              : 'Runtime activity status';
     console.error(`[RuntimeActivity] ${subject} command failed`, error?.message || error);
     return response(statusCode, {
       status: 'error',

@@ -115,10 +115,10 @@ export function evaluateEnrichmentEligibility(state, now = new Date(), generatio
 export function classifyGeminiError(error) {
   const status = Number(error?.status ?? error?.statusCode ?? error?.response?.status ?? error?.code);
   const message = String(error?.message || error || '').toLowerCase();
-    // A provider's 429 is a retryable quota/rate-limit response even when its
-    // message also contains words such as "quota exceeded".
-    if (status === 429 || /rate.?limit|too many requests|resource_exhausted|quota exceeded/.test(message)) return 'RATE_LIMIT';
-    if ([401, 403].includes(status) || /api.?key|unauthori[sz]|permission|billing/.test(message)) return 'AUTH_FAILURE';
+  // A provider's 429 is a retryable quota/rate-limit response even when its
+  // message also contains words such as "quota exceeded".
+  if (status === 429 || /rate.?limit|too many requests|resource_exhausted|quota exceeded/.test(message)) return 'RATE_LIMIT';
+  if ([401, 403].includes(status) || /api.?key|unauthori[sz]|permission|billing/.test(message)) return 'AUTH_FAILURE';
   if ([500, 502, 503, 504].includes(status) || /temporar|unavailable|internal server/.test(message)) return 'PROVIDER_5XX';
   if (/timeout|timed out|socket|econn|connection reset|network/.test(message)) return 'NETWORK_TIMEOUT';
   if (status === 404 || /model.*not found|not found/.test(message)) return 'MODEL_CONFIGURATION';
@@ -242,6 +242,59 @@ export async function loadReusableGeneration({ hex, stage, generationId }) {
   const state = await getEnrichmentState(hex, stage);
   if (!state || state.generationId !== generationId || state.geminiSucceeded !== true || state.generatedValue === undefined) return null;
   return { state, generatedValue: state.generatedValue };
+}
+
+export async function retryManualReviewEnrichment({ hex, stage, requestedBy = 'admin', now = new Date() }) {
+  const normalisedHex = normalise(hex).toLowerCase();
+  const normalisedStage = normaliseEnrichmentStage(stage);
+  if (!TABLE_NAME || !normalisedHex || !normalisedStage) {
+    return { reset: false, reason: 'invalid_request', state: null };
+  }
+
+  const existing = await getEnrichmentState(normalisedHex, normalisedStage);
+  if (!existing) return { reset: false, reason: 'not_found', state: null };
+  if (existing.state !== 'manual_review') {
+    return { reset: false, reason: 'not_manual_review', state: existing };
+  }
+
+  const nowIso = now.toISOString();
+  const previousFailure = {
+    type: normalise(existing.lastErrorType) || 'UNKNOWN',
+    message: normalise(existing.lastErrorMessage) || null,
+    updatedAt: normalise(existing.updatedAt) || null,
+  };
+
+  try {
+    const result = await client.send(new UpdateItemCommand({
+      TableName: TABLE_NAME,
+      Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
+      UpdateExpression: 'SET #state = :pending, #attemptCount = :zero, #manualReviewRetryCount = if_not_exists(#manualReviewRetryCount, :zero) + :one, #manualReviewRetriedAt = :now, #manualReviewRetriedBy = :requestedBy, #previousManualReviewErrorType = :previousErrorType, #previousManualReviewErrorMessage = :previousErrorMessage, #previousManualReviewUpdatedAt = :previousUpdatedAt, #updatedAt = :now, #expiresAt = :expiresAt REMOVE #nextRetryAt, #inProgressExpiresAt, #geminiSucceeded, #generatedValue, #generationId, #lastErrorType, #lastErrorMessage, #escalatedAt, #firstAttemptAt, #lastAttemptAt, #lastRequestId',
+      ConditionExpression: '#state = :manualReview',
+      ExpressionAttributeNames: {
+        '#state': 'state', '#attemptCount': 'attemptCount', '#manualReviewRetryCount': 'manualReviewRetryCount',
+        '#manualReviewRetriedAt': 'manualReviewRetriedAt', '#manualReviewRetriedBy': 'manualReviewRetriedBy',
+        '#previousManualReviewErrorType': 'previousManualReviewErrorType', '#previousManualReviewErrorMessage': 'previousManualReviewErrorMessage',
+        '#previousManualReviewUpdatedAt': 'previousManualReviewUpdatedAt', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt',
+        '#nextRetryAt': 'nextRetryAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#geminiSucceeded': 'geminiSucceeded',
+        '#generatedValue': 'generatedValue', '#generationId': 'generationId', '#lastErrorType': 'lastErrorType',
+        '#lastErrorMessage': 'lastErrorMessage', '#escalatedAt': 'escalatedAt', '#firstAttemptAt': 'firstAttemptAt',
+        '#lastAttemptAt': 'lastAttemptAt', '#lastRequestId': 'lastRequestId',
+      },
+      ExpressionAttributeValues: {
+        ':pending': asString('pending'), ':manualReview': asString('manual_review'), ':zero': asNumber(0), ':one': asNumber(1),
+        ':now': asString(nowIso), ':requestedBy': asString(normalise(requestedBy) || 'admin'),
+        ':previousErrorType': asString(previousFailure.type), ':previousErrorMessage': asString(previousFailure.message || ''),
+        ':previousUpdatedAt': asString(previousFailure.updatedAt || ''),
+        ':expiresAt': asNumber(Math.floor(now.getTime() / 1000) + TTL_DAYS * 86400),
+      },
+      ReturnValues: 'ALL_NEW',
+    }));
+    return { reset: true, reason: null, previousFailure, state: unmarshallItem(result?.Attributes) };
+  } catch (error) {
+    if (error?.name !== 'ConditionalCheckFailedException') throw error;
+    const current = await getEnrichmentState(normalisedHex, normalisedStage).catch(() => null);
+    return { reset: false, reason: 'state_changed', state: current };
+  }
 }
 
 export async function resetEnrichmentState(hex, stage, now = new Date()) {

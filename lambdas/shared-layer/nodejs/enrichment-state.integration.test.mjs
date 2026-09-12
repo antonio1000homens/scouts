@@ -1,5 +1,6 @@
 import test, { beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 process.env.GEMINI_ENRICHMENT_STATE_TABLE_NAME = 'scouts-enrichment-state-test';
 process.env.GEMINI_MAX_ATTEMPTS_PER_STAGE = '3';
@@ -15,6 +16,7 @@ const {
   markEnrichmentFailure,
   loadReusableGeneration,
   claimEnrichmentEscalation,
+  retryManualReviewEnrichment,
   resetEnrichmentState,
   getEnrichmentState,
   setEnrichmentStateClientForTests,
@@ -106,6 +108,33 @@ class InMemoryEnrichmentDynamo {
       item.updatedAt = values[':now'];
       item.expiresAt = values[':expiresAt'];
       delete item.nextRetryAt;
+      this.items.set(key, item);
+      return { Attributes: marshall(item) };
+    }
+
+    if (expression.includes('#manualReviewRetryCount')) {
+      if (item.state !== 'manual_review') throw conditionalFailure();
+      item.state = values[':pending'];
+      item.attemptCount = 0;
+      item.manualReviewRetryCount = Number(item.manualReviewRetryCount || 0) + 1;
+      item.manualReviewRetriedAt = values[':now'];
+      item.manualReviewRetriedBy = values[':requestedBy'];
+      item.previousManualReviewErrorType = values[':previousErrorType'];
+      item.previousManualReviewErrorMessage = values[':previousErrorMessage'];
+      item.previousManualReviewUpdatedAt = values[':previousUpdatedAt'];
+      item.updatedAt = values[':now'];
+      item.expiresAt = values[':expiresAt'];
+      delete item.nextRetryAt;
+      delete item.inProgressExpiresAt;
+      delete item.geminiSucceeded;
+      delete item.generatedValue;
+      delete item.generationId;
+      delete item.lastErrorType;
+      delete item.lastErrorMessage;
+      delete item.escalatedAt;
+      delete item.firstAttemptAt;
+      delete item.lastAttemptAt;
+      delete item.lastRequestId;
       this.items.set(key, item);
       return { Attributes: marshall(item) };
     }
@@ -214,6 +243,33 @@ test('deterministic configuration/auth errors quarantine immediately', async () 
   assert.equal(state.lastErrorType, 'AUTH_FAILURE');
 });
 
+test('manual-review retry is guarded, auditable, and reopens normal reservation at attempt 1', async () => {
+  const now = new Date('2026-09-07T10:00:00Z');
+  const first = await reserveEnrichmentAttempt({ hex: 'abcd', stage: 'tagline', generationId: 'g1', requestId: 'r1', now });
+  await markEnrichmentFailure({ hex: 'abcd', stage: 'tagline', error: { status: 401, message: 'legacy quota classification' }, attemptCount: first.state.attemptCount, now });
+  await claimEnrichmentEscalation({ hex: 'abcd', stage: 'tagline', now });
+
+  const retried = await retryManualReviewEnrichment({ hex: 'ABCD', stage: 'tagline', requestedBy: 'admin', now: new Date('2026-09-07T10:05:00Z') });
+  assert.equal(retried.reset, true);
+  assert.equal(retried.state.state, 'pending');
+  assert.equal(retried.state.attemptCount, 0);
+  assert.equal(retried.state.manualReviewRetryCount, 1);
+  assert.equal(retried.state.manualReviewRetriedBy, 'admin');
+  assert.equal(retried.state.previousManualReviewErrorType, 'AUTH_FAILURE');
+  assert.equal(retried.state.previousManualReviewErrorMessage, 'legacy quota classification');
+  assert.equal(retried.state.lastErrorType, undefined);
+  assert.equal(retried.state.escalatedAt, undefined);
+  assert.equal(retried.state.generationId, undefined);
+
+  const duplicateReset = await retryManualReviewEnrichment({ hex: 'abcd', stage: 'tagline', requestedBy: 'admin', now: new Date('2026-09-07T10:05:01Z') });
+  assert.equal(duplicateReset.reset, false);
+  assert.equal(duplicateReset.reason, 'not_manual_review');
+
+  const next = await reserveEnrichmentAttempt({ hex: 'abcd', stage: 'tagline', generationId: 'g1', requestId: 'r2', now: new Date('2026-09-07T10:06:00Z') });
+  assert.equal(next.reserved, true);
+  assert.equal(next.state.attemptCount, 1);
+});
+
 test('provider success is cached before persistence completion and reused without another generation', async () => {
   const now = new Date('2026-09-07T10:00:00Z');
   await reserveEnrichmentAttempt({ hex: 'abcd', stage: 'image', generationId: 'image-g1', requestId: 'r1', now });
@@ -265,6 +321,23 @@ test('invalid stage updates are rejected without writing a null sort key', async
   assert.equal(await markEnrichmentSucceeded({ hex: 'abcd', stage: 'unsupported', generationId: 'g1', now }), null);
   assert.equal(await markGeminiSucceeded({ hex: 'abcd', stage: undefined, generationId: 'g1', generatedValue: { value: 'x' }, now }), null);
   assert.equal(await claimEnrichmentEscalation({ hex: 'abcd', stage: 'unsupported', now }), false);
+  assert.deepEqual(await retryManualReviewEnrichment({ hex: 'abcd', stage: 'unsupported', requestedBy: 'admin', now }), { reset: false, reason: 'invalid_request', state: null });
   assert.equal(db.commands.length, 0);
   assert.equal(db.items.has('abcd#null'), false);
+});
+
+test('admin recovery routes manual-review retry through the normal enrichment pipeline', () => {
+  const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
+  const activityCentre = readFileSync('website/admin/admin-activity-centre.js', 'utf8');
+
+  assert.match(scoutsEntry, /command\.subject === 'enrichment' && command\.action === 'retry'/);
+  assert.match(scoutsEntry, /retryManualReviewEnrichment/);
+  assert.match(scoutsEntry, /subject: retrySubject/);
+  assert.match(scoutsEntry, /action: 'request'/);
+  assert.match(scoutsEntry, /source: 'admin-manual-review-retry'/);
+  assert.match(activityCentre, /RETRYABLE_ENRICHMENT_STAGES/);
+  assert.match(activityCentre, /subject: 'enrichment'/);
+  assert.match(activityCentre, /action: 'retry'/);
+  assert.match(activityCentre, /Retry enrichment/);
+  assert.match(activityCentre, /latestByEnrichmentStage/);
 });
