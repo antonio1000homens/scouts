@@ -221,7 +221,7 @@ test('issue 91 revisioned persistence bypasses legacy auto-approval and complete
   assert.match(approvalLifecycleAdapter, /IfMatch: text\(eTag\)/);
   assert.match(approvalLifecycleAdapter, /approvalState === 'approved' \? 'completed' : 'awaiting_image'/);
   assert.match(approvalLifecycleAdapter, /await publishEvent\(hex, accepted\)/);
-  assert.match(approvalLifecycleAdapter, /export async function processRevisionedApprovalRecords\(records\)/);
+  assert.match(approvalLifecycleAdapter, /export async function processRevisionedApprovalRecords\(records = \[\]\)/);
   assert.match(imageProviderAdapter, /processRevisionedApprovalRecords/);
   assert.match(sqs2scoutsDeploy, /HANDLER="\$\{HANDLER:-image-provider-adapter\.lambdaHandler\}"/);
   assert.match(sqs2scoutsDeploy, /approval-lifecycle-adapter\.mjs/);
