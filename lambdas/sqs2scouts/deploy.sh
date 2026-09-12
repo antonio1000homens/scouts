@@ -228,6 +228,7 @@ echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
     approval-lifecycle-adapter.mjs \
     image-provider-adapter.mjs \
     image-provider-worker.mjs \
+    legacy-approval-card-normalizer.mjs \
     cloudflare-image-client.mjs \
     gemini-text-models.mjs \
     runtime-request-entry.mjs \
