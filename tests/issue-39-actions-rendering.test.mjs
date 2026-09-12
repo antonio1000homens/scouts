@@ -51,11 +51,11 @@ function loadPublicHelpers() {
   return sandbox.__publicHelpers;
 }
 
-test('public loader recognises hidden events across structured and legacy status shapes', () => {
+test('public loader recognises hidden events only from canonical metadata status', () => {
   const helpers = loadPublicHelpers();
   assert.equal(helpers.isHiddenEvent({ metadata: { status: { isHidden: true } } }), true);
-  assert.equal(helpers.isHiddenEvent({ isHidden: 'yes' }), true);
-  assert.equal(helpers.isHiddenEvent({ status: 'hidden' }), true);
+  assert.equal(helpers.isHiddenEvent({ isHidden: 'yes' }), false);
+  assert.equal(helpers.isHiddenEvent({ status: 'hidden' }), false);
   assert.equal(helpers.isHiddenEvent({ metadata: { status: { isHidden: false } } }), false);
   assert.match(publicSource, /if \(isHiddenEvent\(event\)\)\s*\{[\s\S]*?Filtering out hidden event/, 'agenda load must filter hidden events before rendering');
 });
