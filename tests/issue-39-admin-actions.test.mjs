@@ -247,12 +247,16 @@ test('issue 91 loads the revisioned approval controller after the legacy admin b
   assert.match(approvalWorkflowSource, /Approve shown changes/);
 });
 
-test('issue 91 admin approval submits the complete visible review snapshot', () => {
+test('issue 91 admin approval submits the complete server-issued review snapshot', () => {
   for (const field of ['hex', 'tagline', 'imageTheme', 'imageUrl', 'isHidden']) {
     assert.match(approvalWorkflowSource, new RegExp(`${field}:`));
   }
-  assert.match(approvalWorkflowSource, /revision: await sha256Prefix\(JSON\.stringify\(reviewable\)\)/);
+  assert.match(approvalWorkflowSource, /subject: 'event'/);
+  assert.match(approvalWorkflowSource, /action: 'review'/);
+  assert.match(approvalWorkflowSource, /sameReviewableValues/);
   assert.match(approvalWorkflowSource, /reviewSnapshot,/);
+  assert.match(approvalWorkflowSource, /baseRevision: reviewSnapshot\.revision/);
+  assert.doesNotMatch(approvalWorkflowSource, /sha256Prefix|crypto\?\.subtle|TextEncoder/);
   assert.match(approvalWorkflowSource, /requiresGeneratedImage/);
   assert.match(approvalWorkflowSource, /final review required/i);
 });
@@ -260,6 +264,7 @@ test('issue 91 admin approval submits the complete visible review snapshot', () 
 test('issue 91 backend intercepts revisioned approval and rejects stale review state', () => {
   assert.match(scoutsEntrySource, /function revisionedApprovalCommand/);
   assert.match(scoutsEntrySource, /coordinateEventApproval/);
+  assert.match(scoutsEntrySource, /review: buildEventReviewSnapshot\(eventObject\)/);
   assert.match(approvalCoordinatorSource, /compareEventReviewRevision\(canonical, renderedRevision\)/);
   assert.match(approvalCoordinatorSource, /statusCode: 409/);
   assert.match(approvalCoordinatorSource, /STALE_REVIEW/);
