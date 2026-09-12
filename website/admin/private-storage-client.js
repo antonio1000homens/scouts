@@ -66,13 +66,26 @@
     };
 
     // Keep issue #91's approval controller isolated from the legacy admin bundle.
-    // Loading it here avoids changing the large static index while guaranteeing it
-    // runs after admin-script.js has established the existing UI helpers/state.
+    // Dynamic scripts are async by default; explicitly disable async so this
+    // bootstrap has deterministic ordering relative to any future dynamically
+    // loaded admin controllers. The approval controller itself no longer relies
+    // on a document-wide MutationObserver for correctness.
     if (!document.querySelector('script[data-scouts-approval-workflow]')) {
         const script = document.createElement('script');
         script.src = 'admin-approval-workflow.js';
-        script.defer = true;
+        script.async = false;
         script.dataset.scoutsApprovalWorkflow = 'true';
+        script.addEventListener('load', () => {
+            window.scoutsApprovalWorkflowReady = true;
+            window.refreshApprovalButtonLabels?.();
+        }, { once: true });
+        script.addEventListener('error', () => {
+            window.scoutsApprovalWorkflowReady = false;
+            console.error('[ApprovalWorkflow] Failed to load admin-approval-workflow.js');
+            if (typeof showAdminNotification === 'function') {
+                showAdminNotification('Approval controls failed to load. Reload the Admin page before approving events.', 'error', 10000);
+            }
+        }, { once: true });
         document.body.appendChild(script);
     }
 })();
