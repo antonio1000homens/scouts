@@ -553,7 +553,7 @@ jobs:
           QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessing
           QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing
           SCOUTS_DECISION_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsDecision
-          SCOUTS_DECISION_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsDecision
+          SCOUTS_DECISION_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883:scoutsDecision
           DLQ_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessingDLQ
           DLQ_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ
           S3_WEBSITE_BASE_URL: https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com
@@ -593,17 +593,95 @@ jobs:
           IMAGE_GENERATION_PROVIDER: ${{ vars.IMAGE_GENERATION_PROVIDER || 'disabled' }}
         run: cd lambdas/scouts2sqs && bash ./deploy.sh
 
-      - name: Get calendar URLs
-        if: needs.plan-and-test.outputs.scouts_function == 'true'
+      - name: Reject plaintext calendar URL variables
+        if: >-
+          needs.plan-and-test.outputs.scouts_function == 'true' &&
+          (startsWith(vars.CUBS_EVENTS_CALENDAR_URL, 'http://') ||
+           startsWith(vars.CUBS_EVENTS_CALENDAR_URL, 'https://') ||
+           startsWith(vars.CUBS_PROGRAMME_CALENDAR_URL, 'http://') ||
+           startsWith(vars.CUBS_PROGRAMME_CALENDAR_URL, 'https://') ||
+           startsWith(vars.SCOUTS_EVENTS_CALENDAR_URL, 'http://') ||
+           startsWith(vars.SCOUTS_EVENTS_CALENDAR_URL, 'https://') ||
+           startsWith(vars.SCOUTS_PROGRAMME_CALENDAR_URL, 'http://') ||
+           startsWith(vars.SCOUTS_PROGRAMME_CALENDAR_URL, 'https://') ||
+           startsWith(vars.BEAVERS_EVENTS_CALENDAR_URL, 'http://') ||
+           startsWith(vars.BEAVERS_EVENTS_CALENDAR_URL, 'https://') ||
+           startsWith(vars.BEAVERS_PROGRAMME_CALENDAR_URL, 'http://') ||
+           startsWith(vars.BEAVERS_PROGRAMME_CALENDAR_URL, 'https://'))
+        run: |
+          echo "Calendar repository variables must contain Bitwarden secret UIDs, never calendar URLs. Empty means disabled."
+          exit 1
+
+      - name: Get Cubs events calendar URL
+        if: >-
+          needs.plan-and-test.outputs.scouts_function == 'true' &&
+          vars.CUBS_EVENTS_CALENDAR_URL != '' &&
+          !startsWith(vars.CUBS_EVENTS_CALENDAR_URL, 'http://') &&
+          !startsWith(vars.CUBS_EVENTS_CALENDAR_URL, 'https://')
         uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
             ${{ vars.CUBS_EVENTS_CALENDAR_URL }} > CUBS_EVENTS_CALENDAR_URL
+
+      - name: Get Cubs programme calendar URL
+        if: >-
+          needs.plan-and-test.outputs.scouts_function == 'true' &&
+          vars.CUBS_PROGRAMME_CALENDAR_URL != '' &&
+          !startsWith(vars.CUBS_PROGRAMME_CALENDAR_URL, 'http://') &&
+          !startsWith(vars.CUBS_PROGRAMME_CALENDAR_URL, 'https://')
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
             ${{ vars.CUBS_PROGRAMME_CALENDAR_URL }} > CUBS_PROGRAMME_CALENDAR_URL
+
+      - name: Get Scouts events calendar URL
+        if: >-
+          needs.plan-and-test.outputs.scouts_function == 'true' &&
+          vars.SCOUTS_EVENTS_CALENDAR_URL != '' &&
+          !startsWith(vars.SCOUTS_EVENTS_CALENDAR_URL, 'http://') &&
+          !startsWith(vars.SCOUTS_EVENTS_CALENDAR_URL, 'https://')
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
             ${{ vars.SCOUTS_EVENTS_CALENDAR_URL }} > SCOUTS_EVENTS_CALENDAR_URL
+
+      - name: Get Scouts programme calendar URL
+        if: >-
+          needs.plan-and-test.outputs.scouts_function == 'true' &&
+          vars.SCOUTS_PROGRAMME_CALENDAR_URL != '' &&
+          !startsWith(vars.SCOUTS_PROGRAMME_CALENDAR_URL, 'http://') &&
+          !startsWith(vars.SCOUTS_PROGRAMME_CALENDAR_URL, 'https://')
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
             ${{ vars.SCOUTS_PROGRAMME_CALENDAR_URL }} > SCOUTS_PROGRAMME_CALENDAR_URL
+
+      - name: Get Beavers events calendar URL
+        if: >-
+          needs.plan-and-test.outputs.scouts_function == 'true' &&
+          vars.BEAVERS_EVENTS_CALENDAR_URL != '' &&
+          !startsWith(vars.BEAVERS_EVENTS_CALENDAR_URL, 'http://') &&
+          !startsWith(vars.BEAVERS_EVENTS_CALENDAR_URL, 'https://')
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
             ${{ vars.BEAVERS_EVENTS_CALENDAR_URL }} > BEAVERS_EVENTS_CALENDAR_URL
+
+      - name: Get Beavers programme calendar URL
+        if: >-
+          needs.plan-and-test.outputs.scouts_function == 'true' &&
+          vars.BEAVERS_PROGRAMME_CALENDAR_URL != '' &&
+          !startsWith(vars.BEAVERS_PROGRAMME_CALENDAR_URL, 'http://') &&
+          !startsWith(vars.BEAVERS_PROGRAMME_CALENDAR_URL, 'https://')
+        uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
+        with:
+          access_token: ${{ secrets.BW_ACCESS_TOKEN }}
+          secrets: |
             ${{ vars.BEAVERS_PROGRAMME_CALENDAR_URL }} > BEAVERS_PROGRAMME_CALENDAR_URL
 
       - name: Deploy Scouts function
@@ -616,8 +694,8 @@ jobs:
           CREATE_DATA_BUCKET: 'true'
           SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
           SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
-          # Calendar feeds are resolved from Bitwarden UID variables by the
-          # preceding action and exported to this job without logging values.
+          # Configured calendar feeds are resolved from Bitwarden UID variables by
+          # the preceding actions. Missing variables deliberately disable feeds.
         run: cd lambdas/scouts && bash ./deploy.sh
 
       - name: Deploy Scouts Slack handler
