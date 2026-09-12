@@ -8,47 +8,69 @@ function text(value) {
   return result || null;
 }
 
-function titleHex(event) {
-  const title = text(event?.summary ?? event?.title ?? event?.name);
-  return title ? Buffer.from(title, 'utf8').toString('hex') : null;
+function isObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function assertExactKeys(value, allowed, label) {
+  const extras = Object.keys(value || {}).filter((key) => !allowed.includes(key));
+  if (extras.length > 0) throw new Error(`${label} contains unsupported fields: ${extras.sort().join(', ')}`);
+}
+
+function canonicalHex(value, label = 'metadata.hex') {
+  const normalized = text(value)?.toLowerCase() ?? null;
+  if (!normalized || !/^[0-9a-f]+$/.test(normalized)) {
+    throw new Error(`${label} must be a lowercase hexadecimal string`);
+  }
+  return normalized;
 }
 
 function eventHex(event) {
-  return text(event?.metadata?.hex ?? event?.metadata?.hexId ?? event?.hex ?? event?.hexId)?.toLowerCase()
-    ?? titleHex(event)?.toLowerCase()
-    ?? null;
+  if (!isObject(event?.metadata)) return null;
+  const candidate = text(event.metadata.hex)?.toLowerCase() ?? null;
+  return candidate && /^[0-9a-f]+$/.test(candidate) ? candidate : null;
 }
 
-function metadataForAgenda(event, hex) {
-  const source = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {};
-  const image = source.image && typeof source.image === 'object'
-    ? source.image
-    : (event?.image && typeof event.image === 'object' ? event.image : {});
-  const status = source.status && typeof source.status === 'object'
-    ? source.status
-    : (event?.status && typeof event.status === 'object' ? event.status : {});
-  const metadata = clone(source) || {};
-  metadata.hex = hex;
-  metadata.tagline = text(source.tagline ?? event?.tagline ?? event?.AI ?? event?.ai);
-  metadata.image = {
-    theme: text(image.theme ?? event?.imageTheme),
-    url: text(image.url ?? image.src ?? event?.imageUrl),
+function metadataForAgenda(event, expectedHex) {
+  if (!isObject(event?.metadata)) throw new Error('Canonical event is missing metadata');
+  const source = event.metadata;
+  assertExactKeys(source, ['hex', 'tagline', 'image', 'status'], 'metadata');
+
+  const hex = canonicalHex(source.hex);
+  if (hex !== expectedHex) throw new Error(`Canonical event HEX ${hex} does not match ${expectedHex}`);
+
+  const tagline = source.tagline === null ? null : text(source.tagline);
+  if (source.tagline !== null && !tagline) throw new Error('metadata.tagline must be a non-empty string or null');
+
+  if (!isObject(source.image)) throw new Error('metadata.image must be an object');
+  assertExactKeys(source.image, ['theme', 'url'], 'metadata.image');
+  const theme = source.image.theme === null ? null : text(source.image.theme);
+  const url = source.image.url === null ? null : text(source.image.url);
+  if (source.image.theme !== null && !theme) throw new Error('metadata.image.theme must be a non-empty string or null');
+  if (source.image.url !== null && !url) throw new Error('metadata.image.url must be a non-empty string or null');
+
+  if (!isObject(source.status)) throw new Error('metadata.status must be an object');
+  assertExactKeys(source.status, ['isHidden', 'isApproved'], 'metadata.status');
+  if (typeof source.status.isHidden !== 'boolean') throw new Error('metadata.status.isHidden must be boolean');
+  if (typeof source.status.isApproved !== 'boolean') throw new Error('metadata.status.isApproved must be boolean');
+
+  return {
+    hex,
+    tagline,
+    image: { theme, url },
+    status: {
+      isHidden: source.status.isHidden,
+      isApproved: source.status.isApproved,
+    },
   };
-  metadata.status = {
-    isHidden: status.isHidden === true || event?.isHidden === true || event?.status === 'hidden',
-    isApproved: status.isApproved === true || event?.isApproved === true || event?.approved === true,
-  };
-  delete metadata.requests;
-  delete metadata.requestIds;
-  return metadata;
 }
 
 export function mergeCanonicalEventIntoAgenda(agenda, canonicalEvent, hex) {
   if (!agenda || typeof agenda !== 'object' || !Array.isArray(agenda.events)) {
     throw new Error('agenda.json is missing its events array');
   }
-  const normalisedHex = text(hex)?.toLowerCase();
-  if (!normalisedHex) throw new Error('Agenda publication requires a HEX identifier');
+  const normalisedHex = canonicalHex(hex, 'Agenda publication HEX');
+  const canonicalMetadata = metadataForAgenda(canonicalEvent, normalisedHex);
 
   let matched = 0;
   const events = agenda.events.map((event) => {
@@ -56,7 +78,7 @@ export function mergeCanonicalEventIntoAgenda(agenda, canonicalEvent, hex) {
     matched += 1;
     return {
       ...event,
-      metadata: metadataForAgenda(canonicalEvent, normalisedHex),
+      metadata: clone(canonicalMetadata),
     };
   });
 
