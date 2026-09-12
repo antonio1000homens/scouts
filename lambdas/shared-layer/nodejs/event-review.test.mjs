@@ -104,6 +104,20 @@ test('approving snapshot without an image persists metadata but requires image g
   });
 });
 
+test('approval without an image or image theme is rejected before generation can be queued', () => {
+  const missingTheme = event({
+    metadata: {
+      ...event().metadata,
+      image: { theme: null, url: null },
+    },
+  });
+  const snapshot = buildEventReviewSnapshot(missingTheme);
+  assert.throws(
+    () => buildApprovedSnapshotPatch(snapshot),
+    /requires an image theme before generation can start/,
+  );
+});
+
 test('approving snapshot with a visible image can complete approval immediately', () => {
   const withImage = event({
     metadata: {
