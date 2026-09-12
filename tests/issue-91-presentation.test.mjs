@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { loadFunctionsFromSource } from './helpers/source-function-loader.mjs';
 
 const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
 const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
 const activityCentre = readFileSync('website/admin/admin-activity-centre.js', 'utf8');
 const approvalWorkflow = readFileSync('website/admin/admin-approval-workflow.js', 'utf8');
+const privateStorage = readFileSync('website/admin/private-storage-client.js', 'utf8');
 const eventReview = readFileSync('lambdas/shared-layer/nodejs/event-review.mjs', 'utf8');
 const approvalLifecycle = readFileSync('lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs', 'utf8');
 const imageAdapter = readFileSync('lambdas/sqs2scouts/function/image-provider-adapter.mjs', 'utf8');
@@ -66,11 +68,43 @@ test('issue 91 admin final generated-image review keeps the original root and us
   assert.match(approvalWorkflow, /Activity Centre owns that long-lived phase/);
 });
 
-test('issue 91 approval-label observer does not create a self-sustaining mutation loop', () => {
-  assert.match(approvalWorkflow, /const label = generatedReview \? 'Approve generated image' : 'Approve shown changes';/);
-  assert.match(approvalWorkflow, /if \(button\.textContent !== label\) button\.textContent = label;/);
-  assert.match(approvalWorkflow, /if \(button\.title !== title\) button\.title = title;/);
-  assert.doesNotMatch(approvalWorkflow, /button\.textContent = generatedReview \?/);
+test('issue 91 approval labels are render-driven and idempotent without a document-wide observer', () => {
+  assert.match(approvalWorkflow, /window\.renderEvents = relabelAfterRender/);
+  assert.match(approvalWorkflow, /window\.openUploadModal = relabelAfterRender/);
+  assert.doesNotMatch(approvalWorkflow, /new MutationObserver/);
+
+  let label = 'Approve';
+  let title = '';
+  let labelWrites = 0;
+  let titleWrites = 0;
+  const button = {
+    get textContent() { return label; },
+    set textContent(value) { labelWrites += 1; label = value; },
+    get title() { return title; },
+    set title(value) { titleWrites += 1; title = value; },
+  };
+  const root = { querySelectorAll: () => [button] };
+  const { functions } = loadFunctionsFromSource(approvalWorkflow, ['relabelApprovalButtons'], {
+    isGeneratedImageReview: () => false,
+    eventForApprovalButton: () => ({}),
+  });
+
+  functions.relabelApprovalButtons(root);
+  functions.relabelApprovalButtons(root);
+  assert.equal(label, 'Approve shown changes');
+  assert.equal(labelWrites, 1, 'unchanged approval labels must not be rewritten');
+  assert.equal(titleWrites, 1, 'unchanged approval titles must not be rewritten');
+});
+
+test('issue 91 approval acceptance is not blocked by a secondary activity refresh', () => {
+  assert.match(approvalWorkflow, /void Promise\.resolve\(pollQueueDepthSnapshots/);
+  assert.doesNotMatch(approvalWorkflow, /await pollQueueDepthSnapshots\(\{ updatePanels: true \}\)/);
+});
+
+test('issue 91 approval controller bootstrap is ordered and observable', () => {
+  assert.match(privateStorage, /script\.async = false/);
+  assert.match(privateStorage, /scoutsApprovalWorkflowReady = true/);
+  assert.match(privateStorage, /Approval controls failed to load/);
 });
 
 test('issue 91 generated review notification has durable external identity and Slack reference', () => {
@@ -136,6 +170,7 @@ test('issue 91 presentation and closure files remain syntactically valid', () =>
     'lambdas/scouts/function/scouts-entry.mjs',
     'website/admin/admin-activity-centre.js',
     'website/admin/admin-approval-workflow.js',
+    'website/admin/private-storage-client.js',
     'lambdas/shared-layer/nodejs/event-review.mjs',
     'lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs',
     'lambdas/sqs2scouts/function/image-provider-adapter.mjs',
