@@ -593,12 +593,16 @@ jobs:
           IMAGE_GENERATION_PROVIDER: ${{ vars.IMAGE_GENERATION_PROVIDER || 'disabled' }}
         run: cd lambdas/scouts2sqs && bash ./deploy.sh
 
-      - name: Get Beavers calendar URLs
+      - name: Get calendar URLs
         if: needs.plan-and-test.outputs.scouts_function == 'true'
         uses: bitwarden/sm-action@14f92f1d294ae3c2b6a3845d389cd2c318b0dfd8 # v2.2.0
         with:
           access_token: ${{ secrets.BW_ACCESS_TOKEN }}
           secrets: |
+            ${{ vars.CUBS_EVENTS_CALENDAR_URL }} > CUBS_EVENTS_CALENDAR_URL
+            ${{ vars.CUBS_PROGRAMME_CALENDAR_URL }} > CUBS_PROGRAMME_CALENDAR_URL
+            ${{ vars.SCOUTS_EVENTS_CALENDAR_URL }} > SCOUTS_EVENTS_CALENDAR_URL
+            ${{ vars.SCOUTS_PROGRAMME_CALENDAR_URL }} > SCOUTS_PROGRAMME_CALENDAR_URL
             ${{ vars.BEAVERS_EVENTS_CALENDAR_URL }} > BEAVERS_EVENTS_CALENDAR_URL
             ${{ vars.BEAVERS_PROGRAMME_CALENDAR_URL }} > BEAVERS_PROGRAMME_CALENDAR_URL
 
@@ -612,14 +616,8 @@ jobs:
           CREATE_DATA_BUCKET: 'true'
           SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:eu-west-2:553490163883:scoutsRequests
           SCOUTS_REQUESTS_QUEUE_URL: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests
-          # Calendar feeds are bearer/private URLs. GitHub Secrets are masked in
-          # logs; ordinary vars are not. If a secret is not set, deploy.sh safely
-          # reuses the existing Lambda environment value without printing it.
-          CUBS_EVENTS_CALENDAR_URL: ${{ secrets.CUBS_EVENTS_CALENDAR_URL }}
-          CUBS_PROGRAMME_CALENDAR_URL: ${{ secrets.CUBS_PROGRAMME_CALENDAR_URL }}
-          CUBS_PROGRAME_CALENDAR_URL: ${{ secrets.CUBS_PROGRAME_CALENDAR_URL }}
-          SCOUTS_EVENTS_CALENDAR_URL: ${{ secrets.SCOUTS_EVENTS_CALENDAR_URL }}
-          SCOUTS_PROGRAMME_CALENDAR_URL: ${{ secrets.SCOUTS_PROGRAMME_CALENDAR_URL }}
+          # Calendar feeds are resolved from Bitwarden UID variables by the
+          # preceding action and exported to this job without logging values.
         run: cd lambdas/scouts && bash ./deploy.sh
 
       - name: Deploy Scouts Slack handler

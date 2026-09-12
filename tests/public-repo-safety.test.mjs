@@ -66,27 +66,22 @@ test('workflow actions are pinned to immutable commit SHAs', () => {
   assert.deepEqual(offenders, [], `Unpinned GitHub Actions:\n${offenders.join('\n')}`);
 });
 
-test('private calendar feeds are sourced from masked GitHub Secrets or Bitwarden UID variables', () => {
+test('private calendar feeds are resolved from Bitwarden UID variables', () => {
   const workflow = readFileSync('.github/workflows/deploy-to-s3.yml', 'utf8');
   const calendarNames = [
     'CUBS_EVENTS_CALENDAR_URL',
     'CUBS_PROGRAMME_CALENDAR_URL',
-    'CUBS_PROGRAME_CALENDAR_URL',
     'SCOUTS_EVENTS_CALENDAR_URL',
     'SCOUTS_PROGRAMME_CALENDAR_URL',
     'BEAVERS_EVENTS_CALENDAR_URL',
     'BEAVERS_PROGRAMME_CALENDAR_URL',
   ];
 
-  for (const name of calendarNames.filter((name) => !name.startsWith('BEAVERS_'))) {
-    assert.doesNotMatch(workflow, new RegExp(`\\$\\{\\{\\s*vars\\.${name}\\s*\\}\\}`));
-    assert.match(workflow, new RegExp(`${name}: \\$\\{\\{ secrets\\.${name} \\}\\}`));
-  }
-
-  for (const name of ['BEAVERS_EVENTS_CALENDAR_URL', 'BEAVERS_PROGRAMME_CALENDAR_URL']) {
+  for (const name of calendarNames) {
     assert.doesNotMatch(workflow, new RegExp(`${name}: \\$\\{\\{ secrets\\.${name} \\}\\}`));
     assert.match(workflow, new RegExp(`vars\\.${name} \\}\\} > ${name}`));
   }
+  assert.doesNotMatch(workflow, /CUBS_PROGRAME_CALENDAR_URL/);
 });
 
 test('anonymous S3 policy exposes only deliberate public website objects', () => {

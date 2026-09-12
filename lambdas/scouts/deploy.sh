@@ -131,12 +131,30 @@ reuse_lambda_env_if_unset() {
   if [ -n "${current_value}" ] && [ "${current_value}" != "None" ] && [ "${current_value}" != "null" ]; then printf '%s' "${current_value}"; fi
 }
 
-if [ -z "${CUBS_EVENTS_CALENDAR_URL}" ]; then CUBS_EVENTS_CALENDAR_URL="$(reuse_lambda_env_if_unset "CUBS_EVENTS_CALENDAR_URL")"; fi
-if [ -z "${CUBS_PROGRAMME_CALENDAR_URL}" ]; then CUBS_PROGRAMME_CALENDAR_URL="$(reuse_lambda_env_if_unset "CUBS_PROGRAMME_CALENDAR_URL")"; fi
-if [ -z "${SCOUTS_EVENTS_CALENDAR_URL}" ]; then SCOUTS_EVENTS_CALENDAR_URL="$(reuse_lambda_env_if_unset "SCOUTS_EVENTS_CALENDAR_URL")"; fi
-if [ -z "${SCOUTS_PROGRAMME_CALENDAR_URL}" ]; then SCOUTS_PROGRAMME_CALENDAR_URL="$(reuse_lambda_env_if_unset "SCOUTS_PROGRAMME_CALENDAR_URL")"; fi
-if [ -z "${BEAVERS_EVENTS_CALENDAR_URL}" ]; then BEAVERS_EVENTS_CALENDAR_URL="$(reuse_lambda_env_if_unset "BEAVERS_EVENTS_CALENDAR_URL")"; fi
-if [ -z "${BEAVERS_PROGRAMME_CALENDAR_URL}" ]; then BEAVERS_PROGRAMME_CALENDAR_URL="$(reuse_lambda_env_if_unset "BEAVERS_PROGRAMME_CALENDAR_URL")"; fi
+CALENDAR_VARIABLE_NAMES=(
+  CUBS_EVENTS_CALENDAR_URL
+  CUBS_PROGRAMME_CALENDAR_URL
+  SCOUTS_EVENTS_CALENDAR_URL
+  SCOUTS_PROGRAMME_CALENDAR_URL
+  BEAVERS_EVENTS_CALENDAR_URL
+  BEAVERS_PROGRAMME_CALENDAR_URL
+)
+
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  for calendar_variable_name in "${CALENDAR_VARIABLE_NAMES[@]}"; do
+    if [ -z "${!calendar_variable_name:-}" ]; then
+      echo -e "${RED}Required Bitwarden calendar value was not resolved: ${calendar_variable_name}${NC}"
+      exit 1
+    fi
+  done
+else
+  if [ -z "${CUBS_EVENTS_CALENDAR_URL}" ]; then CUBS_EVENTS_CALENDAR_URL="$(reuse_lambda_env_if_unset "CUBS_EVENTS_CALENDAR_URL")"; fi
+  if [ -z "${CUBS_PROGRAMME_CALENDAR_URL}" ]; then CUBS_PROGRAMME_CALENDAR_URL="$(reuse_lambda_env_if_unset "CUBS_PROGRAMME_CALENDAR_URL")"; fi
+  if [ -z "${SCOUTS_EVENTS_CALENDAR_URL}" ]; then SCOUTS_EVENTS_CALENDAR_URL="$(reuse_lambda_env_if_unset "SCOUTS_EVENTS_CALENDAR_URL")"; fi
+  if [ -z "${SCOUTS_PROGRAMME_CALENDAR_URL}" ]; then SCOUTS_PROGRAMME_CALENDAR_URL="$(reuse_lambda_env_if_unset "SCOUTS_PROGRAMME_CALENDAR_URL")"; fi
+  if [ -z "${BEAVERS_EVENTS_CALENDAR_URL}" ]; then BEAVERS_EVENTS_CALENDAR_URL="$(reuse_lambda_env_if_unset "BEAVERS_EVENTS_CALENDAR_URL")"; fi
+  if [ -z "${BEAVERS_PROGRAMME_CALENDAR_URL}" ]; then BEAVERS_PROGRAMME_CALENDAR_URL="$(reuse_lambda_env_if_unset "BEAVERS_PROGRAMME_CALENDAR_URL")"; fi
+fi
 
 if [ -z "${SCOUTS2SQS_FUNCTION_URL}" ]; then
   DISCOVERED_SCOUTS2SQS_URL="$(aws lambda get-function-url-config --function-name scouts2sqs --region "${REGION}" --query 'FunctionUrl' --output text 2>/dev/null || true)"
