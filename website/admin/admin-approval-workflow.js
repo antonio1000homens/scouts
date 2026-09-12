@@ -39,7 +39,10 @@
     }
 
     async function fetchServerReview(hex) {
-        const result = await sendScoutsCommand({
+        const sendRead = typeof window.sendScoutsReadCommand === 'function'
+            ? window.sendScoutsReadCommand
+            : sendScoutsCommand;
+        const result = await sendRead({
             realm: 'runtime',
             subject: 'event',
             action: 'review',
