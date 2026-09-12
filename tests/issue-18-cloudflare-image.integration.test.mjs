@@ -36,7 +36,7 @@ test('deploy packages the approval-aware provider facade and direct provider wor
   assert.match(deploy, /HANDLER="\$\{HANDLER:-image-provider-adapter\.lambdaHandler\}"/);
   assert.match(adapter, /processRevisionedApprovalRecords/);
   assert.match(adapter, /imageProviderWorkerHandler/);
-  assert.match(lifecycleAdapter, /export async function processRevisionedApprovalRecords\(records\)/);
+  assert.match(lifecycleAdapter, /export async function processRevisionedApprovalRecords\(records = \[\]\)/);
   assert.match(deploy, /ImageGenerationProvider="\$\{IMAGE_GENERATION_PROVIDER\}"/);
   assert.match(deploy, /IMAGE_GENERATION_PROVIDER.*cloudflare[\s\S]*?GEMINI_IMAGES_ENABLED='false'/);
 });
