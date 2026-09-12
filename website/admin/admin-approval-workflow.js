@@ -151,6 +151,36 @@
         };
     }
 
+    function refreshApprovedPresentation(entry, fromModal = false) {
+        const approvedHex = typeof getEventHex === 'function'
+            ? String(getEventHex(entry?.event) || '').trim().toLowerCase()
+            : '';
+
+        if (typeof updateEventsCount === 'function') {
+            updateEventsCount(
+                uniqueEventEntries.length,
+                eventsData.length,
+                uniqueEventEntries.filter((candidate) => isEntryHidden(candidate)).length,
+                uniqueEventEntries.filter((candidate) => isEntryComplete(candidate)).length,
+            );
+        }
+        if (typeof updateSidebarUi === 'function') updateSidebarUi();
+        if (typeof renderEvents === 'function') renderEvents();
+
+        if (!fromModal) return;
+        const refreshedIndex = approvedHex && Array.isArray(visibleEventEntries)
+            ? visibleEventEntries.findIndex((candidate) => {
+                return String(getEventHex(candidate?.event) || '').trim().toLowerCase() === approvedHex;
+            })
+            : -1;
+        if (refreshedIndex >= 0 && typeof updateModalContent === 'function') {
+            currentEventIndex = refreshedIndex;
+            updateModalContent(refreshedIndex);
+            return;
+        }
+        if (typeof closeUploadModal === 'function') closeUploadModal();
+    }
+
     // Approval copy is derived from application state at the points where the
     // event grid/modal are rendered. Do not observe the entire document: broad
     // MutationObservers can turn presentation writes into self-sustaining
@@ -234,6 +264,7 @@
                 if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(message, 'info');
             } else {
                 if (typeof applyLocalApprovalState === 'function') applyLocalApprovalState(entry, true);
+                refreshApprovedPresentation(entry, fromModal);
                 const message = result?.message || (generatedReview ? 'Generated image approval submitted.' : 'Approve shown changes submitted.');
                 updateRuntimeDetails(message, 'success');
                 if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(message, 'success');
