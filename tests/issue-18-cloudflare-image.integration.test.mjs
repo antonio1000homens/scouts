@@ -6,7 +6,9 @@ import { readFileSync } from 'node:fs';
 
 const read = (path) => readFileSync(path, 'utf8');
 
+const lifecycleAdapter = read('lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs');
 const adapter = read('lambdas/sqs2scouts/function/image-provider-adapter.mjs');
+const worker = read('lambdas/sqs2scouts/function/image-provider-worker.mjs');
 const client = read('lambdas/sqs2scouts/function/cloudflare-image-client.mjs');
 const helpers = read('lambdas/sqs2scouts/function/full-enrich-helpers.mjs');
 const template = read('lambdas/cloudformation/templates/sqs2scouts.yaml');
@@ -24,12 +26,17 @@ test('CloudFormation has fail-closed provider defaults and SSM-only Cloudflare t
   assert.match(template, /parameter\$\{CloudflareAiApiTokenParameter\}/);
 });
 
-test('deploy packages the direct provider worker and forces Gemini images off for Cloudflare', () => {
+test('deploy packages the approval-aware provider facade and direct provider worker while forcing Gemini images off for Cloudflare', () => {
   assert.doesNotMatch(deploy, /full-enrich-adapter\.mjs/);
   assert.match(deploy, /full-enrich-core\.mjs/);
+  assert.match(deploy, /approval-lifecycle-adapter\.mjs/);
   assert.match(deploy, /image-provider-adapter\.mjs/);
+  assert.match(deploy, /image-provider-worker\.mjs/);
   assert.match(deploy, /cloudflare-image-client\.mjs/);
   assert.match(deploy, /HANDLER="\$\{HANDLER:-image-provider-adapter\.lambdaHandler\}"/);
+  assert.match(adapter, /processRevisionedApprovalRecords/);
+  assert.match(adapter, /imageProviderWorkerHandler/);
+  assert.match(lifecycleAdapter, /export async function processRevisionedApprovalRecords\(records = \[\]\)/);
   assert.match(deploy, /ImageGenerationProvider="\$\{IMAGE_GENERATION_PROVIDER\}"/);
   assert.match(deploy, /IMAGE_GENERATION_PROVIDER.*cloudflare[\s\S]*?GEMINI_IMAGES_ENABLED='false'/);
 });
@@ -42,38 +49,43 @@ test('deploy preserves an existing image provider configuration and defaults a n
   assert.match(deploy, /Environment\.Variables\.CLOUDFLARE_AI_MODEL/);
 });
 
-test('provider adapter is the stable Lambda entrypoint and delegates non-image work to full-enrich core', () => {
-  assert.match(adapter, /import \{ lambdaHandler as fullEnrichHandler \} from '\.\/full-enrich-core\.mjs'/);
+test('provider facade intercepts revisioned approval work and delegates provider work to the worker', () => {
+  assert.match(adapter, /import \{ processRevisionedApprovalRecords \} from '\.\/approval-lifecycle-adapter\.mjs'/);
+  assert.match(adapter, /import \{ lambdaHandler as imageProviderWorkerHandler \} from '\.\/image-provider-worker\.mjs'/);
   assert.match(adapter, /export async function lambdaHandler\(event\)/);
-  assert.match(adapter, /if \(records\.length === 0\) return fullEnrichHandler\(event\)/);
+  assert.match(adapter, /if \(records\.length === 0\) return imageProviderWorkerHandler\(event\)/);
+  assert.match(adapter, /const delegated = await processRevisionedApprovalRecords\(records\)/);
+  assert.match(adapter, /return imageProviderWorkerHandler\(\{ \.\.\.event, Records: delegated \}\)/);
+  assert.match(worker, /import \{ lambdaHandler as fullEnrichHandler \} from '\.\/full-enrich-core\.mjs'/);
+  assert.match(worker, /if \(records\.length === 0\) return fullEnrichHandler\(event\)/);
 });
 
 test('Cloudflare path reserves stage before the external inference call', () => {
-  const reservation = adapter.indexOf('await reserveEnrichmentAttempt');
-  const provider = adapter.indexOf('await generateCloudflareImageAsset', reservation);
+  const reservation = worker.indexOf('await reserveEnrichmentAttempt');
+  const provider = worker.indexOf('await generateCloudflareImageAsset', reservation);
   assert.ok(reservation >= 0, 'stage reservation must exist');
   assert.ok(provider > reservation, 'external provider call must occur only after stage ownership');
 });
 
 test('application-level daily request caps are absent while the provider quota circuit remains', () => {
-  assert.doesNotMatch(adapter, /IMAGE_DAILY_REQUEST_LIMIT|image-requests|image-cap-alert|application_daily_cap/);
-  assert.match(adapter, /provider#cloudflare#daily-quota/);
+  assert.doesNotMatch(worker, /IMAGE_DAILY_REQUEST_LIMIT|image-requests|image-cap-alert|application_daily_cap/);
+  assert.match(worker, /provider#cloudflare#daily-quota/);
 });
 
 test('cached image is stored before final S3/event persistence', () => {
-  const provider = adapter.indexOf('await generateCloudflareImageAsset');
-  const cache = adapter.indexOf('await markGeminiSucceeded', provider);
-  const persist = adapter.indexOf('await persistCachedImage', cache);
+  const provider = worker.indexOf('await generateCloudflareImageAsset');
+  const cache = worker.indexOf('await markGeminiSucceeded', provider);
+  const persist = worker.indexOf('await persistCachedImage', cache);
   assert.ok(provider >= 0 && cache > provider, 'provider result must be cached');
   assert.ok(persist > cache, 'final persistence must happen after durable generated-result cache');
-  assert.match(adapter, /reusable\?\.generatedValue\?\.relativeUrl[\s\S]*?generatedValue\?\.imageBase64[\s\S]*?persistCachedImage/);
+  assert.match(worker, /reusable\?\.generatedValue\?\.relativeUrl[\s\S]*?generatedValue\?\.imageBase64[\s\S]*?persistCachedImage/);
 });
 
 test('Cloudflare daily allocation exhaustion is a provider/day circuit, not an event attempt loop', () => {
-  assert.match(adapter, /provider#cloudflare#daily-quota/);
-  assert.match(adapter, /markProviderQuotaExhausted/);
-  assert.match(adapter, /nextProviderReset/);
-  assert.match(adapter, /attemptWasReserved:\s*true/);
+  assert.match(worker, /provider#cloudflare#daily-quota/);
+  assert.match(worker, /markProviderQuotaExhausted/);
+  assert.match(worker, /nextProviderReset/);
+  assert.match(worker, /attemptWasReserved:\s*true/);
   assert.match(client, /providerCode/);
   assert.match(helpers, /3036/);
   assert.match(helpers, /PROVIDER_QUOTA/);

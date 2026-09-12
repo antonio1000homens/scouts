@@ -7,7 +7,7 @@ function read(relativePath) {
 }
 
 const scoutsSource = read('lambdas/scouts/function/scouts-service.mjs');
-const workerSource = read('lambdas/sqs2scouts/function/image-provider-adapter.mjs');
+const workerSource = read('lambdas/sqs2scouts/function/image-provider-worker.mjs');
 const workerCoreSource = read('lambdas/sqs2scouts/function/full-enrich-core.mjs');
 const scoutsTemplate = read('lambdas/cloudformation/templates/scouts.yaml');
 const workerTemplate = read('lambdas/cloudformation/templates/sqs2scouts.yaml');

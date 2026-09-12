@@ -225,7 +225,9 @@ echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
     agenda-publisher.mjs \
     full-enrich-core.mjs \
     full-enrich-helpers.mjs \
+    approval-lifecycle-adapter.mjs \
     image-provider-adapter.mjs \
+    image-provider-worker.mjs \
     cloudflare-image-client.mjs \
     gemini-text-models.mjs \
     runtime-request-entry.mjs \

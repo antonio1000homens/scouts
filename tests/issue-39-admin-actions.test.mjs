@@ -7,6 +7,7 @@ const adminSource = readFileSync('website/admin/admin-script.js', 'utf8');
 const approvalWorkflowSource = readFileSync('website/admin/admin-approval-workflow.js', 'utf8');
 const privateStorageSource = readFileSync('website/admin/private-storage-client.js', 'utf8');
 const scoutsEntrySource = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
+const approvalCoordinatorSource = readFileSync('lambdas/shared-layer/nodejs/approval-coordinator.mjs', 'utf8');
 const TEST_HEX = '746573742d6576656e74';
 
 function actionSandbox(overrides = {}) {
@@ -258,18 +259,20 @@ test('issue 91 admin approval submits the complete visible review snapshot', () 
 
 test('issue 91 backend intercepts revisioned approval and rejects stale review state', () => {
   assert.match(scoutsEntrySource, /function revisionedApprovalCommand/);
-  assert.match(scoutsEntrySource, /compareEventReviewRevision\(canonical, snapshot\.revision\)/);
-  assert.match(scoutsEntrySource, /response\(409,/);
-  assert.match(scoutsEntrySource, /STALE_REVIEW/);
-  assert.match(scoutsEntrySource, /approvalOperationId/);
-  assert.match(scoutsEntrySource, /approvalIdempotencyKey/);
-  assert.match(scoutsEntrySource, /rootRequestId/);
+  assert.match(scoutsEntrySource, /coordinateEventApproval/);
+  assert.match(approvalCoordinatorSource, /compareEventReviewRevision\(canonical, renderedRevision\)/);
+  assert.match(approvalCoordinatorSource, /statusCode: 409/);
+  assert.match(approvalCoordinatorSource, /STALE_REVIEW/);
+  assert.match(approvalCoordinatorSource, /approvalOperationId/);
+  assert.match(approvalCoordinatorSource, /approvalIdempotencyKey/);
+  assert.match(approvalCoordinatorSource, /rootRequestId/);
 });
 
 test('issue 91 missing-image approval queues one correlated image child and keeps final approval false', () => {
-  assert.match(scoutsEntrySource, /if \(patch\.approval\.requiresGeneratedImage\)/);
-  assert.match(scoutsEntrySource, /const imageRequestId = `\$\{rootRequestId\}:image`/);
-  assert.match(scoutsEntrySource, /approvalMode: 'review_generated_image'/);
-  assert.match(scoutsEntrySource, /state: 'awaiting_image'/);
-  assert.match(scoutsEntrySource, /Generating image — final review required/);
+  assert.match(approvalCoordinatorSource, /if \(patch\.approval\.requiresGeneratedImage\)/);
+  assert.match(approvalCoordinatorSource, /const imageRequestId = `\$\{root\}:image:\$\{revision\}`/);
+  assert.match(approvalCoordinatorSource, /approvalMode: 'review_generated_image'/);
+  assert.match(approvalCoordinatorSource, /state: 'awaiting_image'/);
+  assert.match(approvalCoordinatorSource, /Generating image — final review required/);
+  assert.match(approvalCoordinatorSource, /subject: \{ metadata: patch\.metadata \}/);
 });
