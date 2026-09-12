@@ -18,6 +18,24 @@
     const AUTO_REFRESH_ENABLED_STORAGE_KEY = 'scoutsAdminAgendaAutoRefreshEnabledV1';
     const AUTO_REFRESH_INTERVAL_STORAGE_KEY = 'scoutsAdminAgendaAutoRefreshIntervalSecondsV1';
 
+    // Metadata completeness is deliberately separate from workflow state.
+    // Approval and visibility each have their own admin filters; an otherwise
+    // enriched event must not appear under "Missing Metadata" just because it
+    // is awaiting approval or is hidden.
+    window.getMissingMetadataFields = function (event) {
+        const missing = [];
+        if (!hasText(getAIPrompt(event))) {
+            missing.push('Tagline');
+        }
+        if (!hasText(getImageThemeOrLegacyPrompt(event))) {
+            missing.push('Image Theme');
+        }
+        if (!hasRelativeImageUrl(event)) {
+            missing.push('Image URL');
+        }
+        return missing;
+    };
+
     let agendaRefreshExecutionInFlight = false;
     let agendaAutoRefreshEnabled = true;
     let agendaAutoRefreshIntervalSeconds = DEFAULT_RECONCILIATION_INTERVAL_SECONDS;
