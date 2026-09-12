@@ -88,9 +88,14 @@ test('issue 91 admin final generated-image review keeps the original root and us
   assert.match(approvalWorkflow, /Activity Centre owns that long-lived phase/);
 });
 
-test('issue 91 successful final approval updates the event entry, not the raw event object', () => {
+test('issue 91 successful final approval updates state and immediately refreshes its presentation', () => {
   assert.match(approvalWorkflow, /applyLocalApprovalState\(entry, true\)/);
   assert.doesNotMatch(approvalWorkflow, /applyLocalApprovalState\(event, true\)/);
+  assert.match(approvalWorkflow, /function refreshApprovedPresentation/);
+  assert.match(approvalWorkflow, /refreshApprovedPresentation\(entry, fromModal\)/);
+  assert.match(approvalWorkflow, /if \(typeof renderEvents === 'function'\) renderEvents\(\)/);
+  assert.match(approvalWorkflow, /updateModalContent\(refreshedIndex\)/);
+  assert.match(approvalWorkflow, /closeUploadModal\(\)/);
 });
 
 test('issue 91 approval labels are render-driven and idempotent without a document-wide observer', () => {
@@ -139,13 +144,17 @@ test('issue 91 approval controller loads statically in dependency order and fail
   assert.doesNotMatch(privateStorage, /createElement\('script'\)/);
 });
 
-test('admin direct-image controls are render-driven and cannot self-trigger a child-list observer', () => {
+test('admin direct-image controls are render-driven and preserve pending disabled state after generic refresh', () => {
   assert.match(diagnosticsEnhancements, /function installEventCardRenderHook/);
   assert.match(diagnosticsEnhancements, /window\.renderEvents = diagnosticsAwareRender/);
   assert.doesNotMatch(diagnosticsEnhancements, /new MutationObserver/);
   assert.match(diagnosticsEnhancements, /existing\.textContent !== desiredLabel/);
   assert.match(diagnosticsEnhancements, /void Promise\.resolve\(pollQueueDepthSnapshots\(\)\)/);
   assert.doesNotMatch(diagnosticsEnhancements, /await pollQueueDepthSnapshots\(\)/);
+  assert.match(
+    diagnosticsEnhancements,
+    /finally \{[\s\S]*uiCommandInFlight = false;[\s\S]*refreshApiActionButtons\(\);[\s\S]*enhanceEventCards\(\);[\s\S]*\}/,
+  );
 });
 
 test('issue 91 generated review notification has durable external identity and Slack reference', () => {
