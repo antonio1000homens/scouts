@@ -148,3 +148,13 @@ test('approval awaiting generated image replaces stale review actions with a pen
   assert.match(payload.text, /generating image/i);
   assert.equal(payload.blocks.some((block) => block.type === 'actions'), false);
 });
+
+test('Slack response URL callback bindings use the defined helper in both persistence paths', () => {
+  const persistenceProcessor = readFileSync('lambdas/sqs2scouts/function/persistence-processor.mjs', 'utf8');
+  const approvalAdapter = readFileSync('lambdas/sqs2scouts/function/approval-lifecycle-adapter.mjs', 'utf8');
+  for (const source of [persistenceProcessor, approvalAdapter]) {
+    assert.match(source, /async function postToResponseUrl\(/);
+    assert.match(source, /postResponseUrl: postToResponseUrl/);
+    assert.doesNotMatch(source, /\n\s*postResponseUrl,\n/);
+  }
+});
