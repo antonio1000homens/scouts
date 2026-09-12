@@ -253,35 +253,7 @@ async function verifyAccessJwt(token, env) {
   }
 }
 
-async function requireAccess(request, env) {
-  const mustRequire = (env.REQUIRE_CF_ACCESS || "true").toLowerCase() === "true";
-  if (!mustRequire) return null;
-
-  const jwt = (request.headers.get("cf-access-jwt-assertion") || "").trim();
-  if (!jwt) {
-    return json(
-      {
-        ok: false,
-        code: "ACCESS_UNAUTHENTICATED",
-        message: "Cloudflare Access session missing or expired. Re-login required.",
-      },
-      401,
-    );
-  }
-
-  const verification = await verifyAccessJwt(jwt, env);
-  if (verification.ok) return null;
-  if (verification.configError) {
-    return json(
-      {
-        ok: false,
-        code: "ACCESS_CONFIG_MISSING",
-        message: "Cloudflare Access JWT validation is not configured.",
-      },
-      500,
-    );
-  }
-
+function accessUnauthorized() {
   return json(
     {
       ok: false,
@@ -290,6 +262,44 @@ async function requireAccess(request, env) {
     },
     401,
   );
+}
+
+async function requireAccess(request, env, ctx = null) {
+  const mustRequire = (env.REQUIRE_CF_ACCESS || "true").toLowerCase() === "true";
+  if (!mustRequire) return null;
+
+  // Cloudflare Access evaluates protected Worker invocations before user code
+  // runs. When that platform-authenticated context is present, prefer it over
+  // re-parsing the assertion and depending on separately managed Worker vars.
+  // If POLICY_AUD is configured, retain the explicit application pin as an
+  // additional check; otherwise ctx.access itself remains authoritative.
+  if (ctx?.access) {
+    const expectedAudience = (env.POLICY_AUD || "").trim();
+    const actualAudience = typeof ctx.access.aud === "string" ? ctx.access.aud.trim() : "";
+    if (expectedAudience && actualAudience !== expectedAudience) return accessUnauthorized();
+    return null;
+  }
+
+  // Fallback for legacy/test invocation contexts that expose only the raw JWT.
+  // This path deliberately retains the original cryptographic verification and
+  // fails closed unless TEAM_DOMAIN and POLICY_AUD are both pinned.
+  const jwt = (request.headers.get("cf-access-jwt-assertion") || "").trim();
+  if (!jwt) return accessUnauthorized();
+
+  const verification = await verifyAccessJwt(jwt, env);
+  if (verification.ok) return null;
+  if (verification.configError) {
+    return json(
+      {
+        ok: false,
+        code: "ACCESS_CONFIG_MISSING",
+        message: "Cloudflare Access JWT validation fallback is not configured.",
+      },
+      500,
+    );
+  }
+
+  return accessUnauthorized();
 }
 
 function requireConfig(env) {
@@ -410,7 +420,7 @@ function handleOptions() {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
@@ -429,7 +439,7 @@ export default {
       if (request.method !== "GET") {
         return json({ ok: false, code: "METHOD_NOT_ALLOWED" }, 405);
       }
-      const accessErr = await requireAccess(request, env);
+      const accessErr = await requireAccess(request, env, ctx);
       if (accessErr) return accessErr;
       const configErr = requireConfig(env);
       if (configErr) return configErr;
@@ -440,7 +450,7 @@ export default {
       return json({ ok: false, code: "NOT_FOUND", message: "Not found" }, 404);
     }
 
-    const accessErr = await requireAccess(request, env);
+    const accessErr = await requireAccess(request, env, ctx);
     if (accessErr) return accessErr;
 
     const configErr = requireConfig(env);

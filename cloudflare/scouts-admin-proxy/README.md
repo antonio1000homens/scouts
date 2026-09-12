@@ -28,13 +28,22 @@ The Worker verifies the CAPTCHA token and forwards submissions to IFTTT.
 
 ## Required configuration
 
-Set these in Cloudflare Worker settings (or via `wrangler secret put`):
+Set these in Cloudflare Worker settings (or via `wrangler secret put` where appropriate):
 
 ### Admin proxy secrets / vars
 - Secret: `SCOUTS_LAMBDA_API_KEY`
 - Vars:
   - `SCOUTS_URL`
   - `REQUIRE_CF_ACCESS` (`true` in production)
+
+Production admin/private routes must be protected by a Cloudflare Access application. For a directly Access-protected Worker invocation, the Worker uses Cloudflare's authenticated `ctx.access` context as the primary identity/authentication signal; no separately managed JWT issuer/audience variables are required for that normal path.
+
+The Worker retains its explicit raw-JWT verifier as a fail-closed fallback for invocation/test contexts where `ctx.access` is unavailable. These optional remote Worker variables pin that fallback:
+
+- `TEAM_DOMAIN`: the Access team domain, for example `https://<team>.cloudflareaccess.com`
+- `POLICY_AUD`: the Access application's Audience (AUD) tag
+
+If `POLICY_AUD` is configured and `ctx.access` is present, the Worker also requires `ctx.access.aud` to match it. `deploy-ci.sh` uses `wrangler deploy --keep-vars` so existing remote fallback pins are preserved without making them a production availability prerequisite.
 
 ### Contact form secrets
 - Secret: `TURNSTILE_SECRET_KEY` from the Cloudflare Turnstile dashboard
@@ -71,9 +80,10 @@ The Worker returns:
    - `wrangler secret put SCOUTS_LAMBDA_API_KEY`
    - `wrangler secret put TURNSTILE_SECRET_KEY`
    - `wrangler secret put IFTTT_WEBHOOK_KEY`
-4. Deploy:
+4. Confirm the `2ndtolworth.org.uk/admin-api/*`, `/runtime/*`, and `/events/*` routes are protected by the intended Cloudflare Access application.
+5. Deploy:
    - `cd scouts/cloudflare/scouts-admin-proxy`
-   - `wrangler deploy --var SCOUTS_URL=https://... --var REQUIRE_CF_ACCESS=true --var IFTTT_EVENT_NAME=scouts_contact`
+   - `wrangler deploy --var SCOUTS_URL=https://... --var REQUIRE_CF_ACCESS=true --var IFTTT_EVENT_NAME=scouts_contact --keep-vars`
 
 For scripted deploys in this repo, `cloudflare/scouts-admin-proxy/deploy-ci.sh`
 also supports resolving the deploy token from Bitwarden via the Scouts local env

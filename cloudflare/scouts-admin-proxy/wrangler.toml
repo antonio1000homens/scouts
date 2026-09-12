@@ -12,9 +12,10 @@ routes = [
 ]
 
 [vars]
-# Production admin/private routes require a cryptographically validated Cloudflare
-# Access assertion. TEAM_DOMAIN and POLICY_AUD are intentionally managed as remote
-# Worker variables and preserved by deploy-ci.sh rather than committed here.
+# Production admin/private routes are protected by Cloudflare Access. The Worker
+# prefers Cloudflare's authenticated ctx.access context. Optional TEAM_DOMAIN and
+# POLICY_AUD remote variables are preserved as explicit pins for the legacy/raw-JWT
+# fallback path rather than being required for normal Access-authenticated traffic.
 REQUIRE_CF_ACCESS = "true"
 SCOUTS_URL = "https://w6yfull3fisjxefw2lknyblezu0kbokv.lambda-url.eu-west-2.on.aws/"
 IFTTT_EVENT_NAME = "scoutsContactForm"
