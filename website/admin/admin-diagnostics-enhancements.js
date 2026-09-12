@@ -580,6 +580,11 @@
         } finally {
             uiCommandInFlight = false;
             refreshApiActionButtons();
+            // Generic API button refresh enables every `.requires-api` control.
+            // Reapply the direct-image pending state immediately so a request that
+            // has already been accepted cannot look clickable while its duplicate
+            // guard still rejects clicks.
+            enhanceEventCards();
         }
     }
 
