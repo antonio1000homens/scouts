@@ -130,7 +130,8 @@ function collapseRootActivity(rows = []) {
   return [...grouped.values()].sort((a, b) => time(b.updatedAt || b.createdAt) - time(a.updatedAt || a.createdAt));
 }
 
-function enrichmentStageFromActivity(request = {}) {
+function enrichmentStageFromActivity(request) {
+  request = request || {};
   const direct = text(request.stage);
   if (RECOVERABLE_ENRICHMENT_STAGES.has(direct)) return direct;
   const timeline = Array.isArray(request.timeline) ? request.timeline : [];
@@ -141,7 +142,8 @@ function enrichmentStageFromActivity(request = {}) {
   return '';
 }
 
-export function classifyRuntimeRecovery(request = {}) {
+function classifyRuntimeRecovery(request) {
+  request = request || {};
   const state = text(request.state).toLowerCase();
   if (!TERMINAL_FAILURES.has(state)) return null;
 
