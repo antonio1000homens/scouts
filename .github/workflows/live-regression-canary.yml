@@ -27,7 +27,10 @@ jobs:
   live-regression:
     if: ${{ inputs.confirm_live_mutation == true }}
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    # A single stage may poll for up to four minutes. The full canary has twelve
+    # bounded convergence waits, so reserve enough wall-clock time for every
+    # stage to fail independently and still allow the script's finally cleanup.
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
