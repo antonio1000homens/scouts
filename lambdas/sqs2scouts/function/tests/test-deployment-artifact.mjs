@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import '../../test-persist-patch-merge.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../../..');
 const functionDir = path.join(repoRoot, 'lambdas/sqs2scouts/function');
