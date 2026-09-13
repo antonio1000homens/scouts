@@ -20,7 +20,6 @@ const ACK = process.env.LIVE_TEST_ACK === '1';
 const TIMEOUT_MS = Number(process.env.LIVE_TEST_TIMEOUT_MS || 240000);
 const POLL_MS = Number(process.env.LIVE_TEST_POLL_MS || 3000);
 const AGENDA_KEY = process.env.AGENDA_KEY || 'agenda.json';
-const ENRICHMENT_STATE_TABLE_NAME = process.env.GEMINI_ENRICHMENT_STATE_TABLE_NAME || 'scouts-enrichment-state';
 const BACKUP_PREFIX = process.env.BACKUP_PREFIX || 'migration-backups/live-regression/';
 const FUTURE_DATE_RAW = process.env.LIVE_TEST_DATE_RAW || '20990101T120000';
 const FUTURE_DATE_ISO = process.env.LIVE_TEST_DATE_ISO || '2099-01-01T12:00:00Z';
@@ -102,39 +101,6 @@ function verifyDeployedRegressionGuard() {
     throw new Error(`Deployed ${DEPLOYED_EVENT_LOADER_KEY} does not contain the required regression UID guard; refusing live canary mutation/unhide.`);
   }
   recordPass('Deployed public exclusion verified', DEPLOYED_EVENT_LOADER_KEY);
-}
-
-function resetDurableEnrichmentState(stage) {
-  const output = aws([
-    'dynamodb', 'update-item',
-    '--table-name', ENRICHMENT_STATE_TABLE_NAME,
-    '--key', JSON.stringify({ hex: { S: hex }, stage: { S: stage } }),
-    '--update-expression', 'SET #state = :pending, #attemptCount = :zero, #updatedAt = :updatedAt REMOVE #nextRetryAt, #inProgressExpiresAt, #geminiSucceeded, #generatedValue, #generationId',
-    '--condition-expression', '#state = :succeeded',
-    '--expression-attribute-names', JSON.stringify({
-      '#state': 'state',
-      '#attemptCount': 'attemptCount',
-      '#updatedAt': 'updatedAt',
-      '#nextRetryAt': 'nextRetryAt',
-      '#inProgressExpiresAt': 'inProgressExpiresAt',
-      '#geminiSucceeded': 'geminiSucceeded',
-      '#generatedValue': 'generatedValue',
-      '#generationId': 'generationId',
-    }),
-    '--expression-attribute-values', JSON.stringify({
-      ':pending': { S: 'pending' },
-      ':zero': { N: '0' },
-      ':updatedAt': { S: new Date().toISOString() },
-      ':succeeded': { S: 'succeeded' },
-    }),
-    '--return-values', 'ALL_NEW',
-    '--output', 'json',
-  ]);
-  const state = JSON.parse(output)?.Attributes?.state?.S;
-  const attemptCount = Number(JSON.parse(output)?.Attributes?.attemptCount?.N);
-  if (state !== 'pending' || attemptCount !== 0) {
-    throw new Error(`Durable ${stage} enrichment state was not reset for canary HEX ${hex}`);
-  }
 }
 
 function errorText(error) {
@@ -403,9 +369,14 @@ async function writeCanonicalState(hex, mutate) {
 
 async function requestAndVerify({ action, stage, reset, predicate, label }) {
   if (reset) {
-    await writeCanonicalState(hex, reset);
-    resetDurableEnrichmentState(stage);
-    recordPass(`${label} durable state reset`, stage);
+    await writeCanonicalState(hex, (event) => {
+      reset(event);
+      // The production reservation logic resets a succeeded stage when its
+      // generation ID changes. Change only a generation-ID input here so the
+      // canary remains self-contained and does not need DynamoDB write access.
+      event.description = `Live regression canary ${stage} ${runSuffix}`;
+    });
+    recordPass(`${label} generation reset`, stage);
   }
   const response = await postCommand({ realm: 'scouts', action, subject: { hex } });
   const { event } = await waitForEventAndAgenda(hex, predicate, `${label} persistence`);
