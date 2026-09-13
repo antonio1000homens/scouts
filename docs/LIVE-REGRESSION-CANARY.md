@@ -35,6 +35,8 @@ The public loader therefore permanently filters events whose top-level UID **or 
 scouts-regression-
 ```
 
+Before any production mutation, the canary reads the deployed `website/scripts/event-loader.js` from the production bucket and refuses to run unless that deployed guard is present. This prevents an independently triggered canary from un-hiding an event while an older website bundle is still live.
+
 This means the canary can safely verify a real `unhide` transition (`metadata.status.isHidden=false`) while the event remains in `agenda.json`, without becoming visible on the public site.
 
 Normal calendar events must never use the reserved prefix.
@@ -43,17 +45,18 @@ Normal calendar events must never use the reserved prefix.
 
 The canary performs the following deployed journey:
 
-1. Seed a clean synthetic event in `events/<hex>.json` and `agenda.json`.
-2. Assert the event object exists in S3 and the agenda contains the same canonical metadata.
-3. Request `generateFull`; wait for tagline, image theme and image URL to persist in both files.
-4. Require a `website/eventImages/` generated-image key and assert the object itself exists in S3.
-5. Clear only the tagline in both canonical representations, request `generateTagline`, and assert durable read-back.
-6. Clear only the image theme, request `generateImageTheme`, and assert durable read-back.
-7. Clear only the image URL, request `generateImage`, and again require durable read-back plus a verifiable generated-image object.
-8. Request `approve`; assert `isApproved=true` in the event and agenda.
-9. Request `hide`; assert `isHidden=true` in the event and agenda.
-10. Request `unhide`; assert `isHidden=false` in the event and agenda and confirm the reserved regression UID remains attached.
-11. Remove the synthetic agenda entry, event object, and generated image objects owned by the canary HEX, and verify S3 deletions rather than reporting cleanup success from an acknowledgement alone.
+1. Verify the AWS account and deployed public-page regression guard.
+2. Seed a clean synthetic event in `events/<hex>.json` and `agenda.json`.
+3. Assert the event object exists in S3 and the agenda contains the same canonical metadata.
+4. Request `generateFull`; wait for tagline, image theme and image URL to persist in both files.
+5. Require a `website/eventImages/` generated-image key and assert the object itself exists in S3.
+6. Clear only the tagline in both canonical representations, request `generateTagline`, and assert durable read-back.
+7. Clear only the image theme, request `generateImageTheme`, and assert durable read-back.
+8. Clear only the image URL, request `generateImage`, and again require durable read-back plus a verifiable generated-image object.
+9. Request `approve`; assert `isApproved=true` in the event and agenda.
+10. Request `hide`; assert `isHidden=true` in the event and agenda.
+11. Request `unhide`; assert `isHidden=false` in the event and agenda and confirm the reserved regression UID remains attached.
+12. Remove the synthetic agenda entry and event object, sweep the complete `website/eventImages/<hex>-` namespace, and verify S3 deletions rather than reporting cleanup success from an acknowledgement alone.
 
 An agenda backup is retained under `migration-backups/live-regression/<run-id>/agenda.json` for recovery/audit.
 
@@ -74,12 +77,13 @@ The workflow:
 
 ## Running locally
 
-With AWS credentials that can read/write the Scouts bucket, query the deployed Function URL, and read the API-key parameter:
+Local execution deliberately does **not** accept ambient/default AWS credentials. Select an explicit profile for the intended production account; the script independently verifies account `553490163883` before mutating anything.
 
 ```bash
+export AWS_PROFILE="<your-explicit-scouts-production-profile>"
 export AWS_REGION=eu-west-2
-export SCOUTS_API_URL="$(aws lambda get-function-url-config --function-name scouts --query FunctionUrl --output text)"
-export SCOUTS_API_KEY="$(aws ssm get-parameter --name /scouts/shared/required-api-key --with-decryption --query Parameter.Value --output text)"
+export SCOUTS_API_URL="$(aws --profile "${AWS_PROFILE}" lambda get-function-url-config --function-name scouts --query FunctionUrl --output text)"
+export SCOUTS_API_KEY="$(aws --profile "${AWS_PROFILE}" ssm get-parameter --name /scouts/shared/required-api-key --with-decryption --query Parameter.Value --output text)"
 export LIVE_TEST_ACK=1
 node lambdas/tools/live-canonical-event-smoke.mjs
 ```
