@@ -12,6 +12,9 @@ const ACTIVE = new Set([
   'awaiting_review',
 ]);
 
+const TERMINAL_FAILURES = new Set(['failed', 'needs_attention', 'manual_review']);
+const RECOVERABLE_ENRICHMENT_STAGES = new Set(['tagline', 'imageTheme', 'image']);
+
 const PRIORITY = Object.freeze({
   accepted: 10,
   queued: 20,
@@ -127,6 +130,56 @@ function collapseRootActivity(rows = []) {
   return [...grouped.values()].sort((a, b) => time(b.updatedAt || b.createdAt) - time(a.updatedAt || a.createdAt));
 }
 
+function enrichmentStageFromActivity(request = {}) {
+  const direct = text(request.stage);
+  if (RECOVERABLE_ENRICHMENT_STAGES.has(direct)) return direct;
+  const timeline = Array.isArray(request.timeline) ? request.timeline : [];
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const stage = text(timeline[index]?.stage);
+    if (RECOVERABLE_ENRICHMENT_STAGES.has(stage)) return stage;
+  }
+  return '';
+}
+
+export function classifyRuntimeRecovery(request = {}) {
+  const state = text(request.state).toLowerCase();
+  if (!TERMINAL_FAILURES.has(state)) return null;
+
+  const failureType = text(request.failureType || request.failure?.type).toUpperCase();
+  const stage = text(request.stage);
+  if (failureType === 'WORKER_DELIVERY_EXHAUSTED' || /DLQ$/i.test(stage)) {
+    return {
+      type: 'dlq_recovery',
+      available: false,
+      action: 'open_operations',
+      label: 'Open Operations → DLQ recovery',
+      message: 'Inspect the DLQ and confirm its current visible count before using the guarded throttled redrive.',
+    };
+  }
+
+  if (state === 'manual_review') {
+    const enrichmentStage = enrichmentStageFromActivity(request);
+    if (enrichmentStage && text(request.hex)) {
+      return {
+        type: 'enrichment_retry',
+        available: true,
+        action: 'retry',
+        label: 'Retry enrichment',
+        stage: enrichmentStage,
+        message: `Retry the ${enrichmentStage} enrichment from its durable manual-review state.`,
+      };
+    }
+  }
+
+  return {
+    type: 'unsupported',
+    available: false,
+    action: 'none',
+    label: 'Manual recovery unavailable',
+    message: 'This terminal failure has no safe idempotent manual recovery handler.',
+  };
+}
+
 function canonicalDisplay(request = {}) {
   const state = text(request.state).toLowerCase();
   const stage = text(request.stage).toLowerCase();
@@ -188,6 +241,7 @@ function present(request, now) {
     publication: request.publication || null,
     ...display,
     failure: request.failureType ? { type: request.failureType, message: request.failureMessage || null } : null,
+    recovery: classifyRuntimeRecovery(request),
     createdAt: request.createdAt || null,
     updatedAt: request.updatedAt || null,
     ageSeconds: Number.isFinite(updated) ? Math.max(0, Math.floor((now.getTime() - updated) / 1000)) : null,
