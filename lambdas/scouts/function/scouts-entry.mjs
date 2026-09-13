@@ -1,5 +1,7 @@
 import crypto from 'crypto';
+import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import { withRequestActivityContext } from '/opt/nodejs/request-activity.mjs';
 import { coordinateEventApproval } from '/opt/nodejs/approval-coordinator.mjs';
@@ -17,7 +19,12 @@ import {
 } from './runtime-schedule.mjs';
 
 const s3 = new S3Client({});
+const sqs = new SQSClient({});
+const dynamodb = new DynamoDBClient({});
 const TARGET_BUCKET = process.env.TARGET_BUCKET || '';
+const SCOUTS_REQUESTS_QUEUE_URL = process.env.SCOUTS_REQUESTS_QUEUE_URL || '';
+const ENRICHMENT_STATE_TABLE_NAME = String(process.env.GEMINI_ENRICHMENT_STATE_TABLE_NAME || '').trim();
+const REQUEST_ACTIVITY_TABLE_NAME = String(process.env.SCOUTS_REQUEST_ACTIVITY_TABLE_NAME || '').trim();
 const PRIVATE_RUNTIME_SNAPSHOT_KEYS = Object.freeze({
   queued: 'runtime/scoutsQueued.json',
   processing: 'runtime/scoutsProcessing.json',
@@ -242,6 +249,133 @@ function enrichmentRetrySubject(stage) {
   return '';
 }
 
+function recoveryActivityId(body) {
+  return text(body?.activityId || body?.requestId || body?.operationId);
+}
+
+function activityMatchesId(request, activityId) {
+  return text(request?.requestId) === activityId
+    || text(request?.rootRequestId) === activityId
+    || (Array.isArray(request?.childRequestIds) && request.childRequestIds.some((id) => text(id) === activityId));
+}
+
+async function loadRecoveryActivity(activityId) {
+  let activity = await buildRuntimeActivity({ rootRequestId: activityId, limit: 50 });
+  let request = activity.requests.find((candidate) => activityMatchesId(candidate, activityId));
+  if (request) return request;
+
+  activity = await buildRuntimeActivity({ requestIds: [activityId], limit: 50 });
+  request = activity.requests.find((candidate) => activityMatchesId(candidate, activityId));
+  return request || null;
+}
+
+function dynamoString(value) {
+  return { S: String(value) };
+}
+
+function dynamoNumber(value) {
+  return { N: String(value) };
+}
+
+async function restoreManualReviewAfterEnqueueFailure({ hex, stage, reset, error, now = new Date() }) {
+  const retryCount = Number(reset?.state?.manualReviewRetryCount || 0);
+  if (!ENRICHMENT_STATE_TABLE_NAME || !hex || !stage || !Number.isFinite(retryCount) || retryCount < 1) {
+    return false;
+  }
+
+  try {
+    await dynamodb.send(new UpdateItemCommand({
+      TableName: ENRICHMENT_STATE_TABLE_NAME,
+      Key: { hex: dynamoString(hex), stage: dynamoString(stage) },
+      UpdateExpression: 'SET #state = :manualReview, #lastErrorType = :errorType, #lastErrorMessage = :errorMessage, #updatedAt = :now',
+      ConditionExpression: '#state = :pending AND #manualReviewRetryCount = :retryCount',
+      ExpressionAttributeNames: {
+        '#state': 'state',
+        '#lastErrorType': 'lastErrorType',
+        '#lastErrorMessage': 'lastErrorMessage',
+        '#updatedAt': 'updatedAt',
+        '#manualReviewRetryCount': 'manualReviewRetryCount',
+      },
+      ExpressionAttributeValues: {
+        ':manualReview': dynamoString('manual_review'),
+        ':pending': dynamoString('pending'),
+        ':retryCount': dynamoNumber(retryCount),
+        ':errorType': dynamoString('MANUAL_RETRY_ENQUEUE_FAILED'),
+        ':errorMessage': dynamoString(`Manual retry enqueue failed: ${String(error?.message || error || 'unknown error').slice(0, 420)}`),
+        ':now': dynamoString(now.toISOString()),
+      },
+    }));
+    return true;
+  } catch (restoreError) {
+    if (restoreError?.name === 'ConditionalCheckFailedException') return false;
+    throw restoreError;
+  }
+}
+
+async function reopenManualRecoveryActivity({ requestId, stage, now = new Date() }) {
+  if (!REQUEST_ACTIVITY_TABLE_NAME || !requestId) return false;
+  const at = now.toISOString();
+  const timelineEntry = JSON.stringify({
+    state: 'queued',
+    stage: 'scoutsRequests',
+    at,
+    source: 'admin-manual-review-retry',
+    recoveryStage: stage,
+  });
+
+  try {
+    await dynamodb.send(new UpdateItemCommand({
+      TableName: REQUEST_ACTIVITY_TABLE_NAME,
+      Key: { requestId: dynamoString(requestId) },
+      UpdateExpression: 'SET #state = :queued, stage = :stage, updatedAt = :now, priority = :priority, terminal = :notTerminal, timeline = list_append(if_not_exists(timeline, :empty), :timeline), publication = :nullValue, failureType = :nullValue, failureMessage = :nullValue',
+      ConditionExpression: '#state = :manualReview',
+      ExpressionAttributeNames: { '#state': 'state' },
+      ExpressionAttributeValues: {
+        ':queued': dynamoString('queued'),
+        ':stage': dynamoString('scoutsRequests'),
+        ':now': dynamoString(at),
+        ':priority': dynamoNumber(20),
+        ':notTerminal': dynamoString('false'),
+        ':empty': { L: [] },
+        ':timeline': { L: [{ S: timelineEntry }] },
+        ':nullValue': { NULL: true },
+        ':manualReview': dynamoString('manual_review'),
+      },
+    }));
+    return true;
+  } catch (activityError) {
+    if (activityError?.name === 'ConditionalCheckFailedException') return false;
+    throw activityError;
+  }
+}
+
+async function queueManualRecovery({ requestId, hex, retrySubject }) {
+  if (!SCOUTS_REQUESTS_QUEUE_URL) {
+    const error = new Error('SCOUTS_REQUESTS_QUEUE_URL is not configured');
+    error.statusCode = 503;
+    throw error;
+  }
+
+  const payload = {
+    realm: 'scoutsRequest',
+    subject: retrySubject,
+    subjectLabel: retrySubject,
+    hex,
+    requestHex: hex,
+    action: 'request',
+    requestId,
+    rootRequestId: requestId,
+    source: 'admin-manual-review-retry',
+    requestMode: 'manual',
+    approvalMode: 'auto',
+  };
+  const sendResult = await sqs.send(new SendMessageCommand({
+    QueueUrl: SCOUTS_REQUESTS_QUEUE_URL,
+    MessageBody: JSON.stringify(payload),
+  }));
+  return { payload, messageId: text(sendResult?.MessageId) || null };
+}
+
 async function handleRevisionedApproval(event, command) {
   const requiredApiKey = await getRequiredSecret('REQUIRED_API_KEY_PARAMETER');
   if (!constantTimeEquals(getApiKey(event), requiredApiKey)) {
@@ -384,18 +518,43 @@ export async function handler(event = {}) {
       return response(200, { status: 'ok', event: eventObject });
     }
 
-    if (command.subject === 'enrichment') {
-      const hex = normalizePrivateEventHex(command.body?.hex);
-      const stage = normaliseEnrichmentStage(command.body?.stage);
-      const retrySubject = enrichmentRetrySubject(stage);
-      if (!hex || !stage || !retrySubject) {
-        return response(400, { status: 'error', error: 'A valid event HEX and enrichment stage are required' });
+    if (command.subject === 'enrichment' && command.action === 'retry') {
+      const activityId = recoveryActivityId(command.body);
+      if (!activityId) {
+        return response(400, { status: 'error', error: 'A valid activity/request ID is required' });
       }
 
+      const request = await loadRecoveryActivity(activityId);
+      if (!request) {
+        return response(404, { status: 'error', error: 'Activity record not found' });
+      }
+
+      const recovery = request.recovery;
+      if (recovery?.type !== 'enrichment_retry' || recovery.available !== true) {
+        return response(409, {
+          status: 'error',
+          error: recovery?.type === 'dlq_recovery'
+            ? 'This failure must be recovered through Operations DLQ controls'
+            : 'Manual recovery is not supported for this terminal failure',
+          recovery: recovery || { type: 'unsupported', available: false, action: 'none' },
+        });
+      }
+
+      const hex = normalizePrivateEventHex(request.hex);
+      const stage = normaliseEnrichmentStage(recovery.stage);
+      const retrySubject = enrichmentRetrySubject(stage);
+      const rootRequestId = text(request.rootRequestId || request.requestId || activityId);
+      if (!hex || !stage || !retrySubject || !rootRequestId) {
+        return response(409, { status: 'error', error: 'Activity recovery metadata is no longer valid' });
+      }
+
+      // Re-read and conditionally reset the durable enrichment row. This remains
+      // the concurrency gate: stale cards and double-clicks cannot reserve a
+      // second retry once manual_review has already been reopened.
       const reset = await retryManualReviewEnrichment({
         hex,
         stage,
-        requestedBy: text(command.body?.requestedBy) || 'admin',
+        requestedBy: 'admin',
       });
       if (!reset.reset) {
         const statusCode = reset.reason === 'not_found' ? 404 : reset.reason === 'invalid_request' ? 400 : 409;
@@ -408,29 +567,50 @@ export async function handler(event = {}) {
               : reset.reason === 'state_changed'
                 ? 'Enrichment state changed before retry could be reserved'
                 : 'Enrichment retry could not be prepared',
-          retry: { reset: false, reason: reset.reason, hex, stage },
+          retry: { reset: false, reason: reset.reason, activityId },
         });
       }
 
-      const trustedInternalEvent = {
-        requestContext: { http: { method: 'POST' } },
-        headers: { 'x-api-key': requiredApiKey },
-        body: JSON.stringify({
-          realm: 'scouts',
-          subject: retrySubject,
-          action: 'request',
-          hex,
-          source: 'admin-manual-review-retry',
-        }),
-      };
-      const queued = await invokeScoutsService(trustedInternalEvent);
-      return appendResponseBodyFields(queued, {
+      let queued;
+      try {
+        // Reuse the canonical root request ID so the recovered work continues
+        // the same Activity lifecycle instead of creating a second operation.
+        queued = await queueManualRecovery({ requestId: rootRequestId, hex, retrySubject });
+      } catch (queueError) {
+        let restored = false;
+        try {
+          restored = await restoreManualReviewAfterEnqueueFailure({ hex, stage, reset, error: queueError });
+        } catch (restoreError) {
+          console.error('[ManualRecovery] Failed to restore manual-review state after enqueue failure.', restoreError?.message || restoreError);
+        }
+        const error = new Error(restored
+          ? 'Enrichment retry could not be queued; manual-review state was restored'
+          : 'Enrichment retry could not be queued; recovery state requires inspection');
+        error.statusCode = 503;
+        throw error;
+      }
+
+      try {
+        await reopenManualRecoveryActivity({ requestId: rootRequestId, stage });
+      } catch (activityError) {
+        // The queue submission is authoritative. If Activity persistence is
+        // temporarily unavailable, downstream success/failure on the same root
+        // request ID will still reconcile the operation later.
+        console.warn('[ManualRecovery] Retry queued but Activity could not be reopened immediately.', activityError?.message || activityError);
+      }
+
+      return response(200, {
+        status: 'ok',
+        message: `${stage} enrichment retry queued`,
+        requestId: rootRequestId,
+        rootRequestId,
+        queueAccepted: true,
+        queuedMessageId: queued.messageId,
         retry: {
           reset: true,
-          hex,
+          activityId,
           stage,
           retryCount: Number(reset.state?.manualReviewRetryCount || 1),
-          previousFailure: reset.previousFailure,
         },
       });
     }

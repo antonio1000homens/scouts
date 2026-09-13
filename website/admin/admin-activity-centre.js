@@ -104,14 +104,34 @@
     }
 
     function enrichmentStage(request) {
-        const stage = text(request?.stage);
+        if (request?.recovery?.type !== 'enrichment_retry' || request?.recovery?.available !== true) return '';
+        const stage = text(request?.recovery?.stage);
         return RETRYABLE_ENRICHMENT_STAGES.has(stage) ? stage : '';
     }
 
+    function openOperationsRecovery() {
+        if (!apiAuthReady || uiCommandInFlight) {
+            notifyMessage('Operations recovery controls are not ready yet.', 'warning');
+            return;
+        }
+        document.getElementById('activity-centre-drawer')?.classList.remove('open');
+        const open = document.getElementById('diagnostics-open');
+        if (!open) {
+            notifyMessage('Operations recovery controls are unavailable.', 'warning');
+            return;
+        }
+        open.click();
+        setTimeout(() => document.getElementById('diagnostics-queue-health')?.scrollIntoView({ block: 'start' }), 0);
+    }
+
     async function retryManualReview(request, button) {
-        const hex = text(request?.hex).toLowerCase();
+        const activityId = text(request?.rootRequestId || request?.requestId);
         const stage = enrichmentStage(request);
-        if (!hex || !stage || text(request?.state).toLowerCase() !== 'manual_review') return;
+        if (!activityId || !stage || text(request?.state).toLowerCase() !== 'manual_review') return;
+        if (!apiAuthReady || uiCommandInFlight) {
+            notifyMessage('Recovery controls are not ready yet.', 'warning');
+            return;
+        }
         if (!window.confirm(`Retry ${stage} enrichment for ${requestLabel(request)}?`)) return;
 
         const originalLabel = button.textContent;
@@ -122,9 +142,7 @@
                 realm: 'runtime',
                 subject: 'enrichment',
                 action: 'retry',
-                hex,
-                stage,
-                requestedBy: 'admin',
+                activityId,
             });
             const requestId = text(result?.rootRequestId || result?.requestId || result?.request?.requestId || result?.activity?.requestId);
             if (requestId) { tracked.add(requestId); saveTracked(); }
@@ -133,7 +151,7 @@
             setTimeout(() => poll(), 500);
         } catch (error) {
             notifyMessage(`Enrichment retry failed: ${error?.message || error}`, 'error', 8000);
-            button.disabled = false;
+            button.disabled = !apiAuthReady || uiCommandInFlight;
             button.textContent = originalLabel;
         }
     }
@@ -149,7 +167,7 @@
                 .filter((request, index, list) => list.findIndex((candidate) => candidate.requestId === request.requestId) === index);
             const changed = [];
             for (const request of requests) {
-                const fingerprint = `${request.state}|${request.stage}|${request.displayMessage || ''}|${request.publication || ''}|${request.updatedAt}|${request.failure?.message || ''}`;
+                const fingerprint = `${request.state}|${request.stage}|${request.displayMessage || ''}|${request.publication || ''}|${request.updatedAt}|${request.failure?.message || ''}|${request.recovery?.type || ''}`;
                 const previous = known.get(request.requestId);
                 known.set(request.requestId, fingerprint);
                 if (request.requestId && !TERMINAL.has(request.state)) { tracked.add(request.requestId); saveTracked(); }
@@ -194,10 +212,25 @@
                 const retryButton = document.createElement('button');
                 retryButton.type = 'button';
                 retryButton.className = 'btn btn-primary requires-api activity-retry-enrichment';
-                retryButton.textContent = 'Retry enrichment';
-                retryButton.title = `Reset the ${stage} manual-review state and queue a new provider attempt.`;
+                retryButton.textContent = request.recovery?.label || 'Retry enrichment';
+                retryButton.title = request.recovery?.message || `Retry the ${stage} enrichment from durable manual-review state.`;
+                retryButton.disabled = !apiAuthReady || uiCommandInFlight;
                 retryButton.addEventListener('click', () => retryManualReview(request, retryButton));
                 item.appendChild(retryButton);
+            } else if (request.recovery?.type === 'dlq_recovery') {
+                const recoveryButton = document.createElement('button');
+                recoveryButton.type = 'button';
+                recoveryButton.className = 'btn btn-secondary requires-api activity-open-dlq-recovery';
+                recoveryButton.textContent = request.recovery?.label || 'Open Operations → DLQ recovery';
+                recoveryButton.title = request.recovery?.message || 'Inspect and confirm the DLQ before redriving.';
+                recoveryButton.disabled = !apiAuthReady || uiCommandInFlight;
+                recoveryButton.addEventListener('click', openOperationsRecovery);
+                item.appendChild(recoveryButton);
+            } else if (request.recovery?.type === 'unsupported') {
+                const note = document.createElement('p');
+                note.className = 'activity-recovery-note';
+                note.textContent = request.recovery?.message || 'Manual recovery is not supported for this failure.';
+                item.appendChild(note);
             }
             if (request.hex) {
                 const button = document.createElement('button');
