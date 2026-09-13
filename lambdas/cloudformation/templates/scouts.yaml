@@ -222,7 +222,9 @@ Resources:
               - Effect: Allow
                 Action:
                   - dynamodb:UpdateItem
-                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScoutsRequestActivityTableName}
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${GeminiEnrichmentStateTableName}
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScoutsRequestActivityTableName}
               - Effect: Allow
                 Action:
                   - ssm:GetParameter
@@ -359,7 +361,7 @@ Resources:
     Type: AWS::Lambda::Url
     Properties:
       AuthType: !Ref FunctionUrlAuthType
-      TargetFunctionArn: !Ref ScoutsFunction
+      TargetFunctionArn: !GetAtt ScoutsFunction.Arn
       Cors:
         AllowOrigins: !Ref FunctionUrlCorsAllowOrigins
         AllowMethods: !Ref FunctionUrlCorsAllowMethods
