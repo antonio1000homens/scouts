@@ -66,6 +66,14 @@ test('PRs validate but never enter deployment lanes', () => {
   assert.match(workflow, /deploy-aws:[\s\S]*github\.event_name != 'pull_request'/);
 });
 
+test('workflow-only changes run validation without triggering application deployments', () => {
+  assert.doesNotMatch(
+    workflow,
+    /case "\$\{file\}" in index\.html\|deploy\.sh\|deploy-manual\.sh\|[^\n]*\.github\/workflows\/deploy-to-s3\.yml/,
+  );
+  assert.doesNotMatch(workflow, /case "\$\{file\}" in cloudflare\/\*\|\.github\/workflows\/deploy-to-s3\.yml/);
+});
+
 test('modern cutover removes the retired image-enrich deployment target', () => {
   assert.doesNotMatch(workflow, /scouts_image_enrich/);
   assert.doesNotMatch(workflow, /scouts-image-enrich/);

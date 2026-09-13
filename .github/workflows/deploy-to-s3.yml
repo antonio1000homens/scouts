@@ -118,8 +118,8 @@ jobs:
           while IFS= read -r file; do
             [ -n "${file}" ] || continue
             case "${file}" in aws/bootstrap/*) aws_bootstrap=true ;; esac
-            case "${file}" in index.html|deploy.sh|deploy-manual.sh|.github/workflows/deploy-to-s3.yml|lambdas/sqs2scouts/scouts.conf|website/*) website=true ;; esac
-            case "${file}" in cloudflare/*|.github/workflows/deploy-to-s3.yml) cloudflare=true ;; esac
+            case "${file}" in index.html|deploy.sh|deploy-manual.sh|lambdas/sqs2scouts/scouts.conf|website/*) website=true ;; esac
+            case "${file}" in cloudflare/*) cloudflare=true ;; esac
             case "${file}" in lambdas/scouts-queues/*|lambdas/cloudformation/templates/scouts-queues.yaml) scouts_queues=true ;; esac
             case "${file}" in lambdas/scouts/*|lambdas/tools/*|lambdas/cloudformation/templates/scouts.yaml) scouts_function=true ;; esac
             case "${file}" in lambdas/scouts-slack-handler/*|lambdas/tools/*|lambdas/cloudformation/templates/slack-handler.yaml) scouts_slack_handler=true ;; esac
