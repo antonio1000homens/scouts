@@ -508,6 +508,7 @@ jobs:
             ${{ vars.BW_SCOUTS_SLACK_SIGNING_SECRET }} > SLACK_SIGNING_SECRET
             ${{ vars.BW_SCOUTS_SLACK_BOT_TOKEN }} > SLACK_BOT_TOKEN
             ${{ vars.BW_GEMINI_API_KEY }} > GEMINI_API_KEY
+            ${{ vars.BW_CF_AI_WORKER }} > CLOUDFLARE_ACCOUNT_ID
 
       - name: Get Cloudflare Workers AI token
         if: needs.plan-and-test.outputs.sqs2scouts == 'true' && vars.BW_CLOUDFLARE_AI_API_TOKEN != ''
@@ -559,7 +560,6 @@ jobs:
           REQUIRE_GEMINI_API_KEY: 'true'
           IMAGE_GENERATION_PROVIDER: ${{ vars.IMAGE_GENERATION_PROVIDER || 'disabled' }}
           IMAGE_GENERATION_DAILY_REQUEST_LIMIT: ${{ vars.IMAGE_GENERATION_DAILY_REQUEST_LIMIT || '10' }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_AI_MODEL: ${{ vars.CLOUDFLARE_AI_MODEL || '@cf/black-forest-labs/flux-1-schnell' }}
           CLOUDFLARE_AI_STEPS: ${{ vars.CLOUDFLARE_AI_STEPS || '4' }}
         run: cd lambdas/sqs2scouts && bash ./deploy.sh
