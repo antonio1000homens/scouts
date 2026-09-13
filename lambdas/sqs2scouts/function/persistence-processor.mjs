@@ -3310,7 +3310,23 @@ export async function lambdaHandler(event) {
             try {
                 await saveHexEventToS3(hexValue, hexData);
                 const persisted = await loadHexEventFromS3(hexValue);
-                if (getTagline(persisted) !== result.tagline || getImageThemeValue(persisted) !== result.imageTheme) throw new Error('Tagline enrichment read-back did not contain the generated fields');
+                const persistedTagline = getTagline(persisted);
+                const persistedImageTheme = getImageThemeValue(persisted);
+                if (persistedTagline !== result.tagline || persistedImageTheme !== result.imageTheme) {
+                    console.error('[Hex] Tagline enrichment read-back mismatch', {
+                        taglineEqual: persistedTagline === result.tagline,
+                        imageThemeEqual: persistedImageTheme === result.imageTheme,
+                        generatedTaglineLength: typeof result.tagline === 'string' ? result.tagline.length : null,
+                        persistedTaglineLength: typeof persistedTagline === 'string' ? persistedTagline.length : null,
+                        generatedImageThemeLength: typeof result.imageTheme === 'string' ? result.imageTheme.length : null,
+                        persistedImageThemeLength: typeof persistedImageTheme === 'string' ? persistedImageTheme.length : null,
+                        generatedTaglineType: typeof result.tagline,
+                        persistedTaglineType: typeof persistedTagline,
+                        generatedImageThemeType: typeof result.imageTheme,
+                        persistedImageThemeType: typeof persistedImageTheme,
+                    });
+                    throw new Error('Tagline enrichment read-back did not contain the generated fields');
+                }
                 await publishHexEventToAgenda(hexValue, hexData);
             } catch (error) {
                 emitEnrichmentMetric('PersistenceRetry', 'tagline', 'publication_failed');
