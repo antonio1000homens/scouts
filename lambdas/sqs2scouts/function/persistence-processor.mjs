@@ -3312,19 +3312,11 @@ export async function lambdaHandler(event) {
                 const persisted = await loadHexEventFromS3(hexValue);
                 const persistedTagline = getTagline(persisted);
                 const persistedImageTheme = getImageThemeValue(persisted);
-                if (persistedTagline !== result.tagline || persistedImageTheme !== result.imageTheme) {
-                    console.error('[Hex] Tagline enrichment read-back mismatch', {
-                        taglineEqual: persistedTagline === result.tagline,
-                        imageThemeEqual: persistedImageTheme === result.imageTheme,
-                        generatedTaglineLength: typeof result.tagline === 'string' ? result.tagline.length : null,
-                        persistedTaglineLength: typeof persistedTagline === 'string' ? persistedTagline.length : null,
-                        generatedImageThemeLength: typeof result.imageTheme === 'string' ? result.imageTheme.length : null,
-                        persistedImageThemeLength: typeof persistedImageTheme === 'string' ? persistedImageTheme.length : null,
-                        generatedTaglineType: typeof result.tagline,
-                        persistedTaglineType: typeof persistedTagline,
-                        generatedImageThemeType: typeof result.imageTheme,
-                        persistedImageThemeType: typeof persistedImageTheme,
-                    });
+                // A tagline request may receive an image theme from Gemini,
+                // but must preserve an existing theme. Compare read-back with
+                // the effective value on the event, not the unused suggestion.
+                const expectedImageTheme = getImageThemeValue(hexData);
+                if (persistedTagline !== result.tagline || persistedImageTheme !== expectedImageTheme) {
                     throw new Error('Tagline enrichment read-back did not contain the generated fields');
                 }
                 await publishHexEventToAgenda(hexValue, hexData);
