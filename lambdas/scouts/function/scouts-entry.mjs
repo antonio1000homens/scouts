@@ -242,6 +242,26 @@ function enrichmentRetrySubject(stage) {
   return '';
 }
 
+function recoveryActivityId(body) {
+  return text(body?.activityId || body?.requestId || body?.operationId);
+}
+
+function activityMatchesId(request, activityId) {
+  return text(request?.requestId) === activityId
+    || text(request?.rootRequestId) === activityId
+    || (Array.isArray(request?.childRequestIds) && request.childRequestIds.some((id) => text(id) === activityId));
+}
+
+async function loadRecoveryActivity(activityId) {
+  let activity = await buildRuntimeActivity({ rootRequestId: activityId, limit: 50 });
+  let request = activity.requests.find((candidate) => activityMatchesId(candidate, activityId));
+  if (request) return request;
+
+  activity = await buildRuntimeActivity({ requestIds: [activityId], limit: 50 });
+  request = activity.requests.find((candidate) => activityMatchesId(candidate, activityId));
+  return request || null;
+}
+
 async function handleRevisionedApproval(event, command) {
   const requiredApiKey = await getRequiredSecret('REQUIRED_API_KEY_PARAMETER');
   if (!constantTimeEquals(getApiKey(event), requiredApiKey)) {
@@ -384,18 +404,42 @@ export async function handler(event = {}) {
       return response(200, { status: 'ok', event: eventObject });
     }
 
-    if (command.subject === 'enrichment') {
-      const hex = normalizePrivateEventHex(command.body?.hex);
-      const stage = normaliseEnrichmentStage(command.body?.stage);
-      const retrySubject = enrichmentRetrySubject(stage);
-      if (!hex || !stage || !retrySubject) {
-        return response(400, { status: 'error', error: 'A valid event HEX and enrichment stage are required' });
+    if (command.subject === 'enrichment' && command.action === 'retry') {
+      const activityId = recoveryActivityId(command.body);
+      if (!activityId) {
+        return response(400, { status: 'error', error: 'A valid activity/request ID is required' });
       }
 
+      const request = await loadRecoveryActivity(activityId);
+      if (!request) {
+        return response(404, { status: 'error', error: 'Activity record not found' });
+      }
+
+      const recovery = request.recovery;
+      if (recovery?.type !== 'enrichment_retry' || recovery.available !== true) {
+        return response(409, {
+          status: 'error',
+          error: recovery?.type === 'dlq_recovery'
+            ? 'This failure must be recovered through Operations DLQ controls'
+            : 'Manual recovery is not supported for this terminal failure',
+          recovery: recovery || { type: 'unsupported', available: false, action: 'none' },
+        });
+      }
+
+      const hex = normalizePrivateEventHex(request.hex);
+      const stage = normaliseEnrichmentStage(recovery.stage);
+      const retrySubject = enrichmentRetrySubject(stage);
+      if (!hex || !stage || !retrySubject) {
+        return response(409, { status: 'error', error: 'Activity recovery metadata is no longer valid' });
+      }
+
+      // Re-read and conditionally reset the durable enrichment row. This is the
+      // concurrency gate: stale cards and double-clicks cannot reserve a second
+      // retry once manual_review has already been reopened.
       const reset = await retryManualReviewEnrichment({
         hex,
         stage,
-        requestedBy: text(command.body?.requestedBy) || 'admin',
+        requestedBy: 'admin',
       });
       if (!reset.reset) {
         const statusCode = reset.reason === 'not_found' ? 404 : reset.reason === 'invalid_request' ? 400 : 409;
@@ -408,7 +452,7 @@ export async function handler(event = {}) {
               : reset.reason === 'state_changed'
                 ? 'Enrichment state changed before retry could be reserved'
                 : 'Enrichment retry could not be prepared',
-          retry: { reset: false, reason: reset.reason, hex, stage },
+          retry: { reset: false, reason: reset.reason, activityId },
         });
       }
 
@@ -427,10 +471,9 @@ export async function handler(event = {}) {
       return appendResponseBodyFields(queued, {
         retry: {
           reset: true,
-          hex,
+          activityId,
           stage,
           retryCount: Number(reset.state?.manualReviewRetryCount || 1),
-          previousFailure: reset.previousFailure,
         },
       });
     }
