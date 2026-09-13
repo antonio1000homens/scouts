@@ -315,7 +315,7 @@ function removeAgendaDummy(agenda, hex, uid) {
   };
 }
 
-function replaceAgendaMetadata(agenda, hex, uid, metadata, titleOverride = null) {
+function replaceAgendaMetadata(agenda, hex, uid, metadata, titleOverride = null, sectionOverride = null) {
   let matched = false;
   const events = (Array.isArray(agenda?.events) ? agenda.events : []).map((event) => {
     if (event?.metadata?.hex !== hex) return event;
@@ -324,6 +324,7 @@ function replaceAgendaMetadata(agenda, hex, uid, metadata, titleOverride = null)
     return {
       ...event,
       ...(titleOverride ? { title: titleOverride } : {}),
+      ...(sectionOverride ? { source: { ...event.source, section: sectionOverride } } : {}),
       metadata: structuredClone(metadata),
     };
   });
@@ -353,7 +354,7 @@ async function waitForEventAndAgenda(hex, predicate, label) {
   });
 }
 
-async function writeCanonicalState(hex, mutate) {
+async function writeCanonicalState(hex, mutate, stage = null) {
   const eventKey = `events/${hex}.json`;
   const next = await mutateJsonOptimistically(eventKey, (current) => {
     assertCanonicalEventDocument(current, { expectedHex: hex });
@@ -364,7 +365,7 @@ async function writeCanonicalState(hex, mutate) {
   }, 'canonical event reset');
   await mutateJsonOptimistically(
     AGENDA_KEY,
-    (agenda) => replaceAgendaMetadata(agenda, hex, uid, next.metadata, next.title),
+    (agenda) => replaceAgendaMetadata(agenda, hex, uid, next.metadata, next.title, `canary-${stage}`),
     'canonical agenda reset',
   );
   await waitForEventAndAgenda(hex, () => true, 'canonical state reset');
@@ -380,7 +381,7 @@ async function requestAndVerify({ action, stage, reset, predicate, label }) {
       // so vary the title (while retaining the original HEX namespace) to
       // keep the canary self-contained without DynamoDB write access.
       event.title = `${title} ${stage}`;
-    });
+    }, stage);
     recordPass(`${label} generation reset`, stage);
   }
   const response = await postCommand({ realm: 'scouts', action, subject: { hex } });
