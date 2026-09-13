@@ -79,6 +79,21 @@ test('worker and ingress deployment handlers match the modern cutover', () => {
   assert.doesNotMatch(workflow, /full-enrich-adapter\.lambdaHandler/);
 });
 
+test('sqs2scouts Bitwarden refresh is optional and SSM remains fail-closed', () => {
+  const providerSecrets = workflow.indexOf('- name: Get sqs2scouts provider secrets');
+  const deploy = workflow.indexOf('- name: Deploy sqs2scouts');
+  const providerBlock = workflow.slice(providerSecrets, deploy);
+
+  assert.match(providerBlock, /continue-on-error: true/);
+  assert.doesNotMatch(providerBlock, /Retry sqs2scouts provider secrets/);
+  assert.match(sqs2scoutsDeploy, /if \[ -z "\$\{SLACK_SIGNING_SECRET\}" \]; then require_existing_secure_parameter/);
+  assert.match(sqs2scoutsDeploy, /if \[ -z "\$\{SLACK_BOT_TOKEN\}" \]; then require_existing_secure_parameter/);
+  assert.match(sqs2scoutsDeploy, /if \[ -z "\$\{GEMINI_API_KEY\}" \]; then require_existing_secure_parameter/);
+  assert.match(sqs2scoutsDeploy, /Required SSM parameter is missing/);
+  assert.match(workflow, /GEMINI_API_KEY_PARAMETER/);
+  assert.match(workflow, /image-provider-adapter\.lambdaHandler/);
+});
+
 test('shared layer is content-addressed and published centrally', () => {
   assert.match(sharedLayerResolver, /shared_layer_source_hash/);
   assert.match(sharedLayerResolver, /! -name '\*\.test\.mjs'/);
