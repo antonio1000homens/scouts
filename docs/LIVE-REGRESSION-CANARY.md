@@ -23,11 +23,13 @@ The canary writes and then reads back both:
 
 The test does not treat a successful HTTP response as success. Every mutation must become visible in both S3 representations before the stage passes.
 
+Production mutations are ownership-aware and optimistic. The event object is created with an S3 create-only precondition; agenda seed/reset/cleanup writes use the current ETag and retry on concurrent updates. Cleanup removes only objects and agenda entries that this run proved it created.
+
 ## Public-page isolation
 
 Future dating alone is not a sufficient safety boundary because the public loader intentionally renders future events.
 
-The public loader therefore permanently filters events whose UID begins with the reserved prefix:
+The public loader therefore permanently filters events whose top-level UID **or source UID** begins with the reserved prefix:
 
 ```text
 scouts-regression-
@@ -44,14 +46,14 @@ The canary performs the following deployed journey:
 1. Seed a clean synthetic event in `events/<hex>.json` and `agenda.json`.
 2. Assert the event object exists in S3 and the agenda contains the same canonical metadata.
 3. Request `generateFull`; wait for tagline, image theme and image URL to persist in both files.
-4. If the image is an S3-backed generated image, assert the object itself exists.
+4. Require a `website/eventImages/` generated-image key and assert the object itself exists in S3.
 5. Clear only the tagline in both canonical representations, request `generateTagline`, and assert durable read-back.
 6. Clear only the image theme, request `generateImageTheme`, and assert durable read-back.
-7. Clear only the image URL, request `generateImage`, and assert durable read-back plus image-object existence when applicable.
+7. Clear only the image URL, request `generateImage`, and again require durable read-back plus a verifiable generated-image object.
 8. Request `approve`; assert `isApproved=true` in the event and agenda.
 9. Request `hide`; assert `isHidden=true` in the event and agenda.
 10. Request `unhide`; assert `isHidden=false` in the event and agenda and confirm the reserved regression UID remains attached.
-11. Remove the synthetic agenda entry, event object, and generated image objects owned by the canary HEX.
+11. Remove the synthetic agenda entry, event object, and generated image objects owned by the canary HEX, and verify S3 deletions rather than reporting cleanup success from an acknowledgement alone.
 
 An agenda backup is retained under `migration-backups/live-regression/<run-id>/agenda.json` for recovery/audit.
 
@@ -67,7 +69,7 @@ The workflow:
 - verifies the expected AWS account before mutation;
 - resolves the deployed `scouts` Lambda Function URL;
 - reads `/scouts/shared/required-api-key` from SSM with decryption and masks it immediately;
-- runs the canary with bounded polling and a job timeout;
+- gives the job enough wall-clock budget for every bounded stage wait plus `finally` cleanup;
 - writes a compact pass/fail table to the GitHub job summary.
 
 ## Running locally
@@ -95,6 +97,8 @@ A failure names the durable boundary that did not converge, for example:
 - `approval persistence`;
 - `hide persistence`;
 - `unhide persistence`.
+
+Cleanup failures are also failures of the canary. A run must not report PASS while a canary-owned event, agenda entry, or generated image is known to remain behind.
 
 This is specifically intended to catch cases where the request is acknowledged but S3 remains unchanged.
 
