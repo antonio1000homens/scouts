@@ -6,6 +6,7 @@ import { loadFunctionsFromSource } from './helpers/source-function-loader.mjs';
 
 const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
 const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
+const scoutsTemplate = readFileSync('lambdas/cloudformation/templates/scouts.yaml', 'utf8');
 const activityCentre = readFileSync('website/admin/admin-activity-centre.js', 'utf8');
 
 function assertSyntax(path) {
@@ -119,6 +120,13 @@ test('manual recovery publishes only the server-derived canonical request to sco
   assert.match(scoutsEntry, /requestMode: 'manual'/);
   assert.match(scoutsEntry, /source: 'admin-manual-review-retry'/);
   assert.doesNotMatch(scoutsEntry, /queueManualRecovery\(\{[^}]*command\.body/s);
+});
+
+test('Scouts role grants only the DynamoDB writes manual recovery needs', () => {
+  const updatePolicy = scoutsTemplate.match(/- Effect: Allow\n\s+Action:\n\s+- dynamodb:UpdateItem[\s\S]*?(?=\n\s+- Effect: Allow|\n\s+- !If)/)?.[0] || '';
+  assert.match(updatePolicy, /GeminiEnrichmentStateTableName/);
+  assert.match(updatePolicy, /ScoutsRequestActivityTableName/);
+  assert.doesNotMatch(updatePolicy, /GeminiUsageTableName/);
 });
 
 test('Activity retry submits only the operation ID as recovery input', () => {
