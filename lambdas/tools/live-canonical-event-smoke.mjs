@@ -373,7 +373,10 @@ async function requestAndVerify({ action, reset, predicate, label }) {
 
 const runSuffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 const title = `SCOUTS REGRESSION ${runSuffix}`;
-const uid = `${REGRESSION_UID_PREFIX}${runSuffix}`;
+// Production agenda hydration sanitizes UIDs by retaining the prefix through
+// the first numeric run. Keep the canary UID in that canonical form so the
+// ownership check remains exact during cleanup.
+const uid = `${REGRESSION_UID_PREFIX}${Date.now()}`;
 const hex = titleToHex(title);
 const eventKey = `events/${hex}.json`;
 const dummy = buildCanonicalEventDocument({

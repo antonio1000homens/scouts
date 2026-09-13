@@ -361,7 +361,7 @@ Resources:
     Type: AWS::Lambda::Url
     Properties:
       AuthType: !Ref FunctionUrlAuthType
-      TargetFunctionArn: !GetAtt ScoutsFunction.Arn
+      TargetFunctionArn: !Ref ScoutsFunction
       Cors:
         AllowOrigins: !Ref FunctionUrlCorsAllowOrigins
         AllowMethods: !Ref FunctionUrlCorsAllowMethods
