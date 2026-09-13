@@ -138,6 +138,17 @@ test('live regression canary uses conditional S3 writes and explicit ownership f
   assert.match(liveRegressionSource, /S3 object still exists after delete/);
 });
 
+test('live regression canary verifies deployment and sweeps its full generated-image namespace', () => {
+  assert.match(liveRegressionSource, /AWS_PROFILE is required for local live regression runs/);
+  assert.match(liveRegressionSource, /verifyAwsIdentity/);
+  assert.match(liveRegressionSource, /EXPECTED_AWS_ACCOUNT/);
+  assert.match(liveRegressionSource, /verifyDeployedRegressionGuard/);
+  assert.match(liveRegressionSource, /DEPLOYED_EVENT_LOADER_KEY/);
+  assert.match(liveRegressionSource, /const prefix = `website\/eventImages\/\$\{hex\}-`/);
+  assert.match(liveRegressionSource, /listOwnedImageKeys\(hex\)/);
+  assert.match(liveRegressionSource, /Canary image prefix still contains/);
+});
+
 test('live regression workflow is manual, explicit, OIDC-authenticated and reserves cleanup time', () => {
   assert.match(liveRegressionWorkflowSource, /workflow_dispatch:/);
   assert.match(liveRegressionWorkflowSource, /confirm_live_mutation:/);
@@ -145,6 +156,7 @@ test('live regression workflow is manual, explicit, OIDC-authenticated and reser
   assert.match(liveRegressionWorkflowSource, /aws-actions\/configure-aws-credentials/);
   assert.match(liveRegressionWorkflowSource, /\/scouts\/shared\/required-api-key/);
   assert.match(liveRegressionWorkflowSource, /LIVE_TEST_ACK: '1'/);
+  assert.match(liveRegressionWorkflowSource, /EXPECTED_AWS_ACCOUNT/);
   assert.match(liveRegressionWorkflowSource, /timeout-minutes:\s*60/);
   assert.doesNotMatch(liveRegressionWorkflowSource, /^\s*push:/m);
   assert.doesNotMatch(liveRegressionWorkflowSource, /^\s*pull_request:/m);
