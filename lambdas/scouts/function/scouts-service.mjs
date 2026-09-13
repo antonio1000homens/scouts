@@ -107,6 +107,21 @@ function normalizeComparableText(value) {
     .replace(/\s+/g, ' ');
 }
 
+function stableOsmEventIdentity(uid) {
+  if (uid === undefined || uid === null) return null;
+  const match = String(uid).trim().match(/(?:^|[-:])event-(\d+)(?:[-:]|$)/i);
+  return match ? `osm-event:${match[1]}` : null;
+}
+
+function buildEventMergeKey(event) {
+  if (!event) return '';
+  const stableIdentity = stableOsmEventIdentity(event.uid ?? event.originalUid ?? event.raw?.UID);
+  if (stableIdentity) return `stable:${stableIdentity}`;
+  const identity = buildEventIdentityKey(event);
+  if (identity) return `identity:${identity}`;
+  return event.uid ? `uid:${event.uid}` : '';
+}
+
 function buildEventIdentityKey(event) {
   if (!event) return '';
   const dateKey = event.sortKey || event.start?.sortKey || event.start?.raw || '';
@@ -1111,8 +1126,10 @@ function parseIcsEvents(icsText) {
     const event = { raw: {} };
 
     for (const line of lines) {
-      const [propertyPart, valuePart] = line.split(':', 2);
-      if (!propertyPart || valuePart === undefined) continue;
+      const separatorIndex = line.indexOf(':');
+      if (separatorIndex <= 0) continue;
+      const propertyPart = line.slice(0, separatorIndex);
+      const valuePart = line.slice(separatorIndex + 1);
 
       const [propertyName, ...paramParts] = propertyPart.split(';');
       const property = propertyName.toUpperCase();
@@ -1204,8 +1221,7 @@ function dedupeSectionedEvents(events, { defaultSection = SECTION_CUBS } = {}) {
     if (!applySanitizedUidToEvent(candidate)) {
       continue;
     }
-    const identityKey = buildEventIdentityKey(candidate)
-      || (candidate.uid ? `uid:${candidate.uid}` : null);
+    const identityKey = buildEventMergeKey(candidate);
     if (!identityKey) {
       continue;
     }
@@ -2222,7 +2238,26 @@ function mergeEvents(existingData, newEvents) {
         section: normaliseSection(event.section, SECTION_CUBS),
         image: ensureImageContainer(event.image),
       };
-      existingEventsMap.set(event.uid, normalisedEvent);
+      const mergeKey = buildEventMergeKey(normalisedEvent);
+      const duplicate = existingEventsMap.get(mergeKey);
+      if (duplicate) {
+        const duplicateMetadata = normalisedEvent.metadata;
+        if (duplicateMetadata && !duplicate.metadata) duplicate.metadata = duplicateMetadata;
+        if (normalisedEvent.lastModified?.raw && (!duplicate.lastModified?.raw || normalisedEvent.lastModified.raw > duplicate.lastModified.raw)) {
+          duplicate.uid = normalisedEvent.uid;
+          duplicate.originalUid = normalisedEvent.originalUid;
+          duplicate.title = normalisedEvent.title;
+          duplicate.summary = normalisedEvent.summary;
+          duplicate.location = normalisedEvent.location;
+          duplicate.start = normalisedEvent.start;
+          duplicate.end = normalisedEvent.end;
+          duplicate.sortKey = normalisedEvent.sortKey;
+          duplicate.lastModified = normalisedEvent.lastModified;
+        }
+        duplicate.section = combineSections(duplicate.section, normalisedEvent.section);
+        continue;
+      }
+      existingEventsMap.set(mergeKey, normalisedEvent);
       addEventToMediaIndex(mediaIndex, normalisedEvent);
     }
   }
@@ -2232,9 +2267,14 @@ function mergeEvents(existingData, newEvents) {
   for (const newEvent of newEvents) {
     if (!newEvent?.uid || !newEvent.start?.sortKey) continue;
     const incomingTitle = newEvent.title ?? newEvent.summary ?? null;
+    const mergeKey = buildEventMergeKey(newEvent);
 
-    if (existingEventsMap.has(newEvent.uid)) {
-      const existing = existingEventsMap.get(newEvent.uid);
+    if (existingEventsMap.has(mergeKey)) {
+      const existing = existingEventsMap.get(mergeKey);
+      const sameStableIdentity = Boolean(
+        stableOsmEventIdentity(existing.uid) &&
+        stableOsmEventIdentity(existing.uid) === stableOsmEventIdentity(newEvent.uid)
+      );
       applySanitizedUidToEvent(existing);
       const titleChanged = Boolean(
         incomingTitle
@@ -2250,11 +2290,17 @@ function mergeEvents(existingData, newEvents) {
         existing.title = incomingTitle;
         existing.summary = newEvent.summary ?? incomingTitle;
         existing.location = newEvent.location ?? null;
-        existing.tagline = getEventTagline(newEvent) ?? null;
-        existing.image = ensureImageContainer(newEvent.image);
-        existing.metadata = {};
-        delete existing.approved;
-        delete existing.hex;
+        if (!sameStableIdentity) {
+          existing.tagline = getEventTagline(newEvent) ?? null;
+          existing.image = ensureImageContainer(newEvent.image);
+          existing.metadata = {};
+          delete existing.approved;
+          delete existing.hex;
+        }
+      }
+      if (sameStableIdentity) {
+        existing.uid = newEvent.uid;
+        if (newEvent.originalUid) existing.originalUid = newEvent.originalUid;
       }
       existing.section = combineSections(existing.section, newEvent.section);
       if (!existing.title && incomingTitle) {
@@ -2292,7 +2338,7 @@ function mergeEvents(existingData, newEvents) {
       }
       addEventToMediaIndex(mediaIndex, existing);
       mergedEvents.push(existing);
-      existingEventsMap.delete(newEvent.uid);
+      existingEventsMap.delete(mergeKey);
       continue;
     }
 
@@ -4679,4 +4725,8 @@ export {
   buildQueuedRuntimeRequestEntry,
   prepareEventForStorage,
   pruneQueuedRuntimeRequests,
+  parseIcsEvents,
+  stableOsmEventIdentity,
+  dedupeSectionedEvents,
+  mergeEvents,
 };
