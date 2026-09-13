@@ -1,0 +1,53 @@
+name: Recover sqs2scouts deployment
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/recover-sqs2scouts-deploy.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: eu-west-2
+  EXPECTED_AWS_ACCOUNT: "553490163883"
+  AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+  CLOUDFORMATION_ROLE_ARN: ${{ vars.CLOUDFORMATION_ROLE_ARN }}
+  CODE_BUCKET: ${{ vars.CODE_BUCKET || 'aws2022-lambda-code-eu-west-2-553490163883' }}
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  deploy-sqs2scouts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: github-actions-scouts-sqs2scouts-recovery
+
+      - name: Deploy sqs2scouts using existing SSM secrets
+        env:
+          REQUIRE_GEMINI_API_KEY: 'false'
+        run: cd lambdas/sqs2scouts && bash ./deploy.sh
+
+      - name: Verify deployed sqs2scouts worker
+        run: |
+          set -euo pipefail
+          HANDLER="$(aws lambda get-function-configuration --function-name sqs2scouts --region "${AWS_REGION}" --query 'Handler' --output text)"
+          [ "$HANDLER" = "image-provider-adapter.lambdaHandler" ] || { echo "Unexpected sqs2scouts handler: $HANDLER"; exit 1; }
+          GEMINI_PARAMETER="$(aws lambda get-function-configuration --function-name sqs2scouts --region "${AWS_REGION}" --query 'Environment.Variables.GEMINI_API_KEY_PARAMETER' --output text)"
+          [ -n "$GEMINI_PARAMETER" ] && [ "$GEMINI_PARAMETER" != "None" ] && [ "$GEMINI_PARAMETER" != "null" ] || { echo "GEMINI_API_KEY_PARAMETER is not configured"; exit 1; }
+          LAST_MODIFIED="$(aws lambda get-function-configuration --function-name sqs2scouts --region "${AWS_REGION}" --query 'LastModified' --output text)"
+          echo "Verified sqs2scouts handler=$HANDLER lastModified=$LAST_MODIFIED"
