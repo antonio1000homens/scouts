@@ -95,6 +95,32 @@ test('durable manual-review reset remains the concurrency gate and prevents dupl
   assert.match(scoutsEntry, /action: 'request'/);
 });
 
+test('failed manual-recovery enqueue conditionally restores manual_review instead of stranding pending state', () => {
+  assert.match(scoutsEntry, /async function restoreManualReviewAfterEnqueueFailure/);
+  assert.match(scoutsEntry, /#state = :pending AND #manualReviewRetryCount = :retryCount/);
+  assert.match(scoutsEntry, /MANUAL_RETRY_ENQUEUE_FAILED/);
+  assert.match(scoutsEntry, /restoreManualReviewAfterEnqueueFailure\(\{ hex, stage, reset, error: queueError \}\)/);
+  assert.match(scoutsEntry, /manual-review state was restored/);
+});
+
+test('manual recovery reuses and reopens the original operation ID', () => {
+  assert.match(scoutsEntry, /const rootRequestId = text\(request\.rootRequestId \|\| request\.requestId \|\| activityId\)/);
+  assert.match(scoutsEntry, /queueManualRecovery\(\{ requestId: rootRequestId, hex, retrySubject \}\)/);
+  assert.match(scoutsEntry, /requestId,\n\s+rootRequestId: requestId,/);
+  assert.match(scoutsEntry, /async function reopenManualRecoveryActivity/);
+  assert.match(scoutsEntry, /ConditionExpression: '#state = :manualReview'/);
+  assert.match(scoutsEntry, /requestId: rootRequestId,\n\s+rootRequestId,/);
+});
+
+test('manual recovery publishes only the server-derived canonical request to scoutsRequests', () => {
+  assert.match(scoutsEntry, /new SendMessageCommand/);
+  assert.match(scoutsEntry, /QueueUrl: SCOUTS_REQUESTS_QUEUE_URL/);
+  assert.match(scoutsEntry, /realm: 'scoutsRequest'/);
+  assert.match(scoutsEntry, /requestMode: 'manual'/);
+  assert.match(scoutsEntry, /source: 'admin-manual-review-retry'/);
+  assert.doesNotMatch(scoutsEntry, /queueManualRecovery\(\{[^}]*command\.body/s);
+});
+
 test('Activity retry submits only the operation ID as recovery input', () => {
   const retryStart = activityCentre.indexOf('async function retryManualReview');
   const retryEnd = activityCentre.indexOf('\n    async function poll()', retryStart);
@@ -109,6 +135,13 @@ test('Activity retry submits only the operation ID as recovery input', () => {
   assert.doesNotMatch(retrySource, /\n\s+hex,/);
   assert.doesNotMatch(retrySource, /\n\s+stage,/);
   assert.match(retrySource, /Enrichment retry failed/);
+});
+
+test('dynamically rendered recovery controls initialize from admin auth and in-flight state', () => {
+  assert.match(activityCentre, /retryButton\.disabled = !apiAuthReady \|\| uiCommandInFlight/);
+  assert.match(activityCentre, /recoveryButton\.disabled = !apiAuthReady \|\| uiCommandInFlight/);
+  assert.match(activityCentre, /if \(!apiAuthReady \|\| uiCommandInFlight\)[\s\S]*Recovery controls are not ready yet/);
+  assert.match(activityCentre, /if \(!apiAuthReady \|\| uiCommandInFlight\)[\s\S]*Operations recovery controls are not ready yet/);
 });
 
 test('Activity cards expose enrichment, guarded DLQ navigation, and unsupported recovery states', () => {
