@@ -24,6 +24,9 @@ const BACKUP_PREFIX = process.env.BACKUP_PREFIX || 'migration-backups/live-regre
 const FUTURE_DATE_RAW = process.env.LIVE_TEST_DATE_RAW || '20990101T120000';
 const FUTURE_DATE_ISO = process.env.LIVE_TEST_DATE_ISO || '2099-01-01T12:00:00Z';
 const REGRESSION_UID_PREFIX = 'scouts-regression-';
+const EXPECTED_AWS_ACCOUNT = process.env.EXPECTED_AWS_ACCOUNT || '553490163883';
+const DEPLOYED_EVENT_LOADER_KEY = process.env.DEPLOYED_EVENT_LOADER_KEY || 'website/scripts/event-loader.js';
+const IS_GITHUB_ACTIONS = process.env.GITHUB_ACTIONS === 'true';
 const CONDITIONAL_WRITE_ATTEMPTS = 8;
 
 if (!ACK) {
@@ -31,6 +34,9 @@ if (!ACK) {
 }
 if (!API_URL) throw new Error('SCOUTS_API_URL is required');
 if (!API_KEY) throw new Error('SCOUTS_API_KEY is required');
+if (!IS_GITHUB_ACTIONS && !AWS_PROFILE) {
+  throw new Error('AWS_PROFILE is required for local live regression runs; do not use ambient/default production credentials.');
+}
 if (!(Date.parse(FUTURE_DATE_ISO) > Date.now())) {
   throw new Error(`Regression event must be future-dated: ${FUTURE_DATE_ISO}`);
 }
@@ -77,6 +83,24 @@ function aws(args) {
     maxBuffer: 20 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+}
+
+function verifyAwsIdentity() {
+  const actualAccount = aws(['sts', 'get-caller-identity', '--query', 'Account', '--output', 'text']).trim();
+  if (actualAccount !== EXPECTED_AWS_ACCOUNT) {
+    throw new Error(`Unexpected AWS account ${actualAccount}; expected ${EXPECTED_AWS_ACCOUNT}`);
+  }
+  recordPass('AWS account verified', actualAccount);
+}
+
+function verifyDeployedRegressionGuard() {
+  const source = aws(['s3', 'cp', `s3://${BUCKET}/${DEPLOYED_EVENT_LOADER_KEY}`, '-']);
+  const hasReservedPrefix = source.includes("const REGRESSION_UID_PREFIX = 'scouts-regression-'");
+  const checksBothUidLocations = /const candidates\s*=\s*\[event\?\.uid,\s*event\?\.source\?\.uid\]/.test(source);
+  if (!hasReservedPrefix || !checksBothUidLocations) {
+    throw new Error(`Deployed ${DEPLOYED_EVENT_LOADER_KEY} does not contain the required regression UID guard; refusing live canary mutation/unhide.`);
+  }
+  recordPass('Deployed public exclusion verified', DEPLOYED_EVENT_LOADER_KEY);
 }
 
 function errorText(error) {
@@ -189,6 +213,19 @@ function objectExists(key) {
 function deleteObjectChecked(key) {
   aws(['s3api', 'delete-object', '--bucket', BUCKET, '--key', key, '--output', 'json']);
   if (objectExists(key)) throw new Error(`S3 object still exists after delete: ${key}`);
+}
+
+function listOwnedImageKeys(hex) {
+  const prefix = `website/eventImages/${hex}-`;
+  const response = JSON.parse(aws([
+    's3api', 'list-objects-v2',
+    '--bucket', BUCKET,
+    '--prefix', prefix,
+    '--output', 'json',
+  ]));
+  return (response?.Contents || [])
+    .map((entry) => entry?.Key)
+    .filter((key) => typeof key === 'string' && key.startsWith(prefix));
 }
 
 function sleep(ms) {
@@ -384,6 +421,8 @@ console.log(`Bucket: s3://${BUCKET}`);
 
 try {
   assertCanonicalEventDocument(dummy, { expectedHex: hex });
+  verifyAwsIdentity();
+  verifyDeployedRegressionGuard();
 
   const agendaBefore = readJson(AGENDA_KEY);
   if (eventFromAgenda(agendaBefore, hex)) {
@@ -525,20 +564,24 @@ try {
     console.log('Skipping event cleanup because this run never created the event object');
   }
 
-  for (const key of generatedImageKeys) {
-    if (!key.includes(hex)) {
-      markCleanupFailure('Cleanup generated image', new Error(`Refusing to delete image outside canary HEX namespace: ${key}`));
-      continue;
-    }
+  if (eventCreatedByRun) {
     try {
-      deleteObjectChecked(key);
-      recordPass('Cleanup generated image', key);
-    } catch (error) {
-      if (isNotFoundError(error)) {
-        recordPass('Cleanup generated image', `${key} already absent`);
-      } else {
-        markCleanupFailure('Cleanup generated image', error);
+      const ownedKeys = listOwnedImageKeys(hex);
+      for (const key of ownedKeys) {
+        try {
+          deleteObjectChecked(key);
+          recordPass('Cleanup generated image', key);
+        } catch (error) {
+          markCleanupFailure('Cleanup generated image', error);
+        }
       }
+      const leftovers = listOwnedImageKeys(hex);
+      if (leftovers.length > 0) {
+        throw new Error(`Canary image prefix still contains ${leftovers.length} object(s): ${leftovers.join(', ')}`);
+      }
+      if (ownedKeys.length === 0) recordPass('Cleanup generated images', 'no owned image objects remain');
+    } catch (error) {
+      markCleanupFailure('Cleanup generated image prefix', error);
     }
   }
 
