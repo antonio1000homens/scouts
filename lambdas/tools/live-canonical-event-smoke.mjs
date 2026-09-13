@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import {
   assertCanonicalEventDocument,
   buildCanonicalEventDocument,
-  buildCanonicalMetadata,
   titleToHex,
 } from '../shared-layer/nodejs/canonical-event.mjs';
 
@@ -20,13 +19,53 @@ const ACK = process.env.LIVE_TEST_ACK === '1';
 const TIMEOUT_MS = Number(process.env.LIVE_TEST_TIMEOUT_MS || 240000);
 const POLL_MS = Number(process.env.LIVE_TEST_POLL_MS || 3000);
 const AGENDA_KEY = process.env.AGENDA_KEY || 'agenda.json';
-const BACKUP_PREFIX = process.env.BACKUP_PREFIX || 'migration-backups/live-smoke/';
+const BACKUP_PREFIX = process.env.BACKUP_PREFIX || 'migration-backups/live-regression/';
+const FUTURE_DATE_RAW = process.env.LIVE_TEST_DATE_RAW || '20990101T120000';
+const FUTURE_DATE_ISO = process.env.LIVE_TEST_DATE_ISO || '2099-01-01T12:00:00Z';
+const REGRESSION_UID_PREFIX = 'scouts-regression-';
 
 if (!ACK) {
   throw new Error('Refusing live mutation. Set LIVE_TEST_ACK=1 after reviewing this script.');
 }
 if (!API_URL) throw new Error('SCOUTS_API_URL is required');
 if (!API_KEY) throw new Error('SCOUTS_API_KEY is required');
+if (!(Date.parse(FUTURE_DATE_ISO) > Date.now())) {
+  throw new Error(`Regression event must be future-dated: ${FUTURE_DATE_ISO}`);
+}
+
+const results = [];
+
+function recordPass(label, detail = '') {
+  results.push({ label, status: 'PASS', detail });
+  console.log(`✓ ${label}${detail ? ` — ${detail}` : ''}`);
+}
+
+function recordFailure(label, error) {
+  const detail = error?.message || String(error);
+  results.push({ label, status: 'FAIL', detail });
+  console.error(`✗ ${label} — ${detail}`);
+}
+
+function writeStepSummary({ title, hex, uid, failure = null }) {
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+  if (!summaryPath) return;
+  const rows = results.map(({ label, status, detail }) => `| ${label} | ${status} | ${String(detail || '').replace(/\|/g, '\\|')} |`).join('\n');
+  const failureText = failure ? `\n**Failure:** ${String(failure?.message || failure).replace(/\n/g, ' ')}\n` : '';
+  appendFileSync(summaryPath, [
+    '## Scouts live regression canary',
+    '',
+    `- Event: \`${title}\``,
+    `- UID: \`${uid}\``,
+    `- HEX: \`${hex}\``,
+    `- Bucket: \`s3://${BUCKET}\``,
+    '',
+    '| Check | Result | Detail |',
+    '| --- | --- | --- |',
+    rows,
+    failureText,
+    '',
+  ].join('\n'));
+}
 
 function aws(args) {
   const cliArgs = [...args, '--region', REGION];
@@ -39,7 +78,7 @@ function aws(args) {
 }
 
 function withTempFile(key, fn) {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'scouts-live-smoke-'));
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'scouts-live-regression-'));
   const filePath = path.join(dir, path.basename(key) || 'object.json');
   try {
     return fn(filePath);
@@ -71,6 +110,10 @@ function deleteObject(key) {
   } catch (error) {
     console.warn(`Cleanup warning for ${key}: ${error?.message || error}`);
   }
+}
+
+function headObject(key) {
+  return JSON.parse(aws(['s3api', 'head-object', '--bucket', BUCKET, '--key', key, '--output', 'json']));
 }
 
 function sleep(ms) {
@@ -112,23 +155,25 @@ function eventFromAgenda(agenda, hex) {
   return (agenda?.events || []).find((event) => event?.metadata?.hex === hex) || null;
 }
 
-function upsertAgendaDummy(agenda, dummy) {
-  const events = Array.isArray(agenda?.events) ? agenda.events.filter((event) => event?.metadata?.hex !== dummy.metadata.hex) : [];
+function upsertAgendaDummy(agenda, dummy, uid) {
+  const events = Array.isArray(agenda?.events)
+    ? agenda.events.filter((event) => event?.metadata?.hex !== dummy.metadata.hex)
+    : [];
   events.push({
-    uid: `live-smoke-${dummy.metadata.hex}`,
+    uid,
     title: dummy.title,
-    description: 'Temporary canonical schema smoke-test event',
+    description: 'Temporary deployed regression canary event',
     start: {
-      raw: '20990101T120000',
-      iso: '2099-01-01T12:00:00',
-      epochMillis: Date.parse('2099-01-01T12:00:00Z'),
+      raw: FUTURE_DATE_RAW,
+      iso: FUTURE_DATE_ISO.replace(/Z$/, ''),
+      epochMillis: Date.parse(FUTURE_DATE_ISO),
     },
     source: {
-      uid: `live-smoke-${dummy.metadata.hex}`,
+      uid,
       title: dummy.title,
       section: 'cubs',
-      icsType: 'cubs',
-      dtstart: '20990101T120000',
+      icsType: 'regression',
+      dtstart: FUTURE_DATE_RAW,
     },
     metadata: structuredClone(dummy.metadata),
   });
@@ -143,23 +188,64 @@ function removeAgendaDummy(agenda, hex) {
   };
 }
 
-async function waitForCanonicalEvent(hex, predicate, label) {
+function replaceAgendaMetadata(agenda, hex, metadata) {
+  let matched = false;
+  const events = (Array.isArray(agenda?.events) ? agenda.events : []).map((event) => {
+    if (event?.metadata?.hex !== hex) return event;
+    matched = true;
+    return { ...event, metadata: structuredClone(metadata) };
+  });
+  if (!matched) throw new Error(`Cannot update agenda metadata; HEX ${hex} is missing`);
+  return { ...agenda, generatedAt: new Date().toISOString(), events };
+}
+
+function imageKeyFromEvent(event) {
+  const imageUrl = event?.metadata?.image?.url;
+  if (typeof imageUrl !== 'string') return null;
+  const trimmed = imageUrl.trim().replace(/^\//, '');
+  return trimmed.startsWith('website/eventImages/') ? trimmed : null;
+}
+
+function metadataMatches(event, agendaEvent) {
+  return JSON.stringify(event?.metadata ?? null) === JSON.stringify(agendaEvent?.metadata ?? null);
+}
+
+async function waitForEventAndAgenda(hex, predicate, label) {
   return poll(label, () => {
     const event = readJson(`events/${hex}.json`);
     assertCanonicalEventDocument(event, { expectedHex: hex });
-    return predicate(event) ? event : null;
+    const agendaEvent = eventFromAgenda(readJson(AGENDA_KEY), hex);
+    if (!agendaEvent) return null;
+    if (!metadataMatches(event, agendaEvent)) return null;
+    return predicate(event, agendaEvent) ? { event, agendaEvent } : null;
   });
 }
 
-async function waitForAgendaStatus(hex, field, expected) {
-  return poll(`agenda ${field}=${expected}`, () => {
-    const event = eventFromAgenda(readJson(AGENDA_KEY), hex);
-    return event?.metadata?.status?.[field] === expected ? event : null;
-  });
+async function writeCanonicalState(hex, mutate) {
+  const eventKey = `events/${hex}.json`;
+  const current = readJson(eventKey);
+  assertCanonicalEventDocument(current, { expectedHex: hex });
+  const next = structuredClone(current);
+  mutate(next);
+  assertCanonicalEventDocument(next, { expectedHex: hex });
+  writeJson(eventKey, next);
+  const agenda = readJson(AGENDA_KEY);
+  writeJson(AGENDA_KEY, replaceAgendaMetadata(agenda, hex, next.metadata));
+  await waitForEventAndAgenda(hex, () => true, 'canonical state reset');
+  return next;
+}
+
+async function requestAndVerify({ action, reset, predicate, label }) {
+  if (reset) await writeCanonicalState(hex, reset);
+  const response = await postCommand({ realm: 'scouts', action, subject: { hex } });
+  const { event } = await waitForEventAndAgenda(hex, predicate, `${label} persistence`);
+  recordPass(label, response?.requestId ? `request ${response.requestId}` : 'persisted to event + agenda');
+  return event;
 }
 
 const runSuffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-const title = `SCOUTS CANONICAL SMOKE ${runSuffix}`;
+const title = `SCOUTS REGRESSION ${runSuffix}`;
+const uid = `${REGRESSION_UID_PREFIX}${runSuffix}`;
 const hex = titleToHex(title);
 const eventKey = `events/${hex}.json`;
 const dummy = buildCanonicalEventDocument({
@@ -173,11 +259,13 @@ const dummy = buildCanonicalEventDocument({
   requests: [],
 });
 
-let generatedImageKey = null;
+const generatedImageKeys = new Set();
 let agendaBackupKey = null;
 let eventBackupKey = null;
+let failure = null;
 
-console.log(`Live canonical smoke test: ${title}`);
+console.log(`Live regression canary: ${title}`);
+console.log(`UID: ${uid}`);
 console.log(`HEX: ${hex}`);
 console.log(`Bucket: s3://${BUCKET}`);
 
@@ -196,69 +284,120 @@ try {
   }
 
   writeJson(eventKey, dummy);
-  writeJson(AGENDA_KEY, upsertAgendaDummy(agendaBefore, dummy));
-  console.log('✓ Seeded clean canonical event and temporary agenda entry');
-
-  const generate = await postCommand({
-    realm: 'scouts',
-    action: 'generateFull',
-    subject: { hex },
-  });
-  console.log(`✓ Full enrichment queued${generate?.requestId ? ` (${generate.requestId})` : ''}`);
-
-  const enriched = await waitForCanonicalEvent(
+  writeJson(AGENDA_KEY, upsertAgendaDummy(agendaBefore, dummy, uid));
+  headObject(eventKey);
+  const seeded = await waitForEventAndAgenda(
     hex,
-    (event) => Boolean(event.metadata.tagline && event.metadata.image.theme && event.metadata.image.url),
-    'full enrichment',
+    (event, agendaEvent) => (
+      agendaEvent.uid === uid
+      && Date.parse(agendaEvent.start?.iso || FUTURE_DATE_ISO) > Date.now()
+      && event.metadata.tagline === null
+      && event.metadata.image.theme === null
+      && event.metadata.image.url === null
+      && event.metadata.status.isHidden === false
+      && event.metadata.status.isApproved === false
+    ),
+    'synthetic event seed',
   );
-  assertCanonicalEventDocument(enriched, { expectedHex: hex, requireComplete: true });
-  generatedImageKey = enriched.metadata.image.url.startsWith('website/eventImages/')
-    ? enriched.metadata.image.url.replace(/^\//, '')
-    : null;
-  if (generatedImageKey) {
-    aws(['s3api', 'head-object', '--bucket', BUCKET, '--key', generatedImageKey, '--output', 'json']);
+  if (!seeded.agendaEvent.uid.startsWith(REGRESSION_UID_PREFIX)) {
+    throw new Error('Synthetic event does not use the reserved regression UID prefix');
   }
-  console.log(`✓ Enriched: tagline/theme/image URL are populated${generatedImageKey ? ' and image exists in S3' : ''}`);
+  recordPass('Synthetic event seeded', `${eventKey} + ${AGENDA_KEY}`);
 
-  await postCommand({ realm: 'scouts', action: 'approve', subject: { hex, isApproved: true } });
-  await waitForCanonicalEvent(hex, (event) => event.metadata.status.isApproved === true, 'approval persistence');
-  await waitForAgendaStatus(hex, 'isApproved', true);
-  console.log('✓ Approval persisted to HEX and agenda');
+  let current = await requestAndVerify({
+    action: 'generateFull',
+    label: 'Full enrichment',
+    predicate: (event) => Boolean(event.metadata.tagline && event.metadata.image.theme && event.metadata.image.url),
+  });
+  assertCanonicalEventDocument(current, { expectedHex: hex, requireComplete: true });
+  let imageKey = imageKeyFromEvent(current);
+  if (imageKey) {
+    headObject(imageKey);
+    generatedImageKeys.add(imageKey);
+    recordPass('Generated image exists in S3', imageKey);
+  }
 
-  await postCommand({ realm: 'scouts', action: 'hide', subject: { hex, isHidden: true } });
-  await waitForCanonicalEvent(hex, (event) => event.metadata.status.isHidden === true, 'hide persistence');
-  await waitForAgendaStatus(hex, 'isHidden', true);
-  console.log('✓ Hide persisted to HEX and agenda');
+  current = await requestAndVerify({
+    action: 'generateTagline',
+    label: 'Tagline enrichment',
+    reset: (event) => { event.metadata.tagline = null; },
+    predicate: (event) => Boolean(event.metadata.tagline),
+  });
 
-  await postCommand({ realm: 'scouts', action: 'unhide', subject: { hex, isHidden: false } });
-  await waitForCanonicalEvent(hex, (event) => event.metadata.status.isHidden === false, 'unhide persistence');
-  await waitForAgendaStatus(hex, 'isHidden', false);
-  console.log('✓ Unhide persisted to HEX and agenda');
+  current = await requestAndVerify({
+    action: 'generateImageTheme',
+    label: 'Image theme enrichment',
+    reset: (event) => { event.metadata.image.theme = null; },
+    predicate: (event) => Boolean(event.metadata.image.theme),
+  });
 
-  console.log('✓ Live canonical lifecycle passed');
+  current = await requestAndVerify({
+    action: 'generateImage',
+    label: 'Image enrichment',
+    reset: (event) => { event.metadata.image.url = null; },
+    predicate: (event) => Boolean(event.metadata.image.url),
+  });
+  imageKey = imageKeyFromEvent(current);
+  if (imageKey) {
+    headObject(imageKey);
+    generatedImageKeys.add(imageKey);
+  }
+
+  const approve = await postCommand({ realm: 'scouts', action: 'approve', subject: { hex, isApproved: true } });
+  await waitForEventAndAgenda(hex, (event) => event.metadata.status.isApproved === true, 'approval persistence');
+  recordPass('Approval persisted', approve?.requestId ? `request ${approve.requestId}` : 'event + agenda');
+
+  const hide = await postCommand({ realm: 'scouts', action: 'hide', subject: { hex, isHidden: true } });
+  await waitForEventAndAgenda(hex, (event) => event.metadata.status.isHidden === true, 'hide persistence');
+  recordPass('Hide persisted', hide?.requestId ? `request ${hide.requestId}` : 'event + agenda');
+
+  const unhide = await postCommand({ realm: 'scouts', action: 'unhide', subject: { hex, isHidden: false } });
+  const unhidden = await waitForEventAndAgenda(
+    hex,
+    (event, agendaEvent) => event.metadata.status.isHidden === false && agendaEvent.uid === uid,
+    'unhide persistence',
+  );
+  if (!unhidden.agendaEvent.uid.startsWith(REGRESSION_UID_PREFIX)) {
+    throw new Error('Unhidden canary lost the reserved regression UID prefix');
+  }
+  recordPass('Unhide persisted', unhide?.requestId ? `request ${unhide.requestId}` : 'event + agenda');
+  recordPass('Public exclusion identity retained', uid);
+
+  recordPass('Live canonical lifecycle', 'all regression stages passed');
+} catch (error) {
+  failure = error;
+  recordFailure('Live canonical lifecycle', error);
 } finally {
   try {
     const currentAgenda = readJson(AGENDA_KEY);
     writeJson(AGENDA_KEY, removeAgendaDummy(currentAgenda, hex));
-    console.log('✓ Removed temporary agenda entry');
+    recordPass('Cleanup agenda entry', AGENDA_KEY);
   } catch (error) {
-    console.error(`Failed to remove temporary agenda entry. Recovery backup: ${agendaBackupKey || '<none>'}`);
-    console.error(error?.message || error);
+    recordFailure('Cleanup agenda entry', error);
+    if (!failure) failure = error;
+    console.error(`Agenda recovery backup: ${agendaBackupKey || '<none>'}`);
   }
 
   if (eventBackupKey) {
     console.error(`Event key unexpectedly existed; original backup retained at s3://${BUCKET}/${eventBackupKey}`);
   } else {
     deleteObject(eventKey);
-    console.log('✓ Removed temporary event object');
+    recordPass('Cleanup event object', eventKey);
   }
 
-  if (generatedImageKey && generatedImageKey.includes(hex)) {
-    deleteObject(generatedImageKey);
-    console.log('✓ Removed generated test image');
+  for (const key of generatedImageKeys) {
+    if (!key.includes(hex)) {
+      console.warn(`Retaining generated image outside canary HEX namespace: s3://${BUCKET}/${key}`);
+      continue;
+    }
+    deleteObject(key);
+    recordPass('Cleanup generated image', key);
   }
 
   if (agendaBackupKey) {
     console.log(`Agenda recovery backup retained at s3://${BUCKET}/${agendaBackupKey}`);
   }
+  writeStepSummary({ title, hex, uid, failure });
 }
+
+if (failure) throw failure;
