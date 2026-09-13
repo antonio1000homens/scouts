@@ -372,9 +372,10 @@ async function requestAndVerify({ action, stage, reset, predicate, label }) {
     await writeCanonicalState(hex, (event) => {
       reset(event);
       // The production reservation logic resets a succeeded stage when its
-      // generation ID changes. Change only a generation-ID input here so the
-      // canary remains self-contained and does not need DynamoDB write access.
-      event.description = `Live regression canary ${stage} ${runSuffix}`;
+      // generation ID changes. The canonical schema has no description field,
+      // so vary the title (while retaining the original HEX namespace) to
+      // keep the canary self-contained without DynamoDB write access.
+      event.title = `${title} ${stage}`;
     });
     recordPass(`${label} generation reset`, stage);
   }
