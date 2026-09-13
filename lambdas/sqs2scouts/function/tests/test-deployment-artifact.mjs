@@ -4,11 +4,17 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import '../../test-persist-patch-merge.mjs';
+import {
+  buildVisibilityPersistGuard,
+  extractVisibilityPersistMutation,
+  verifyVisibilityPersistReadback,
+} from '../full-enrich-helpers.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../../..');
 const functionDir = path.join(repoRoot, 'lambdas/sqs2scouts/function');
 const deployScript = readFileSync(path.join(repoRoot, 'lambdas/sqs2scouts/deploy.sh'), 'utf8');
+const persistenceProcessor = readFileSync(path.join(functionDir, 'persistence-processor.mjs'), 'utf8');
+const HOLIDAY_HEX = '686f6c69646179';
 
 function packagedFiles() {
   const block = deployScript.match(/zip -jq sqs2scouts-lambda\.zip \\\n([\s\S]*?)\n\)/)?.[1];
@@ -20,6 +26,46 @@ function relativeImports(zipPath, entry) {
   const source = execFileSync('unzip', ['-p', zipPath, entry], { encoding: 'utf8' });
   return [...source.matchAll(/from\s+['"](\.\/?[^'"]+)['"]/g)]
     .map((match) => path.posix.normalize(path.posix.join(path.posix.dirname(entry), match[1])));
+}
+
+function visibilityMessage(isHidden = true) {
+  return {
+    realm: 'persist',
+    operation: 'persist',
+    subject: HOLIDAY_HEX,
+    action: JSON.stringify({
+      metadata: {
+        hex: HOLIDAY_HEX,
+        status: { isHidden },
+      },
+    }),
+  };
+}
+
+function canonicalEvent(isHidden = false) {
+  return {
+    title: 'HOLIDAY',
+    metadata: {
+      hex: HOLIDAY_HEX,
+      tagline: 'School holiday',
+      image: { theme: 'calendar', url: '/website/eventImages/holiday.webp' },
+      status: { isHidden, isApproved: false },
+    },
+  };
+}
+
+function agendaEvent(uid, isHidden = false) {
+  return {
+    uid,
+    summary: 'HOLIDAY',
+    dtstart: '20260923T183000',
+    metadata: {
+      hex: HOLIDAY_HEX,
+      tagline: 'School holiday',
+      image: { theme: 'calendar', url: '/website/eventImages/holiday.webp' },
+      status: { isHidden, isApproved: false },
+    },
+  };
 }
 
 test('sqs2scouts deployment ZIP contains every handler-relative import', () => {
@@ -47,4 +93,78 @@ test('sqs2scouts deployment ZIP contains every handler-relative import', () => {
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test('persistence worker parses and merges the JSON action patch before writing', () => {
+  assert.match(persistenceProcessor, /function parsePersistPatch\(action\)/);
+  assert.match(persistenceProcessor, /const persistPatch = parsePersistPatch\(action\)/);
+  assert.match(persistenceProcessor, /mergePersistPatch\(baseEvent, persistPatch\)/);
+  assert.match(persistenceProcessor, /await saveHexEventToS3\(hexValue, event\);\s*await publishHexEventToAgenda\(hexValue, event\);/);
+});
+
+test('visibility guard understands the live subject-HEX plus encoded-action contract', () => {
+  assert.deepEqual(extractVisibilityPersistMutation(visibilityMessage(true)), {
+    hex: HOLIDAY_HEX,
+    isHidden: true,
+  });
+});
+
+test('visibility guard refuses five HOLIDAY occurrences before persistence', () => {
+  const agendaSnapshot = {
+    value: {
+      events: [1, 2, 3, 4, 5].map((index) => agendaEvent(`osm-event-${index}`)),
+    },
+    eTag: '"agenda-before"',
+  };
+  const eventSnapshot = { value: canonicalEvent(false), eTag: '"0fe52dbc"' };
+
+  assert.throws(
+    () => buildVisibilityPersistGuard(visibilityMessage(true), agendaSnapshot, eventSnapshot),
+    (error) => error?.code === 'AMBIGUOUS_EVENT_OCCURRENCE' && error?.matched === 5,
+  );
+});
+
+test('visibility read-back rejects an unchanged canonical value', () => {
+  const beforeAgenda = { value: { events: [agendaEvent('osm-event-1', false)] } };
+  const beforeEvent = { value: canonicalEvent(false), eTag: '"0fe52dbc"' };
+  const guard = buildVisibilityPersistGuard(visibilityMessage(true), beforeAgenda, beforeEvent);
+
+  assert.throws(
+    () => verifyVisibilityPersistReadback(
+      guard,
+      { value: { events: [agendaEvent('osm-event-1', false)] }, eTag: '"agenda-after"' },
+      { value: canonicalEvent(false), eTag: '"0fe52dbc"' },
+    ),
+    (error) => error?.code === 'PERSISTENCE_READ_BACK_MISMATCH',
+  );
+});
+
+test('visibility read-back rejects an unchanged S3 ETag when the boolean changed', () => {
+  const beforeAgenda = { value: { events: [agendaEvent('osm-event-1', false)] } };
+  const beforeEvent = { value: canonicalEvent(false), eTag: '"0fe52dbc"' };
+  const guard = buildVisibilityPersistGuard(visibilityMessage(true), beforeAgenda, beforeEvent);
+
+  assert.throws(
+    () => verifyVisibilityPersistReadback(
+      guard,
+      { value: { events: [agendaEvent('osm-event-1', true)] }, eTag: '"agenda-after"' },
+      { value: canonicalEvent(true), eTag: '"0fe52dbc"' },
+    ),
+    (error) => error?.code === 'PERSISTENCE_ETAG_UNCHANGED',
+  );
+});
+
+test('visibility read-back succeeds only when canonical S3 and agenda both match', () => {
+  const beforeAgenda = { value: { events: [agendaEvent('osm-event-1', false)] } };
+  const beforeEvent = { value: canonicalEvent(false), eTag: '"0fe52dbc"' };
+  const guard = buildVisibilityPersistGuard(visibilityMessage(true), beforeAgenda, beforeEvent);
+
+  assert.deepEqual(
+    verifyVisibilityPersistReadback(
+      guard,
+      { value: { events: [agendaEvent('osm-event-1', true)] }, eTag: '"agenda-after"' },
+      { value: canonicalEvent(true), eTag: '"new-etag"' },
+    ),
+    { hex: HOLIDAY_HEX, isHidden: true, eTag: '"new-etag"' },
+  );
 });
