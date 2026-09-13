@@ -376,7 +376,7 @@ const title = `SCOUTS REGRESSION ${runSuffix}`;
 // Production agenda hydration sanitizes UIDs by retaining the prefix through
 // the first numeric run. Keep the canary UID in that canonical form so the
 // ownership check remains exact during cleanup.
-const uid = `${REGRESSION_UID_PREFIX}${Date.now()}`;
+const uid = `${REGRESSION_UID_PREFIX}${runSuffix.split('-', 1)[0]}`;
 const hex = titleToHex(title);
 const eventKey = `events/${hex}.json`;
 const dummy = buildCanonicalEventDocument({
