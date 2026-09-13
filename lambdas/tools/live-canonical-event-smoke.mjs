@@ -315,13 +315,17 @@ function removeAgendaDummy(agenda, hex, uid) {
   };
 }
 
-function replaceAgendaMetadata(agenda, hex, uid, metadata) {
+function replaceAgendaMetadata(agenda, hex, uid, metadata, titleOverride = null) {
   let matched = false;
   const events = (Array.isArray(agenda?.events) ? agenda.events : []).map((event) => {
     if (event?.metadata?.hex !== hex) return event;
     assertOwnedAgendaEvent(event, hex, uid);
     matched = true;
-    return { ...event, metadata: structuredClone(metadata) };
+    return {
+      ...event,
+      ...(titleOverride ? { title: titleOverride } : {}),
+      metadata: structuredClone(metadata),
+    };
   });
   if (!matched) throw new Error(`Cannot update agenda metadata; HEX ${hex} is missing`);
   return { ...agenda, generatedAt: new Date().toISOString(), events };
@@ -360,7 +364,7 @@ async function writeCanonicalState(hex, mutate) {
   }, 'canonical event reset');
   await mutateJsonOptimistically(
     AGENDA_KEY,
-    (agenda) => replaceAgendaMetadata(agenda, hex, uid, next.metadata),
+    (agenda) => replaceAgendaMetadata(agenda, hex, uid, next.metadata, next.title),
     'canonical agenda reset',
   );
   await waitForEventAndAgenda(hex, () => true, 'canonical state reset');
@@ -566,7 +570,8 @@ try {
   if (eventCreatedByRun) {
     try {
       const currentEvent = readJson(eventKey);
-      if (currentEvent?.title !== title || currentEvent?.metadata?.hex !== hex) {
+      const ownedTitle = currentEvent?.title === title || currentEvent?.title?.startsWith(`${title} `);
+      if (!ownedTitle || currentEvent?.metadata?.hex !== hex) {
         throw new Error(`Refusing to delete event object no longer owned by this canary: ${eventKey}`);
       }
       deleteObjectChecked(eventKey);
