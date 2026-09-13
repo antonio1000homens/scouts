@@ -295,7 +295,11 @@ function addAgendaDummy(agenda, dummy, uid) {
 
 function assertOwnedAgendaEvent(event, hex, uid) {
   if (!event) return;
-  if (event?.metadata?.hex !== hex || event?.uid !== uid || event?.source?.uid !== uid) {
+  if (
+    event?.metadata?.hex !== hex
+    || event?.uid !== uid
+    || (event?.source?.uid !== undefined && event?.source?.uid !== uid)
+  ) {
     throw new Error(`Refusing to mutate non-canary agenda entry for HEX ${hex}`);
   }
 }
