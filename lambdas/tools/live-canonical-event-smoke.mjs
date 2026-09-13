@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'child_process';
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { isDeepStrictEqual } from 'node:util';
 import os from 'os';
 import path from 'path';
 import {
@@ -23,6 +24,7 @@ const BACKUP_PREFIX = process.env.BACKUP_PREFIX || 'migration-backups/live-regre
 const FUTURE_DATE_RAW = process.env.LIVE_TEST_DATE_RAW || '20990101T120000';
 const FUTURE_DATE_ISO = process.env.LIVE_TEST_DATE_ISO || '2099-01-01T12:00:00Z';
 const REGRESSION_UID_PREFIX = 'scouts-regression-';
+const CONDITIONAL_WRITE_ATTEMPTS = 8;
 
 if (!ACK) {
   throw new Error('Refusing live mutation. Set LIVE_TEST_ACK=1 after reviewing this script.');
@@ -77,6 +79,20 @@ function aws(args) {
   });
 }
 
+function errorText(error) {
+  return [error?.message, error?.stderr?.toString?.(), error?.stdout?.toString?.()]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function isNotFoundError(error) {
+  return /404|NoSuchKey|Not Found|not exist|does not exist/i.test(errorText(error));
+}
+
+function isPreconditionFailure(error) {
+  return /412|PreconditionFailed|precondition failed/i.test(errorText(error));
+}
+
 function withTempFile(key, fn) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'scouts-live-regression-'));
   const filePath = path.join(dir, path.basename(key) || 'object.json');
@@ -91,11 +107,63 @@ function readJson(key) {
   return JSON.parse(aws(['s3', 'cp', `s3://${BUCKET}/${key}`, '-']));
 }
 
-function writeJson(key, value) {
+function readJsonVersioned(key) {
+  return withTempFile(key, (filePath) => {
+    const response = JSON.parse(aws([
+      's3api', 'get-object',
+      '--bucket', BUCKET,
+      '--key', key,
+      '--output', 'json',
+      filePath,
+    ]));
+    return {
+      value: JSON.parse(readFileSync(filePath, 'utf8')),
+      eTag: response?.ETag,
+    };
+  });
+}
+
+function putJson(key, value, condition = {}) {
   return withTempFile(key, (filePath) => {
     writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-    aws(['s3', 'cp', filePath, `s3://${BUCKET}/${key}`, '--content-type', 'application/json', '--cache-control', 'no-store']);
+    const args = [
+      's3api', 'put-object',
+      '--bucket', BUCKET,
+      '--key', key,
+      '--body', filePath,
+      '--content-type', 'application/json',
+      '--cache-control', 'no-store',
+      '--output', 'json',
+    ];
+    if (condition.ifMatch) args.push('--if-match', condition.ifMatch);
+    if (condition.ifNoneMatch) args.push('--if-none-match', condition.ifNoneMatch);
+    return JSON.parse(aws(args));
   });
+}
+
+function writeJsonIfAbsent(key, value) {
+  return putJson(key, value, { ifNoneMatch: '*' });
+}
+
+function writeJsonIfMatch(key, value, eTag) {
+  if (!eTag) throw new Error(`Cannot conditionally write ${key} without an ETag`);
+  return putJson(key, value, { ifMatch: eTag });
+}
+
+async function mutateJsonOptimistically(key, mutate, label) {
+  for (let attempt = 1; attempt <= CONDITIONAL_WRITE_ATTEMPTS; attempt += 1) {
+    const current = readJsonVersioned(key);
+    const next = mutate(structuredClone(current.value));
+    if (isDeepStrictEqual(next, current.value)) return next;
+    try {
+      writeJsonIfMatch(key, next, current.eTag);
+      return next;
+    } catch (error) {
+      if (!isPreconditionFailure(error) || attempt === CONDITIONAL_WRITE_ATTEMPTS) throw error;
+      await sleep(Math.min(1000, attempt * 150));
+    }
+  }
+  throw new Error(`${label} could not complete after ${CONDITIONAL_WRITE_ATTEMPTS} conditional-write attempts`);
 }
 
 function backupObject(key, suffix) {
@@ -104,16 +172,23 @@ function backupObject(key, suffix) {
   return backupKey;
 }
 
-function deleteObject(key) {
+function headObject(key) {
+  return JSON.parse(aws(['s3api', 'head-object', '--bucket', BUCKET, '--key', key, '--output', 'json']));
+}
+
+function objectExists(key) {
   try {
-    aws(['s3', 'rm', `s3://${BUCKET}/${key}`]);
+    headObject(key);
+    return true;
   } catch (error) {
-    console.warn(`Cleanup warning for ${key}: ${error?.message || error}`);
+    if (isNotFoundError(error)) return false;
+    throw error;
   }
 }
 
-function headObject(key) {
-  return JSON.parse(aws(['s3api', 'head-object', '--bucket', BUCKET, '--key', key, '--output', 'json']));
+function deleteObjectChecked(key) {
+  aws(['s3api', 'delete-object', '--bucket', BUCKET, '--key', key, '--output', 'json']);
+  if (objectExists(key)) throw new Error(`S3 object still exists after delete: ${key}`);
 }
 
 function sleep(ms) {
@@ -155,10 +230,11 @@ function eventFromAgenda(agenda, hex) {
   return (agenda?.events || []).find((event) => event?.metadata?.hex === hex) || null;
 }
 
-function upsertAgendaDummy(agenda, dummy, uid) {
-  const events = Array.isArray(agenda?.events)
-    ? agenda.events.filter((event) => event?.metadata?.hex !== dummy.metadata.hex)
-    : [];
+function addAgendaDummy(agenda, dummy, uid) {
+  if (eventFromAgenda(agenda, dummy.metadata.hex)) {
+    throw new Error(`Refusing to replace existing agenda entry for HEX ${dummy.metadata.hex}`);
+  }
+  const events = Array.isArray(agenda?.events) ? [...agenda.events] : [];
   events.push({
     uid,
     title: dummy.title,
@@ -180,18 +256,29 @@ function upsertAgendaDummy(agenda, dummy, uid) {
   return { ...agenda, generatedAt: new Date().toISOString(), events };
 }
 
-function removeAgendaDummy(agenda, hex) {
+function assertOwnedAgendaEvent(event, hex, uid) {
+  if (!event) return;
+  if (event?.metadata?.hex !== hex || event?.uid !== uid || event?.source?.uid !== uid) {
+    throw new Error(`Refusing to mutate non-canary agenda entry for HEX ${hex}`);
+  }
+}
+
+function removeAgendaDummy(agenda, hex, uid) {
+  const matching = eventFromAgenda(agenda, hex);
+  if (!matching) return agenda;
+  assertOwnedAgendaEvent(matching, hex, uid);
   return {
     ...agenda,
     generatedAt: new Date().toISOString(),
-    events: (Array.isArray(agenda?.events) ? agenda.events : []).filter((event) => event?.metadata?.hex !== hex),
+    events: (Array.isArray(agenda?.events) ? agenda.events : []).filter((event) => event !== matching),
   };
 }
 
-function replaceAgendaMetadata(agenda, hex, metadata) {
+function replaceAgendaMetadata(agenda, hex, uid, metadata) {
   let matched = false;
   const events = (Array.isArray(agenda?.events) ? agenda.events : []).map((event) => {
     if (event?.metadata?.hex !== hex) return event;
+    assertOwnedAgendaEvent(event, hex, uid);
     matched = true;
     return { ...event, metadata: structuredClone(metadata) };
   });
@@ -207,7 +294,7 @@ function imageKeyFromEvent(event) {
 }
 
 function metadataMatches(event, agendaEvent) {
-  return JSON.stringify(event?.metadata ?? null) === JSON.stringify(agendaEvent?.metadata ?? null);
+  return isDeepStrictEqual(event?.metadata ?? null, agendaEvent?.metadata ?? null);
 }
 
 async function waitForEventAndAgenda(hex, predicate, label) {
@@ -223,14 +310,18 @@ async function waitForEventAndAgenda(hex, predicate, label) {
 
 async function writeCanonicalState(hex, mutate) {
   const eventKey = `events/${hex}.json`;
-  const current = readJson(eventKey);
-  assertCanonicalEventDocument(current, { expectedHex: hex });
-  const next = structuredClone(current);
-  mutate(next);
-  assertCanonicalEventDocument(next, { expectedHex: hex });
-  writeJson(eventKey, next);
-  const agenda = readJson(AGENDA_KEY);
-  writeJson(AGENDA_KEY, replaceAgendaMetadata(agenda, hex, next.metadata));
+  const next = await mutateJsonOptimistically(eventKey, (current) => {
+    assertCanonicalEventDocument(current, { expectedHex: hex });
+    const updated = structuredClone(current);
+    mutate(updated);
+    assertCanonicalEventDocument(updated, { expectedHex: hex });
+    return updated;
+  }, 'canonical event reset');
+  await mutateJsonOptimistically(
+    AGENDA_KEY,
+    (agenda) => replaceAgendaMetadata(agenda, hex, uid, next.metadata),
+    'canonical agenda reset',
+  );
   await waitForEventAndAgenda(hex, () => true, 'canonical state reset');
   return next;
 }
@@ -262,7 +353,29 @@ const dummy = buildCanonicalEventDocument({
 const generatedImageKeys = new Set();
 let agendaBackupKey = null;
 let eventBackupKey = null;
+let eventExistedBeforeRun = false;
+let eventCreatedByRun = false;
+let agendaEntryCreatedByRun = false;
 let failure = null;
+
+function requireGeneratedImage(event, label) {
+  const key = imageKeyFromEvent(event);
+  if (!key) {
+    throw new Error(`${label} did not persist an S3-backed website/eventImages/ key`);
+  }
+  if (!key.includes(hex)) {
+    throw new Error(`${label} generated image is outside the canary HEX namespace: ${key}`);
+  }
+  headObject(key);
+  generatedImageKeys.add(key);
+  recordPass(`${label} image exists in S3`, key);
+  return key;
+}
+
+function markCleanupFailure(label, error) {
+  recordFailure(label, error);
+  if (!failure) failure = error;
+}
 
 console.log(`Live regression canary: ${title}`);
 console.log(`UID: ${uid}`);
@@ -273,23 +386,36 @@ try {
   assertCanonicalEventDocument(dummy, { expectedHex: hex });
 
   const agendaBefore = readJson(AGENDA_KEY);
+  if (eventFromAgenda(agendaBefore, hex)) {
+    throw new Error(`Refusing to overwrite existing agenda entry for HEX ${hex}`);
+  }
   agendaBackupKey = backupObject(AGENDA_KEY, runSuffix);
+
   try {
     readJson(eventKey);
+    eventExistedBeforeRun = true;
     eventBackupKey = backupObject(eventKey, runSuffix);
     throw new Error(`Refusing to overwrite existing ${eventKey}`);
   } catch (error) {
-    const message = error?.stderr?.toString?.() || error?.message || '';
-    if (!/404|NoSuchKey|not exist|does not exist/i.test(message)) throw error;
+    if (eventExistedBeforeRun) throw error;
+    if (!isNotFoundError(error)) throw error;
   }
 
-  writeJson(eventKey, dummy);
-  writeJson(AGENDA_KEY, upsertAgendaDummy(agendaBefore, dummy, uid));
+  writeJsonIfAbsent(eventKey, dummy);
+  eventCreatedByRun = true;
+  await mutateJsonOptimistically(
+    AGENDA_KEY,
+    (agenda) => addAgendaDummy(agenda, dummy, uid),
+    'synthetic agenda seed',
+  );
+  agendaEntryCreatedByRun = true;
+
   headObject(eventKey);
   const seeded = await waitForEventAndAgenda(
     hex,
     (event, agendaEvent) => (
       agendaEvent.uid === uid
+      && agendaEvent.source?.uid === uid
       && Date.parse(agendaEvent.start?.iso || FUTURE_DATE_ISO) > Date.now()
       && event.metadata.tagline === null
       && event.metadata.image.theme === null
@@ -310,12 +436,7 @@ try {
     predicate: (event) => Boolean(event.metadata.tagline && event.metadata.image.theme && event.metadata.image.url),
   });
   assertCanonicalEventDocument(current, { expectedHex: hex, requireComplete: true });
-  let imageKey = imageKeyFromEvent(current);
-  if (imageKey) {
-    headObject(imageKey);
-    generatedImageKeys.add(imageKey);
-    recordPass('Generated image exists in S3', imageKey);
-  }
+  requireGeneratedImage(current, 'Full enrichment');
 
   current = await requestAndVerify({
     action: 'generateTagline',
@@ -337,11 +458,7 @@ try {
     reset: (event) => { event.metadata.image.url = null; },
     predicate: (event) => Boolean(event.metadata.image.url),
   });
-  imageKey = imageKeyFromEvent(current);
-  if (imageKey) {
-    headObject(imageKey);
-    generatedImageKeys.add(imageKey);
-  }
+  requireGeneratedImage(current, 'Image enrichment');
 
   const approve = await postCommand({ realm: 'scouts', action: 'approve', subject: { hex, isApproved: true } });
   await waitForEventAndAgenda(hex, (event) => event.metadata.status.isApproved === true, 'approval persistence');
@@ -368,30 +485,61 @@ try {
   failure = error;
   recordFailure('Live canonical lifecycle', error);
 } finally {
-  try {
-    const currentAgenda = readJson(AGENDA_KEY);
-    writeJson(AGENDA_KEY, removeAgendaDummy(currentAgenda, hex));
-    recordPass('Cleanup agenda entry', AGENDA_KEY);
-  } catch (error) {
-    recordFailure('Cleanup agenda entry', error);
-    if (!failure) failure = error;
-    console.error(`Agenda recovery backup: ${agendaBackupKey || '<none>'}`);
+  if (agendaEntryCreatedByRun) {
+    try {
+      await mutateJsonOptimistically(
+        AGENDA_KEY,
+        (agenda) => removeAgendaDummy(agenda, hex, uid),
+        'agenda cleanup',
+      );
+      if (eventFromAgenda(readJson(AGENDA_KEY), hex)) {
+        throw new Error(`Canary agenda entry still exists after cleanup for HEX ${hex}`);
+      }
+      recordPass('Cleanup agenda entry', AGENDA_KEY);
+    } catch (error) {
+      markCleanupFailure('Cleanup agenda entry', error);
+      console.error(`Agenda recovery backup: ${agendaBackupKey || '<none>'}`);
+    }
+  } else {
+    console.log('Skipping agenda cleanup because this run never created the agenda entry');
   }
 
-  if (eventBackupKey) {
-    console.error(`Event key unexpectedly existed; original backup retained at s3://${BUCKET}/${eventBackupKey}`);
+  if (eventCreatedByRun) {
+    try {
+      const currentEvent = readJson(eventKey);
+      if (currentEvent?.title !== title || currentEvent?.metadata?.hex !== hex) {
+        throw new Error(`Refusing to delete event object no longer owned by this canary: ${eventKey}`);
+      }
+      deleteObjectChecked(eventKey);
+      recordPass('Cleanup event object', eventKey);
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        recordPass('Cleanup event object', `${eventKey} already absent`);
+      } else {
+        markCleanupFailure('Cleanup event object', error);
+      }
+    }
+  } else if (eventExistedBeforeRun) {
+    console.error(`Pre-existing event retained${eventBackupKey ? `; backup at s3://${BUCKET}/${eventBackupKey}` : ''}`);
   } else {
-    deleteObject(eventKey);
-    recordPass('Cleanup event object', eventKey);
+    console.log('Skipping event cleanup because this run never created the event object');
   }
 
   for (const key of generatedImageKeys) {
     if (!key.includes(hex)) {
-      console.warn(`Retaining generated image outside canary HEX namespace: s3://${BUCKET}/${key}`);
+      markCleanupFailure('Cleanup generated image', new Error(`Refusing to delete image outside canary HEX namespace: ${key}`));
       continue;
     }
-    deleteObject(key);
-    recordPass('Cleanup generated image', key);
+    try {
+      deleteObjectChecked(key);
+      recordPass('Cleanup generated image', key);
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        recordPass('Cleanup generated image', `${key} already absent`);
+      } else {
+        markCleanupFailure('Cleanup generated image', error);
+      }
+    }
   }
 
   if (agendaBackupKey) {
