@@ -4,6 +4,197 @@ export function text(value) {
   return result || null;
 }
 
+function canonicalHex(value) {
+  const normalized = text(value)?.toLowerCase() ?? null;
+  return normalized && /^[0-9a-f]+$/i.test(normalized) ? normalized : null;
+}
+
+function nullableBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (value === 1 || value === '1' || String(value).trim().toLowerCase() === 'true') return true;
+  if (value === 0 || value === '0' || String(value).trim().toLowerCase() === 'false') return false;
+  return null;
+}
+
+function parseObject(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string') return null;
+  const candidate = value.trim();
+  if (!candidate.startsWith('{')) return null;
+  try {
+    const parsed = JSON.parse(candidate);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function firstBoolean(...values) {
+  for (const value of values) {
+    const normalized = nullableBoolean(value);
+    if (normalized !== null) return normalized;
+  }
+  return null;
+}
+
+function firstHex(...values) {
+  for (const value of values) {
+    const normalized = canonicalHex(value);
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+function codedError(code, message, details = {}) {
+  const error = new Error(message);
+  error.code = code;
+  Object.assign(error, details);
+  return error;
+}
+
+function snapshotValue(snapshot) {
+  return snapshot?.value ?? snapshot;
+}
+
+function eventHex(event) {
+  return canonicalHex(event?.metadata?.hex);
+}
+
+function eventHidden(event) {
+  return event?.metadata?.status?.isHidden;
+}
+
+export function extractVisibilityPersistMutation(message) {
+  if (text(message?.realm) !== 'persist') return null;
+
+  const actionPatch = parseObject(message?.action);
+  const subjectPatch = parseObject(message?.subject);
+  const patch = actionPatch || subjectPatch || {};
+  const subject = message?.subject && typeof message.subject === 'object' && !Array.isArray(message.subject)
+    ? message.subject
+    : {};
+
+  const isHidden = firstBoolean(
+    actionPatch?.metadata?.status?.isHidden,
+    actionPatch?.status?.isHidden,
+    actionPatch?.isHidden,
+    actionPatch?.hidden,
+    subject?.metadata?.status?.isHidden,
+    subject?.status?.isHidden,
+    subject?.isHidden,
+    subject?.hidden,
+  );
+  if (isHidden === null) return null;
+
+  const hex = firstHex(
+    typeof message?.subject === 'string' ? message.subject : null,
+    message?.hex,
+    message?.requestHex,
+    actionPatch?.metadata?.hex,
+    actionPatch?.hex,
+    subject?.metadata?.hex,
+    subject?.hex,
+    patch?.requestHex,
+  );
+  if (!hex) {
+    throw codedError('VISIBILITY_PERSIST_HEX_MISSING', 'Visibility persistence request is missing a canonical HEX identifier');
+  }
+
+  return { hex, isHidden };
+}
+
+export function buildVisibilityPersistGuard(message, agendaSnapshot, eventSnapshot) {
+  const mutation = extractVisibilityPersistMutation(message);
+  if (!mutation) return null;
+
+  const agenda = snapshotValue(agendaSnapshot);
+  const canonical = snapshotValue(eventSnapshot);
+  const beforeETag = text(eventSnapshot?.eTag);
+  const matching = Array.isArray(agenda?.events)
+    ? agenda.events.filter((event) => eventHex(event) === mutation.hex)
+    : [];
+
+  if (matching.length === 0) {
+    throw codedError(
+      'VISIBILITY_TARGET_NOT_FOUND',
+      `Visibility persistence target ${mutation.hex} is not present in agenda.json`,
+      { hex: mutation.hex, matched: 0 },
+    );
+  }
+
+  // Visibility belongs to an occurrence, not to title-derived shared metadata.
+  // Until the ingress contract carries an occurrence selector end-to-end, a
+  // duplicate HEX must fail before the canonical event file can be mutated.
+  if (matching.length > 1) {
+    throw codedError(
+      'AMBIGUOUS_EVENT_OCCURRENCE',
+      `Visibility persistence for HEX ${mutation.hex} matches ${matching.length} agenda occurrences; refusing a shared-title mutation`,
+      { hex: mutation.hex, matched: matching.length },
+    );
+  }
+
+  if (!canonical || typeof canonical !== 'object') {
+    throw codedError(
+      'VISIBILITY_CANONICAL_EVENT_NOT_FOUND',
+      `Canonical event events/${mutation.hex}.json was not found`,
+      { hex: mutation.hex },
+    );
+  }
+
+  return {
+    ...mutation,
+    beforeETag,
+    beforeHidden: eventHidden(canonical),
+  };
+}
+
+export function verifyVisibilityPersistReadback(guard, agendaSnapshot, eventSnapshot) {
+  if (!guard) return null;
+
+  const agenda = snapshotValue(agendaSnapshot);
+  const canonical = snapshotValue(eventSnapshot);
+  const afterETag = text(eventSnapshot?.eTag);
+  const actualHidden = eventHidden(canonical);
+
+  if (actualHidden !== guard.isHidden) {
+    throw codedError(
+      'PERSISTENCE_READ_BACK_MISMATCH',
+      `Canonical event ${guard.hex} read-back has metadata.status.isHidden=${String(actualHidden)}; expected ${guard.isHidden}`,
+      { hex: guard.hex, expected: guard.isHidden, actual: actualHidden },
+    );
+  }
+
+  if (guard.beforeHidden !== guard.isHidden && guard.beforeETag && afterETag === guard.beforeETag) {
+    throw codedError(
+      'PERSISTENCE_ETAG_UNCHANGED',
+      `Canonical event ${guard.hex} changed visibility but its S3 ETag did not change`,
+      { hex: guard.hex, eTag: afterETag },
+    );
+  }
+
+  const matching = Array.isArray(agenda?.events)
+    ? agenda.events.filter((event) => eventHex(event) === guard.hex)
+    : [];
+  if (matching.length !== 1) {
+    throw codedError(
+      'PERSISTENCE_AGENDA_IDENTITY_MISMATCH',
+      `Visibility persistence read-back for ${guard.hex} resolved ${matching.length} agenda occurrences; expected exactly one`,
+      { hex: guard.hex, matched: matching.length },
+    );
+  }
+
+  const agendaHidden = eventHidden(matching[0]);
+  if (agendaHidden !== guard.isHidden) {
+    throw codedError(
+      'PERSISTENCE_AGENDA_READ_BACK_MISMATCH',
+      `Agenda occurrence ${guard.hex} read-back has metadata.status.isHidden=${String(agendaHidden)}; expected ${guard.isHidden}`,
+      { hex: guard.hex, expected: guard.isHidden, actual: agendaHidden },
+    );
+  }
+
+  return { hex: guard.hex, isHidden: guard.isHidden, eTag: afterETag };
+}
+
 export function normaliseStage(value) {
   const stage = text(value);
   if (stage === 'imageUrl') return 'image';
