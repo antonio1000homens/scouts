@@ -349,14 +349,6 @@ async function waitForEventAndAgenda(hex, predicate, label) {
     assertCanonicalEventDocument(event, { expectedHex: hex });
     const agendaEvent = eventFromAgenda(readJson(AGENDA_KEY), hex);
     if (!agendaEvent) return null;
-    if (label === 'approval persistence' && (event?.metadata?.status?.isApproved || agendaEvent?.metadata?.status?.isApproved)) {
-      console.log(JSON.stringify({
-        approvalPoll: true,
-        eventApproved: event?.metadata?.status?.isApproved === true,
-        agendaApproved: agendaEvent?.metadata?.status?.isApproved === true,
-        metadataMatch: metadataMatches(event, agendaEvent),
-      }));
-    }
     if (!metadataMatches(event, agendaEvent)) return null;
     return predicate(event, agendaEvent) ? { event, agendaEvent } : null;
   });
