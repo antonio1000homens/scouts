@@ -110,6 +110,10 @@
     }
 
     function openOperationsRecovery() {
+        if (!apiAuthReady || uiCommandInFlight) {
+            notifyMessage('Operations recovery controls are not ready yet.', 'warning');
+            return;
+        }
         document.getElementById('activity-centre-drawer')?.classList.remove('open');
         const open = document.getElementById('diagnostics-open');
         if (!open) {
@@ -124,6 +128,10 @@
         const activityId = text(request?.rootRequestId || request?.requestId);
         const stage = enrichmentStage(request);
         if (!activityId || !stage || text(request?.state).toLowerCase() !== 'manual_review') return;
+        if (!apiAuthReady || uiCommandInFlight) {
+            notifyMessage('Recovery controls are not ready yet.', 'warning');
+            return;
+        }
         if (!window.confirm(`Retry ${stage} enrichment for ${requestLabel(request)}?`)) return;
 
         const originalLabel = button.textContent;
@@ -143,7 +151,7 @@
             setTimeout(() => poll(), 500);
         } catch (error) {
             notifyMessage(`Enrichment retry failed: ${error?.message || error}`, 'error', 8000);
-            button.disabled = false;
+            button.disabled = !apiAuthReady || uiCommandInFlight;
             button.textContent = originalLabel;
         }
     }
@@ -206,6 +214,7 @@
                 retryButton.className = 'btn btn-primary requires-api activity-retry-enrichment';
                 retryButton.textContent = request.recovery?.label || 'Retry enrichment';
                 retryButton.title = request.recovery?.message || `Retry the ${stage} enrichment from durable manual-review state.`;
+                retryButton.disabled = !apiAuthReady || uiCommandInFlight;
                 retryButton.addEventListener('click', () => retryManualReview(request, retryButton));
                 item.appendChild(retryButton);
             } else if (request.recovery?.type === 'dlq_recovery') {
@@ -214,6 +223,7 @@
                 recoveryButton.className = 'btn btn-secondary requires-api activity-open-dlq-recovery';
                 recoveryButton.textContent = request.recovery?.label || 'Open Operations → DLQ recovery';
                 recoveryButton.title = request.recovery?.message || 'Inspect and confirm the DLQ before redriving.';
+                recoveryButton.disabled = !apiAuthReady || uiCommandInFlight;
                 recoveryButton.addEventListener('click', openOperationsRecovery);
                 item.appendChild(recoveryButton);
             } else if (request.recovery?.type === 'unsupported') {
