@@ -21,6 +21,7 @@ const CONTACT_PAGE_URL = new URL('contact/index.html', LOCAL_WEBSITE_BASE_URL).h
 const CANONICAL_METADATA_KEYS = ['hex', 'tagline', 'image', 'status'];
 const CANONICAL_IMAGE_KEYS = ['theme', 'url'];
 const CANONICAL_STATUS_KEYS = ['isHidden', 'isApproved'];
+const REGRESSION_UID_PREFIX = 'scouts-regression-';
 const LEGACY_ENRICHMENT_TOP_LEVEL_KEYS = [
     'hex', 'hexId', 'tagline', 'AI', 'ai', 'image', 'imageTheme', 'imageUrl', 'sourceImg',
     'status', 'approved', 'isApproved', 'isHidden', 'hidden', 'hiddenAt'
@@ -207,6 +208,14 @@ function getTagline(event) {
 
 function isHiddenEvent(event) {
     return getStatusData(event)?.isHidden === true;
+}
+
+function isRegressionEvent(event) {
+    const candidates = [event?.uid, event?.source?.uid];
+    return candidates.some((uid) => (
+        typeof uid === 'string'
+        && uid.trim().toLowerCase().startsWith(REGRESSION_UID_PREFIX)
+    ));
 }
 
 function normaliseEventRecord(event) {
@@ -417,6 +426,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
                 .filter(Boolean);
             const events = canonicalEvents.filter(event => {
+                if (isRegressionEvent(event)) {
+                    console.log('Filtering out regression event:', event.uid ?? event.title);
+                    return false;
+                }
                 if (isHiddenEvent(event)) {
                     console.log('Filtering out hidden event:', event.uid ?? event.title);
                     return false;

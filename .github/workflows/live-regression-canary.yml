@@ -1,0 +1,87 @@
+name: Scouts Live Regression Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_live_mutation:
+        description: Confirm that the canary may create and remove a synthetic event in the production Scouts bucket
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: scouts-live-regression-canary
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-2
+  EXPECTED_AWS_ACCOUNT: "553490163883"
+  WEBSITE_BUCKET: scouts-2ndtolworth-prod-553490163883
+  AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+
+jobs:
+  live-regression:
+    if: ${{ inputs.confirm_live_mutation == true }}
+    runs-on: ubuntu-latest
+    # A single stage may poll for up to four minutes. The full canary has twelve
+    # bounded convergence waits, so reserve enough wall-clock time for every
+    # stage to fail independently and still allow the script's finally cleanup.
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: github-actions-scouts-live-regression
+
+      - name: Verify AWS account
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_account="$(aws sts get-caller-identity --query Account --output text)"
+          if [ "${actual_account}" != "${EXPECTED_AWS_ACCOUNT}" ]; then
+            echo "Unexpected AWS account ${actual_account}; expected ${EXPECTED_AWS_ACCOUNT}" >&2
+            exit 1
+          fi
+
+      - name: Resolve deployed Scouts API credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_url="$(aws lambda get-function-url-config \
+            --function-name scouts \
+            --region "${AWS_REGION}" \
+            --query FunctionUrl \
+            --output text)"
+          api_key="$(aws ssm get-parameter \
+            --name /scouts/shared/required-api-key \
+            --with-decryption \
+            --region "${AWS_REGION}" \
+            --query Parameter.Value \
+            --output text)"
+
+          test -n "${api_url}"
+          test -n "${api_key}"
+          echo "::add-mask::${api_key}"
+          echo "SCOUTS_API_URL=${api_url}" >> "${GITHUB_ENV}"
+          echo "SCOUTS_API_KEY=${api_key}" >> "${GITHUB_ENV}"
+
+      - name: Run deployed event lifecycle regression
+        env:
+          LIVE_TEST_ACK: '1'
+          BUCKET: ${{ env.WEBSITE_BUCKET }}
+          LIVE_TEST_TIMEOUT_MS: '240000'
+          LIVE_TEST_POLL_MS: '3000'
+        run: node lambdas/tools/live-canonical-event-smoke.mjs
