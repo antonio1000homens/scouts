@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import './issue-43-runtime-activity.test.mjs';
 import './issue-43-dlq-admin-enhancements.test.mjs';
 import './issue-91-presentation.test.mjs';
+import './issue-114-manual-job-recovery.test.mjs';
 import '../lambdas/scouts/function/tests/test-dlq-activity.mjs';
 
 const html = readFileSync('website/admin/index.html', 'utf8');
