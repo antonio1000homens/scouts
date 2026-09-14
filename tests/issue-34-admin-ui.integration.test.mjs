@@ -57,7 +57,7 @@ test('age alone is not an authoritative lifecycle state', () => {
 test('agenda UI no longer exposes an enrichment-count selector', () => {
   assert.doesNotMatch(html, /id="refresh-action"/);
   assert.doesNotMatch(html, /AI off|1 event|5 events|10 events|Events to enrich/);
-  assert.match(html, />Refresh now<\/button>/);
+  assert.match(html, />Sync calendars & agenda<\/button>/);
   assert.match(agendaRefresh, /document\.getElementById\('refresh-action'\)\?\.remove\(\)/);
 });
 
@@ -71,24 +71,18 @@ test('normal agenda reconciliation does not send a browser enrichment limit', ()
   assert.match(scoutsService, /process\.env\.max_events_resume \|\| '1'/);
 });
 
-test('automatic reconciliation is enabled by default, slow, and non-overlapping', () => {
-  assert.match(html, /id="agenda-auto-refresh-toggle"[\s\S]*checked/);
-  assert.match(html, /id="agenda-auto-refresh-interval-seconds"[\s\S]*min="60"[\s\S]*value="300"/);
-  assert.match(agendaRefresh, /DEFAULT_RECONCILIATION_INTERVAL_SECONDS = 300/);
-  assert.match(agendaRefresh, /let agendaAutoRefreshEnabled = true/);
-  assert.match(agendaRefresh, /agendaAutoRefreshTimer = setInterval/);
-  assert.match(agendaRefresh, /if \(agendaRefreshExecutionInFlight \|\| uiCommandInFlight\)/);
-  assert.match(agendaRefresh, /if \(!agendaAutoRefreshEnabled\) return;/);
-  assert.match(agendaRefresh, /automatic agenda reconciliation has its own preference and timer/);
+test('browser startup does not reconcile calendars or expose polling controls', () => {
+  assert.doesNotMatch(html, /agenda-auto-refresh-toggle|agenda-auto-refresh-interval-seconds|status-polling-toggle|status-polling-interval-seconds/);
+  assert.doesNotMatch(agendaRefresh, /setInterval|performAgendaReconciliation\(\{ automatic/);
+  assert.match(agendaRefresh, /Browser startup must remain read-only/);
 });
 
 test('status polling remains read-only and separate from real reconciliation', () => {
   assert.match(adminScript, /function runStatusPollingJob\(\)[\s\S]*pollQueueDepthSnapshots\(\)[\s\S]*loadEvents\(/);
   const pollingBody = adminScript.match(/function runStatusPollingJob\(\) \{[\s\S]*?\n\}/)?.[0] || '';
   assert.doesNotMatch(pollingBody, /sendScoutsCommand|refreshLambda|invokeLambdaHeartbeat/);
-  assert.match(agendaRefresh, /Keep three concerns deliberately separate/);
-  assert.match(agendaRefresh, /admin-script\.js status polling reads agenda\/runtime state frequently/);
-  assert.match(agendaRefresh, /agendaAutoRefreshTimer = setInterval/);
+  assert.match(adminScript, /Canonical Activity polling is owned by admin-activity-centre\.js/);
+  assert.doesNotMatch(agendaRefresh, /setInterval/);
 });
 
 test('backend enrichment state prevents duplicate, succeeded, cooldown and exhausted work', () => {
@@ -107,13 +101,10 @@ test('provider quota circuit remains a backend safety boundary', () => {
   assert.match(imageProvider, /blockedUntil/);
 });
 
-test('refresh result exposes modified-event details in the normal UI', () => {
-  assert.match(agendaRefresh, /agenda-refresh-summary/);
-  assert.match(agendaRefresh, /Updated during refresh/);
-  assert.match(agendaRefresh, /describeModifiedEventChanges/);
-  assert.match(agendaRefresh, /visibility:/);
-  assert.match(agendaRefresh, /event\.changes|entry\?\.changes/);
-  assert.match(agendaRefresh, /Agenda refreshed ·/);
+test('manual sync has one explicit acknowledgement path', () => {
+  assert.match(agendaRefresh, /Syncing calendars & agenda/);
+  assert.match(agendaRefresh, /Calendars & agenda synchronised/);
+  assert.match(agendaRefresh, /refreshAllCalendars/);
 });
 
 test('enrichment starts are exact per reconciliation and distinct from modified events', () => {
@@ -131,8 +122,7 @@ test('enrichment starts are exact per reconciliation and distinct from modified 
   assert.match(runtimeActivity, /reconciliationId: request\.reconciliationId \|\| null/);
   assertNodeTest('lambdas/shared-layer/nodejs/request-activity.test.mjs');
 
-  assert.match(agendaRefresh, /result\?\.modifiedEventsCount/);
-  assert.match(agendaRefresh, /result\?\.enrichmentRequestsStarted/);
+  assert.match(agendaRefresh, /await loadEvents/);
   assert.doesNotMatch(agendaRefresh, /enrichmentRequestsStarted\s*=\s*modified/);
 });
 
@@ -183,10 +173,8 @@ test('one authoritative status poll replaces snapshot polling for the presentati
   assert.match(simplify, /retaining last good result/);
 });
 
-test('observer cannot self-trigger during presentation updates', () => {
-  assert.match(simplify, /presentationRefreshInProgress/);
-  assert.match(simplify, /observer\?\.disconnect\(\)/);
-  assert.match(simplify, /observer\.observe\(document\.body, OBSERVER_OPTIONS\)/);
+test('presentation updates do not install a document-wide observer', () => {
+  assert.doesNotMatch(simplify, /MutationObserver|OBSERVER_OPTIONS|observer\.observe/);
 });
 
 test('legacy diagnostics are hidden only after successful simplify initialization', () => {

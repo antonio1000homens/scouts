@@ -15,6 +15,7 @@ function actionSandbox(overrides = {}) {
   const sent = [];
   const event = {
     summary: 'Synthetic Scouts Test Event',
+    occurrenceId: 'occ_0123456789abcdef01234567',
     metadata: {
       hex: TEST_HEX,
       status: { isApproved: false, isHidden: false },
@@ -25,6 +26,7 @@ function actionSandbox(overrides = {}) {
   const sandbox = {
     apiAuthReady: true,
     uiCommandInFlight: false,
+    pendingUiOperations: new Map(),
     currentEventIndex: 0,
     visibleEventEntries: [entry],
     uniqueEventEntries: [entry],
@@ -82,7 +84,7 @@ function actionSandbox(overrides = {}) {
 async function invokeAdminFunction(functionName, args, sandbox) {
   const dependencies = functionName === 'pollGeneratedRequestUntilSettled'
     ? ['stopGeneratedRequestPolling', 'findAuthoritativeRequest', 'isTerminalAuthoritativeRequest', 'describeAuthoritativeRequestOutcome', 'refreshGeneratedEvent']
-    : [];
+    : ['buildVisibilityCommand', 'uiOperationKey'];
   const { functions } = loadFunctionsFromSource(adminSource, [functionName, ...dependencies], sandbox);
   return functions[functionName](...args);
 }
@@ -204,7 +206,11 @@ test('admin hide and unhide publish idempotent visibility state for the same HEX
   assert.equal(hide.sent.length, 1);
   assert.equal(hide.sent[0].realm, 'scouts');
   assert.equal(hide.sent[0].action, 'hide');
-  assert.deepEqual(hide.sent[0].subject, { hex: TEST_HEX, isHidden: true });
+  assert.deepEqual(hide.sent[0].subject, {
+    hex: TEST_HEX,
+    occurrenceId: hide.event.occurrenceId,
+    isHidden: true,
+  });
   assert.match(hide.sent[0].hiddenAt, /^\d{4}-\d{2}-\d{2}T/);
 
   const unhide = actionSandbox({ isHiddenEvent: () => true });
@@ -212,7 +218,7 @@ test('admin hide and unhide publish idempotent visibility state for the same HEX
   await invokeAdminFunction('unhideEvent', [0, false, 'unhide'], unhide.sandbox);
   assert.deepEqual(unhide.sent, [{
     realm: 'scouts',
-    subject: { hex: TEST_HEX, isHidden: false },
+    subject: { hex: TEST_HEX, occurrenceId: unhide.event.occurrenceId, isHidden: false },
     action: 'unhide',
   }]);
 });

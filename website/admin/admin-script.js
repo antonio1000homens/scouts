@@ -5,7 +5,10 @@ let uniqueEventEntries = [];
 let visibleEventEntries = [];
 let currentEventIndex = null;
 let apiAuthReady = false;
-let uiCommandInFlight = false;
+// A command acknowledgement must never freeze the whole page.  This map is
+// presentation-only duplicate-click protection; backend idempotency remains
+// authoritative.
+const pendingUiOperations = new Map();
 let activeFilter = '';
 let agendaPayload = null;
 let agendaLoadInFlight = false;
@@ -72,6 +75,8 @@ const PROCESSING_REQUESTS_RUNTIME_URL = '../../runtime/scoutsProcessing.json';
 const COMPLETED_REQUESTS_RUNTIME_URL = '../../runtime/scoutsComplete.json';
 const SCOUTS_CONFIG_URL = window.SCOUTS_CONFIG_URL || '../../scouts.conf';
 const SCOUTS_CONFIG_CACHE_MS = 5 * 60 * 1000;
+const ADMIN_WRITE_TIMEOUT_MS = 15_000;
+const ADMIN_READ_TIMEOUT_MS = 12_000;
 const HEX_PREVIEW_POLL_INTERVAL_MS = 5000;
 const GENERATED_REQUEST_POLL_INTERVAL_MS = 3000;
 const GENERATED_REQUEST_POLL_TIMEOUT_MS = 30000;
@@ -1562,12 +1567,8 @@ function restartStatusPollingTimer() {
         clearInterval(statusPollingTimer);
         statusPollingTimer = null;
     }
-    if (!statusPollingEnabled) {
-        return;
-    }
-    statusPollingTimer = setInterval(() => {
-        runStatusPollingJob();
-    }, statusPollingIntervalMs);
+    // Canonical Activity polling is owned by admin-activity-centre.js.
+    // The legacy snapshot timer must not create a second background poller.
 }
 
 function updateAutoLambdaInvocationUi() {
@@ -1650,15 +1651,37 @@ function updateStatusPollingInterval(value, persist = true) {
     updateStatusPollingUi();
 }
 
-async function sendScoutsCommand(payload) {
-    const response = await fetch(SCOUTS_URL, {
+class AdminApiTimeoutError extends Error {
+    constructor(timeoutMs) {
+        super(`The admin API did not acknowledge this request within ${Math.round(timeoutMs / 1000)} seconds. The operation status is unknown; check Activity before retrying.`);
+        this.name = 'AdminApiTimeoutError';
+        this.code = 'ADMIN_API_TIMEOUT';
+    }
+}
+
+async function fetchJsonWithTimeout(url, options, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { ...options, signal: controller.signal });
+    } catch (error) {
+        if (error?.name === 'AbortError') throw new AdminApiTimeoutError(timeoutMs);
+        throw error;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function sendScoutsCommand(payload, options = {}) {
+    const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : ADMIN_WRITE_TIMEOUT_MS;
+    const response = await fetchJsonWithTimeout(SCOUTS_URL, {
         method: 'POST',
         headers: {
             'Content-Type': 'text/plain',
         },
         credentials: 'same-origin',
         body: JSON.stringify(payload),
-    });
+    }, timeoutMs);
 
     if (!response.ok) {
         throw await buildHttpError(response);
@@ -1680,13 +1703,17 @@ async function sendScoutsCommand(payload) {
     }
 }
 
+async function sendScoutsReadCommand(payload, options = {}) {
+    return sendScoutsCommand(payload, { ...options, timeoutMs: options.timeoutMs ?? ADMIN_READ_TIMEOUT_MS });
+}
+
 function setApiActionState(enabled) {
     apiAuthReady = Boolean(enabled);
     refreshApiActionButtons();
 }
 
 function refreshApiActionButtons() {
-    const enabled = apiAuthReady && !uiCommandInFlight;
+    const enabled = apiAuthReady;
     const actionButtons = document.querySelectorAll('.requires-api');
     actionButtons.forEach((button) => {
         button.disabled = !enabled;
@@ -2756,6 +2783,7 @@ function isEntryHidden(entry) {
 }
 
 function getEventMergeKey(event, index) {
+    if (hasText(event?.occurrenceId)) return `occurrence:${event.occurrenceId.trim()}`;
     const hex = getEventHex(event);
     if (hex) return `hex:${hex}`;
 
@@ -2828,6 +2856,7 @@ function buildUniqueEventEntries(events) {
             grouped.set(key, {
                 key,
                 event: cloneEventRecord(event),
+                occurrenceId: hasText(event?.occurrenceId) ? event.occurrenceId.trim() : null,
                 firstIndex: index,
                 duplicateCount: 1,
                 hiddenCount: hidden ? 1 : 0,
@@ -2889,6 +2918,28 @@ function formatTrackerTimestamp(isoString) {
 }
 
 // Render all events
+function getEventActionModel(entry) {
+    const event = entry?.event || {};
+    const hidden = isEntryHidden(entry);
+    const approved = isEntryApproved(entry);
+    const missingFields = getMissingMetadataFields(event);
+    const actions = [{ label: 'View details', className: 'btn-primary', onclick: 'openUploadModal' }];
+    if (hidden) {
+        actions.push({ label: 'Unhide', className: 'btn-secondary', onclick: 'unhideEvent' });
+    } else if (!approved) {
+        actions.push({ label: 'Hide', className: 'btn-secondary', onclick: 'hideEvent' });
+    }
+    if (!hidden && !approved) {
+        actions.push({ label: 'Approve shown event', className: 'btn-primary', onclick: 'approveEvent' });
+    }
+    if (missingFields.length === 1 && missingFields[0] === 'Image URL' && hasText(getImageTheme(event))) {
+        actions.push({ label: 'Generate image', className: 'btn-secondary', onclick: 'generateImage' });
+    } else if (missingFields.length > 0) {
+        actions.push({ label: 'Generate all missing metadata', className: 'btn-secondary', onclick: 'generateFull' });
+    }
+    return { actions, missingFields, hidden, approved };
+}
+
 function renderEvents() {
     const container = document.getElementById('events-container');
     closeHexPreview();
@@ -2928,7 +2979,8 @@ function renderEvents() {
         const imageUrl = getImageUrl(event);
         const tagline = getAIPrompt(event);
         const imageTheme = getImageTheme(event);
-        const missingFields = getMissingMetadataFields(event);
+        const actionModel = getEventActionModel(entry);
+        const missingFields = actionModel.missingFields;
         const hasMissingMetadata = missingFields.length > 0;
         const section = getEventSection(event);
         const isHidden = isEntryHidden(entry);
@@ -2969,7 +3021,7 @@ function renderEvents() {
                 <div class="event-details">
                     <h3 class="event-title">${title}</h3>
                     <details class="event-identifiers">
-                        <summary>Identifiers</summary>
+                        <summary>Advanced</summary>
                         <div class="event-identifiers-body">
                             <div class="event-identifiers-row"><span>UID:</span> <code>${eventUID}</code></div>
                             <div class="event-identifiers-row"><span>HEX:</span> <code>${getEventHex(event) || 'Missing HEX'}</code></div>
@@ -3001,46 +3053,14 @@ function renderEvents() {
                         : ''
                     }
                     <div class="event-actions">
-                        <button 
-                            class="btn btn-primary"
-                            onclick="openUploadModal(${index})"
-                        >
-                            View Details
-                        </button>
-                        ${isHidden
-                            ? `<button class="btn btn-secondary requires-api" value="unhide" onclick="unhideEvent(${index}, false, this.value)">Unhide Event</button>`
-                            : `<button class="btn btn-secondary requires-api" value="hide" onclick="hideEvent(${index}, false, this.value)">Hide Event</button>`
-                        }
-                        ${showApprovalState
-                            ? `<button class="btn btn-primary requires-api" value="approve" onclick="approveEvent(${index}, false, this.value)">Approve</button>`
-                            : ''
-                        }
-                        <button class="btn btn-secondary" onclick="toggleHexPreview(${index})">HEX</button>
-                    </div>
-                    <div class="event-hex-preview" style="display:none;">
-                        <div class="event-hex-preview-header">
-                            <div class="event-hex-preview-label">HEX JSON</div>
-                            <div class="event-hex-preview-controls">
-                                <button class="btn btn-secondary" onclick="refreshHexPreviewNow(${index})">Refresh</button>
-                                <label class="event-hex-preview-auto">
-                                    <input
-                                        type="checkbox"
-                                        class="event-hex-preview-auto-toggle"
-                                        onchange="setHexPreviewAutoRefresh(${index}, this.checked)"
-                                    >
-                                    Auto
-                                </label>
-                                <input
-                                    type="number"
-                                    class="event-hex-preview-interval-input"
-                                    min="5"
-                                    step="1"
-                                    value="${Math.max(5, Math.round(hexPreviewIntervalMs / 1000))}"
-                                    onchange="updateHexPreviewInterval(this.value, ${index})"
-                                >
-                            </div>
-                        </div>
-                        <pre class="event-hex-preview-body" data-state="idle">Click "View HEX" to load HEX JSON.</pre>
+                        ${actionModel.actions.map((action) => {
+                            if (action.onclick === 'openUploadModal') return `<button class="btn ${action.className}" onclick="openUploadModal(${index})">${action.label}</button>`;
+                            if (action.onclick === 'generateFull') return `<button class="btn ${action.className} requires-api" value="generateFull" onclick="requestGeneratedField('full', this.value, this)">${action.label}</button>`;
+                            if (action.onclick === 'generateImage') return `<button class="btn ${action.className} requires-api" value="generateImage" onclick="requestGeneratedField('imageUrl', this.value, this)">${action.label}</button>`;
+                            if (action.onclick === 'approveEvent') return `<button class="btn ${action.className} requires-api" value="approve" onclick="approveEvent(${index}, false, this.value, this)">${action.label}</button>`;
+                            const command = action.onclick === 'unhideEvent' ? 'unhideEvent' : 'hideEvent';
+                            return `<button class="btn ${action.className} requires-api" value="${action.onclick === 'unhideEvent' ? 'unhide' : 'hide'}" onclick="${command}(${index}, false, this.value, this)">${action.label}</button>`;
+                        }).join('')}
                     </div>
                 </div>
             </div>
@@ -3101,6 +3121,8 @@ function openUploadModal(index) {
     
     document.getElementById('modal-event-name').textContent = event.summary || event.title || 'Event ' + index;
     document.getElementById('modal-event-hex').textContent = getEventHex(event) || 'Missing HEX';
+    document.getElementById('modal-event-uid').textContent = getEntryIdentifier(entry) || 'Missing UID';
+    document.getElementById('modal-event-date-section').textContent = `${normaliseEventDateString(event.dtstart || event.start || 'Not set')} · ${getEventSection(event) || 'Unsectioned'}`;
     
     const currentImage = getImageUrl(event);
     const currentImageTheme = getImageTheme(event);
@@ -3136,6 +3158,12 @@ function openUploadModal(index) {
     }
     if (approveButton) {
         approveButton.style.display = isEntryHidden(entry) || isEntryApproved(entry) ? 'none' : 'inline-block';
+        approveButton.textContent = 'Approve shown event';
+    }
+    const readiness = document.getElementById('modal-readiness');
+    if (readiness) {
+        const missing = getMissingMetadataFields(event);
+        readiness.textContent = `Readiness: Tagline ${hasText(getAIPrompt(event)) ? '✓' : 'Missing'} · Image theme ${hasText(currentImageTheme) ? '✓' : 'Missing'} · Image ${currentImage ? '✓' : 'Missing'} · Visibility ${isEntryHidden(entry) ? 'Hidden' : 'Visible'} · Approval ${isEntryApproved(entry) ? 'Approved' : 'Needs review'}${missing.length ? ` · Missing: ${missing.join(', ')}` : ''}`;
     }
     document.getElementById('modal-status').textContent = '';
     document.getElementById('modal-status').className = 'status-text';
@@ -3286,11 +3314,6 @@ async function refreshLambda(action = 'refreshAgenda') {
     const actionInput = document.getElementById('refresh-action');
     const statusElement = document.getElementById('refresh-status');
     const requestedCount = actionInput.value;
-    if (uiCommandInFlight) {
-        statusElement.textContent = 'Another admin request is already in flight. Wait for completion.';
-        statusElement.className = 'refresh-status error';
-        return;
-    }
 
     const actionCount = Number.isFinite(parseInt(requestedCount, 10)) ? parseInt(requestedCount, 10) : 0;
 
@@ -3305,7 +3328,6 @@ async function refreshLambda(action = 'refreshAgenda') {
         maxEvents: actionCount,
     };
 
-    uiCommandInFlight = true;
     refreshApiActionButtons();
     try {
         const result = await sendScoutsCommand(payload);
@@ -3338,7 +3360,6 @@ async function refreshLambda(action = 'refreshAgenda') {
         statusElement.textContent = errorMessage;
         statusElement.className = 'refresh-status error';
     } finally {
-        uiCommandInFlight = false;
         refreshApiActionButtons();
     }
 }
@@ -3352,10 +3373,6 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
         updateGlobalRefreshStatus('Admin API auth not ready', 'error');
         return;
     }
-    if (uiCommandInFlight) {
-        updateGlobalRefreshStatus('Another admin request is already in flight. Wait for completion.', 'error');
-        return;
-    }
 
     const payload = {
         realm: 'scouts',
@@ -3365,7 +3382,6 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
 
     updateGlobalRefreshStatus(`Refreshing ${label}...`, 'loading');
 
-    uiCommandInFlight = true;
     refreshApiActionButtons();
     try {
         const result = await sendScoutsCommand(payload);
@@ -3384,7 +3400,6 @@ async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected 
         console.error(`Error refreshing ${label}:`, error);
         updateGlobalRefreshStatus(`Failed to refresh ${label}: ${error.message}`, 'error');
     } finally {
-        uiCommandInFlight = false;
         refreshApiActionButtons();
     }
 }
@@ -3393,7 +3408,6 @@ async function invokeLambdaHeartbeat() {
     if (!apiAuthReady) return;
     if (!autoLambdaInvokeEnabled) return;
     if (autoLambdaInvokeInFlight) return;
-    if (uiCommandInFlight) return;
 
     autoLambdaInvokeInFlight = true;
     try {
@@ -3621,17 +3635,13 @@ function applyVisibilityOverrides(entries, options = {}) {
     return changed;
 }
 
-async function persistCurrentField(field, action = 'persist') {
+async function persistCurrentField(field, action = 'persist', button = null) {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
             'error',
         );
         updateModalStatus('Admin API auth not ready.', 'error');
-        return;
-    }
-    if (uiCommandInFlight) {
-        updateModalStatus('Another admin request is already in flight. Wait for completion before persisting.', 'error');
         return;
     }
 
@@ -3669,8 +3679,9 @@ async function persistCurrentField(field, action = 'persist') {
     };
 
     updateModalStatus(`Persisting ${config.label.toLowerCase()} for "${eventLabel}"...`, 'loading');
+    const originalButtonLabel = button?.textContent;
+    if (button) { button.disabled = true; button.textContent = 'Saving…'; }
 
-    uiCommandInFlight = true;
     refreshApiActionButtons();
     try {
         const result = await sendScoutsCommand(payload);
@@ -3699,22 +3710,18 @@ async function persistCurrentField(field, action = 'persist') {
         updateModalStatus(failureMessage, 'error');
         pinRuntimeDetails(failureMessage, 'error');
     } finally {
-        uiCommandInFlight = false;
+        if (button) { button.disabled = !apiAuthReady; button.textContent = originalButtonLabel; }
         refreshApiActionButtons();
     }
 }
 
-async function requestGeneratedField(field, action = 'generate') {
+async function requestGeneratedField(field, action = 'generate', button = null) {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
             'error',
         );
         updateModalStatus('Admin API auth not ready.', 'error');
-        return;
-    }
-    if (uiCommandInFlight) {
-        updateModalStatus('Another admin request is already in flight. Wait for completion before queueing generation.', 'error');
         return;
     }
 
@@ -3740,8 +3747,9 @@ async function requestGeneratedField(field, action = 'generate') {
 
     const requestVerb = action === 'generateFull' ? 'requesting' : 'queueing';
     updateModalStatus(`${requestVerb.charAt(0).toUpperCase()}${requestVerb.slice(1)} ${config.queueLabel} for "${eventLabel}"...`, 'loading');
+    const originalButtonLabel = button?.textContent;
+    if (button) { button.disabled = true; button.textContent = action === 'generateFull' ? 'Generating…' : 'Regenerating…'; }
 
-    uiCommandInFlight = true;
     refreshApiActionButtons();
     try {
         const result = await sendScoutsCommand(payload);
@@ -3775,12 +3783,26 @@ async function requestGeneratedField(field, action = 'generate') {
         updateModalStatus(failureMessage, 'error');
         pinRuntimeDetails(failureMessage, 'error');
     } finally {
-        uiCommandInFlight = false;
+        if (button) { button.disabled = !apiAuthReady; button.textContent = originalButtonLabel; }
         refreshApiActionButtons();
     }
 }
 
-async function hideEvent(eventIndex, fromModal = false, action = 'hide') {
+function buildVisibilityCommand(entry, hidden) {
+    const event = entry?.event || {};
+    return {
+        occurrenceId: entry?.occurrenceId || event.occurrenceId || null,
+        hex: getEventHex(event) || null, // diagnostic/context only; server resolves grouping
+        isHidden: hidden === true,
+    };
+}
+
+function uiOperationKey(entry, action) {
+    const event = entry?.event || {};
+    return `${entry?.occurrenceId || event.occurrenceId || getEventHex(event) || entry?.key || 'unknown'}:${action}`;
+}
+
+async function hideEvent(eventIndex, fromModal = false, action = 'hide', button = null) {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -3788,12 +3810,6 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide') {
         );
         if (fromModal) updateModalStatus('Admin API auth not ready.', 'error');
         else updateRuntimeDetails('Admin API auth not ready.', 'error');
-        return;
-    }
-    if (uiCommandInFlight) {
-        const message = 'Another admin request is already in flight. Wait for completion before hiding.';
-        if (fromModal) updateModalStatus(message, 'error');
-        else updateRuntimeDetails(message, 'error');
         return;
     }
 
@@ -3815,6 +3831,15 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide') {
 
     const eventLabel = event.summary || event.title || `Event ${eventIndex + 1}`;
     const hex = getEventHex(event);
+    const occurrenceId = entry.occurrenceId || event.occurrenceId;
+    if (!occurrenceId) {
+        const message = 'Cannot hide event: this occurrence has no canonical identity. Refresh the agenda and try again.';
+        if (fromModal) updateModalStatus(message, 'error'); else updateRuntimeDetails(message, 'error');
+        return;
+    }
+    const operationKey = uiOperationKey(entry, 'hide');
+    if (pendingUiOperations.has(operationKey)) return;
+    pendingUiOperations.set(operationKey, true);
     if (!hex) {
         const message = 'Cannot hide event: missing HEX.';
         if (fromModal) updateModalStatus(message, 'error');
@@ -3823,10 +3848,7 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide') {
     }
 
     const hiddenAtIso = new Date().toISOString();
-    const subject = {
-        hex,
-        isHidden: true,
-    };
+    const subject = buildVisibilityCommand(entry, true);
 
     const payload = {
         realm: 'scouts',
@@ -3838,8 +3860,9 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide') {
     const loadingMessage = `Hiding "${eventLabel}"...`;
     if (fromModal) updateModalStatus(loadingMessage, 'loading');
     else pinRuntimeDetails(loadingMessage, 'loading');
+    const originalButtonLabel = button?.textContent;
+    if (button) { button.disabled = true; button.textContent = 'Hiding…'; }
 
-    uiCommandInFlight = true;
     refreshApiActionButtons();
     try {
         const result = await sendScoutsCommand(payload);
@@ -3871,12 +3894,13 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide') {
         if (fromModal) updateModalStatus(failureMessage, 'error');
         else pinRuntimeDetails(failureMessage, 'error');
     } finally {
-        uiCommandInFlight = false;
+        if (button) { button.disabled = !apiAuthReady; button.textContent = originalButtonLabel; }
+        pendingUiOperations.delete(operationKey);
         refreshApiActionButtons();
     }
 }
 
-async function unhideEvent(eventIndex, fromModal = false, action = 'unhide') {
+async function unhideEvent(eventIndex, fromModal = false, action = 'unhide', button = null) {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -3884,12 +3908,6 @@ async function unhideEvent(eventIndex, fromModal = false, action = 'unhide') {
         );
         if (fromModal) updateModalStatus('Admin API auth not ready.', 'error');
         else updateRuntimeDetails('Admin API auth not ready.', 'error');
-        return;
-    }
-    if (uiCommandInFlight) {
-        const message = 'Another admin request is already in flight. Wait for completion before unhiding.';
-        if (fromModal) updateModalStatus(message, 'error');
-        else updateRuntimeDetails(message, 'error');
         return;
     }
 
@@ -3911,6 +3929,15 @@ async function unhideEvent(eventIndex, fromModal = false, action = 'unhide') {
 
     const eventLabel = event.summary || event.title || `Event ${eventIndex + 1}`;
     const hex = getEventHex(event);
+    const occurrenceId = entry.occurrenceId || event.occurrenceId;
+    if (!occurrenceId) {
+        const message = 'Cannot unhide event: this occurrence has no canonical identity. Refresh the agenda and try again.';
+        if (fromModal) updateModalStatus(message, 'error'); else updateRuntimeDetails(message, 'error');
+        return;
+    }
+    const operationKey = uiOperationKey(entry, 'unhide');
+    if (pendingUiOperations.has(operationKey)) return;
+    pendingUiOperations.set(operationKey, true);
     if (!hex) {
         const message = 'Cannot unhide event: missing HEX.';
         if (fromModal) updateModalStatus(message, 'error');
@@ -3918,10 +3945,7 @@ async function unhideEvent(eventIndex, fromModal = false, action = 'unhide') {
         return;
     }
 
-    const subject = {
-        hex,
-        isHidden: false,
-    };
+    const subject = buildVisibilityCommand(entry, false);
 
     const payload = {
         realm: 'scouts',
@@ -3932,8 +3956,9 @@ async function unhideEvent(eventIndex, fromModal = false, action = 'unhide') {
     const loadingMessage = `Unhiding "${eventLabel}"...`;
     if (fromModal) updateModalStatus(loadingMessage, 'loading');
     else pinRuntimeDetails(loadingMessage, 'loading');
+    const originalButtonLabel = button?.textContent;
+    if (button) { button.disabled = true; button.textContent = 'Unhiding…'; }
 
-    uiCommandInFlight = true;
     refreshApiActionButtons();
     try {
         const result = await sendScoutsCommand(payload);
@@ -3965,12 +3990,13 @@ async function unhideEvent(eventIndex, fromModal = false, action = 'unhide') {
         if (fromModal) updateModalStatus(failureMessage, 'error');
         else pinRuntimeDetails(failureMessage, 'error');
     } finally {
-        uiCommandInFlight = false;
+        if (button) { button.disabled = !apiAuthReady; button.textContent = originalButtonLabel; }
+        pendingUiOperations.delete(operationKey);
         refreshApiActionButtons();
     }
 }
 
-function toggleCurrentEventHidden(action = null) {
+function toggleCurrentEventHidden(action = null, button = null) {
     if (currentEventIndex === null) {
         updateModalStatus('Open an event first before toggling visibility.', 'error');
         return;
@@ -3981,9 +4007,9 @@ function toggleCurrentEventHidden(action = null) {
         return;
     }
     if (isEntryHidden(entry)) {
-        unhideEvent(currentEventIndex, true, action || 'unhide');
+        unhideEvent(currentEventIndex, true, action || 'unhide', button);
     } else {
-        hideEvent(currentEventIndex, true, action || 'hide');
+        hideEvent(currentEventIndex, true, action || 'hide', button);
     }
 }
 
@@ -4005,7 +4031,7 @@ function applyLocalApprovalState(entry, approved = true) {
     event.metadata.status.isApproved = approved;
 }
 
-async function approveEvent(eventIndex, fromModal = false, action = 'approve') {
+async function approveEvent(eventIndex, fromModal = false, action = 'approve', button = null) {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -4013,12 +4039,6 @@ async function approveEvent(eventIndex, fromModal = false, action = 'approve') {
         );
         if (fromModal) updateModalStatus('Admin API auth not ready.', 'error');
         else updateRuntimeDetails('Admin API auth not ready.', 'error');
-        return;
-    }
-    if (uiCommandInFlight) {
-        const message = 'Another admin request is already in flight. Wait for completion before approving.';
-        if (fromModal) updateModalStatus(message, 'error');
-        else updateRuntimeDetails(message, 'error');
         return;
     }
 
@@ -4059,8 +4079,9 @@ async function approveEvent(eventIndex, fromModal = false, action = 'approve') {
     const loadingMessage = `Approving "${eventLabel}"...`;
     if (fromModal) updateModalStatus(loadingMessage, 'loading');
     else pinRuntimeDetails(loadingMessage, 'loading');
+    const originalButtonLabel = button?.textContent;
+    if (button) { button.disabled = true; button.textContent = 'Approving…'; }
 
-    uiCommandInFlight = true;
     refreshApiActionButtons();
     try {
         const result = await sendScoutsCommand(payload);
@@ -4095,17 +4116,17 @@ async function approveEvent(eventIndex, fromModal = false, action = 'approve') {
         if (fromModal) updateModalStatus(failureMessage, 'error');
         else pinRuntimeDetails(failureMessage, 'error');
     } finally {
-        uiCommandInFlight = false;
+        if (button) { button.disabled = !apiAuthReady; button.textContent = originalButtonLabel; }
         refreshApiActionButtons();
     }
 }
 
-function approveCurrentEvent(action = 'approve') {
+function approveCurrentEvent(action = 'approve', button = null) {
     if (currentEventIndex === null) {
         updateModalStatus('Open an event first before approving.', 'error');
         return;
     }
-    approveEvent(currentEventIndex, true, action);
+    approveEvent(currentEventIndex, true, action, button);
 }
 
 // Initialize on page load

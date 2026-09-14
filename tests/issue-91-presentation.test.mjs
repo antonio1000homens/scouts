@@ -171,7 +171,7 @@ test('admin direct-image controls are render-driven and preserve pending disable
   assert.doesNotMatch(diagnosticsEnhancements, /await pollQueueDepthSnapshots\(\)/);
   assert.match(
     diagnosticsEnhancements,
-    /finally \{[\s\S]*uiCommandInFlight = false;[\s\S]*refreshApiActionButtons\(\);[\s\S]*enhanceEventCards\(\);[\s\S]*\}/,
+    /finally \{[\s\S]*refreshApiActionButtons\(\);[\s\S]*enhanceEventCards\(\);[\s\S]*\}/,
   );
 });
 

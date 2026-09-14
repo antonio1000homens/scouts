@@ -18,6 +18,7 @@ const adminIndex = readFileSync('website/admin/index.html', 'utf8');
 const adminScript = readFileSync('website/admin/admin-script.js', 'utf8');
 const adminSimplify = readFileSync('website/admin/admin-simplify.js', 'utf8');
 const adminActivityCentre = readFileSync('website/admin/admin-activity-centre.js', 'utf8');
+const adminAgendaRefresh = readFileSync('website/admin/admin-agenda-refresh.js', 'utf8');
 const requestActivity = readFileSync('lambdas/shared-layer/nodejs/request-activity.mjs', 'utf8');
 const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
 const runtimeActivity = readFileSync('lambdas/scouts/function/runtime-activity.mjs', 'utf8');
@@ -269,8 +270,8 @@ test('website deployment never publishes the Lambda URL into browser config', ()
 });
 
 test('admin refresh commands use the authenticated proxy routes', () => {
-  assert.match(adminIndex, /onclick="refreshSelectedCalendar\('all', 'All Calendars', this\.value\)"/);
-  assert.match(adminIndex, /onclick="refreshLambda\(this\.value\)"/);
+  assert.match(adminIndex, /onclick="refreshLambda\(this\)"/);
+  assert.match(adminAgendaRefresh, /action: 'refreshAllCalendars'/);
   assert.match(adminScript, /const SCOUTS_URL = configuredScoutsUrl\.startsWith\('\/'\)/);
-  assert.match(adminScript, /fetch\(SCOUTS_URL, \{[\s\S]*credentials: 'same-origin'/);
+  assert.match(adminScript, /fetchJsonWithTimeout\(SCOUTS_URL, \{[\s\S]*credentials: 'same-origin'/);
 });

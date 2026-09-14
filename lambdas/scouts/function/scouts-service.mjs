@@ -17,6 +17,7 @@ import {
   evaluateEnrichmentEligibility,
   buildGenerationId,
 } from '/opt/nodejs/enrichment-state.mjs';
+import { resolveOccurrenceId, occurrenceStorageKey } from '/opt/nodejs/occurrence-identity.mjs';
 // Updated: Testing CI deployment mode to bypass environment parsing issues
 
 const {
@@ -2023,6 +2024,7 @@ function hydrateStoredDataset(dataset) {
 
     hydratedEvents.push({
       uid: sanitizedUid,
+      occurrenceId: resolveOccurrenceId({ ...event, uid: sanitizedUid, start }),
       ...(event.originalUid && event.originalUid !== sanitizedUid ? { originalUid: event.originalUid } : {}),
       title,
       start,
@@ -2054,6 +2056,7 @@ function prepareEventForStorage(event) {
   const metadata = buildAgendaMetadata(event);
   return {
     uid: event.uid,
+    occurrenceId: resolveOccurrenceId(event),
     summary,
     dtstart,
     lastModified: lastModifiedRaw ? { raw: lastModifiedRaw } : null,
@@ -2238,6 +2241,7 @@ function mergeEvents(existingData, newEvents) {
         section: normaliseSection(event.section, SECTION_CUBS),
         image: ensureImageContainer(event.image),
       };
+      normalisedEvent.occurrenceId = resolveOccurrenceId(normalisedEvent);
       const mergeKey = buildEventMergeKey(normalisedEvent);
       const duplicate = existingEventsMap.get(mergeKey);
       if (duplicate) {
@@ -2267,6 +2271,7 @@ function mergeEvents(existingData, newEvents) {
   for (const newEvent of newEvents) {
     if (!newEvent?.uid || !newEvent.start?.sortKey) continue;
     const incomingTitle = newEvent.title ?? newEvent.summary ?? null;
+    newEvent.occurrenceId = resolveOccurrenceId(newEvent);
     const mergeKey = buildEventMergeKey(newEvent);
 
     if (existingEventsMap.has(mergeKey)) {
@@ -2668,6 +2673,7 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
       ...event,
       image: ensureImageContainer(event.image),
     };
+    baseEvent.occurrenceId = resolveOccurrenceId(baseEvent);
     let isHidden = isEventHidden(baseEvent);
 
     const sanitizedUid = applySanitizedUidToEvent(baseEvent);
@@ -2764,6 +2770,27 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
 
     if (!isHidden) {
       isHidden = isEventHidden(baseEvent);
+    }
+    if (baseEvent.occurrenceId) {
+      try {
+        const occurrenceState = await getJsonFromS3(bucketName, occurrenceStorageKey(baseEvent.occurrenceId), `occurrence:${baseEvent.occurrenceId}`);
+        if (occurrenceState?.status && typeof occurrenceState.status.isHidden === 'boolean') {
+          isHidden = occurrenceState.status.isHidden;
+          baseEvent.status = {
+            ...(baseEvent.status && typeof baseEvent.status === 'object' ? baseEvent.status : {}),
+            isHidden,
+          };
+          baseEvent.metadata = baseEvent.metadata && typeof baseEvent.metadata === 'object' ? baseEvent.metadata : {};
+          baseEvent.metadata.status = {
+            ...(baseEvent.metadata.status && typeof baseEvent.metadata.status === 'object' ? baseEvent.metadata.status : {}),
+            isHidden,
+          };
+        }
+      } catch (error) {
+        if (!/NoSuchKey|not found/i.test(error?.name || error?.message || '')) {
+          console.warn(`[Occurrence] Failed to load visibility overlay ${baseEvent.occurrenceId}:`, error?.message || error);
+        }
+      }
     }
 
     const needsAi = !isHidden && !hasEventTagline(baseEvent);
@@ -3743,6 +3770,16 @@ export async function lambdaHandler(event = {}) {
     const subjectObject =
       (bodyParams?.subject && typeof bodyParams.subject === 'object' ? bodyParams.subject : null)
       ?? (structuredCommand?.subject && typeof structuredCommand.subject === 'object' ? structuredCommand.subject : null);
+    const candidateOccurrenceId = normalizeNullableText(
+      firstDefinedValue(subjectObject?.occurrenceId, bodyParams?.occurrenceId, queryParams?.occurrenceId),
+    );
+    if (!candidateOccurrenceId) {
+      return {
+        statusCode: 400,
+        headers: corsHeaders,
+        body: JSON.stringify({ error: 'visibility_selector_required', message: 'Hide and unhide require a canonical occurrenceId.' }),
+      };
+    }
     const candidateHex = normalizeNullableText(
       firstDefinedValue(
         subjectObject?.hex,
@@ -3772,6 +3809,7 @@ export async function lambdaHandler(event = {}) {
         realm: 'persist',
         subject: {
           hex: candidateHex,
+          occurrenceId: candidateOccurrenceId,
           isHidden: isHideOperation,
         },
         action: 'persist',
@@ -3787,6 +3825,7 @@ export async function lambdaHandler(event = {}) {
         message: `${isHideOperation ? 'Hide' : 'Unhide'} request submitted for ${candidateHex}`,
         queueAccepted: true,
         queuedHex: candidateHex,
+        occurrenceId: candidateOccurrenceId,
         requestId: queueResult?.payload?.requestId ?? null,
         queuedMessage: {
           requestId: queueResult?.payload?.requestId ?? null,

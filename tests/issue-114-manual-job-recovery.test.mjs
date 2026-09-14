@@ -146,10 +146,10 @@ test('Activity retry submits only the operation ID as recovery input', () => {
 });
 
 test('dynamically rendered recovery controls initialize from admin auth and in-flight state', () => {
-  assert.match(activityCentre, /retryButton\.disabled = !apiAuthReady \|\| uiCommandInFlight/);
-  assert.match(activityCentre, /recoveryButton\.disabled = !apiAuthReady \|\| uiCommandInFlight/);
-  assert.match(activityCentre, /if \(!apiAuthReady \|\| uiCommandInFlight\)[\s\S]*Recovery controls are not ready yet/);
-  assert.match(activityCentre, /if \(!apiAuthReady \|\| uiCommandInFlight\)[\s\S]*Operations recovery controls are not ready yet/);
+  assert.match(activityCentre, /retryButton\.disabled = !apiAuthReady/);
+  assert.match(activityCentre, /recoveryButton\.disabled = !apiAuthReady/);
+  assert.match(activityCentre, /if \(!apiAuthReady\)[\s\S]*Recovery controls are not ready yet/);
+  assert.match(activityCentre, /if \(!apiAuthReady\)[\s\S]*Operations recovery controls are not ready yet/);
 });
 
 test('Activity cards expose enrichment, guarded DLQ navigation, and unsupported recovery states', () => {

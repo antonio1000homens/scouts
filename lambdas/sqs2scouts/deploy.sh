@@ -223,6 +223,7 @@ echo -e "\n${YELLOW}Step 2: Package Lambda function...${NC}"
   zip -jq sqs2scouts-lambda.zip \
     persistence-processor.mjs \
     agenda-publisher.mjs \
+    occurrence-identity.mjs \
     full-enrich-core.mjs \
     full-enrich-helpers.mjs \
     approval-lifecycle-adapter.mjs \

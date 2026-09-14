@@ -42,6 +42,16 @@ function visibilityMessage(isHidden = true) {
   };
 }
 
+function occurrenceVisibilityMessage(occurrenceId, isHidden = true) {
+  return {
+    realm: 'persist',
+    operation: 'persist',
+    occurrenceId,
+    subject: { hex: HOLIDAY_HEX, occurrenceId },
+    action: JSON.stringify({ metadata: { hex: HOLIDAY_HEX, status: { isHidden } } }),
+  };
+}
+
 function canonicalEvent(isHidden = false) {
   return {
     title: 'HOLIDAY',
@@ -122,6 +132,19 @@ test('visibility guard refuses five HOLIDAY occurrences before persistence', () 
     () => buildVisibilityPersistGuard(visibilityMessage(true), agendaSnapshot, eventSnapshot),
     (error) => error?.code === 'AMBIGUOUS_EVENT_OCCURRENCE' && error?.matched === 5,
   );
+});
+
+test('visibility guard selects exactly one same-HEX occurrence when occurrenceId is supplied', () => {
+  const occurrenceId = 'occ_0123456789abcdef01234567';
+  const agendaSnapshot = {
+    value: {
+      events: [1, 2, 3].map((index) => ({ ...agendaEvent(`osm-event-${index}`), occurrenceId: index === 2 ? occurrenceId : `occ_${String(index).repeat(24)}` })),
+    },
+  };
+  const eventSnapshot = { value: canonicalEvent(false), eTag: '"before"' };
+  const guard = buildVisibilityPersistGuard(occurrenceVisibilityMessage(occurrenceId), agendaSnapshot, eventSnapshot);
+  assert.equal(guard.occurrenceId, occurrenceId);
+  assert.equal(guard.hex, HOLIDAY_HEX);
 });
 
 test('visibility read-back rejects an unchanged canonical value', () => {

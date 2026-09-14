@@ -10,13 +10,6 @@
         ['Processing Stall', 'Processing'],
         ['Completed Archive', 'Completed'],
     ]);
-    const OBSERVER_OPTIONS = {
-        childList: true,
-        subtree: true,
-        characterData: true,
-        attributes: true,
-        attributeFilter: ['class'],
-    };
     const ACTIVE_STATES = new Set([
         'accepted', 'queued', 'processing', 'orchestrating', 'persisting',
         'waiting_for_tagline', 'waiting_for_image_theme', 'waiting_for_image',
@@ -27,15 +20,11 @@
         'waiting_for_tagline', 'waiting_for_image_theme', 'waiting_for_image',
     ]);
 
-    let observer = null;
-    let presentationRefreshInProgress = false;
     let activityRefreshPromise = null;
     let latestActivity = null;
     let lastActivityCheckedAt = null;
     let lastActivitySuccessAt = null;
     let lastActivityError = null;
-
-    const legacySendScoutsCommand = sendScoutsCommand;
 
     function sanitizeStatusText(value) {
         if (!value) return '';
@@ -545,17 +534,6 @@
     // All status polling now goes through one authoritative endpoint.
     pollQueueDepthSnapshots = pollAuthoritativeActivity;
 
-    // Refresh activity immediately after successful user mutations, then let the
-    // existing single status-poll timer continue until the request settles.
-    sendScoutsCommand = async function (payload) {
-        const result = await legacySendScoutsCommand(payload);
-        const isActivityPoll = payload?.realm === 'runtime' && payload?.subject === 'activity' && payload?.action === 'status';
-        if (!isActivityPoll) {
-            setTimeout(() => { pollAuthoritativeActivity(); }, 0);
-        }
-        return result;
-    };
-
     function hideImplementationLanguage() {
         document.querySelectorAll('[title]').forEach((el) => {
             if (isDiagnosticsNode(el)) return;
@@ -566,17 +544,9 @@
     }
 
     function refreshPresentation() {
-        if (presentationRefreshInProgress) return;
-        presentationRefreshInProgress = true;
-        observer?.disconnect();
-        try {
-            sanitizeRenderedStatuses(document);
-            updateSystemHealth(latestActivity);
-            hideImplementationLanguage();
-        } finally {
-            presentationRefreshInProgress = false;
-            if (observer) observer.observe(document.body, OBSERVER_OPTIONS);
-        }
+        sanitizeRenderedStatuses(document);
+        updateSystemHealth(latestActivity);
+        hideImplementationLanguage();
     }
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -586,9 +556,9 @@
             buildPrimarySummary();
             refreshPresentation();
             document.body.classList.add('admin-simplify-ready');
-            observer = new MutationObserver(() => refreshPresentation());
-            observer.observe(document.body, OBSERVER_OPTIONS);
-            pollAuthoritativeActivity();
+            // Activity Centre owns the single recurring lifecycle poll. Render
+            // the initial presentation once; do not repair the whole document
+            // with a broad document-wide repair loop.
         } catch (error) {
             console.error('Failed to initialize authoritative admin presentation', error);
             document.body.classList.remove('admin-simplify-ready');

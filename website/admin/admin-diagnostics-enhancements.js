@@ -538,11 +538,10 @@
             pinRuntimeDetails('Admin API auth is not ready.', 'error');
             return;
         }
-        if (uiCommandInFlight || pendingDirectImageHexes.has(prerequisites.hex)) return;
+        if (pendingDirectImageHexes.has(prerequisites.hex)) return;
 
         const title = text(event.summary || event.title) || `Event ${index + 1}`;
         pendingDirectImageHexes.add(prerequisites.hex);
-        uiCommandInFlight = true;
         if (button) {
             button.disabled = true;
             if (button.textContent !== 'Requesting image…') button.textContent = 'Requesting image…';
@@ -578,7 +577,6 @@
             if (typeof showAdminNotification === 'function') showAdminNotification(message, 'error', 7000);
             enhanceEventCards();
         } finally {
-            uiCommandInFlight = false;
             refreshApiActionButtons();
             // Generic API button refresh enables every `.requires-api` control.
             // Reapply the direct-image pending state immediately so a request that
@@ -607,7 +605,7 @@
             }
             const pending = pendingDirectImageHexes.has(prerequisites.hex);
             if (existing) {
-                const shouldDisable = !apiAuthReady || uiCommandInFlight || pending;
+                const shouldDisable = !apiAuthReady || pending;
                 const desiredLabel = pending ? 'Image requested' : 'Request Image';
                 if (existing.disabled !== shouldDisable) existing.disabled = shouldDisable;
                 if (existing.textContent !== desiredLabel) existing.textContent = desiredLabel;
@@ -619,7 +617,7 @@
             button.className = 'btn btn-secondary requires-api event-direct-image-request';
             button.textContent = pending ? 'Image requested' : 'Request Image';
             button.title = 'Image theme/prompt is already available. Generate the missing image without opening View Details.';
-            button.disabled = !apiAuthReady || uiCommandInFlight || pending;
+            button.disabled = !apiAuthReady || pending;
             button.addEventListener('click', () => requestDirectImage(index, button));
 
             const detailsButton = actions.querySelector('button');

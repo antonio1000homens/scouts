@@ -265,8 +265,6 @@
             );
             return null;
         }
-        if (uiCommandInFlight) return null;
-
         const entry = selectedEntry(eventIndex, fromModal);
         const event = eventFromEntry(entry);
         if (!event) {
@@ -292,7 +290,6 @@
             return null;
         }
 
-        uiCommandInFlight = true;
         if (typeof refreshApiActionButtons === 'function') refreshApiActionButtons();
         let operationStage = 'canonical review';
         try {
@@ -375,7 +372,6 @@
             if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(failureMessage, 'error');
             throw error;
         } finally {
-            uiCommandInFlight = false;
             if (typeof refreshApiActionButtons === 'function') refreshApiActionButtons();
             relabelApprovalButtons();
         }
