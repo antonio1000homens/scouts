@@ -16,7 +16,7 @@ The browser does not run calendar reconciliation on page load, expose polling in
 
 Each published occurrence carries a server-owned opaque `occurrenceId`. Shared enrichment metadata is grouped by HEX, but Hide/Unhide commands are selected by `occurrenceId`; same-title occurrences therefore remain independently addressable. HEX and UID are shown only under Advanced diagnostics.
 
-Visibility is occurrence-owned state. Shared metadata publication must preserve an occurrence's current visibility unless the request explicitly targets that `occurrenceId` with a visibility change. Review/approval may reuse shared HEX metadata, but any visibility presented with that review must refer to the selected occurrence. Commands validate the selected occurrence before persisting visibility. UI pending state is action-scoped, so one accepted or slow operation does not disable unrelated event actions or permit duplicate submission of the same action.
+Visibility is occurrence-owned state. Shared metadata publication must preserve an occurrence's current visibility unless the request explicitly targets that `occurrenceId` with a visibility change. Review/approval may reuse shared HEX metadata, but approval does not write occurrence visibility back into the shared HEX record. Commands validate the selected occurrence before persisting visibility. Admin and Slack use the same occurrence-scoped visibility contract; stale Slack review cards that do not contain a canonical occurrence selector fail closed and must be refreshed. UI pending state is action-scoped, so one accepted or slow operation does not disable unrelated event actions or permit duplicate submission of the same action.
 
 ## Security and API
 
