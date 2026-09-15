@@ -28,7 +28,16 @@ const RECONCILIATION_ENRICHMENT_ACTIONS = new Set(['new', 'imageenrich']);
 
 function text(value) { return value === undefined || value === null ? '' : String(value).trim(); }
 function hexOf(value) {
-  const candidate = text(value?.hex || value?.requestHex || (typeof value?.subject === 'object' ? value.subject?.hex : ''));
+  const subject = value?.subject && typeof value.subject === 'object' ? value.subject : {};
+  const metadata = subject.metadata && typeof subject.metadata === 'object' ? subject.metadata : {};
+  const candidate = text(
+    value?.hex
+    || value?.requestHex
+    || subject.hex
+    || subject.hexId
+    || metadata.hex
+    || metadata.hexId
+  );
   return /^[0-9a-f]+$/i.test(candidate) ? candidate.toLowerCase() : '';
 }
 function titleOf(value) {

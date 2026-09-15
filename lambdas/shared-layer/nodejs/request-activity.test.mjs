@@ -18,6 +18,20 @@ test('activity ledger update only supplies DynamoDB placeholders used by the exp
   assert.match(update.command.input.ConditionExpression, /priority <= :priority/);
 });
 
+test('activity ledger derives HEX from subject metadata', () => {
+  const update = buildRequestActivityUpdate({
+    requestId: 'metadata-hex-request',
+    subject: { title: 'Remembrance Sunday', metadata: { hex: '72656D656D6272616E6365' } },
+    action: 'new',
+    state: 'queued',
+    at: new Date('2026-09-15T00:00:00.000Z'),
+  });
+  assert.equal(
+    update.command.input.ExpressionAttributeValues[':hex'].S,
+    '72656d656d6272616e6365',
+  );
+});
+
 test('activity ledger defaults rootRequestId to requestId for backwards compatibility', () => {
   const update = buildRequestActivityUpdate({
     requestId: 'request-123',
