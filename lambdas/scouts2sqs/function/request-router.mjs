@@ -3,6 +3,7 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SFNClient, ListExecutionsCommand, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
+import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 import { lambdaHandler as requestProcessorHandler } from './request-processor.mjs';
 
 const AWS_REGION = process.env.AWS_REGION || 'eu-west-2';
@@ -330,6 +331,14 @@ async function startFullEnrich(message) {
   const input = buildFullEnrichExecutionInput(message, event);
   if (input.startStage === 'complete') {
     console.log('[FullEnrich] Event already complete; no execution required', { hex, requestId: input.requestId, rootRequestId: input.rootRequestId });
+    await recordRequestActivity({
+      ...message,
+      ...input,
+      action: text(message?.action) || 'new',
+      state: 'completed',
+      stage: 'agenda_published',
+      publication: 'published',
+    });
     return { status: 'complete', input, reused: false };
   }
   if (input.imageProvider === 'disabled' && input.startStage === 'image') {

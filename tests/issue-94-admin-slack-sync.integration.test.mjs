@@ -169,3 +169,10 @@ test('Slack hide requires and forwards a canonical occurrence selector', () => {
   assert.match(router, /slackMetadata:[\s\S]*message\.slackMetadata/);
   assert.match(router, /decisionSource/);
 });
+
+test('already-complete full-enrich requests close their activity ledger without starting execution', () => {
+  const router = readFileSync('lambdas/scouts2sqs/function/request-router.mjs', 'utf8');
+  assert.match(router, /import \{ recordRequestActivity \} from '\/opt\/nodejs\/request-activity\.mjs';/);
+  assert.match(router, /if \(input\.startStage === 'complete'\)[\s\S]*?await recordRequestActivity\(\{[\s\S]*?state: 'completed',[\s\S]*?stage: 'agenda_published',[\s\S]*?publication: 'published',[\s\S]*?\}\);[\s\S]*?return \{ status: 'complete'/);
+  assert.match(router, /Event already complete; no execution required/);
+});
