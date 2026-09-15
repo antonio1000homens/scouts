@@ -17,6 +17,9 @@ jobs:
           ref: refactor/admin-v2
           fetch-depth: 0
 
+      - name: Install shared-layer dependencies
+        run: npm ci --prefix lambdas/shared-layer/nodejs
+
       - name: Apply review fixes
         run: python3 .github/scripts/pr123_apply_review_fixes_v2.py
 
