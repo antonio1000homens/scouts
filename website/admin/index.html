@@ -46,66 +46,18 @@
                     <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showScoutsConfigViewer()">Config</button>
                 </div>
             </div>
-            <div class="header-control-group" aria-label="Calendar refresh controls">
-                <span class="header-control-label">Calendar</span>
-                <div class="header-control-actions">
-                    <button class="btn btn-primary btn-header requires-api" value="refreshAllCalendars" onclick="refreshSelectedCalendar('all', 'All Calendars', this.value)">All Calendars</button>
-                    <button class="btn btn-secondary btn-header requires-api" value="refreshCubsEvents" onclick="refreshSelectedCalendar('cubs-events', 'Cubs Events', this.value)">Cubs Events</button>
-                    <button class="btn btn-secondary btn-header requires-api" value="refreshCubsProgramme" onclick="refreshSelectedCalendar('cubs-programme', 'Cubs Programme', this.value)">Cubs Programme</button>
-                </div>
-            </div>
             <div class="header-control-group" aria-label="Agenda refresh controls">
                 <span class="header-control-label">Agenda</span>
                 <div class="header-control-actions header-control-actions-agenda">
                     <button
                         id="refresh-button"
                         class="btn btn-primary btn-header requires-api"
-                        onclick="refreshLambda(this.value)"
+                        onclick="refreshLambda(this)"
                         title="Refresh calendar feeds and reconcile the agenda now. Backend policy controls enrichment throttling and retries."
-                    >Refresh now</button>
+                    >Sync calendars & agenda</button>
                 </div>
             </div>
             <span id="api-ready-indicator" class="api-ready-pill api-loading" title="Checking Cloudflare admin API...">API</span>
-            <label class="auto-invoke-header-label" for="agenda-auto-refresh-toggle">
-                <input
-                    type="checkbox"
-                    id="agenda-auto-refresh-toggle"
-                    checked
-                    onchange="toggleAgendaAutoRefresh(this.checked)"
-                >
-                Auto refresh
-            </label>
-            <input
-                type="number"
-                id="agenda-auto-refresh-interval-seconds"
-                class="refresh-input auto-invoke-header-interval"
-                min="60"
-                step="1"
-                value="300"
-                onchange="updateAgendaAutoRefreshInterval(this.value)"
-                title="Automatic agenda reconciliation interval in seconds (status polling is separate)."
-            >
-            <span id="agenda-auto-refresh-status" class="auto-invoke-header-status">Auto refresh: every 300s</span>
-            <label class="auto-invoke-header-label" for="status-polling-toggle">
-                <input
-                    type="checkbox"
-                    id="status-polling-toggle"
-                    checked
-                    onchange="toggleStatusPolling(this.checked)"
-                >
-                Polling
-            </label>
-            <input
-                type="number"
-                id="status-polling-interval-seconds"
-                class="refresh-input auto-invoke-header-interval"
-                min="5"
-                step="1"
-                value="5"
-                onchange="updateStatusPollingInterval(this.value)"
-                title="Polling job interval in seconds"
-            >
-            <span id="status-polling-status" class="auto-invoke-header-status">Polling: enabled every 5s</span>
             <div class="admin-top-nav-status-row">
                 <p id="global-refresh-status" class="refresh-status">No global refresh triggered yet.</p>
                 <p id="refresh-status" class="refresh-status">No agenda refresh triggered yet.</p>
@@ -241,12 +193,17 @@
         <div id="upload-modal" class="modal" style="display: none;">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h2>Update Event Metadata</h2>
+                    <h2>Event details</h2>
                     <button class="modal-close" onclick="closeUploadModal()">&times;</button>
                 </div>
                 <div class="modal-body">
                     <p><strong>Event:</strong> <span id="modal-event-name"></span></p>
-                    <p><strong>HEX:</strong> <span id="modal-event-hex"></span></p>
+                    <p><strong>Date / section:</strong> <span id="modal-event-date-section"></span></p>
+                    <details class="modal-advanced">
+                        <summary>Advanced</summary>
+                        <p><strong>HEX:</strong> <code id="modal-event-hex"></code></p>
+                        <p><strong>UID:</strong> <code id="modal-event-uid"></code></p>
+                    </details>
                     <p><strong>Current Image:</strong></p>
                     <div id="modal-image-frame" class="modal-image-frame">
                         <img id="modal-current-image" src="" alt="Current image" onclick="openImageViewer(this.src, this.alt || 'Current image')">
@@ -259,17 +216,14 @@
                     </div>
 
                     <div class="operation-group">
-                        <h3>Operation Types</h3>
-                        <p class="refresh-status modal-input-help"><strong>Persist to HEX:</strong> immediately replaces the selected field in the HEX payload.</p>
-                        <p class="refresh-status modal-input-help"><strong>Request AI/Image:</strong> queues generation for that field and updates later through the existing SQS workflow.</p>
-                        <p class="refresh-status modal-input-help"><strong>Hide/Unhide Event:</strong> toggles visibility in HEX and agenda for this event.</p>
-                        <p class="refresh-status modal-input-help"><strong>Requeue/repair:</strong> no longer starts from the admin page.</p>
+                        <h3>Visibility and review</h3>
+                        <p class="refresh-status modal-input-help">Save submits the value for this event; Activity confirms when it is durably saved. Generate starts background work, so Admin remains usable while it runs.</p>
                         <div class="field-actions">
                             <button
                                 id="modal-hide-toggle-button"
                                 class="btn btn-secondary requires-api"
                                 value="hide"
-                                onclick="toggleCurrentEventHidden(this.value)"
+                                onclick="toggleCurrentEventHidden(this.value, this)"
                             >Hide Event</button>
                         </div>
                     </div>
@@ -287,18 +241,18 @@
                             <button
                                 class="btn btn-primary requires-api"
                                 value="persistTagline"
-                                onclick="persistCurrentField('tagline', this.value)"
-                            >Persist Tagline</button>
+                                onclick="persistCurrentField('tagline', this.value, this)"
+                            >Save tagline</button>
                             <button
                                 class="btn btn-secondary requires-api"
                                 value="generateTagline"
-                                onclick="requestGeneratedField('tagline', this.value)"
-                            >Request AI Tagline</button>
+                                onclick="requestGeneratedField('tagline', this.value, this)"
+                            >Regenerate tagline</button>
                             <button
                                 class="btn btn-secondary requires-api"
                                 value="generateFull"
-                                onclick="requestGeneratedField('full', this.value)"
-                            >Request Image Enrichment</button>
+                                onclick="requestGeneratedField('full', this.value, this)"
+                            >Generate all missing metadata</button>
                         </div>
                     </div>
 
@@ -315,13 +269,13 @@
                             <button
                                 class="btn btn-primary requires-api"
                                 value="persistImageTheme"
-                                onclick="persistCurrentField('imageTheme', this.value)"
-                            >Persist Image Theme</button>
+                                onclick="persistCurrentField('imageTheme', this.value, this)"
+                            >Save image theme</button>
                             <button
                                 class="btn btn-secondary requires-api"
                                 value="generateImageTheme"
-                                onclick="requestGeneratedField('imageTheme', this.value)"
-                            >Request AI Image Theme</button>
+                                onclick="requestGeneratedField('imageTheme', this.value, this)"
+                            >Regenerate image theme</button>
                         </div>
                     </div>
 
@@ -340,22 +294,21 @@
                                 id="modal-save-image-url-button"
                                 class="btn btn-primary requires-api"
                                 value="persistImageUrl"
-                                onclick="persistCurrentField('imageUrl', this.value)"
-                            >Persist Image URL</button>
+                                onclick="persistCurrentField('imageUrl', this.value, this)"
+                            >Use image URL</button>
                             <button
                                 class="btn btn-secondary requires-api"
                                 value="generateImage"
-                                onclick="requestGeneratedField('imageUrl', this.value)"
-                            >Request AI Image</button>
+                                onclick="requestGeneratedField('imageUrl', this.value, this)"
+                            >Generate image</button>
                         </div>
                     </div>
 
-                    <p class="note">Image URL persist queued for "Meet the Police" [HTTP 200]. Queue accepted. Persist request submitted for 6d6565742074686520706f6c696365</p>
+                    <div id="modal-readiness" class="modal-readiness" aria-live="polite"></div>
                     <p id="modal-status" class="status-text"></p>
                 </div>
                 <div class="modal-footer">
-                    <button id="modal-approve-button" class="btn btn-primary requires-api" value="approve" onclick="approveCurrentEvent(this.value)">Approve</button>
-                    <button id="modal-hide-toggle-button" class="btn btn-secondary requires-api" value="hide" onclick="toggleCurrentEventHidden(this.value)">Hide Event</button>
+                    <button id="modal-approve-button" class="btn btn-primary requires-api" value="approve" onclick="approveCurrentEvent(this.value, this)">Approve shown event</button>
                     <button class="btn btn-secondary" onclick="closeUploadModal()">Close</button>
                 </div>
             </div>

@@ -3,7 +3,8 @@
 (function () {
     const STORAGE_KEY = 'scouts_admin_tracked_request_ids';
     const SEEN_KEY = 'scouts_admin_activity_seen';
-    const POLL_MS = 5000;
+    const ACTIVE_POLL_MS = 4000;
+    const IDLE_POLL_MS = 25000;
     const TERMINAL = new Set(['completed', 'failed', 'needs_attention', 'manual_review']);
     const RETRYABLE_ENRICHMENT_STAGES = new Set(['tagline', 'imageTheme', 'image']);
     const originalSend = window.sendScoutsCommand;
@@ -110,7 +111,7 @@
     }
 
     function openOperationsRecovery() {
-        if (!apiAuthReady || uiCommandInFlight) {
+        if (!apiAuthReady) {
             notifyMessage('Operations recovery controls are not ready yet.', 'warning');
             return;
         }
@@ -128,7 +129,7 @@
         const activityId = text(request?.rootRequestId || request?.requestId);
         const stage = enrichmentStage(request);
         if (!activityId || !stage || text(request?.state).toLowerCase() !== 'manual_review') return;
-        if (!apiAuthReady || uiCommandInFlight) {
+        if (!apiAuthReady) {
             notifyMessage('Recovery controls are not ready yet.', 'warning');
             return;
         }
@@ -151,7 +152,7 @@
             setTimeout(() => poll(), 500);
         } catch (error) {
             notifyMessage(`Enrichment retry failed: ${error?.message || error}`, 'error', 8000);
-            button.disabled = !apiAuthReady || uiCommandInFlight;
+                button.disabled = !apiAuthReady;
             button.textContent = originalLabel;
         }
     }
@@ -179,6 +180,14 @@
             }
             await reconcileAgenda(changed);
         } catch (error) { console.warn('[ActivityCentre] Activity refresh failed', error); }
+    }
+
+    function schedulePoll(delay = tracked.size ? ACTIVE_POLL_MS : IDLE_POLL_MS) {
+        if (pollTimer) clearTimeout(pollTimer);
+        pollTimer = setTimeout(async () => {
+            await poll();
+            schedulePoll();
+        }, delay);
     }
 
     function renderLog(requests) {
@@ -214,7 +223,7 @@
                 retryButton.className = 'btn btn-primary requires-api activity-retry-enrichment';
                 retryButton.textContent = request.recovery?.label || 'Retry enrichment';
                 retryButton.title = request.recovery?.message || `Retry the ${stage} enrichment from durable manual-review state.`;
-                retryButton.disabled = !apiAuthReady || uiCommandInFlight;
+                retryButton.disabled = !apiAuthReady;
                 retryButton.addEventListener('click', () => retryManualReview(request, retryButton));
                 item.appendChild(retryButton);
             } else if (request.recovery?.type === 'dlq_recovery') {
@@ -223,7 +232,7 @@
                 recoveryButton.className = 'btn btn-secondary requires-api activity-open-dlq-recovery';
                 recoveryButton.textContent = request.recovery?.label || 'Open Operations → DLQ recovery';
                 recoveryButton.title = request.recovery?.message || 'Inspect and confirm the DLQ before redriving.';
-                recoveryButton.disabled = !apiAuthReady || uiCommandInFlight;
+                recoveryButton.disabled = !apiAuthReady;
                 recoveryButton.addEventListener('click', openOperationsRecovery);
                 item.appendChild(recoveryButton);
             } else if (request.recovery?.type === 'unsupported') {
@@ -268,23 +277,28 @@
     }
 
     window.sendScoutsCommand = async function activityAwareCommand(payload) {
-        const result = await originalSend(payload);
-        if (payload?.realm !== 'runtime') {
-            const requestId = text(result?.rootRequestId || result?.requestId || result?.request?.requestId || result?.activity?.requestId);
-            // Tracking is immediate, but canonical status refresh has one owner:
-            // admin-simplify schedules it after the mutation. The Activity Centre's
-            // own 5-second timer handles notifications/history without launching a
-            // second request burst for the same click.
-            if (requestId) { tracked.add(requestId); saveTracked(); }
+        try {
+            const result = await originalSend(payload);
+            if (payload?.realm !== 'runtime') {
+                const requestId = text(result?.rootRequestId || result?.requestId || result?.request?.requestId || result?.activity?.requestId);
+                if (requestId) { tracked.add(requestId); saveTracked(); }
+                schedulePoll(250);
+            }
+            return result;
+        } catch (error) {
+            // A timed-out write has unknown state. Refresh read-only Activity once;
+            // never replay the mutation in the browser.
+            if (error?.code === 'ADMIN_API_TIMEOUT') schedulePoll(0);
+            throw error;
         }
-        return result;
     };
     document.addEventListener('DOMContentLoaded', () => {
         ensureUi();
         // Native-notification denial and agenda-change fallback share the same
         // stack and log affordance instead of reviving the single legacy toast.
         window.showAdminNotification = notifyMessage;
-        removeLegacyUi(); poll(); pollTimer = setInterval(poll, POLL_MS);
-        window.addEventListener('beforeunload', () => clearInterval(pollTimer));
+        removeLegacyUi();
+        void poll().finally(() => schedulePoll());
+        window.addEventListener('beforeunload', () => clearTimeout(pollTimer));
     });
 }());

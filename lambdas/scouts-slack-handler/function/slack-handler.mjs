@@ -1047,10 +1047,36 @@ export async function lambdaHandler(event) {
                 if (actionId === 'scouts_request_hide') {
                     console.log('[Slack] Handling hide action');
 
+                    const occurrenceId = String(actionMeta?.occurrenceId ?? eventData?.occurrenceId ?? '').trim();
+                    const hex = String(eventData?.metadata?.hex ?? eventData?.hex ?? '').trim().toLowerCase();
+                    if (!occurrenceId || !hex) {
+                        const staleMessage = `This review is stale or ambiguous for ${eventTitle}. Refresh the review before hiding this occurrence.`;
+                        console.warn('[Slack] Refusing hide without canonical occurrence selector', {
+                            eventTitle,
+                            occurrenceIdPresent: Boolean(occurrenceId),
+                            hexPresent: Boolean(hex),
+                        });
+                        if (responseUrl) {
+                            try {
+                                await sendSlackResponse(responseUrl, staleMessage);
+                            } catch (responseError) {
+                                console.error('[Slack] Failed to report stale hide action:', responseError.message);
+                            }
+                        }
+                        return { statusCode: 200, body: JSON.stringify({ ok: false, error: 'visibility_selector_required' }) };
+                    }
+
                     const hidePayload = {
-                        realm,
-                        subject: stripStaleDecisionStatus(eventData),
-                        action: 'hidden',
+                        realm: 'persist',
+                        subject: {
+                            occurrenceId,
+                            metadata: {
+                                hex,
+                                status: { isHidden: true },
+                            },
+                        },
+                        action: 'persist',
+                        source: 'slack',
                         decisionSource: 'slack',
                         slackMetadata: {
                             channel,
@@ -1060,7 +1086,7 @@ export async function lambdaHandler(event) {
                         },
                     };
                     console.log('[Debug] Hide payload to send to SQS:', JSON.stringify(hidePayload, null, 2));
-                    
+
                     try {
                         await sendToScoutsRequestQueue(hidePayload);
                         if (responseUrl) {
@@ -1086,10 +1112,10 @@ export async function lambdaHandler(event) {
                     } catch (error) {
                         console.error('[Slack] Failed to send hide to scoutsRequests queue:', error.message);
                     }
-                    
+
                     return { statusCode: 200, body: JSON.stringify({ ok: true }) };
                 }
-                
+
                 if (actionId === 'scouts_request_skip') {
                     console.log('[Slack] Handling skip action', { correlationId });
                     return handleSkipInteraction({ eventTitle, responseUrl, correlationId });

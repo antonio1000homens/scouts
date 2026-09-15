@@ -17,6 +17,7 @@ import {
   evaluateEnrichmentEligibility,
   buildGenerationId,
 } from '/opt/nodejs/enrichment-state.mjs';
+import { resolveOccurrenceId, occurrenceStorageKey } from '/opt/nodejs/occurrence-identity.mjs';
 // Updated: Testing CI deployment mode to bypass environment parsing issues
 
 const {
@@ -142,6 +143,8 @@ function buildEventIdentityKey(event) {
 
 function buildEventChangeKey(event, index = 0) {
   if (!event || typeof event !== 'object') return `idx:${index}`;
+  const occurrenceId = typeof event.occurrenceId === 'string' ? event.occurrenceId.trim() : '';
+  if (occurrenceId) return `occurrence:${occurrenceId}`;
   const hex = typeof event.hex === 'string' ? event.hex.trim().toLowerCase() : '';
   if (hex) return `hex:${hex}`;
   const uid = typeof event.uid === 'string' ? event.uid.trim() : '';
@@ -2023,6 +2026,7 @@ function hydrateStoredDataset(dataset) {
 
     hydratedEvents.push({
       uid: sanitizedUid,
+      occurrenceId: resolveOccurrenceId({ ...event, uid: sanitizedUid, start }),
       ...(event.originalUid && event.originalUid !== sanitizedUid ? { originalUid: event.originalUid } : {}),
       title,
       start,
@@ -2054,6 +2058,7 @@ function prepareEventForStorage(event) {
   const metadata = buildAgendaMetadata(event);
   return {
     uid: event.uid,
+    occurrenceId: resolveOccurrenceId(event),
     summary,
     dtstart,
     lastModified: lastModifiedRaw ? { raw: lastModifiedRaw } : null,
@@ -2238,6 +2243,7 @@ function mergeEvents(existingData, newEvents) {
         section: normaliseSection(event.section, SECTION_CUBS),
         image: ensureImageContainer(event.image),
       };
+      normalisedEvent.occurrenceId = resolveOccurrenceId(normalisedEvent);
       const mergeKey = buildEventMergeKey(normalisedEvent);
       const duplicate = existingEventsMap.get(mergeKey);
       if (duplicate) {
@@ -2267,6 +2273,7 @@ function mergeEvents(existingData, newEvents) {
   for (const newEvent of newEvents) {
     if (!newEvent?.uid || !newEvent.start?.sortKey) continue;
     const incomingTitle = newEvent.title ?? newEvent.summary ?? null;
+    newEvent.occurrenceId = resolveOccurrenceId(newEvent);
     const mergeKey = buildEventMergeKey(newEvent);
 
     if (existingEventsMap.has(mergeKey)) {
@@ -2662,12 +2669,32 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
   const processedTitles = new Set(); // Track processed titles to avoid duplicates
   const liveQueuedProcessingByHex = new Map(); // Map<hexValue, Array<'tagline'|'imageTheme'|'image'>>
 
+  const occurrenceStateById = new Map();
+  const occurrenceIds = [...new Set(events.map((event) => resolveOccurrenceId(event)).filter(Boolean))];
+  const occurrenceReadConcurrency = 8;
+  for (let offset = 0; offset < occurrenceIds.length; offset += occurrenceReadConcurrency) {
+    const batchIds = occurrenceIds.slice(offset, offset + occurrenceReadConcurrency);
+    const batch = await Promise.all(batchIds.map(async (occurrenceId) => {
+      try {
+        const state = await getJsonFromS3(bucketName, occurrenceStorageKey(occurrenceId), `occurrence:${occurrenceId}`);
+        return [occurrenceId, state];
+      } catch (error) {
+        if (!/NoSuchKey|not found/i.test(error?.name || error?.message || '')) {
+          console.warn(`[Occurrence] Failed to load visibility overlay ${occurrenceId}:`, error?.message || error);
+        }
+        return [occurrenceId, null];
+      }
+    }));
+    for (const [occurrenceId, state] of batch) occurrenceStateById.set(occurrenceId, state);
+  }
+
   for (let index = 0; index < events.length; index++) {
     const event = events[index];
     const baseEvent = {
       ...event,
       image: ensureImageContainer(event.image),
     };
+    baseEvent.occurrenceId = resolveOccurrenceId(baseEvent);
     let isHidden = isEventHidden(baseEvent);
 
     const sanitizedUid = applySanitizedUidToEvent(baseEvent);
@@ -2764,6 +2791,21 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
 
     if (!isHidden) {
       isHidden = isEventHidden(baseEvent);
+    }
+    if (baseEvent.occurrenceId) {
+      const occurrenceState = occurrenceStateById.get(baseEvent.occurrenceId) ?? null;
+      if (occurrenceState?.status && typeof occurrenceState.status.isHidden === 'boolean') {
+        isHidden = occurrenceState.status.isHidden;
+        baseEvent.status = {
+          ...(baseEvent.status && typeof baseEvent.status === 'object' ? baseEvent.status : {}),
+          isHidden,
+        };
+        baseEvent.metadata = baseEvent.metadata && typeof baseEvent.metadata === 'object' ? baseEvent.metadata : {};
+        baseEvent.metadata.status = {
+          ...(baseEvent.metadata.status && typeof baseEvent.metadata.status === 'object' ? baseEvent.metadata.status : {}),
+          isHidden,
+        };
+      }
     }
 
     const needsAi = !isHidden && !hasEventTagline(baseEvent);
@@ -3743,6 +3785,16 @@ export async function lambdaHandler(event = {}) {
     const subjectObject =
       (bodyParams?.subject && typeof bodyParams.subject === 'object' ? bodyParams.subject : null)
       ?? (structuredCommand?.subject && typeof structuredCommand.subject === 'object' ? structuredCommand.subject : null);
+    const candidateOccurrenceId = normalizeNullableText(
+      firstDefinedValue(subjectObject?.occurrenceId, bodyParams?.occurrenceId, queryParams?.occurrenceId),
+    );
+    if (!candidateOccurrenceId) {
+      return {
+        statusCode: 400,
+        headers: corsHeaders,
+        body: JSON.stringify({ error: 'visibility_selector_required', message: 'Hide and unhide require a canonical occurrenceId.' }),
+      };
+    }
     const candidateHex = normalizeNullableText(
       firstDefinedValue(
         subjectObject?.hex,
@@ -3772,6 +3824,7 @@ export async function lambdaHandler(event = {}) {
         realm: 'persist',
         subject: {
           hex: candidateHex,
+          occurrenceId: candidateOccurrenceId,
           isHidden: isHideOperation,
         },
         action: 'persist',
@@ -3787,6 +3840,7 @@ export async function lambdaHandler(event = {}) {
         message: `${isHideOperation ? 'Hide' : 'Unhide'} request submitted for ${candidateHex}`,
         queueAccepted: true,
         queuedHex: candidateHex,
+        occurrenceId: candidateOccurrenceId,
         requestId: queueResult?.payload?.requestId ?? null,
         queuedMessage: {
           requestId: queueResult?.payload?.requestId ?? null,

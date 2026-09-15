@@ -167,6 +167,7 @@ export function translateCompactPersistRequest(message) {
   const metadataStatus = metadata.status && typeof metadata.status === 'object' ? metadata.status : {};
   const hex = getHexFromMessage(message);
   if (!hex) throw new Error('Persist request missing hex identifier');
+  const occurrenceId = text(metadata.occurrenceId ?? subject.occurrenceId ?? message?.occurrenceId);
 
   const canonicalMetadata = { hex };
   const tagline = text(metadata.tagline ?? subject.tagline ?? null);
@@ -201,6 +202,11 @@ export function translateCompactPersistRequest(message) {
     requestId,
     rootRequestId: rootRequestIdOf(message, requestId),
     source: text(message?.source) || 'scouts2sqs',
+    ...(occurrenceId ? { occurrenceId } : {}),
+    ...(text(message?.decisionSource) ? { decisionSource: text(message.decisionSource) } : {}),
+    ...(message?.slackMetadata && typeof message.slackMetadata === 'object'
+      ? { slackMetadata: { ...message.slackMetadata } }
+      : {}),
   };
 }
 
@@ -215,6 +221,7 @@ export function buildDownstreamPersistMessage(message) {
     subject: translated.hex,
     action: JSON.stringify(translated.subject),
     operation: 'persist',
+    ...(translated.occurrenceId ? { occurrenceId: translated.occurrenceId } : {}),
   };
 }
 

@@ -46,6 +46,7 @@ function canonicalReviewValues(event) {
     imageTheme: text(image.theme ?? event?.imageTheme ?? null),
     imageUrl: text(image.url ?? event?.imageUrl ?? null),
     isHidden: bool(status.isHidden ?? event?.isHidden ?? event?.hidden ?? false),
+    ...(text(event?.occurrenceId) ? { occurrenceId: text(event.occurrenceId) } : {}),
   };
 }
 
@@ -57,6 +58,7 @@ export function eventReviewRevision(input) {
         imageTheme: text(input.imageTheme),
         imageUrl: text(input.imageUrl),
         isHidden: bool(input.isHidden),
+        ...(text(input.occurrenceId) ? { occurrenceId: text(input.occurrenceId) } : {}),
       }
     : canonicalReviewValues(input);
   if (!values.hex) throw new Error('Event review revision requires a canonical HEX');
@@ -71,6 +73,7 @@ export function buildEventReviewSnapshot(event) {
     revision: eventReviewRevision(values),
     title: text(event?.title ?? event?.summary ?? event?.name ?? null),
     uid: text(event?.uid ?? event?.originalUid ?? metadata.uid ?? null),
+    ...(text(values.occurrenceId) ? { occurrenceId: values.occurrenceId } : {}),
   };
 }
 
@@ -108,7 +111,6 @@ export function buildApprovedSnapshotPatch(snapshot) {
         url: imageUrl,
       },
       status: {
-        isHidden: bool(snapshot.isHidden),
         isApproved: Boolean(imageUrl),
       },
     },

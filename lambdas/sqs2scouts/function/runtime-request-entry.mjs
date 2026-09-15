@@ -34,6 +34,7 @@ export function buildRuntimeRequestEntry(record, messageBody, status) {
         messageId: messageId ? String(messageId) : null,
         hex,
         hexId: hex,
+        occurrenceId: text(messageBody?.occurrenceId ?? messageBody?.subject?.occurrenceId),
         title: getTitleHint(messageBody),
         subject: getSubjectHint(messageBody),
         realm: text(messageBody?.realm) || null,
