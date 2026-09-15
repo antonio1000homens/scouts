@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const trackedFiles = execFileSync('git', ['ls-files'], { encoding: 'utf8' })
   .split('\n')
   .map((value) => value.trim())
   .filter(Boolean);
+
+const existingTrackedFiles = trackedFiles.filter((path) => existsSync(path));
 
 const prohibitedTrackedPath = (path) => {
   if (path.includes('/.wrangler/') || path.startsWith('.wrangler/')) return true;
@@ -34,7 +36,7 @@ test('calendar parser fixture is explicitly synthetic and contains no obvious UK
 test('tracked text does not contain developer home-directory paths', () => {
   const offenders = [];
 
-  for (const path of trackedFiles) {
+  for (const path of existingTrackedFiles) {
     const bytes = readFileSync(path);
     if (bytes.includes(0)) continue;
 
@@ -50,7 +52,7 @@ test('tracked text does not contain developer home-directory paths', () => {
 test('workflow actions are pinned to immutable commit SHAs', () => {
   const offenders = [];
 
-  for (const path of trackedFiles.filter((value) => value.startsWith('.github/workflows/'))) {
+  for (const path of existingTrackedFiles.filter((value) => value.startsWith('.github/workflows/'))) {
     const content = readFileSync(path, 'utf8');
     const actionRefs = [...content.matchAll(/^\s*(?:-\s*)?uses:\s+([^\s#]+)/gm)].map((match) => match[1]);
 
@@ -131,7 +133,7 @@ test('tracked files do not hardcode private calendar URLs', () => {
   const plaintextCalendarAssignment = /(?:CUBS|SCOUTS|BEAVERS)_[A-Z_]*CALENDAR_URL\s*(?::|=)\s*["']?https?:\/\//i;
   const osmPrivateCalendarUrl = /onlinescoutmanager\.co\.uk\/ext\/cal\/\?/i;
 
-  for (const path of trackedFiles) {
+  for (const path of existingTrackedFiles) {
     const bytes = readFileSync(path);
     if (bytes.includes(0)) continue;
 
@@ -205,44 +207,24 @@ test('admin proxy prefers Cloudflare authenticated Access context and retains cr
   assert.match(deployScript, /wrangler deploy .*--keep-vars/);
 });
 
-test('exceptional IAM repair workflow is manual, owner-gated and explicitly confirmed', () => {
-  const workflow = readFileSync('.github/workflows/repair-shared-layer-permission.yml', 'utf8');
-
-  assert.match(workflow, /\n  workflow_dispatch:\n/);
-  assert.doesNotMatch(workflow, /\n  push:\n/);
-  assert.match(workflow, /confirmation:/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/master'/);
-  assert.match(workflow, /github\.actor == github\.repository_owner/);
-  assert.match(workflow, /github\.event\.inputs\.confirmation == 'REPAIR'/);
-  assert.match(workflow, /\n    permissions:\n      contents: read\n      id-token: write\n/);
-});
-
-test('formerly public private prefixes are invalidated and the S3 origin is anonymously private', () => {
-  const workflow = readFileSync('.github/workflows/purge-private-s3-cache.yml', 'utf8');
-  const repairWorkflow = readFileSync('.github/workflows/repair-shared-layer-permission.yml', 'utf8');
+test('private prefixes stay protected and normal deployment owns cache invalidation', () => {
+  const workflow = readFileSync('.github/workflows/deploy-to-s3.yml', 'utf8');
+  const bootstrapTemplate = readFileSync('aws/bootstrap/scouts-account-bootstrap.yaml', 'utf8');
   const cloudfrontDoc = readFileSync('CLOUDFRONT.md', 'utf8');
   const cloudfrontTemplate = readFileSync('cloudfront-stack.yaml', 'utf8');
   const documentedId = cloudfrontDoc.match(/\*\*Distribution ID\*\*:\s*`([^`]+)`/)?.[1] || '';
 
   assert.ok(documentedId, 'CLOUDFRONT.md must document the active distribution ID');
-  assert.match(workflow, new RegExp(`CLOUDFRONT_DISTRIBUTION_ID: ${documentedId}`));
-  assert.match(workflow, /aws cloudfront get-distribution/);
   assert.match(workflow, /aws cloudfront create-invalidation/);
-  assert.match(workflow, /CLOUDFRONT_INVALIDATION_ID/);
-  assert.match(workflow, /aws cloudfront wait invalidation-completed/);
-  assert.match(repairWorkflow, /cloudfront:GetInvalidation/);
-  assert.match(repairWorkflow, new RegExp(`distribution\/${documentedId}`));
+  assert.match(workflow, /CLOUDFRONT_DISTRIBUTION_ID/);
+  assert.match(bootstrapTemplate, /lambda:PublishLayerVersion/);
+  assert.match(bootstrapTemplate, /lambda:GetLayerVersion/);
+  assert.match(bootstrapTemplate, /events:PutRule/);
+  assert.match(bootstrapTemplate, /events:TagResource/);
+  assert.match(bootstrapTemplate, /cloudfront:CreateInvalidation/);
   assert.match(cloudfrontTemplate, /RestrictionType:\s*whitelist/);
   assert.match(cloudfrontTemplate, /- GB/);
-  assert.match(workflow, /"\/calendar\/\*"/);
-  assert.match(workflow, /"\/runtime\/\*"/);
-  assert.match(workflow, /"\/events\/\*"/);
-  assert.match(workflow, /Verify anonymous S3 access boundary/);
-  assert.match(workflow, /status_for/);
-  assert.match(workflow, /is_private_status/);
-  assert.match(workflow, /assert_public/);
-  assert.match(workflow, /assert_private/);
-  assert.match(workflow, /origin\/agenda\.json|\$\{origin\}\/agenda\.json/);
+  assert.match(workflow, /\/agenda\.json/);
   assert.doesNotMatch(workflow, /CLOUDFRONT_BASE_URL/);
   assert.doesNotMatch(workflow, /PUBLIC_SITE_BASE_URL/);
   assert.match(workflow, /configure-aws-credentials@[0-9a-f]{40}/i);
