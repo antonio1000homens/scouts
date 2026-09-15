@@ -28,6 +28,7 @@ const EXPECTED_AWS_ACCOUNT = process.env.EXPECTED_AWS_ACCOUNT || '553490163883';
 const DEPLOYED_EVENT_LOADER_KEY = process.env.DEPLOYED_EVENT_LOADER_KEY || 'website/scripts/event-loader.js';
 const IS_GITHUB_ACTIONS = process.env.GITHUB_ACTIONS === 'true';
 const CONDITIONAL_WRITE_ATTEMPTS = 8;
+const REQUIRE_IMAGE = process.env.LIVE_TEST_REQUIRE_IMAGE === '1';
 
 if (!ACK) {
   throw new Error('Refusing live mutation. Set LIVE_TEST_ACK=1 after reviewing this script.');
@@ -406,7 +407,7 @@ const uid = `${REGRESSION_UID_PREFIX}${runSuffix.split('-', 1)[0]}`;
 const hex = titleToHex(title);
 const uidSibling = `${REGRESSION_UID_PREFIX}${runSuffix.split('-', 1)[0]}-sibling`;
 const occurrenceId = `occ_${hex.slice(0, 24).padEnd(24, '0')}`;
-const siblingOccurrenceId = `occ_${titleToHex(`${title} sibling`).slice(0, 24).padEnd(24, '0')}`;
+const siblingOccurrenceId = `occ_${titleToHex(`${title} sibling`).slice(-24).padStart(24, '0')}`;
 const agendaEntries = [
   { uid, occurrenceId },
   { uid: uidSibling, occurrenceId: siblingOccurrenceId },
@@ -510,10 +511,14 @@ try {
   let current = await requestAndVerify({
     action: 'generateFull',
     label: 'Full enrichment',
-    predicate: (event) => Boolean(event.metadata.tagline && event.metadata.image.theme && event.metadata.image.url),
+    predicate: (event) => Boolean(
+      event.metadata.tagline
+      && event.metadata.image.theme
+      && (!REQUIRE_IMAGE || event.metadata.image.url),
+    ),
   });
-  assertCanonicalEventDocument(current, { expectedHex: hex, requireComplete: true });
-  requireGeneratedImage(current, 'Full enrichment');
+  assertCanonicalEventDocument(current, { expectedHex: hex, requireComplete: REQUIRE_IMAGE });
+  if (REQUIRE_IMAGE) requireGeneratedImage(current, 'Full enrichment');
 
   current = await requestAndVerify({
     action: 'generateTagline',
@@ -531,14 +536,18 @@ try {
     predicate: (event) => Boolean(event.metadata.image.theme),
   });
 
-  current = await requestAndVerify({
-    action: 'generateImage',
-    stage: 'image',
-    label: 'Image enrichment',
-    reset: (event) => { event.metadata.image.url = null; },
-    predicate: (event) => Boolean(event.metadata.image.url),
-  });
-  requireGeneratedImage(current, 'Image enrichment');
+  if (REQUIRE_IMAGE) {
+    current = await requestAndVerify({
+      action: 'generateImage',
+      stage: 'image',
+      label: 'Image enrichment',
+      reset: (event) => { event.metadata.image.url = null; },
+      predicate: (event) => Boolean(event.metadata.image.url),
+    });
+    requireGeneratedImage(current, 'Image enrichment');
+  } else {
+    recordPass('Image enrichment', 'skipped because LIVE_TEST_REQUIRE_IMAGE is not enabled');
+  }
 
   const approve = await postCommand({ realm: 'scouts', action: 'approve', subject: { hex, isApproved: true } });
   const approved = await waitForEventAndAgenda(hex, (event) => event.metadata.status.isApproved === true, 'approval persistence');

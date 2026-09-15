@@ -29,6 +29,10 @@ shared_layer_source_hash() {
 
   (
     cd "${nodejs_dir}"
+    # Lambda runs the Node.js layer on Amazon Linux x86_64. Include the target
+    # platform in the content address so a locally-built macOS sharp binary can
+    # never be mistaken for a deployable Lambda artifact.
+    printf '%s\n' 'lambda-platform:linux-x64'
     find . -type f \
       ! -path './node_modules/*' \
       ! -name '*.test.mjs' \
@@ -63,10 +67,23 @@ prepare_shared_layer_zip() {
   fi
 
   echo "Shared Lambda layer artifact missing for ${layer_hash}; building once."
-  (
-    cd "${shared_layer_dir}/nodejs"
-    npm ci --omit=dev --cache "${npm_cache_dir}"
-  )
+  if [ "$(uname -s)" = 'Linux' ]; then
+    (
+      cd "${shared_layer_dir}/nodejs"
+      npm ci --omit=dev --cache "${npm_cache_dir}"
+    )
+  else
+    if ! command -v docker >/dev/null 2>&1; then
+      echo 'Docker is required to build the Lambda layer from a non-Linux host.' >&2
+      return 1
+    fi
+    docker run --rm --platform linux/amd64 \
+      --user "$(id -u):$(id -g)" \
+      --volume "${shared_layer_dir}/nodejs:/work" \
+      --workdir /work \
+      node:24-bookworm \
+      npm ci --omit=dev --cache /tmp/npm-cache
+  fi
 
   rm -f "${shared_layer_dir}/lambda-layer.zip"
   (

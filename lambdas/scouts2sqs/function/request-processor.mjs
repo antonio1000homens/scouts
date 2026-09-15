@@ -1012,6 +1012,9 @@ function buildPersistPatchForProcessing(rawSubject) {
     if (!hexValue) {
         throw new Error('Persist request missing hex identifier');
     }
+    const occurrenceId = normalizeNullableText(
+        compactSubject.occurrenceId ?? compactSubject.metadata?.occurrenceId,
+    );
 
     const patch = {};
     ensureRuntimeMetadata(compactSubject, hexValue);
@@ -1066,6 +1069,7 @@ function buildPersistPatchForProcessing(rawSubject) {
         hexValue,
         action: patch,
         subject: hexValue,
+        ...(occurrenceId ? { occurrenceId } : {}),
     };
 }
 
@@ -1453,6 +1457,7 @@ export async function lambdaHandler(event) {
                                     realm: 'persist',
                                     subject: expandedPersist.subject,
                                     action: expandedPersist.action,
+                                    ...(expandedPersist.occurrenceId ? { occurrenceId: expandedPersist.occurrenceId } : {}),
                                 };
                             }
                             if (messageBody.slackMetadata && typeof messageBody.slackMetadata === 'object') {
