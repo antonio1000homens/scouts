@@ -203,6 +203,10 @@ export function translateCompactPersistRequest(message) {
     rootRequestId: rootRequestIdOf(message, requestId),
     source: text(message?.source) || 'scouts2sqs',
     ...(occurrenceId ? { occurrenceId } : {}),
+    ...(text(message?.decisionSource) ? { decisionSource: text(message.decisionSource) } : {}),
+    ...(message?.slackMetadata && typeof message.slackMetadata === 'object'
+      ? { slackMetadata: { ...message.slackMetadata } }
+      : {}),
   };
 }
 

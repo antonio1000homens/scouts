@@ -92,7 +92,6 @@ test('approving snapshot without an image persists metadata but requires image g
       url: null,
     },
     status: {
-      isHidden: false,
       isApproved: false,
     },
   });
@@ -150,4 +149,17 @@ test('approval idempotency key is stable for root operation, revision and action
   assert.equal(first, second);
   assert.notEqual(first, different);
   assert.match(first, /^[a-f0-9]{64}$/);
+});
+
+test('approval patch never writes occurrence visibility into shared metadata', () => {
+  const hidden = event({
+    metadata: {
+      ...event().metadata,
+      status: { ...event().metadata.status, isHidden: true },
+    },
+  });
+  const snapshot = buildEventReviewSnapshot(hidden);
+  const patch = buildApprovedSnapshotPatch(snapshot);
+  assert.equal(Object.prototype.hasOwnProperty.call(patch.metadata.status, 'isHidden'), false);
+  assert.equal(patch.metadata.status.isApproved, false);
 });

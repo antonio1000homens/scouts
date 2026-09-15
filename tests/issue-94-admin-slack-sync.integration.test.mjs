@@ -158,3 +158,14 @@ test('Slack response URL callback bindings use the defined helper in both persis
     assert.doesNotMatch(source, /\n\s*postResponseUrl,\n/);
   }
 });
+
+
+test('Slack hide requires and forwards a canonical occurrence selector', () => {
+  const handler = readFileSync('lambdas/scouts-slack-handler/function/slack-handler.mjs', 'utf8');
+  const router = readFileSync('lambdas/scouts2sqs/function/request-router.mjs', 'utf8');
+  assert.match(handler, /actionMeta\?\.occurrenceId \?\? eventData\?\.occurrenceId/);
+  assert.match(handler, /error: 'visibility_selector_required'/);
+  assert.match(handler, /realm: 'persist'[\s\S]*status: \{ isHidden: true \}[\s\S]*action: 'persist'/);
+  assert.match(router, /slackMetadata:[\s\S]*message\.slackMetadata/);
+  assert.match(router, /decisionSource/);
+});

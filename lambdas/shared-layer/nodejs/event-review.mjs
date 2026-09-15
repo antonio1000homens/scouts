@@ -111,7 +111,6 @@ export function buildApprovedSnapshotPatch(snapshot) {
         url: imageUrl,
       },
       status: {
-        isHidden: bool(snapshot.isHidden),
         isApproved: Boolean(imageUrl),
       },
     },
