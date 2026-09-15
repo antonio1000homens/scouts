@@ -1,0 +1,683 @@
+name: PR 123 review fixes
+
+on:
+  push:
+    branches:
+      - refactor/admin-v2
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fixes:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: refactor/admin-v2
+          fetch-depth: 0
+
+      - name: Apply review fixes
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}\n--- needle ---\n{old}')
+              p.write_text(text.replace(old, new, 1))
+
+          # Admin: occurrence-level change identity must precede shared HEX.
+          replace_once(
+              'website/admin/admin-script.js',
+              """function notificationEventIdentity(entry, index = 0) {
+              const event = entry?.event || entry || {};
+              const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+              const hex = String(metadata.hex || metadata.hexId || event.hex || event.hexId || '').trim().toLowerCase();
+              if (hex) return `hex:${hex}`;
+          """,
+              """function notificationEventIdentity(entry, index = 0) {
+              const event = entry?.event || entry || {};
+              const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+              const occurrenceId = String(entry?.occurrenceId || event.occurrenceId || '').trim();
+              if (occurrenceId) return `occurrence:${occurrenceId}`;
+              const hex = String(metadata.hex || metadata.hexId || event.hex || event.hexId || '').trim().toLowerCase();
+              if (hex) return `hex:${hex}`;
+          """,
+          )
+
+          # Admin: auth refresh must preserve action-scoped pending state.
+          replace_once(
+              'website/admin/admin-script.js',
+              """function refreshApiActionButtons() {
+              const enabled = apiAuthReady;
+              const actionButtons = document.querySelectorAll('.requires-api');
+              actionButtons.forEach((button) => {
+                  button.disabled = !enabled;
+                  button.classList.toggle('btn-disabled', !enabled);
+              });
+          }
+          """,
+              """function refreshApiActionButtons() {
+              const actionButtons = document.querySelectorAll('.requires-api');
+              actionButtons.forEach((button) => {
+                  const pending = button.dataset.apiPending === 'true';
+                  const enabled = apiAuthReady && !pending;
+                  button.disabled = !enabled;
+                  button.classList.toggle('btn-disabled', !enabled);
+              });
+          }
+          """,
+          )
+
+          # Admin cards must target their own entry when starting generation.
+          replace_once(
+              'website/admin/admin-script.js',
+              """                            if (action.onclick === 'generateFull') return `<button class=\"btn ${action.className} requires-api\" value=\"generateFull\" onclick=\"requestGeneratedField('full', this.value, this)\">${action.label}</button>`;
+                                      if (action.onclick === 'generateImage') return `<button class=\"btn ${action.className} requires-api\" value=\"generateImage\" onclick=\"requestGeneratedField('imageUrl', this.value, this)\">${action.label}</button>`;
+          """,
+              """                            if (action.onclick === 'generateFull') return `<button class=\"btn ${action.className} requires-api\" value=\"generateFull\" onclick=\"requestGeneratedField('full', this.value, this, ${index})\">${action.label}</button>`;
+                                      if (action.onclick === 'generateImage') return `<button class=\"btn ${action.className} requires-api\" value=\"generateImage\" onclick=\"requestGeneratedField('imageUrl', this.value, this, ${index})\">${action.label}</button>`;
+          """,
+          )
+
+          # Save fields: scope duplicate-click protection to this event/action.
+          replace_once(
+              'website/admin/admin-script.js',
+              """    const event = entry.event;
+              const eventLabel = event.summary || event.title || `Event ${currentEventIndex + 1}`;
+              const hex = getEventHex(event);
+              if (!hex) {
+                  updateModalStatus(`Cannot persist ${config.label.toLowerCase()}: event is missing HEX.`, 'error');
+                  return;
+              }
+
+              const subject = {
+          """,
+              """    const event = entry.event;
+              const eventLabel = event.summary || event.title || `Event ${currentEventIndex + 1}`;
+              const hex = getEventHex(event);
+              if (!hex) {
+                  updateModalStatus(`Cannot persist ${config.label.toLowerCase()}: event is missing HEX.`, 'error');
+                  return;
+              }
+              const operationKey = uiOperationKey(entry, `persist:${field}`);
+              if (pendingUiOperations.has(operationKey)) return;
+              pendingUiOperations.set(operationKey, true);
+
+              const subject = {
+          """,
+          )
+          replace_once(
+              'website/admin/admin-script.js',
+              """    const originalButtonLabel = button?.textContent;
+              if (button) { button.disabled = true; button.textContent = 'Saving…'; }
+
+              refreshApiActionButtons();
+          """,
+              """    const originalButtonLabel = button?.textContent;
+              if (button) {
+                  button.dataset.apiPending = 'true';
+                  button.disabled = true;
+                  button.textContent = 'Saving…';
+              }
+
+              refreshApiActionButtons();
+          """,
+          )
+          replace_once(
+              'website/admin/admin-script.js',
+              """    } finally {
+                  if (button) { button.disabled = !apiAuthReady; button.textContent = originalButtonLabel; }
+                  refreshApiActionButtons();
+              }
+          }
+
+          async function requestGeneratedField(field, action = 'generate', button = null) {
+          """,
+              """    } finally {
+                  pendingUiOperations.delete(operationKey);
+                  if (button) {
+                      delete button.dataset.apiPending;
+                      button.textContent = originalButtonLabel;
+                  }
+                  refreshApiActionButtons();
+              }
+          }
+
+          async function requestGeneratedField(field, action = 'generate', button = null, eventIndex = null) {
+          """,
+          )
+
+          # Generation: resolve card target explicitly and guard duplicate submissions.
+          replace_once(
+              'website/admin/admin-script.js',
+              """    const entry = getSelectedModalEntry();
+              if (!entry) return;
+
+              const config = getFieldOperationConfig(field);
+              const event = entry.event;
+              const eventLabel = event.summary || event.title || `Event ${currentEventIndex + 1}`;
+              const hex = getEventHex(event);
+              if (!hex) {
+                  updateModalStatus(`Cannot queue ${config.queueLabel}: event is missing HEX.`, 'error');
+                  return;
+              }
+
+              const payload = {
+          """,
+              """    const entry = Number.isInteger(eventIndex) ? visibleEventEntries[eventIndex] : getSelectedModalEntry();
+              if (!entry?.event) {
+                  const message = 'Unable to find selected event entry.';
+                  if (Number.isInteger(eventIndex)) pinRuntimeDetails(message, 'error');
+                  else updateModalStatus(message, 'error');
+                  return;
+              }
+
+              const config = getFieldOperationConfig(field);
+              const event = entry.event;
+              const displayIndex = Number.isInteger(eventIndex) ? eventIndex : currentEventIndex;
+              const eventLabel = event.summary || event.title || `Event ${(displayIndex ?? 0) + 1}`;
+              const hex = getEventHex(event);
+              if (!hex) {
+                  const message = `Cannot queue ${config.queueLabel}: event is missing HEX.`;
+                  if (Number.isInteger(eventIndex)) pinRuntimeDetails(message, 'error');
+                  else updateModalStatus(message, 'error');
+                  return;
+              }
+              const operationKey = uiOperationKey(entry, `${action}:${field}`);
+              if (pendingUiOperations.has(operationKey)) return;
+              pendingUiOperations.set(operationKey, true);
+
+              const payload = {
+          """,
+          )
+          replace_once(
+              'website/admin/admin-script.js',
+              """    const originalButtonLabel = button?.textContent;
+              if (button) { button.disabled = true; button.textContent = action === 'generateFull' ? 'Generating…' : 'Regenerating…'; }
+
+              refreshApiActionButtons();
+          """,
+              """    const originalButtonLabel = button?.textContent;
+              if (button) {
+                  button.dataset.apiPending = 'true';
+                  button.disabled = true;
+                  button.textContent = action === 'generateFull' ? 'Generating…' : 'Regenerating…';
+              }
+
+              refreshApiActionButtons();
+          """,
+          )
+          replace_once(
+              'website/admin/admin-script.js',
+              """    } finally {
+                  if (button) { button.disabled = !apiAuthReady; button.textContent = originalButtonLabel; }
+                  refreshApiActionButtons();
+              }
+          }
+
+          function buildVisibilityCommand(entry, hidden) {
+          """,
+              """    } finally {
+                  pendingUiOperations.delete(operationKey);
+                  if (button) {
+                      delete button.dataset.apiPending;
+                      button.textContent = originalButtonLabel;
+                  }
+                  refreshApiActionButtons();
+              }
+          }
+
+          function buildVisibilityCommand(entry, hidden) {
+          """,
+          )
+
+          # Optimistic visibility state is occurrence-scoped, never HEX-scoped.
+          replace_once(
+              'website/admin/admin-script.js',
+              """function applyLocalHiddenState(entry, hiddenAtIso, hidden = true) {
+              if (!entry || !entry.event) return;
+              const event = entry.event;
+              const hex = getEventHex(event);
+              if (hidden) {
+                  event.isHidden = true;
+                  event.hiddenAt = hasText(hiddenAtIso) ? hiddenAtIso : new Date().toISOString();
+                  entry.allHidden = true;
+                  if (hex) {
+                      localVisibilityOverrides.set(hex, {
+                          hidden: true,
+                          hiddenAt: event.hiddenAt,
+                      });
+                  }
+              } else {
+                  event.isHidden = false;
+                  event.hiddenAt = null;
+                  entry.allHidden = false;
+                  if (hex) {
+                      localVisibilityOverrides.set(hex, {
+                          hidden: false,
+                          hiddenAt: null,
+                      });
+                  }
+              }
+          }
+
+          function applyVisibilityOverrides(entries, options = {}) {
+              if (!Array.isArray(entries) || localVisibilityOverrides.size === 0) return false;
+              const allowConfirm = options.allowConfirm !== false;
+              let changed = false;
+
+              entries.forEach((entry) => {
+                  const event = entry?.event;
+                  const hex = getEventHex(event);
+                  if (!hex) return;
+
+                  const override = localVisibilityOverrides.get(hex);
+                  if (!override) return;
+
+                  const backendStateMatches = isHiddenEvent(event) === Boolean(override.hidden);
+                  if (allowConfirm && backendStateMatches) {
+                      localVisibilityOverrides.delete(hex);
+                      return;
+                  }
+
+                  if (override.hidden) {
+                      const nextHiddenAt = hasText(override.hiddenAt) ? override.hiddenAt : (event.hiddenAt || new Date().toISOString());
+                      if (event.isHidden !== true || event.hiddenAt !== nextHiddenAt || entry.allHidden !== true) {
+                          event.isHidden = true;
+                          event.hiddenAt = nextHiddenAt;
+                          entry.allHidden = true;
+                          changed = true;
+                      }
+                      return;
+                  }
+
+                  if (event.isHidden !== false || event.hiddenAt !== null || entry.allHidden !== false) {
+                      event.isHidden = false;
+                      event.hiddenAt = null;
+                      entry.allHidden = false;
+                      changed = true;
+                  }
+              });
+
+              return changed;
+          }
+          """,
+              """function applyLocalHiddenState(entry, hiddenAtIso, hidden = true) {
+              if (!entry || !entry.event) return;
+              const event = entry.event;
+              const occurrenceId = entry.occurrenceId || event.occurrenceId;
+              if (!occurrenceId) return;
+              if (hidden) {
+                  event.isHidden = true;
+                  event.hiddenAt = hasText(hiddenAtIso) ? hiddenAtIso : new Date().toISOString();
+                  entry.allHidden = true;
+                  localVisibilityOverrides.set(occurrenceId, {
+                      hidden: true,
+                      hiddenAt: event.hiddenAt,
+                  });
+              } else {
+                  event.isHidden = false;
+                  event.hiddenAt = null;
+                  entry.allHidden = false;
+                  localVisibilityOverrides.set(occurrenceId, {
+                      hidden: false,
+                      hiddenAt: null,
+                  });
+              }
+          }
+
+          function applyVisibilityOverrides(entries, options = {}) {
+              if (!Array.isArray(entries) || localVisibilityOverrides.size === 0) return false;
+              const allowConfirm = options.allowConfirm !== false;
+              let changed = false;
+
+              entries.forEach((entry) => {
+                  const event = entry?.event;
+                  const occurrenceId = entry?.occurrenceId || event?.occurrenceId;
+                  if (!occurrenceId) return;
+
+                  const override = localVisibilityOverrides.get(occurrenceId);
+                  if (!override) return;
+
+                  const backendStateMatches = isHiddenEvent(event) === Boolean(override.hidden);
+                  if (allowConfirm && backendStateMatches) {
+                      localVisibilityOverrides.delete(occurrenceId);
+                      return;
+                  }
+
+                  if (override.hidden) {
+                      const nextHiddenAt = hasText(override.hiddenAt) ? override.hiddenAt : (event.hiddenAt || new Date().toISOString());
+                      if (event.isHidden !== true || event.hiddenAt !== nextHiddenAt || entry.allHidden !== true) {
+                          event.isHidden = true;
+                          event.hiddenAt = nextHiddenAt;
+                          entry.allHidden = true;
+                          changed = true;
+                      }
+                      return;
+                  }
+
+                  if (event.isHidden !== false || event.hiddenAt !== null || entry.allHidden !== false) {
+                      event.isHidden = false;
+                      event.hiddenAt = null;
+                      entry.allHidden = false;
+                      changed = true;
+                  }
+              });
+
+              return changed;
+          }
+          """,
+          )
+
+          # Validate HEX before marking visibility operation pending; preserve button lock.
+          for action_name, verb in [('hide', 'hide'), ('unhide', 'unhide')]:
+              old = f"""    const eventLabel = event.summary || event.title || `Event ${{eventIndex + 1}}`;
+              const hex = getEventHex(event);
+              const occurrenceId = entry.occurrenceId || event.occurrenceId;
+              if (!occurrenceId) {{
+                  const message = 'Cannot {verb} event: this occurrence has no canonical identity. Refresh the agenda and try again.';
+                  if (fromModal) updateModalStatus(message, 'error'); else updateRuntimeDetails(message, 'error');
+                  return;
+              }}
+              const operationKey = uiOperationKey(entry, '{action_name}');
+              if (pendingUiOperations.has(operationKey)) return;
+              pendingUiOperations.set(operationKey, true);
+              if (!hex) {{
+                  const message = 'Cannot {verb} event: missing HEX.';
+                  if (fromModal) updateModalStatus(message, 'error');
+                  else updateRuntimeDetails(message, 'error');
+                  return;
+              }}
+          """
+              new = f"""    const eventLabel = event.summary || event.title || `Event ${{eventIndex + 1}}`;
+              const hex = getEventHex(event);
+              const occurrenceId = entry.occurrenceId || event.occurrenceId;
+              if (!occurrenceId) {{
+                  const message = 'Cannot {verb} event: this occurrence has no canonical identity. Refresh the agenda and try again.';
+                  if (fromModal) updateModalStatus(message, 'error'); else updateRuntimeDetails(message, 'error');
+                  return;
+              }}
+              if (!hex) {{
+                  const message = 'Cannot {verb} event: missing HEX.';
+                  if (fromModal) updateModalStatus(message, 'error');
+                  else updateRuntimeDetails(message, 'error');
+                  return;
+              }}
+              const operationKey = uiOperationKey(entry, '{action_name}');
+              if (pendingUiOperations.has(operationKey)) return;
+              pendingUiOperations.set(operationKey, true);
+          """
+              replace_once('website/admin/admin-script.js', old, new)
+
+          for label in ['Hiding…', 'Unhiding…']:
+              replace_once(
+                  'website/admin/admin-script.js',
+                  f"""    const originalButtonLabel = button?.textContent;
+              if (button) {{ button.disabled = true; button.textContent = '{label}'; }}
+
+              refreshApiActionButtons();
+          """,
+                  f"""    const originalButtonLabel = button?.textContent;
+              if (button) {{
+                  button.dataset.apiPending = 'true';
+                  button.disabled = true;
+                  button.textContent = '{label}';
+              }}
+
+              refreshApiActionButtons();
+          """,
+              )
+
+          # There are exactly two visibility finally blocks with this shape.
+          p = Path('website/admin/admin-script.js')
+          text = p.read_text()
+          old = """        if (button) { button.disabled = !apiAuthReady; button.textContent = originalButtonLabel; }
+                  pendingUiOperations.delete(operationKey);
+                  refreshApiActionButtons();
+          """
+          if text.count(old) != 2:
+              raise SystemExit(f'visibility finalizer: expected 2 matches, found {text.count(old)}')
+          new = """        pendingUiOperations.delete(operationKey);
+                  if (button) {
+                      delete button.dataset.apiPending;
+                      button.textContent = originalButtonLabel;
+                  }
+                  refreshApiActionButtons();
+          """
+          p.write_text(text.replace(old, new))
+
+          # Approval override receives the clicked button and participates in pending-state guard.
+          replace_once(
+              'website/admin/admin-approval-workflow.js',
+              """    window.approveEvent = async function issue91ApproveEvent(eventIndex, fromModal = false, action = 'approve') {
+                  if (String(action || '').toLowerCase() !== 'approve') {
+                      return legacyApproveEvent?.(eventIndex, fromModal, action);
+                  }
+          """,
+              """    window.approveEvent = async function issue91ApproveEvent(eventIndex, fromModal = false, action = 'approve', button = null) {
+                  if (String(action || '').toLowerCase() !== 'approve') {
+                      return legacyApproveEvent?.(eventIndex, fromModal, action, button);
+                  }
+          """,
+          )
+          replace_once(
+              'website/admin/admin-approval-workflow.js',
+              """        const hex = typeof getEventHex === 'function' ? getEventHex(event) : null;
+                  if (!hex) {
+                      updateRuntimeDetails('Cannot approve: event has no canonical HEX.', 'error');
+                      return null;
+                  }
+
+                  if (typeof refreshApiActionButtons === 'function') refreshApiActionButtons();
+          """,
+              """        const hex = typeof getEventHex === 'function' ? getEventHex(event) : null;
+                  if (!hex) {
+                      updateRuntimeDetails('Cannot approve: event has no canonical HEX.', 'error');
+                      return null;
+                  }
+                  const operationKey = typeof uiOperationKey === 'function'
+                      ? uiOperationKey(entry, 'approve')
+                      : `${entry?.occurrenceId || event?.occurrenceId || hex}:approve`;
+                  if (typeof pendingUiOperations !== 'undefined' && pendingUiOperations.has(operationKey)) return null;
+                  if (typeof pendingUiOperations !== 'undefined') pendingUiOperations.set(operationKey, true);
+                  const originalButtonLabel = button?.textContent;
+                  if (button) {
+                      button.dataset.apiPending = 'true';
+                      button.disabled = true;
+                      button.textContent = 'Approving…';
+                  }
+
+                  if (typeof refreshApiActionButtons === 'function') refreshApiActionButtons();
+          """,
+          )
+          replace_once(
+              'website/admin/admin-approval-workflow.js',
+              """        } finally {
+                      if (typeof refreshApiActionButtons === 'function') refreshApiActionButtons();
+                      relabelApprovalButtons();
+                  }
+          """,
+              """        } finally {
+                      if (typeof pendingUiOperations !== 'undefined') pendingUiOperations.delete(operationKey);
+                      if (button) {
+                          delete button.dataset.apiPending;
+                          button.textContent = originalButtonLabel;
+                      }
+                      if (typeof refreshApiActionButtons === 'function') refreshApiActionButtons();
+                      relabelApprovalButtons();
+                  }
+          """,
+          )
+
+          # Backend change summaries use occurrence identity for occurrence-owned fields.
+          replace_once(
+              'lambdas/scouts/function/scouts-service.mjs',
+              """function buildEventChangeKey(event, index = 0) {
+              if (!event || typeof event !== 'object') return `idx:${index}`;
+              const hex = typeof event.hex === 'string' ? event.hex.trim().toLowerCase() : '';
+          """,
+              """function buildEventChangeKey(event, index = 0) {
+              if (!event || typeof event !== 'object') return `idx:${index}`;
+              const occurrenceId = typeof event.occurrenceId === 'string' ? event.occurrenceId.trim() : '';
+              if (occurrenceId) return `occurrence:${occurrenceId}`;
+              const hex = typeof event.hex === 'string' ? event.hex.trim().toLowerCase() : '';
+          """,
+          )
+
+          # Load occurrence overlays in bounded-concurrency batches before the serial enrichment loop.
+          replace_once(
+              'lambdas/scouts/function/scouts-service.mjs',
+              """  const processedTitles = new Set(); // Track processed titles to avoid duplicates
+              const liveQueuedProcessingByHex = new Map(); // Map<hexValue, Array<'tagline'|'imageTheme'|'image'>>
+
+              for (let index = 0; index < events.length; index++) {
+          """,
+              """  const processedTitles = new Set(); // Track processed titles to avoid duplicates
+              const liveQueuedProcessingByHex = new Map(); // Map<hexValue, Array<'tagline'|'imageTheme'|'image'>>
+
+              const occurrenceStateById = new Map();
+              const occurrenceIds = [...new Set(events.map((event) => resolveOccurrenceId(event)).filter(Boolean))];
+              const occurrenceReadConcurrency = 8;
+              for (let offset = 0; offset < occurrenceIds.length; offset += occurrenceReadConcurrency) {
+                  const batchIds = occurrenceIds.slice(offset, offset + occurrenceReadConcurrency);
+                  const batch = await Promise.all(batchIds.map(async (occurrenceId) => {
+                      try {
+                          const state = await getJsonFromS3(
+                              bucketName,
+                              occurrenceStorageKey(occurrenceId),
+                              `occurrence:${occurrenceId}`,
+                          );
+                          return [occurrenceId, state];
+                      } catch (error) {
+                          if (!/NoSuchKey|not found/i.test(error?.name || error?.message || '')) {
+                              console.warn(`[Occurrence] Failed to load visibility overlay ${occurrenceId}:`, error?.message || error);
+                          }
+                          return [occurrenceId, null];
+                      }
+                  }));
+                  for (const [occurrenceId, state] of batch) occurrenceStateById.set(occurrenceId, state);
+              }
+
+              for (let index = 0; index < events.length; index++) {
+          """,
+          )
+          replace_once(
+              'lambdas/scouts/function/scouts-service.mjs',
+              """    if (baseEvent.occurrenceId) {
+                  try {
+                      const occurrenceState = await getJsonFromS3(bucketName, occurrenceStorageKey(baseEvent.occurrenceId), `occurrence:${baseEvent.occurrenceId}`);
+                      if (occurrenceState?.status && typeof occurrenceState.status.isHidden === 'boolean') {
+                          isHidden = occurrenceState.status.isHidden;
+                          baseEvent.status = {
+                              ...(baseEvent.status && typeof baseEvent.status === 'object' ? baseEvent.status : {}),
+                              isHidden,
+                          };
+                          baseEvent.metadata = baseEvent.metadata && typeof baseEvent.metadata === 'object' ? baseEvent.metadata : {};
+                          baseEvent.metadata.status = {
+                              ...(baseEvent.metadata.status && typeof baseEvent.metadata.status === 'object' ? baseEvent.metadata.status : {}),
+                              isHidden,
+                          };
+                      }
+                  } catch (error) {
+                      if (!/NoSuchKey|not found/i.test(error?.name || error?.message || '')) {
+                          console.warn(`[Occurrence] Failed to load visibility overlay ${baseEvent.occurrenceId}:`, error?.message || error);
+                      }
+                  }
+              }
+          """,
+              """    if (baseEvent.occurrenceId) {
+                  const occurrenceState = occurrenceStateById.get(baseEvent.occurrenceId) ?? null;
+                  if (occurrenceState?.status && typeof occurrenceState.status.isHidden === 'boolean') {
+                      isHidden = occurrenceState.status.isHidden;
+                      baseEvent.status = {
+                          ...(baseEvent.status && typeof baseEvent.status === 'object' ? baseEvent.status : {}),
+                          isHidden,
+                      };
+                      baseEvent.metadata = baseEvent.metadata && typeof baseEvent.metadata === 'object' ? baseEvent.metadata : {};
+                      baseEvent.metadata.status = {
+                          ...(baseEvent.metadata.status && typeof baseEvent.metadata.status === 'object' ? baseEvent.metadata.status : {}),
+                          isHidden,
+                      };
+                  }
+              }
+          """,
+          )
+
+          # Persistence: validate occurrence/HEX before writing an overlay and never promote approval for visibility-only mutations.
+          replace_once(
+              'lambdas/sqs2scouts/function/persistence-processor.mjs',
+              """    if (matches.length !== 1) {
+                  const error = new Error(`Visibility occurrence ${occurrenceId} resolved to ${matches.length} agenda records`);
+                  error.code = matches.length === 0 ? 'VISIBILITY_OCCURRENCE_NOT_FOUND' : 'VISIBILITY_OCCURRENCE_AMBIGUOUS';
+                  throw error;
+              }
+              const overlay = {
+                  occurrenceId,
+                  metadataId: hex,
+                  sourceUid: sourceUid || matches[0].uid || null,
+                  lastKnownStart: lastKnownStart || matches[0].dtstart || null,
+          """,
+              """    if (matches.length !== 1) {
+                  const error = new Error(`Visibility occurrence ${occurrenceId} resolved to ${matches.length} agenda records`);
+                  error.code = matches.length === 0 ? 'VISIBILITY_OCCURRENCE_NOT_FOUND' : 'VISIBILITY_OCCURRENCE_AMBIGUOUS';
+                  throw error;
+              }
+              const occurrence = matches[0];
+              const occurrenceHex = String(occurrence?.metadata?.hex || '').trim().toLowerCase();
+              const requestedHex = String(hex || '').trim().toLowerCase();
+              if (!occurrenceHex || occurrenceHex !== requestedHex) {
+                  const error = new Error(`Visibility occurrence ${occurrenceId} does not belong to HEX ${requestedHex}`);
+                  error.code = 'VISIBILITY_OCCURRENCE_HEX_MISMATCH';
+                  throw error;
+              }
+              const overlay = {
+                  occurrenceId,
+                  metadataId: occurrenceHex,
+                  sourceUid: sourceUid || occurrence.uid || null,
+                  lastKnownStart: lastKnownStart || occurrence.dtstart || null,
+          """,
+          )
+          replace_once(
+              'lambdas/sqs2scouts/function/persistence-processor.mjs',
+              """            if (!actionIsHidden && !statusIsHidden) {
+                  setImageApprovalState(event, true);
+              }
+          """,
+              """            if (!visibility && !actionIsHidden && !statusIsHidden) {
+                  setImageApprovalState(event, true);
+              }
+          """,
+          )
+          PY
+
+      - name: Validate fixes
+        shell: bash
+        run: |
+          git diff --check
+          node --check website/admin/admin-script.js
+          node --check website/admin/admin-approval-workflow.js
+          node --check lambdas/scouts/function/scouts-service.mjs
+          node --check lambdas/sqs2scouts/function/persistence-processor.mjs
+          node --test lambdas/shared-layer/nodejs/occurrence-identity.test.mjs
+          node --test lambdas/sqs2scouts/function/tests/test-agenda-publisher.mjs
+          node --test tests/issue-39-admin-actions.test.mjs
+          node --test tests/issue-34-admin-ui.integration.test.mjs
+
+      - name: Commit fixes and remove one-shot workflow
+        shell: bash
+        run: |
+          git rm .github/workflows/pr123-apply-review-fixes.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add website/admin/admin-script.js website/admin/admin-approval-workflow.js \
+            lambdas/scouts/function/scouts-service.mjs \
+            lambdas/sqs2scouts/function/persistence-processor.mjs
+          git commit -m "Address PR 123 review findings"
+          git push origin HEAD:refactor/admin-v2
