@@ -5,7 +5,7 @@ import { readFileSync } from 'fs';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { SQSClient, SendMessageCommand, GetQueueAttributesCommand } from '@aws-sdk/client-sqs';
 import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
-import sharp from 'sharp';
+import { resolveCanonicalImageDimensions, normaliseGeneratedJpeg } from '/opt/nodejs/image-output-contract.mjs';
 import { getOptionalSecret, getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import { recordRequestActivity as defaultRecordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 import { publishCanonicalEventToAgenda as defaultPublishCanonicalEventToAgenda } from './agenda-publisher.mjs';
@@ -45,12 +45,7 @@ const GEMINI_TEXT_MODEL_PREFERENCES = parseGeminiTextModels(
     process.env.GEMINI_TEXT_MODELS || process.env.GEMINI_TEXT_MODEL,
 );
 const GEMINI_PROMPT_VERSION = (process.env.GEMINI_PROMPT_VERSION || '1').trim() || '1';
-const GENERATED_IMAGE_WIDTH = Number.isFinite(Number(process.env.GEMINI_IMAGE_OUTPUT_WIDTH))
-    ? Math.max(320, Number(process.env.GEMINI_IMAGE_OUTPUT_WIDTH))
-    : 1366;
-const GENERATED_IMAGE_HEIGHT = Number.isFinite(Number(process.env.GEMINI_IMAGE_OUTPUT_HEIGHT))
-    ? Math.max(180, Number(process.env.GEMINI_IMAGE_OUTPUT_HEIGHT))
-    : 768;
+const { width: GENERATED_IMAGE_WIDTH, height: GENERATED_IMAGE_HEIGHT } = resolveCanonicalImageDimensions();
 const defaultS3Client = new S3Client({ region: AWS_REGION });
 const defaultSqsClient = new SQSClient({ region: AWS_REGION });
 const defaultSfnClient = new SFNClient({ region: AWS_REGION });
@@ -1373,17 +1368,10 @@ async function uploadImageBufferToWebsiteS3(imageBuffer, {
     let finalExtension = '.jpg';
 
     try {
-        finalBuffer = await sharp(imageBuffer)
-            .rotate()
-            .trim()
-            .resize({
-                width: GENERATED_IMAGE_WIDTH,
-                height: GENERATED_IMAGE_HEIGHT,
-                fit: 'inside',
-                withoutEnlargement: true,
-            })
-            .jpeg({ mozjpeg: true, quality: 85 })
-            .toBuffer();
+        finalBuffer = await normaliseGeneratedJpeg(imageBuffer, {
+            width: GENERATED_IMAGE_WIDTH,
+            height: GENERATED_IMAGE_HEIGHT,
+        });
         console.log('[Image Conversion] Converted Gemini image to resized JPEG for storage', {
             width: GENERATED_IMAGE_WIDTH,
             height: GENERATED_IMAGE_HEIGHT,

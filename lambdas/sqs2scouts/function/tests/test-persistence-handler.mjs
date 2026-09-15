@@ -83,6 +83,10 @@ async function loadPersistenceModule(store, sentMessages) {
     if (specifier === 'sharp') return synthetic(specifier, { default: () => ({}) });
     if (specifier === '/opt/nodejs/ssm-secrets.mjs') return synthetic(specifier, { getOptionalSecret: async () => null, getRequiredSecret: async () => 'fixture-secret' });
     if (specifier === '/opt/nodejs/request-activity.mjs') return synthetic(specifier, { recordRequestActivity: async () => null });
+    if (specifier === '/opt/nodejs/image-output-contract.mjs') return synthetic(specifier, {
+      resolveCanonicalImageDimensions: () => ({ width: 1200, height: 900 }),
+      normaliseGeneratedJpeg: async (buffer) => buffer,
+    });
     if (specifier === '/opt/nodejs/enrichment-state.mjs') {
       return synthetic(specifier, {
         buildGenerationId: () => 'fixture-generation', getEnrichmentState: async () => null,

@@ -81,7 +81,7 @@
         padding: 1.5rem;
     }
 
-    .home-page .past-events .event-card img {
+    .home-page .past-events .event-card-image-frame {
         width: 92%;
         margin-left: auto;
         margin-right: auto;
@@ -114,9 +114,8 @@
         min-height: var(--homepage-event-card-height);
     }
 
-    .home-page .event-card img {
+    .home-page .event-card-image-frame {
         max-height: 150px;
-        object-fit: cover;
     }
 
     .home-page .future-events {

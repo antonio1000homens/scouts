@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { readFileSync } from 'fs';
-import sharp from 'sharp';
+import { resolveCanonicalImageDimensions, scaledCanonicalImageDimensions, normaliseGeneratedJpeg } from '/opt/nodejs/image-output-contract.mjs';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
@@ -52,12 +52,7 @@ const GEMINI_IMAGES_ENABLED = String(process.env.GEMINI_IMAGES || 'false').trim(
 const CLOUDFLARE_ACCOUNT_ID = text(process.env.CLOUDFLARE_ACCOUNT_ID);
 const CLOUDFLARE_MODEL = text(process.env.CLOUDFLARE_AI_MODEL) || DEFAULT_CLOUDFLARE_IMAGE_MODEL;
 const CLOUDFLARE_STEPS = normaliseCloudflareSteps(process.env.CLOUDFLARE_AI_STEPS);
-const IMAGE_WIDTH = Number.isFinite(Number(process.env.GEMINI_IMAGE_OUTPUT_WIDTH))
-  ? Math.max(320, Number(process.env.GEMINI_IMAGE_OUTPUT_WIDTH))
-  : 1366;
-const IMAGE_HEIGHT = Number.isFinite(Number(process.env.GEMINI_IMAGE_OUTPUT_HEIGHT))
-  ? Math.max(180, Number(process.env.GEMINI_IMAGE_OUTPUT_HEIGHT))
-  : 768;
+const { width: IMAGE_WIDTH, height: IMAGE_HEIGHT } = resolveCanonicalImageDimensions();
 const MAX_CACHED_JPEG_BYTES = 180 * 1024;
 const SLACK_WEBHOOK_URL = text(process.env.SLACK_WEBHOOK_URL) || 'https://slack.com/api/chat.postMessage';
 const SLACK_CHANNEL = text(process.env.SCOUTS_NOTIFICATION_CHANNEL) || 'C0C1996TGQZ';
@@ -592,15 +587,13 @@ async function normaliseForDurableCache(buffer) {
   let width = IMAGE_WIDTH;
   let height = IMAGE_HEIGHT;
   for (const quality of [85, 75, 65, 55, 45, 35]) {
-    const jpeg = await sharp(buffer)
-      .rotate()
-      .trim()
-      .resize({ width: Math.round(width), height: Math.round(height), fit: 'inside', withoutEnlargement: true })
-      .jpeg({ mozjpeg: true, quality })
-      .toBuffer();
+    const jpeg = await normaliseGeneratedJpeg(buffer, {
+      width: Math.round(width),
+      height: Math.round(height),
+      quality,
+    });
     if (jpeg.length <= MAX_CACHED_JPEG_BYTES) return jpeg;
-    width = Math.max(640, width * 0.9);
-    height = Math.max(360, height * 0.9);
+    ({ width, height } = scaledCanonicalImageDimensions(width / IMAGE_WIDTH * 0.9));
   }
   const error = new Error('Generated image could not be compressed safely for the durable retry cache');
   error.status = 400;

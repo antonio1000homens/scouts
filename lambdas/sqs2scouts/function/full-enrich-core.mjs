@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { readFileSync } from 'fs';
-import sharp from 'sharp';
+import { resolveCanonicalImageDimensions, normaliseGeneratedJpeg } from '/opt/nodejs/image-output-contract.mjs';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
 import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
@@ -54,12 +54,7 @@ const CLOUDFLARE_MODEL = text(process.env.CLOUDFLARE_AI_MODEL) || '@cf/black-for
 const CLOUDFLARE_STEPS = Number.isFinite(Number(process.env.CLOUDFLARE_AI_STEPS))
   ? Math.min(8, Math.max(1, Math.floor(Number(process.env.CLOUDFLARE_AI_STEPS))))
   : 4;
-const IMAGE_WIDTH = Number.isFinite(Number(process.env.GEMINI_IMAGE_OUTPUT_WIDTH))
-  ? Math.max(320, Number(process.env.GEMINI_IMAGE_OUTPUT_WIDTH))
-  : 1366;
-const IMAGE_HEIGHT = Number.isFinite(Number(process.env.GEMINI_IMAGE_OUTPUT_HEIGHT))
-  ? Math.max(180, Number(process.env.GEMINI_IMAGE_OUTPUT_HEIGHT))
-  : 768;
+const { width: IMAGE_WIDTH, height: IMAGE_HEIGHT } = resolveCanonicalImageDimensions();
 const SLACK_WEBHOOK_URL = text(process.env.SLACK_WEBHOOK_URL) || 'https://slack.com/api/chat.postMessage';
 const SLACK_CHANNEL = text(process.env.SCOUTS_NOTIFICATION_CHANNEL) || 'C0C1996TGQZ';
 
@@ -323,12 +318,7 @@ function safeKeyPart(value, fallback = 'event') {
 }
 
 async function uploadGeneratedImage(buffer, { hex, requestId, provider }) {
-  const jpeg = await sharp(buffer)
-    .rotate()
-    .trim()
-    .resize({ width: IMAGE_WIDTH, height: IMAGE_HEIGHT, fit: 'inside', withoutEnlargement: true })
-    .jpeg({ mozjpeg: true, quality: 85 })
-    .toBuffer();
+  const jpeg = await normaliseGeneratedJpeg(buffer, { width: IMAGE_WIDTH, height: IMAGE_HEIGHT });
   const key = `${EVENT_IMAGE_PREFIX}${safeKeyPart(hex, 'hex')}-${safeKeyPart(requestId, String(Date.now()))}-${safeKeyPart(provider)}.jpg`;
   await s3.send(new PutObjectCommand({
     Bucket: TARGET_BUCKET,

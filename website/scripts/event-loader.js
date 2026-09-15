@@ -158,7 +158,7 @@ function createEventImageMarkup(event, width = 400) {
     if (!rawUrl) return '';
     const sizedUrl = withImageWidthParam(rawUrl, width) || rawUrl;
     const altText = event?.title || event?.summary || 'Scout event image';
-    return `<img src="${sizedUrl}" alt="${altText}" loading="lazy" />`;
+    return `<div class="event-card-image-frame"><img src="${sizedUrl}" alt="${altText}" loading="lazy" /></div>`;
 }
 
 const SECTION_BADGE_CONFIG = {

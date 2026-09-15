@@ -1950,10 +1950,19 @@ footer {
     overflow: hidden;
 }
 
-.event-card img {
+.event-card-image-frame {
     width: 100%;
-    height: auto;
+    aspect-ratio: 4 / 3;
+    overflow: hidden;
     margin-bottom: 1rem;
+}
+
+.event-card-image-frame img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+    display: block;
 }
 
 .event-card h3,
@@ -2321,6 +2330,11 @@ footer {
     aspect-ratio: 4 / 3;
     overflow: hidden;
     border-radius: 14px;
+}
+
+.next-event .next-event-hero-media .event-card-image-frame {
+    height: 100%;
+    margin-bottom: 0;
 }
 
 .next-event .next-event-hero-copy {
