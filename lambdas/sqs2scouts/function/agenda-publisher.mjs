@@ -73,6 +73,7 @@ export function mergeCanonicalEventIntoAgenda(agenda, canonicalEvent, hex, optio
   const canonicalMetadata = metadataForAgenda(canonicalEvent, normalisedHex);
 
   const occurrenceId = text(options?.occurrenceId);
+  const hasExplicitVisibility = occurrenceId && typeof options.visibility === 'boolean';
   let matched = 0;
   let occurrenceMatched = 0;
   const events = agenda.events.map((event) => {
@@ -80,13 +81,18 @@ export function mergeCanonicalEventIntoAgenda(agenda, canonicalEvent, hex, optio
     if (occurrenceId && text(event?.occurrenceId) !== occurrenceId) return event;
     matched += 1;
     occurrenceMatched += 1;
+
+    // Shared HEX metadata may update all matching occurrences, but visibility is
+    // occurrence-owned state. Never copy the shared canonical isHidden value over
+    // an agenda occurrence unless this publication explicitly targets that
+    // occurrence with a visibility mutation.
+    const existingHidden = event?.metadata?.status?.isHidden === true;
     const metadata = clone(canonicalMetadata);
-    if (occurrenceId && event?.metadata?.status && options.visibility !== undefined) {
-      metadata.status = {
-        ...event.metadata.status,
-        isHidden: options.visibility === true,
-      };
-    }
+    metadata.status = {
+      ...metadata.status,
+      isHidden: hasExplicitVisibility ? options.visibility === true : existingHidden,
+    };
+
     return {
       ...event,
       metadata,
