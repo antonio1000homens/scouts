@@ -3620,7 +3620,7 @@ export async function lambdaHandler(event) {
             const existingEvent = (await loadHexEventFromS3(hexValue)) || {};
             let persistSubject = rawSubject;
             let persistAction = action;
-            const visibility = extractOccurrenceVisibility(message, rawSubject, action);
+            const visibility = extractOccurrenceVisibility(messageBody, rawSubject, action);
             if (visibility) {
                 const agendaOccurrence = await persistOccurrenceVisibility({
                     ...visibility,
@@ -3763,6 +3763,7 @@ export async function lambdaHandler(event) {
             });
 
             console.log(`[Persist] Successfully persisted HEX file for ${eventTitle}`);
+            runtimeOutcome = { status: 'completed' };
             const decisionAction = slackSyncResult.decision.status === 'HIDDEN' ? 'hidden' : 'persisted';
             const decisionSubject = {
                 hex: hexValue,

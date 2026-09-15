@@ -9,6 +9,7 @@ import {
   extractVisibilityPersistMutation,
   verifyVisibilityPersistReadback,
 } from '../full-enrich-helpers.mjs';
+import { mergeCanonicalEventIntoAgenda } from '../agenda-publisher.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../../..');
 const functionDir = path.join(repoRoot, 'lambdas/sqs2scouts/function');
@@ -110,6 +111,43 @@ test('persistence worker parses and merges the JSON action patch before writing'
   assert.match(persistenceProcessor, /const persistPatch = parsePersistPatch\(action\)/);
   assert.match(persistenceProcessor, /mergePersistPatch\(baseEvent, persistPatch\)/);
   assert.match(persistenceProcessor, /await saveHexEventToS3\(hexValue, event\);\s*await publishHexEventToAgenda\(hexValue, event\);/);
+});
+
+test('persist handler passes its parsed request body into occurrence visibility persistence', () => {
+  assert.match(
+    persistenceProcessor,
+    /const visibility = extractOccurrenceVisibility\(messageBody, rawSubject, action\);/,
+  );
+  assert.doesNotMatch(
+    persistenceProcessor,
+    /const visibility = extractOccurrenceVisibility\(message, rawSubject, action\);/,
+  );
+});
+
+test('persist handler records a verified completed outcome after canonical publication', () => {
+  assert.match(
+    persistenceProcessor,
+    /Successfully persisted HEX file for \$\{eventTitle\}\`\);\s*runtimeOutcome = \{ status: 'completed' \};/,
+  );
+});
+
+test('occurrence persist contract writes hidden state to the effective agenda without mutating the canonical event', () => {
+  const occurrenceId = 'occ_0123456789abcdef01234567';
+  const messageBody = occurrenceVisibilityMessage(occurrenceId, true);
+  const canonical = canonicalEvent(false);
+  const beforeCanonical = structuredClone(canonical);
+  const visibility = extractVisibilityPersistMutation(messageBody);
+  const agenda = { events: [agendaEvent('osm-event-1', false), { ...agendaEvent('osm-event-2', false), occurrenceId }] };
+  const merged = mergeCanonicalEventIntoAgenda(agenda, canonical, HOLIDAY_HEX, {
+    occurrenceId,
+    visibility: visibility.isHidden,
+  });
+
+  assert.equal(visibility.hex, HOLIDAY_HEX);
+  assert.equal(visibility.isHidden, true);
+  assert.deepEqual(canonical, beforeCanonical);
+  assert.equal(merged.agenda.events[0].metadata.status.isHidden, false);
+  assert.equal(merged.agenda.events[1].metadata.status.isHidden, true);
 });
 
 test('visibility guard understands the live subject-HEX plus encoded-action contract', () => {
