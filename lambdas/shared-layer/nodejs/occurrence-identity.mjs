@@ -10,22 +10,31 @@ function stableOsmIdentity(value) {
   return match ? `osm-event:${match[1]}` : '';
 }
 
+function firstStableOsmIdentity(...values) {
+  for (const value of values) {
+    const identity = stableOsmIdentity(value);
+    if (identity) return identity;
+  }
+  return '';
+}
+
 /** Return the strongest available source identity for one concrete occurrence. */
 export function sourceOccurrenceIdentity(event = {}) {
   const source = event.source && typeof event.source === 'object' ? event.source : {};
-  const osm = stableOsmIdentity(event.uid ?? event.originalUid ?? source.uid ?? source.id);
+  const osm = firstStableOsmIdentity(event.originalUid, event.uid, source.uid, source.id);
   if (osm) return osm;
 
   const nativeId = text(event.occurrenceSourceId ?? event.sourceEventId ?? event.eventId ?? source.eventId ?? source.id);
   if (nativeId) return `source:${nativeId}`;
 
-  const uid = text(event.uid ?? event.originalUid ?? source.uid ?? event.raw?.UID);
+  // Prefer the source/original UID over any presentation-sanitised UID. DTSTART is
+  // deliberately not part of durable identity: moving a non-recurring event must
+  // not orphan its occurrence visibility overlay. RECURRENCE-ID distinguishes
+  // concrete instances when recurrence semantics are available.
+  const uid = text(event.originalUid ?? event.raw?.UID ?? source.uid ?? event.uid);
   const recurrence = text(event.recurrenceId ?? event.recurrenceID ?? source.recurrenceId ?? event.raw?.['RECURRENCE-ID']);
   if (uid && recurrence) return `ics:${uid}|recurrence:${recurrence}`;
-  if (uid) {
-    const start = text(event.start?.sortKey ?? event.start?.raw ?? event.dtstart);
-    return start ? `uid:${uid}|start:${start}` : `uid:${uid}`;
-  }
+  if (uid) return `uid:${uid}`;
 
   const title = text(event.title ?? event.summary).toLowerCase();
   const start = text(event.start?.sortKey ?? event.start?.raw ?? event.dtstart);
@@ -47,4 +56,3 @@ export function occurrenceStorageKey(occurrenceId) {
   if (!/^occ_[a-f0-9]{24,}$/i.test(id)) throw new Error('Invalid occurrenceId');
   return `occurrences/${id}.json`;
 }
-
