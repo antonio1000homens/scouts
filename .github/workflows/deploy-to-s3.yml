@@ -137,7 +137,7 @@ jobs:
                 ;;
             esac
             case "${file}" in
-              deploy.sh|lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|tests/issue-34-admin-ui.integration.test.mjs|tests/issue-39-*.test.mjs|tests/issue-39-*.integration.test.mjs|tests/issue-43-*.test.mjs|tests/admin-notifications.test.mjs|tests/public-repo-safety.test.mjs|tests/helpers/*|docs/TESTING-STRATEGY.md|website/admin/*|.github/workflows/deploy-to-s3.yml)
+              deploy.sh|lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|tests/issue-34-admin-ui.integration.test.mjs|tests/issue-39-*.test.mjs|tests/issue-39-*.integration.test.mjs|tests/issue-43-*.test.mjs|tests/issue-125-*.test.mjs|tests/admin-notifications.test.mjs|tests/public-repo-safety.test.mjs|tests/helpers/*|scripts/run-hermetic-tests.mjs|eslint.config.mjs|docs/TESTING-STRATEGY.md|website/admin/*|.github/workflows/deploy-to-s3.yml)
                 retry_safety=true
                 ;;
             esac
@@ -223,46 +223,9 @@ jobs:
         working-directory: lambdas/shared-layer/nodejs
         run: npm ci
 
-      - name: Run retry policy unit tests
+      - name: Run authoritative hermetic test and static-safety runner
         if: steps.plan.outputs.retry_safety == 'true'
-        run: node --test lambdas/shared-layer/nodejs/enrichment-state.test.mjs
-
-      - name: Run retry state integration tests
-        if: steps.plan.outputs.retry_safety == 'true'
-        run: node --test lambdas/shared-layer/nodejs/enrichment-state.integration.test.mjs
-
-      - name: Run full-enrich callback policy tests
-        if: steps.plan.outputs.retry_safety == 'true'
-        run: node --test lambdas/sqs2scouts/function/tests/test-full-enrich-helpers.mjs
-
-      - name: Run issue 16 pipeline integration contracts
-        if: steps.plan.outputs.retry_safety == 'true'
-        run: node --test tests/issue-16-pipeline.integration.test.mjs
-
-      - name: Run deployment ordering contract tests
-        if: steps.plan.outputs.retry_safety == 'true'
-        run: node --test tests/deployment-order.integration.test.mjs
-
-      - name: Run issue 34 admin UI contracts
-        if: steps.plan.outputs.retry_safety == 'true'
-        run: node --test tests/issue-34-admin-ui.integration.test.mjs
-
-      - name: Run admin notification tests
-        if: steps.plan.outputs.retry_safety == 'true'
-        run: node --test tests/admin-notifications.test.mjs
-
-      - name: Run issue 39 workflow journey and security tests
-        if: steps.plan.outputs.retry_safety == 'true'
-        run: |
-          node --test \
-            tests/issue-39-admin-actions.test.mjs \
-            tests/issue-39-actions-rendering.test.mjs \
-            tests/issue-39-synthetic-workflow.integration.test.mjs \
-            tests/issue-39-security-contract.test.mjs
-
-      - name: Run issue 66 public repository safety contracts
-        if: steps.plan.outputs.retry_safety == 'true'
-        run: node --test tests/public-repo-safety.test.mjs
+        run: node scripts/run-hermetic-tests.mjs
 
   deploy-web:
     needs: plan-and-test

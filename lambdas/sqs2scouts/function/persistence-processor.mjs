@@ -1,13 +1,14 @@
 import https from 'https';
 import crypto from 'crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { readFileSync } from 'fs';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { SQSClient, SendMessageCommand, GetQueueAttributesCommand } from '@aws-sdk/client-sqs';
 import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
 import sharp from 'sharp';
 import { getOptionalSecret, getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
-import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
-import { publishCanonicalEventToAgenda } from './agenda-publisher.mjs';
+import { recordRequestActivity as defaultRecordRequestActivity } from '/opt/nodejs/request-activity.mjs';
+import { publishCanonicalEventToAgenda as defaultPublishCanonicalEventToAgenda } from './agenda-publisher.mjs';
 import { occurrenceStorageKey } from './occurrence-identity.mjs';
 import { generateGeminiTextWithFallback, parseGeminiTextModels, GEMINI_TEXT_RESPONSE_SCHEMAS, validateGeminiTextResponse } from './gemini-text-models.mjs';
 import { buildRuntimeRequestEntry } from './runtime-request-entry.mjs';
@@ -50,9 +51,15 @@ const GENERATED_IMAGE_WIDTH = Number.isFinite(Number(process.env.GEMINI_IMAGE_OU
 const GENERATED_IMAGE_HEIGHT = Number.isFinite(Number(process.env.GEMINI_IMAGE_OUTPUT_HEIGHT))
     ? Math.max(180, Number(process.env.GEMINI_IMAGE_OUTPUT_HEIGHT))
     : 768;
-const s3Client = new S3Client({ region: AWS_REGION });
-const sqsClient = new SQSClient({ region: AWS_REGION });
-const sfnClient = new SFNClient({ region: AWS_REGION });
+const defaultS3Client = new S3Client({ region: AWS_REGION });
+const defaultSqsClient = new SQSClient({ region: AWS_REGION });
+const defaultSfnClient = new SFNClient({ region: AWS_REGION });
+const persistenceDependencyContext = new AsyncLocalStorage();
+const s3Client = { send: (command) => (persistenceDependencyContext.getStore()?.s3Client || defaultS3Client).send(command) };
+const sqsClient = { send: (command) => (persistenceDependencyContext.getStore()?.sqsClient || defaultSqsClient).send(command) };
+const sfnClient = { send: (command) => (persistenceDependencyContext.getStore()?.sfnClient || defaultSfnClient).send(command) };
+const recordRequestActivity = (...args) => (persistenceDependencyContext.getStore()?.recordRequestActivity || defaultRecordRequestActivity)(...args);
+const publishCanonicalEventToAgenda = (...args) => (persistenceDependencyContext.getStore()?.publishCanonicalEventToAgenda || defaultPublishCanonicalEventToAgenda)(...args);
 const SCOUTS_DECISION_QUEUE_URL = process.env.SCOUTS_DECISION_QUEUE_URL || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsDecision';
 const SCOUTS_PROCESSING_QUEUE_URL_FALLBACK =
     process.env.SCOUTS_PROCESSING_QUEUE_URL
@@ -3230,7 +3237,7 @@ function summarizeMessageBody(messageBody) {
     };
 }
 
-export async function lambdaHandler(event) {
+async function lambdaHandlerWithDependencies(event) {
     console.log('[sqs2scouts] Lambda invoked:', JSON.stringify(summarizeInvocationEvent(event)));
     const directInvocation = isStepFunctionsInvocation(event);
     const records = Array.isArray(event?.Records) ? event.Records : [];
@@ -3620,7 +3627,7 @@ export async function lambdaHandler(event) {
             const existingEvent = (await loadHexEventFromS3(hexValue)) || {};
             let persistSubject = rawSubject;
             let persistAction = action;
-            const visibility = extractOccurrenceVisibility(message, rawSubject, action);
+            const visibility = extractOccurrenceVisibility(messageBody, rawSubject, action);
             if (visibility) {
                 const agendaOccurrence = await persistOccurrenceVisibility({
                     ...visibility,
@@ -3788,6 +3795,7 @@ export async function lambdaHandler(event) {
                 console.warn('[Persist] Failed to notify scoutsDecision queue:', queueErr?.message || queueErr);
             }
 
+            runtimeOutcome = { status: 'completed' };
             return {
                 statusCode: 200,
                 body: JSON.stringify({ message: `Hex file persisted for ${eventTitle}` })
@@ -3846,3 +3854,15 @@ export async function lambdaHandler(event) {
 }
 
 export { buildRuntimeRequestEntry };
+
+async function runWithPersistenceDependencies(event, dependencies = {}) {
+    return persistenceDependencyContext.run(dependencies, () => lambdaHandlerWithDependencies(event));
+}
+
+export function createPersistenceHandler(dependencies = {}) {
+    return (event) => runWithPersistenceDependencies(event, dependencies);
+}
+
+export async function lambdaHandler(event) {
+    return runWithPersistenceDependencies(event);
+}

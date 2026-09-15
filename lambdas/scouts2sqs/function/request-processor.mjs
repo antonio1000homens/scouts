@@ -1473,7 +1473,11 @@ export async function lambdaHandler(event) {
                     try {
                         const dlqCommand = new SendMessageCommand({
                             QueueUrl: DLQ_URL,
-                            MessageBody: JSON.stringify({ ...messageBody, error: error.message, timestamp: new Date().toISOString() }),
+                            MessageBody: JSON.stringify({
+                                ...(record?.body && typeof record.body === 'object' ? record.body : { body: record?.body }),
+                                error: error.message,
+                                timestamp: new Date().toISOString(),
+                            }),
                         });
                         await sqsClient.send(dlqCommand);
                         console.log('[DLQ] Error message sent to DLQ');

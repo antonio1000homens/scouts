@@ -267,59 +267,66 @@ function eventFromAgenda(agenda, hex) {
   return (agenda?.events || []).find((event) => event?.metadata?.hex === hex) || null;
 }
 
-function addAgendaDummy(agenda, dummy, uid) {
+function eventsFromAgenda(agenda, hex) {
+  return (agenda?.events || []).filter((event) => event?.metadata?.hex === hex);
+}
+
+function addAgendaDummies(agenda, dummy, entries) {
   if (eventFromAgenda(agenda, dummy.metadata.hex)) {
     throw new Error(`Refusing to replace existing agenda entry for HEX ${dummy.metadata.hex}`);
   }
   const events = Array.isArray(agenda?.events) ? [...agenda.events] : [];
-  events.push({
-    uid,
-    title: dummy.title,
-    description: 'Temporary deployed regression canary event',
-    start: {
-      raw: FUTURE_DATE_RAW,
-      iso: FUTURE_DATE_ISO.replace(/Z$/, ''),
-      epochMillis: Date.parse(FUTURE_DATE_ISO),
-    },
-    source: {
+  for (const { uid, occurrenceId } of entries) events.push({
       uid,
+      occurrenceId,
       title: dummy.title,
-      section: 'cubs',
-      icsType: 'regression',
-      dtstart: FUTURE_DATE_RAW,
-    },
-    metadata: structuredClone(dummy.metadata),
-  });
+      description: 'Temporary deployed regression canary event',
+      start: {
+        raw: FUTURE_DATE_RAW,
+        iso: FUTURE_DATE_ISO.replace(/Z$/, ''),
+        epochMillis: Date.parse(FUTURE_DATE_ISO),
+      },
+      source: {
+        uid,
+        title: dummy.title,
+        section: 'cubs',
+        icsType: 'regression',
+        dtstart: FUTURE_DATE_RAW,
+      },
+      metadata: structuredClone(dummy.metadata),
+    });
   return { ...agenda, generatedAt: new Date().toISOString(), events };
 }
 
-function assertOwnedAgendaEvent(event, hex, uid) {
+function assertOwnedAgendaEvent(event, hex, uids) {
+  const ownedUids = new Set(Array.isArray(uids) ? uids : [uids]);
   if (!event) return;
   if (
     event?.metadata?.hex !== hex
-    || event?.uid !== uid
-    || (event?.source?.uid !== undefined && event?.source?.uid !== uid)
+    || !ownedUids.has(event?.uid)
+    || (event?.source?.uid !== undefined && !ownedUids.has(event?.source?.uid))
   ) {
     throw new Error(`Refusing to mutate non-canary agenda entry for HEX ${hex}`);
   }
 }
 
-function removeAgendaDummy(agenda, hex, uid) {
-  const matching = eventFromAgenda(agenda, hex);
-  if (!matching) return agenda;
-  assertOwnedAgendaEvent(matching, hex, uid);
+function removeAgendaDummies(agenda, hex, uids) {
+  const matching = eventsFromAgenda(agenda, hex);
+  if (!matching.length) return agenda;
+  for (const event of matching) assertOwnedAgendaEvent(event, hex, uids);
+  const ownedUids = new Set(uids);
   return {
     ...agenda,
     generatedAt: new Date().toISOString(),
-    events: (Array.isArray(agenda?.events) ? agenda.events : []).filter((event) => event !== matching),
+    events: (Array.isArray(agenda?.events) ? agenda.events : []).filter((event) => !(event?.metadata?.hex === hex && ownedUids.has(event?.uid))),
   };
 }
 
-function replaceAgendaMetadata(agenda, hex, uid, metadata, titleOverride = null, sectionOverride = null) {
+function replaceAgendaMetadata(agenda, hex, uids, metadata, titleOverride = null, sectionOverride = null) {
   let matched = false;
   const events = (Array.isArray(agenda?.events) ? agenda.events : []).map((event) => {
     if (event?.metadata?.hex !== hex) return event;
-    assertOwnedAgendaEvent(event, hex, uid);
+    assertOwnedAgendaEvent(event, hex, uids);
     matched = true;
     return {
       ...event,
@@ -343,13 +350,13 @@ function metadataMatches(event, agendaEvent) {
   return isDeepStrictEqual(event?.metadata ?? null, agendaEvent?.metadata ?? null);
 }
 
-async function waitForEventAndAgenda(hex, predicate, label) {
+async function waitForEventAndAgenda(hex, predicate, label, { allowOccurrenceVisibilityMismatch = false } = {}) {
   return poll(label, () => {
     const event = readJson(`events/${hex}.json`);
     assertCanonicalEventDocument(event, { expectedHex: hex });
     const agendaEvent = eventFromAgenda(readJson(AGENDA_KEY), hex);
     if (!agendaEvent) return null;
-    if (!metadataMatches(event, agendaEvent)) return null;
+    if (!allowOccurrenceVisibilityMismatch && !metadataMatches(event, agendaEvent)) return null;
     return predicate(event, agendaEvent) ? { event, agendaEvent } : null;
   });
 }
@@ -365,7 +372,7 @@ async function writeCanonicalState(hex, mutate, stage = null) {
   }, 'canonical event reset');
   await mutateJsonOptimistically(
     AGENDA_KEY,
-    (agenda) => replaceAgendaMetadata(agenda, hex, uid, next.metadata, next.title, `canary-${stage}`),
+    (agenda) => replaceAgendaMetadata(agenda, hex, agendaUids, next.metadata, next.title, `canary-${stage}`),
     'canonical agenda reset',
   );
   await waitForEventAndAgenda(hex, () => true, 'canonical state reset');
@@ -397,6 +404,14 @@ const title = `SCOUTS REGRESSION ${runSuffix}`;
 // ownership check remains exact during cleanup.
 const uid = `${REGRESSION_UID_PREFIX}${runSuffix.split('-', 1)[0]}`;
 const hex = titleToHex(title);
+const uidSibling = `${REGRESSION_UID_PREFIX}${runSuffix.split('-', 1)[0]}-sibling`;
+const occurrenceId = `occ_${hex.slice(0, 24).padEnd(24, '0')}`;
+const siblingOccurrenceId = `occ_${titleToHex(`${title} sibling`).slice(0, 24).padEnd(24, '0')}`;
+const agendaEntries = [
+  { uid, occurrenceId },
+  { uid: uidSibling, occurrenceId: siblingOccurrenceId },
+];
+const agendaUids = agendaEntries.map((entry) => entry.uid);
 const eventKey = `events/${hex}.json`;
 const dummy = buildCanonicalEventDocument({
   title,
@@ -466,7 +481,7 @@ try {
   eventCreatedByRun = true;
   await mutateJsonOptimistically(
     AGENDA_KEY,
-    (agenda) => addAgendaDummy(agenda, dummy, uid),
+    (agenda) => addAgendaDummies(agenda, dummy, agendaEntries),
     'synthetic agenda seed',
   );
   agendaEntryCreatedByRun = true;
@@ -477,6 +492,7 @@ try {
     (event, agendaEvent) => (
       agendaEvent.uid === uid
       && agendaEvent.source?.uid === uid
+      && agendaEvent.occurrenceId === occurrenceId
       && Date.parse(agendaEvent.start?.iso || FUTURE_DATE_ISO) > Date.now()
       && event.metadata.tagline === null
       && event.metadata.image.theme === null
@@ -525,18 +541,38 @@ try {
   requireGeneratedImage(current, 'Image enrichment');
 
   const approve = await postCommand({ realm: 'scouts', action: 'approve', subject: { hex, isApproved: true } });
-  await waitForEventAndAgenda(hex, (event) => event.metadata.status.isApproved === true, 'approval persistence');
+  const approved = await waitForEventAndAgenda(hex, (event) => event.metadata.status.isApproved === true, 'approval persistence');
+  const canonicalMetadataBeforeVisibility = structuredClone(approved.event.metadata);
   recordPass('Approval persisted', approve?.requestId ? `request ${approve.requestId}` : 'event + agenda');
 
-  const hide = await postCommand({ realm: 'scouts', action: 'hide', subject: { hex, isHidden: true } });
-  await waitForEventAndAgenda(hex, (event) => event.metadata.status.isHidden === true, 'hide persistence');
+  const hide = await postCommand({ realm: 'scouts', action: 'hide', subject: { hex, occurrenceId, isHidden: true } });
+  const hidden = await waitForEventAndAgenda(hex, (event, agendaEvent) => {
+    const agenda = readJson(AGENDA_KEY);
+    const sibling = agenda.events.find((entry) => entry.occurrenceId === siblingOccurrenceId);
+    return isDeepStrictEqual(event.metadata, canonicalMetadataBeforeVisibility)
+      && event.metadata.status.isHidden === false
+      && agendaEvent.occurrenceId === occurrenceId
+      && agendaEvent.metadata.status.isHidden === true
+      && sibling?.metadata?.status?.isHidden === false;
+  }, 'hide persistence', { allowOccurrenceVisibilityMismatch: true });
   recordPass('Hide persisted', hide?.requestId ? `request ${hide.requestId}` : 'event + agenda');
+  recordPass('Same-HEX sibling remained visible', hidden.agendaEvent.occurrenceId);
 
-  const unhide = await postCommand({ realm: 'scouts', action: 'unhide', subject: { hex, isHidden: false } });
+  const unhide = await postCommand({ realm: 'scouts', action: 'unhide', subject: { hex, occurrenceId, isHidden: false } });
   const unhidden = await waitForEventAndAgenda(
     hex,
-    (event, agendaEvent) => event.metadata.status.isHidden === false && agendaEvent.uid === uid,
+    (event, agendaEvent) => {
+      const agenda = readJson(AGENDA_KEY);
+      const sibling = agenda.events.find((entry) => entry.occurrenceId === siblingOccurrenceId);
+      return isDeepStrictEqual(event.metadata, canonicalMetadataBeforeVisibility)
+        && event.metadata.status.isHidden === false
+        && agendaEvent.uid === uid
+        && agendaEvent.occurrenceId === occurrenceId
+        && agendaEvent.metadata.status.isHidden === false
+        && sibling?.metadata?.status?.isHidden === false;
+    },
     'unhide persistence',
+    { allowOccurrenceVisibilityMismatch: true },
   );
   if (!unhidden.agendaEvent.uid.startsWith(REGRESSION_UID_PREFIX)) {
     throw new Error('Unhidden canary lost the reserved regression UID prefix');
@@ -553,7 +589,7 @@ try {
     try {
       await mutateJsonOptimistically(
         AGENDA_KEY,
-        (agenda) => removeAgendaDummy(agenda, hex, uid),
+        (agenda) => removeAgendaDummies(agenda, hex, agendaUids),
         'agenda cleanup',
       );
       if (eventFromAgenda(readJson(AGENDA_KEY), hex)) {

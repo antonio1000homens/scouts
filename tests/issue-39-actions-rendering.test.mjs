@@ -123,7 +123,7 @@ test('live regression canary covers all deployed mutation routes with durable ev
   assert.match(liveRegressionSource, /REGRESSION_UID_PREFIX = 'scouts-regression-'/);
   assert.match(liveRegressionSource, /Date\.parse\(FUTURE_DATE_ISO\) > Date\.now\(\)/);
   assert.match(liveRegressionSource, /finally \{/);
-  assert.match(liveRegressionSource, /removeAgendaDummy/);
+  assert.match(liveRegressionSource, /removeAgendaDummies/);
   assert.match(liveRegressionSource, /deleteObjectChecked\(eventKey\)/);
 });
 
@@ -135,6 +135,7 @@ test('live regression canary uses conditional S3 writes and explicit ownership f
   assert.match(liveRegressionSource, /eventCreatedByRun/);
   assert.match(liveRegressionSource, /agendaEntryCreatedByRun/);
   assert.match(liveRegressionSource, /assertOwnedAgendaEvent/);
+  assert.match(liveRegressionSource, /Same-HEX sibling remained visible/);
   assert.match(liveRegressionSource, /S3 object still exists after delete/);
 });
 

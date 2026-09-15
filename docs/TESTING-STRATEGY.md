@@ -12,6 +12,22 @@ Normal pull-request tests are hermetic and must not depend on the deployed site.
 
 ## Test layers
 
+### Authoritative hermetic runner
+
+Normal hermetic tests are discovered and executed by one entry point:
+
+```bash
+npm ci --prefix lambdas/shared-layer/nodejs
+node scripts/run-hermetic-tests.mjs
+```
+
+`scripts/run-hermetic-tests.mjs` owns the approved test locations and naming
+convention, prints selected file counts for each component, fails when an
+expected component selects no tests, and runs the deployed-Lambda `no-undef`
+gate before the tests. Live scripts and provider-spend tests are not selected.
+The intentional undefined-identifier fixture is checked as part of the runner
+so a broken lint configuration cannot silently pass.
+
 ### Layer A — hermetic unit/contract tests (every affected PR)
 
 These tests run with Node's built-in test runner and no production credentials.
@@ -52,6 +68,13 @@ Browser functions are loaded from the actual checked-in browser source into a No
 The test records boundary/stage information so a failure identifies the broken logical stage rather than only reporting an incorrect final object.
 
 The fake provider exists under `tests/helpers/` only. Production provider allowlists continue to accept only their normal production values; `fake` is deliberately not a production-selectable provider.
+
+The persistence boundary also has a handler-level test. It invokes the real
+`persistence-processor.mjs` Lambda handler through its SQS entry point with a
+production-shaped message and injected fake S3/SQS/SFN/activity adapters. The
+fixture hides and unhides one occurrence, reads back the overlay and agenda,
+checks the same-HEX sibling and canonical metadata, and requires a completed
+activity result.
 
 ### Layer C — deployed smoke test (future, manual/post-merge only)
 
@@ -119,6 +142,16 @@ The CI job intentionally runs the issue #39 suite before any deployment lane. PR
 
 ## Running locally
 
+The authoritative suite is:
+
+```bash
+npm ci --prefix lambdas/shared-layer/nodejs
+node scripts/run-hermetic-tests.mjs
+```
+
+The issue #39 subset can still be run directly when iterating on the UI or
+security contracts:
+
 From the repository root, the issue #39 suite has no external dependencies beyond Node:
 
 ```bash
@@ -145,7 +178,7 @@ node --test lambdas/sqs2scouts/function/tests/test-cloudflare-image-client.mjs
 | Image request | yes | yes | future |
 | Provider response/schema | existing + fake | yes | fake by default |
 | Image cache/reuse | existing + fake | yes | future |
-| Persistence boundary | existing contracts | in-memory | future |
+| Persistence boundary | existing contracts | real handler with injected adapters | future |
 | Approve | yes | yes | future |
 | Hide/unhide | yes | yes | future |
 | Invalid/tampered action | yes | yes | future |
@@ -157,3 +190,19 @@ node --test lambdas/sqs2scouts/function/tests/test-cloudflare-image-client.mjs
 Hermetic tests cannot prove that production SQS event-source mappings are enabled, deployed Lambda environment variables are correct, or AWS permissions currently allow a message to flow. Those are specifically the purpose of the future isolated deployed smoke layer.
 
 When an incident occurs before that layer exists, use the issue #39 tests to first rule out browser/message-contract regressions, then inspect deployed queue depth/event-source mappings/Step Functions/runtime state.
+
+## Regression policy
+
+Every confirmed production defect must add or strengthen an automated
+regression at the lowest production boundary that would have prevented the
+escape, and that regression must be selected by `scripts/run-hermetic-tests.mjs`.
+The change description records:
+
+```text
+Why existing tests missed it:
+New regression:
+Would the regression fail on the previous commit: yes/no
+CI command/job that executes it:
+```
+
+If the CI command is not explicit, the regression is not complete.

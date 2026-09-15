@@ -260,6 +260,10 @@ function trimOptionalText(value) {
   return text.length > 0 ? text : null;
 }
 
+function hasText(value) {
+  return trimOptionalText(value) !== null;
+}
+
 function getEventImageContainer(event) {
   if (!event || typeof event !== 'object') return null;
   const metadataImage = getEventMetadata(event)?.image;
