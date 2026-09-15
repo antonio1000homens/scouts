@@ -16,6 +16,8 @@ The browser does not run calendar reconciliation on page load, expose polling in
 
 Each published occurrence carries a server-owned opaque `occurrenceId`. Shared enrichment metadata is grouped by HEX, but Hide/Unhide commands are selected by `occurrenceId`; same-title occurrences therefore remain independently addressable. HEX and UID are shown only under Advanced diagnostics.
 
+Visibility is occurrence-owned state. Shared metadata publication must preserve an occurrence's current visibility unless the request explicitly targets that `occurrenceId` with a visibility change. UI pending state is also action-scoped, so one accepted or slow operation must not disable unrelated event actions.
+
 ## Security and API
 
 All requests use the same-origin Cloudflare admin proxy. The browser never contains the Lambda API key. Write acknowledgements have a finite timeout and are never automatically retried; after a timeout, check Activity before submitting again.
