@@ -9,6 +9,7 @@ function agenda() {
     generatedAt: '2026-09-08T21:00:00.000Z',
     events: [{
       uid: 'osm-water-games',
+      occurrenceId: 'occ_0123456789abcdef01234567',
       summary: 'Water Games',
       dtstart: '20260715T183000',
       metadata: {
@@ -43,13 +44,15 @@ test('publishes a partial direct tagline without requiring an image', () => {
   assert.equal(result.agenda.events[0].metadata.image.url, null);
 });
 
-test('publishes image, approval, and visibility changes from the canonical HEX event', () => {
-  const result = mergeCanonicalEventIntoAgenda(agenda(), canonical({
+test('shared metadata publication preserves occurrence-owned visibility', () => {
+  const hiddenAgenda = agenda();
+  hiddenAgenda.events[0].metadata.status.isHidden = true;
+  const result = mergeCanonicalEventIntoAgenda(hiddenAgenda, canonical({
     metadata: {
       hex: HEX,
       tagline: 'Updated',
       image: { theme: 'Watercolour water fight', url: 'website/eventImages/water-games.jpg' },
-      status: { isHidden: true, isApproved: true },
+      status: { isHidden: false, isApproved: true },
     },
   }), HEX);
   assert.deepEqual(result.agenda.events[0].metadata, {
@@ -58,6 +61,26 @@ test('publishes image, approval, and visibility changes from the canonical HEX e
     image: { theme: 'Watercolour water fight', url: 'website/eventImages/water-games.jpg' },
     status: { isHidden: true, isApproved: true },
   });
+});
+
+test('explicit occurrence visibility changes only the selected same-HEX occurrence', () => {
+  const source = agenda();
+  source.events = [
+    source.events[0],
+    {
+      ...structuredClone(source.events[0]),
+      uid: 'osm-water-games-2',
+      occurrenceId: 'occ_89abcdef0123456701234567',
+      dtstart: '20260716T183000',
+    },
+  ];
+  const result = mergeCanonicalEventIntoAgenda(source, canonical(), HEX, {
+    occurrenceId: 'occ_89abcdef0123456701234567',
+    visibility: true,
+  });
+  assert.equal(result.matched, 1);
+  assert.equal(result.agenda.events[0].metadata.status.isHidden, false);
+  assert.equal(result.agenda.events[1].metadata.status.isHidden, true);
 });
 
 test('publisher rejects compatibility fields in canonical metadata', () => {
