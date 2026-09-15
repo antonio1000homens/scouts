@@ -254,9 +254,9 @@
 
     const legacyApproveEvent = typeof approveEvent === 'function' ? approveEvent : null;
 
-    window.approveEvent = async function issue91ApproveEvent(eventIndex, fromModal = false, action = 'approve') {
+    window.approveEvent = async function issue91ApproveEvent(eventIndex, fromModal = false, action = 'approve', button = null) {
         if (String(action || '').toLowerCase() !== 'approve') {
-            return legacyApproveEvent?.(eventIndex, fromModal, action);
+            return legacyApproveEvent?.(eventIndex, fromModal, action, button);
         }
         if (!apiAuthReady) {
             updateApiAuthStatus(
@@ -288,6 +288,18 @@
         if (!hex) {
             updateRuntimeDetails('Cannot approve: event has no canonical HEX.', 'error');
             return null;
+        }
+
+        const operationKey = typeof uiOperationKey === 'function'
+            ? uiOperationKey(entry, 'approve')
+            : `${entry?.occurrenceId || event?.occurrenceId || hex}:approve`;
+        if (typeof pendingUiOperations !== 'undefined' && pendingUiOperations.has(operationKey)) return null;
+        if (typeof pendingUiOperations !== 'undefined') pendingUiOperations.set(operationKey, true);
+        const originalButtonLabel = button?.textContent;
+        if (button) {
+            button.dataset.apiPending = 'true';
+            button.disabled = true;
+            button.textContent = 'Approving…';
         }
 
         if (typeof refreshApiActionButtons === 'function') refreshApiActionButtons();
@@ -372,6 +384,11 @@
             if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(failureMessage, 'error');
             throw error;
         } finally {
+            if (typeof pendingUiOperations !== 'undefined') pendingUiOperations.delete(operationKey);
+            if (button) {
+                delete button.dataset.apiPending;
+                button.textContent = originalButtonLabel;
+            }
             if (typeof refreshApiActionButtons === 'function') refreshApiActionButtons();
             relabelApprovalButtons();
         }

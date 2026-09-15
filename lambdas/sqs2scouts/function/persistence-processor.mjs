@@ -2469,11 +2469,19 @@ async function persistOccurrenceVisibility({ occurrenceId, isHidden, hex, title,
         error.code = matches.length === 0 ? 'VISIBILITY_OCCURRENCE_NOT_FOUND' : 'VISIBILITY_OCCURRENCE_AMBIGUOUS';
         throw error;
     }
+    const occurrence = matches[0];
+    const occurrenceHex = String(occurrence?.metadata?.hex || '').trim().toLowerCase();
+    const requestedHex = String(hex || '').trim().toLowerCase();
+    if (!occurrenceHex || occurrenceHex !== requestedHex) {
+        const error = new Error(`Visibility occurrence ${occurrenceId} does not belong to HEX ${requestedHex}`);
+        error.code = 'VISIBILITY_OCCURRENCE_HEX_MISMATCH';
+        throw error;
+    }
     const overlay = {
         occurrenceId,
-        metadataId: hex,
-        sourceUid: sourceUid || matches[0].uid || null,
-        lastKnownStart: lastKnownStart || matches[0].dtstart || null,
+        metadataId: occurrenceHex,
+        sourceUid: sourceUid || occurrence.uid || null,
+        lastKnownStart: lastKnownStart || occurrence.dtstart || null,
         status: { isHidden },
         updatedAt: new Date().toISOString(),
         requestId: requestId || null,
@@ -3710,7 +3718,7 @@ export async function lambdaHandler(event) {
                 }
             }
 
-            if (!actionIsHidden && !statusIsHidden) {
+            if (!visibility && !actionIsHidden && !statusIsHidden) {
                 setImageApprovalState(event, true);
             }
 

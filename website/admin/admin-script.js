@@ -219,6 +219,8 @@ function initializeBrowserNotificationsPreference() {
 function notificationEventIdentity(entry, index = 0) {
     const event = entry?.event || entry || {};
     const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+    const occurrenceId = String(entry?.occurrenceId || event.occurrenceId || '').trim();
+    if (occurrenceId) return `occurrence:${occurrenceId}`;
     const hex = String(metadata.hex || metadata.hexId || event.hex || event.hexId || '').trim().toLowerCase();
     if (hex) return `hex:${hex}`;
     const uid = String(event.uid || event.source?.uid || '').trim();
@@ -1713,9 +1715,10 @@ function setApiActionState(enabled) {
 }
 
 function refreshApiActionButtons() {
-    const enabled = apiAuthReady;
     const actionButtons = document.querySelectorAll('.requires-api');
     actionButtons.forEach((button) => {
+        const pending = button.dataset.apiPending === 'true';
+        const enabled = apiAuthReady && !pending;
         button.disabled = !enabled;
         button.classList.toggle('btn-disabled', !enabled);
     });
@@ -3055,8 +3058,8 @@ function renderEvents() {
                     <div class="event-actions">
                         ${actionModel.actions.map((action) => {
                             if (action.onclick === 'openUploadModal') return `<button class="btn ${action.className}" onclick="openUploadModal(${index})">${action.label}</button>`;
-                            if (action.onclick === 'generateFull') return `<button class="btn ${action.className} requires-api" value="generateFull" onclick="requestGeneratedField('full', this.value, this)">${action.label}</button>`;
-                            if (action.onclick === 'generateImage') return `<button class="btn ${action.className} requires-api" value="generateImage" onclick="requestGeneratedField('imageUrl', this.value, this)">${action.label}</button>`;
+                            if (action.onclick === 'generateFull') return `<button class="btn ${action.className} requires-api" value="generateFull" onclick="requestGeneratedField('full', this.value, this, ${index})">${action.label}</button>`;
+                            if (action.onclick === 'generateImage') return `<button class="btn ${action.className} requires-api" value="generateImage" onclick="requestGeneratedField('imageUrl', this.value, this, ${index})">${action.label}</button>`;
                             if (action.onclick === 'approveEvent') return `<button class="btn ${action.className} requires-api" value="approve" onclick="approveEvent(${index}, false, this.value, this)">${action.label}</button>`;
                             const command = action.onclick === 'unhideEvent' ? 'unhideEvent' : 'hideEvent';
                             return `<button class="btn ${action.className} requires-api" value="${action.onclick === 'unhideEvent' ? 'unhide' : 'hide'}" onclick="${command}(${index}, false, this.value, this)">${action.label}</button>`;
@@ -3570,27 +3573,24 @@ function applyLocalPersistedField(entry, field, value) {
 function applyLocalHiddenState(entry, hiddenAtIso, hidden = true) {
     if (!entry || !entry.event) return;
     const event = entry.event;
-    const hex = getEventHex(event);
+    const occurrenceId = entry.occurrenceId || event.occurrenceId;
+    if (!occurrenceId) return;
     if (hidden) {
         event.isHidden = true;
         event.hiddenAt = hasText(hiddenAtIso) ? hiddenAtIso : new Date().toISOString();
         entry.allHidden = true;
-        if (hex) {
-            localVisibilityOverrides.set(hex, {
-                hidden: true,
-                hiddenAt: event.hiddenAt,
-            });
-        }
+        localVisibilityOverrides.set(occurrenceId, {
+            hidden: true,
+            hiddenAt: event.hiddenAt,
+        });
     } else {
         event.isHidden = false;
         event.hiddenAt = null;
         entry.allHidden = false;
-        if (hex) {
-            localVisibilityOverrides.set(hex, {
-                hidden: false,
-                hiddenAt: null,
-            });
-        }
+        localVisibilityOverrides.set(occurrenceId, {
+            hidden: false,
+            hiddenAt: null,
+        });
     }
 }
 
@@ -3601,15 +3601,15 @@ function applyVisibilityOverrides(entries, options = {}) {
 
     entries.forEach((entry) => {
         const event = entry?.event;
-        const hex = getEventHex(event);
-        if (!hex) return;
+        const occurrenceId = entry?.occurrenceId || event?.occurrenceId;
+        if (!occurrenceId) return;
 
-        const override = localVisibilityOverrides.get(hex);
+        const override = localVisibilityOverrides.get(occurrenceId);
         if (!override) return;
 
         const backendStateMatches = isHiddenEvent(event) === Boolean(override.hidden);
         if (allowConfirm && backendStateMatches) {
-            localVisibilityOverrides.delete(hex);
+            localVisibilityOverrides.delete(occurrenceId);
             return;
         }
 
@@ -3667,6 +3667,10 @@ async function persistCurrentField(field, action = 'persist', button = null) {
         return;
     }
 
+    const operationKey = uiOperationKey(entry, `persist:${field}`);
+    if (pendingUiOperations.has(operationKey)) return;
+    pendingUiOperations.set(operationKey, true);
+
     const subject = {
         hex,
         [config.subjectKey]: nextValue,
@@ -3680,7 +3684,11 @@ async function persistCurrentField(field, action = 'persist', button = null) {
 
     updateModalStatus(`Persisting ${config.label.toLowerCase()} for "${eventLabel}"...`, 'loading');
     const originalButtonLabel = button?.textContent;
-    if (button) { button.disabled = true; button.textContent = 'Saving…'; }
+    if (button) {
+        button.dataset.apiPending = 'true';
+        button.disabled = true;
+        button.textContent = 'Saving…';
+    }
 
     refreshApiActionButtons();
     try {
@@ -3710,12 +3718,16 @@ async function persistCurrentField(field, action = 'persist', button = null) {
         updateModalStatus(failureMessage, 'error');
         pinRuntimeDetails(failureMessage, 'error');
     } finally {
-        if (button) { button.disabled = !apiAuthReady; button.textContent = originalButtonLabel; }
+        pendingUiOperations.delete(operationKey);
+        if (button) {
+            delete button.dataset.apiPending;
+            button.textContent = originalButtonLabel;
+        }
         refreshApiActionButtons();
     }
 }
 
-async function requestGeneratedField(field, action = 'generate', button = null) {
+async function requestGeneratedField(field, action = 'generate', button = null, eventIndex = null) {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -3725,17 +3737,27 @@ async function requestGeneratedField(field, action = 'generate', button = null) 
         return;
     }
 
-    const entry = getSelectedModalEntry();
-    if (!entry) return;
+    const entry = Number.isInteger(eventIndex) ? visibleEventEntries[eventIndex] : getSelectedModalEntry();
+    if (!entry?.event) {
+        const message = 'Unable to find selected event entry.';
+        if (Number.isInteger(eventIndex)) pinRuntimeDetails(message, 'error');
+        else updateModalStatus(message, 'error');
+        return;
+    }
 
     const config = getFieldOperationConfig(field);
     const event = entry.event;
-    const eventLabel = event.summary || event.title || `Event ${currentEventIndex + 1}`;
+    const displayIndex = Number.isInteger(eventIndex) ? eventIndex : currentEventIndex;
+    const eventLabel = event.summary || event.title || `Event ${(displayIndex ?? 0) + 1}`;
     const hex = getEventHex(event);
     if (!hex) {
         updateModalStatus(`Cannot queue ${config.queueLabel}: event is missing HEX.`, 'error');
         return;
     }
+
+    const operationKey = uiOperationKey(entry, `${action}:${field}`);
+    if (pendingUiOperations.has(operationKey)) return;
+    pendingUiOperations.set(operationKey, true);
 
     const payload = {
         realm: 'scouts',
@@ -3748,7 +3770,11 @@ async function requestGeneratedField(field, action = 'generate', button = null) 
     const requestVerb = action === 'generateFull' ? 'requesting' : 'queueing';
     updateModalStatus(`${requestVerb.charAt(0).toUpperCase()}${requestVerb.slice(1)} ${config.queueLabel} for "${eventLabel}"...`, 'loading');
     const originalButtonLabel = button?.textContent;
-    if (button) { button.disabled = true; button.textContent = action === 'generateFull' ? 'Generating…' : 'Regenerating…'; }
+    if (button) {
+        button.dataset.apiPending = 'true';
+        button.disabled = true;
+        button.textContent = action === 'generateFull' ? 'Generating…' : 'Regenerating…';
+    }
 
     refreshApiActionButtons();
     try {
@@ -3783,7 +3809,11 @@ async function requestGeneratedField(field, action = 'generate', button = null) 
         updateModalStatus(failureMessage, 'error');
         pinRuntimeDetails(failureMessage, 'error');
     } finally {
-        if (button) { button.disabled = !apiAuthReady; button.textContent = originalButtonLabel; }
+        pendingUiOperations.delete(operationKey);
+        if (button) {
+            delete button.dataset.apiPending;
+            button.textContent = originalButtonLabel;
+        }
         refreshApiActionButtons();
     }
 }
@@ -3837,15 +3867,15 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide', button 
         if (fromModal) updateModalStatus(message, 'error'); else updateRuntimeDetails(message, 'error');
         return;
     }
-    const operationKey = uiOperationKey(entry, 'hide');
-    if (pendingUiOperations.has(operationKey)) return;
-    pendingUiOperations.set(operationKey, true);
     if (!hex) {
         const message = 'Cannot hide event: missing HEX.';
         if (fromModal) updateModalStatus(message, 'error');
         else updateRuntimeDetails(message, 'error');
         return;
     }
+    const operationKey = uiOperationKey(entry, 'hide');
+    if (pendingUiOperations.has(operationKey)) return;
+    pendingUiOperations.set(operationKey, true);
 
     const hiddenAtIso = new Date().toISOString();
     const subject = buildVisibilityCommand(entry, true);
@@ -3861,7 +3891,11 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide', button 
     if (fromModal) updateModalStatus(loadingMessage, 'loading');
     else pinRuntimeDetails(loadingMessage, 'loading');
     const originalButtonLabel = button?.textContent;
-    if (button) { button.disabled = true; button.textContent = 'Hiding…'; }
+    if (button) {
+        button.dataset.apiPending = 'true';
+        button.disabled = true;
+        button.textContent = 'Hiding…';
+    }
 
     refreshApiActionButtons();
     try {
@@ -3894,8 +3928,11 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide', button 
         if (fromModal) updateModalStatus(failureMessage, 'error');
         else pinRuntimeDetails(failureMessage, 'error');
     } finally {
-        if (button) { button.disabled = !apiAuthReady; button.textContent = originalButtonLabel; }
         pendingUiOperations.delete(operationKey);
+        if (button) {
+            delete button.dataset.apiPending;
+            button.textContent = originalButtonLabel;
+        }
         refreshApiActionButtons();
     }
 }
@@ -3935,15 +3972,15 @@ async function unhideEvent(eventIndex, fromModal = false, action = 'unhide', but
         if (fromModal) updateModalStatus(message, 'error'); else updateRuntimeDetails(message, 'error');
         return;
     }
-    const operationKey = uiOperationKey(entry, 'unhide');
-    if (pendingUiOperations.has(operationKey)) return;
-    pendingUiOperations.set(operationKey, true);
     if (!hex) {
         const message = 'Cannot unhide event: missing HEX.';
         if (fromModal) updateModalStatus(message, 'error');
         else updateRuntimeDetails(message, 'error');
         return;
     }
+    const operationKey = uiOperationKey(entry, 'unhide');
+    if (pendingUiOperations.has(operationKey)) return;
+    pendingUiOperations.set(operationKey, true);
 
     const subject = buildVisibilityCommand(entry, false);
 
@@ -3957,7 +3994,11 @@ async function unhideEvent(eventIndex, fromModal = false, action = 'unhide', but
     if (fromModal) updateModalStatus(loadingMessage, 'loading');
     else pinRuntimeDetails(loadingMessage, 'loading');
     const originalButtonLabel = button?.textContent;
-    if (button) { button.disabled = true; button.textContent = 'Unhiding…'; }
+    if (button) {
+        button.dataset.apiPending = 'true';
+        button.disabled = true;
+        button.textContent = 'Unhiding…';
+    }
 
     refreshApiActionButtons();
     try {
@@ -3990,8 +4031,11 @@ async function unhideEvent(eventIndex, fromModal = false, action = 'unhide', but
         if (fromModal) updateModalStatus(failureMessage, 'error');
         else pinRuntimeDetails(failureMessage, 'error');
     } finally {
-        if (button) { button.disabled = !apiAuthReady; button.textContent = originalButtonLabel; }
         pendingUiOperations.delete(operationKey);
+        if (button) {
+            delete button.dataset.apiPending;
+            button.textContent = originalButtonLabel;
+        }
         refreshApiActionButtons();
     }
 }

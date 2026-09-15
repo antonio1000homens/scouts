@@ -294,3 +294,11 @@ test('issue 91 missing-image approval queues one correlated image child and keep
   assert.match(approvalCoordinatorSource, /Generating image — final review required/);
   assert.match(approvalCoordinatorSource, /subject: \{ metadata: patch\.metadata \}/);
 });
+
+
+test('admin v2 action scoping guards card generation and pending buttons', () => {
+  assert.match(adminSource, /requestGeneratedField\('full', this\.value, this, \$\{index\}\)/);
+  assert.match(adminSource, /button\.dataset\.apiPending === 'true'/);
+  assert.match(adminSource, /localVisibilityOverrides\.set\(occurrenceId/);
+  assert.match(adminSource, /localVisibilityOverrides\.get\(occurrenceId\)/);
+});

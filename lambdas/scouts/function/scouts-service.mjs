@@ -143,6 +143,8 @@ function buildEventIdentityKey(event) {
 
 function buildEventChangeKey(event, index = 0) {
   if (!event || typeof event !== 'object') return `idx:${index}`;
+  const occurrenceId = typeof event.occurrenceId === 'string' ? event.occurrenceId.trim() : '';
+  if (occurrenceId) return `occurrence:${occurrenceId}`;
   const hex = typeof event.hex === 'string' ? event.hex.trim().toLowerCase() : '';
   if (hex) return `hex:${hex}`;
   const uid = typeof event.uid === 'string' ? event.uid.trim() : '';
@@ -2667,6 +2669,25 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
   const processedTitles = new Set(); // Track processed titles to avoid duplicates
   const liveQueuedProcessingByHex = new Map(); // Map<hexValue, Array<'tagline'|'imageTheme'|'image'>>
 
+  const occurrenceStateById = new Map();
+  const occurrenceIds = [...new Set(events.map((event) => resolveOccurrenceId(event)).filter(Boolean))];
+  const occurrenceReadConcurrency = 8;
+  for (let offset = 0; offset < occurrenceIds.length; offset += occurrenceReadConcurrency) {
+    const batchIds = occurrenceIds.slice(offset, offset + occurrenceReadConcurrency);
+    const batch = await Promise.all(batchIds.map(async (occurrenceId) => {
+      try {
+        const state = await getJsonFromS3(bucketName, occurrenceStorageKey(occurrenceId), `occurrence:${occurrenceId}`);
+        return [occurrenceId, state];
+      } catch (error) {
+        if (!/NoSuchKey|not found/i.test(error?.name || error?.message || '')) {
+          console.warn(`[Occurrence] Failed to load visibility overlay ${occurrenceId}:`, error?.message || error);
+        }
+        return [occurrenceId, null];
+      }
+    }));
+    for (const [occurrenceId, state] of batch) occurrenceStateById.set(occurrenceId, state);
+  }
+
   for (let index = 0; index < events.length; index++) {
     const event = events[index];
     const baseEvent = {
@@ -2772,24 +2793,18 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
       isHidden = isEventHidden(baseEvent);
     }
     if (baseEvent.occurrenceId) {
-      try {
-        const occurrenceState = await getJsonFromS3(bucketName, occurrenceStorageKey(baseEvent.occurrenceId), `occurrence:${baseEvent.occurrenceId}`);
-        if (occurrenceState?.status && typeof occurrenceState.status.isHidden === 'boolean') {
-          isHidden = occurrenceState.status.isHidden;
-          baseEvent.status = {
-            ...(baseEvent.status && typeof baseEvent.status === 'object' ? baseEvent.status : {}),
-            isHidden,
-          };
-          baseEvent.metadata = baseEvent.metadata && typeof baseEvent.metadata === 'object' ? baseEvent.metadata : {};
-          baseEvent.metadata.status = {
-            ...(baseEvent.metadata.status && typeof baseEvent.metadata.status === 'object' ? baseEvent.metadata.status : {}),
-            isHidden,
-          };
-        }
-      } catch (error) {
-        if (!/NoSuchKey|not found/i.test(error?.name || error?.message || '')) {
-          console.warn(`[Occurrence] Failed to load visibility overlay ${baseEvent.occurrenceId}:`, error?.message || error);
-        }
+      const occurrenceState = occurrenceStateById.get(baseEvent.occurrenceId) ?? null;
+      if (occurrenceState?.status && typeof occurrenceState.status.isHidden === 'boolean') {
+        isHidden = occurrenceState.status.isHidden;
+        baseEvent.status = {
+          ...(baseEvent.status && typeof baseEvent.status === 'object' ? baseEvent.status : {}),
+          isHidden,
+        };
+        baseEvent.metadata = baseEvent.metadata && typeof baseEvent.metadata === 'object' ? baseEvent.metadata : {};
+        baseEvent.metadata.status = {
+          ...(baseEvent.metadata.status && typeof baseEvent.metadata.status === 'object' ? baseEvent.metadata.status : {}),
+          isHidden,
+        };
       }
     }
 
