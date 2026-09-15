@@ -11,54 +11,13 @@ def replace_once(path, old, new, label):
 
 
 # Slack Hide must use the same occurrence-scoped persist contract as Admin.
-slack = 'lambdas/scouts-slack-handler/function/slack-handler.mjs'
-old = '''                if (actionId === 'scouts_request_hide') {
-                    console.log('[Slack] Handling hide action');
-
-                    const hidePayload = {
-                        realm,
-                        subject: stripStaleDecisionStatus(eventData),
-                        action: 'hidden',
-                        decisionSource: 'slack',
-                        slackMetadata: {
-                            channel,
-                            ts,
-                            responseUrl,
-                            previewText,
-                        },
-                    };
-                    console.log('[Debug] Hide payload to send to SQS:', JSON.stringify(hidePayload, null, 2));
-                    
-                    try {
-                        await sendToScoutsRequestQueue(hidePayload);
-                        if (responseUrl) {
-                            const processingBlocks = [
-                                {
-                                    type: 'header',
-                                    text: { type: 'plain_text', text: 'Processing hide request...', emoji: true },
-                                },
-                                {
-                                    type: 'section',
-                                    text: {
-                                        type: 'mrkdwn',
-                                        text: `⏳ Hiding *${eventTitle}*\n\nPlease wait while we process your request...`,
-                                    },
-                                },
-                            ];
-                            try {
-                                await sendSlackResponse(responseUrl, `Processing hide request for ${eventTitle}`, processingBlocks);
-                            } catch (responseError) {
-                                console.error('[Slack] Failed to replace message after hide enqueue:', responseError.message);
-                            }
-                        }
-                    } catch (error) {
-                        console.error('[Slack] Failed to send hide to scoutsRequests queue:', error.message);
-                    }
-                    
-                    return { statusCode: 200, body: JSON.stringify({ ok: true }) };
-                }
-'''
-new = '''                if (actionId === 'scouts_request_hide') {
+slack = Path('lambdas/scouts-slack-handler/function/slack-handler.mjs')
+text = slack.read_text()
+start_marker = "                if (actionId === 'scouts_request_hide') {"
+end_marker = "                if (actionId === 'scouts_request_skip') {"
+start = text.index(start_marker)
+end = text.index(end_marker, start)
+new_hide = '''                if (actionId === 'scouts_request_hide') {
                     console.log('[Slack] Handling hide action');
 
                     const occurrenceId = String(actionMeta?.occurrenceId ?? eventData?.occurrenceId ?? '').trim();
@@ -100,7 +59,7 @@ new = '''                if (actionId === 'scouts_request_hide') {
                         },
                     };
                     console.log('[Debug] Hide payload to send to SQS:', JSON.stringify(hidePayload, null, 2));
-                    
+
                     try {
                         await sendToScoutsRequestQueue(hidePayload);
                         if (responseUrl) {
@@ -113,7 +72,7 @@ new = '''                if (actionId === 'scouts_request_hide') {
                                     type: 'section',
                                     text: {
                                         type: 'mrkdwn',
-                                        text: `⏳ Hiding *${eventTitle}*\n\nPlease wait while we process your request...`,
+                                        text: `⏳ Hiding *${eventTitle}*\\n\\nPlease wait while we process your request...`,
                                     },
                                 },
                             ];
@@ -126,11 +85,12 @@ new = '''                if (actionId === 'scouts_request_hide') {
                     } catch (error) {
                         console.error('[Slack] Failed to send hide to scoutsRequests queue:', error.message);
                     }
-                    
+
                     return { statusCode: 200, body: JSON.stringify({ ok: true }) };
                 }
+
 '''
-replace_once(slack, old, new, 'Slack occurrence-scoped hide')
+slack.write_text(text[:start] + new_hide + text[end:])
 
 # Preserve Slack callback metadata through compact persist routing so the canonical
 # persistence worker can reconcile the originating review card after success.
@@ -196,7 +156,9 @@ p = Path(issue94)
 text = p.read_text()
 marker = "test('Slack hide requires and forwards a canonical occurrence selector'"
 if marker not in text:
-    text += '''\n\ntest('Slack hide requires and forwards a canonical occurrence selector', () => {
+    text += r'''
+
+test('Slack hide requires and forwards a canonical occurrence selector', () => {
   const handler = readFileSync('lambdas/scouts-slack-handler/function/slack-handler.mjs', 'utf8');
   const router = readFileSync('lambdas/scouts2sqs/function/request-router.mjs', 'utf8');
   assert.match(handler, /actionMeta\?\.occurrenceId \?\? eventData\?\.occurrenceId/);
