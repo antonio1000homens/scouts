@@ -54,9 +54,10 @@ The canary performs the following deployed journey:
 7. Clear only the image theme, request `generateImageTheme`, and assert durable read-back.
 8. Clear only the image URL, request `generateImage`, and again require durable read-back plus a verifiable generated-image object.
 9. Request `approve`; assert `isApproved=true` in the event and agenda.
-10. Request `hide`; assert `isHidden=true` in the event and agenda.
-11. Request `unhide`; assert `isHidden=false` in the event and agenda and confirm the reserved regression UID remains attached.
-12. Remove the synthetic agenda entry and event object, sweep the complete `website/eventImages/<hex>-` namespace, and verify S3 deletions rather than reporting cleanup success from an acknowledgement alone.
+10. Request `hide`; assert canonical `isHidden=true` and every same-HEX agenda instance is hidden.
+11. Run the agenda refresh/republication path; assert the hidden canonical state and every same-HEX agenda instance remain hidden.
+12. Request explicit `unhide`; assert `isHidden=false` in the canonical event and every same-HEX agenda instance, and confirm the reserved regression UID remains attached.
+13. Remove the synthetic agenda entry and event object, sweep the complete `website/eventImages/<hex>-` namespace, and verify S3 deletions rather than reporting cleanup success from an acknowledgement alone.
 
 An agenda backup is retained under `migration-backups/live-regression/<run-id>/agenda.json` for recovery/audit.
 

@@ -172,9 +172,10 @@ test('real persistence handler treats legacy occurrence selectors as HEX-wide vi
       return { matched };
     },
   });
-  const invoke = async (requestId, occurrenceId, isHidden) => handler({ Records: [{ eventSource: 'aws:sqs', messageId: `message-${requestId}`, body: JSON.stringify({
+  const invoke = async (requestId, occurrenceId, isHidden, visibilityIntent = isHidden ? 'hide' : 'unhide') => handler({ Records: [{ eventSource: 'aws:sqs', messageId: `message-${requestId}`, body: JSON.stringify({
     realm: 'persist', operation: 'persist', requestId, rootRequestId: 'root-visibility', occurrenceId,
     hex: HEX, subject: HEX, action: JSON.stringify({ metadata: { hex: HEX, status: { isHidden } } }),
+    ...(visibilityIntent ? { visibilityIntent } : {}),
   }) }] });
 
   const hideResult = await invoke('request-hide', OCCURRENCE_A, true);
@@ -199,4 +200,8 @@ test('real persistence handler treats legacy occurrence selectors as HEX-wide vi
   assert.equal(store['agenda.json'].events.every((entry) => entry.metadata.status.isHidden === true), true);
   assert.equal(activity.at(-1).state, 'completed');
   assert.equal(sentMessages.length, 4);
+
+  await invoke('request-stale-false', undefined, false, null);
+  assert.equal(store[`events/${HEX}.json`].metadata.status.isHidden, true);
+  assert.equal(store['agenda.json'].events.every((entry) => entry.metadata.status.isHidden === true), true);
 });

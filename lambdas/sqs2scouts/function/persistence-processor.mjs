@@ -2441,6 +2441,9 @@ function extractOccurrenceVisibility(message, rawSubject, action) {
         ?? subjectObject.metadata?.status?.isHidden
         ?? subjectObject.isHidden;
     if (typeof hidden !== 'boolean') return null;
+    // A false value on a general metadata patch is stale input, not an
+    // unhide. Only the explicit Admin command may clear shared-HEX visibility.
+    if (hidden === false && message?.visibilityIntent !== 'unhide') return null;
     // Visibility is canonical HEX state. Legacy occurrenceId selectors are
     // deliberately ignored so one calendar instance cannot diverge from siblings.
     return { isHidden: hidden };
@@ -3567,6 +3570,16 @@ async function lambdaHandlerWithDependencies(event) {
             const visibility = extractOccurrenceVisibility(messageBody, rawSubject, action);
             const event = buildPersistEventPayload(existingEvent, rawSubject, action);
             event.hex = hexValue;
+            // Do not let a stale false status embedded in an unrelated patch
+            // overwrite the canonical hide. `visibility` is non-null only for
+            // hide or an explicitly marked unhide command.
+            if (visibility === null && getStatusObject(existingEvent)?.isHidden === true) {
+                event.metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+                event.metadata.status = event.metadata.status && typeof event.metadata.status === 'object'
+                    ? event.metadata.status
+                    : {};
+                event.metadata.status.isHidden = true;
+            }
             normalizeHexEventShape(event, hexValue);
             ensureRuntimeMetadata(event, hexValue);
             

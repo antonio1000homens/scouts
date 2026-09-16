@@ -351,13 +351,13 @@ function metadataMatches(event, agendaEvent) {
   return isDeepStrictEqual(event?.metadata ?? null, agendaEvent?.metadata ?? null);
 }
 
-async function waitForEventAndAgenda(hex, predicate, label, { allowOccurrenceVisibilityMismatch = false } = {}) {
+async function waitForEventAndAgenda(hex, predicate, label) {
   return poll(label, () => {
     const event = readJson(`events/${hex}.json`);
     assertCanonicalEventDocument(event, { expectedHex: hex });
     const agendaEvent = eventFromAgenda(readJson(AGENDA_KEY), hex);
     if (!agendaEvent) return null;
-    if (!allowOccurrenceVisibilityMismatch && !metadataMatches(event, agendaEvent)) return null;
+    if (!metadataMatches(event, agendaEvent)) return null;
     return predicate(event, agendaEvent) ? { event, agendaEvent } : null;
   });
 }
@@ -554,20 +554,33 @@ try {
   const canonicalMetadataBeforeVisibility = structuredClone(approved.event.metadata);
   recordPass('Approval persisted', approve?.requestId ? `request ${approve.requestId}` : 'event + agenda');
 
-  const hide = await postCommand({ realm: 'scouts', action: 'hide', subject: { hex, occurrenceId, isHidden: true } });
+  const hide = await postCommand({ realm: 'scouts', action: 'hide', subject: { hex, isHidden: true } });
   const hidden = await waitForEventAndAgenda(hex, (event, agendaEvent) => {
     const agenda = readJson(AGENDA_KEY);
     const sibling = agenda.events.find((entry) => entry.occurrenceId === siblingOccurrenceId);
-    return isDeepStrictEqual(event.metadata, canonicalMetadataBeforeVisibility)
-      && event.metadata.status.isHidden === false
+    return isDeepStrictEqual(event.metadata, {
+      ...canonicalMetadataBeforeVisibility,
+      status: { ...canonicalMetadataBeforeVisibility.status, isHidden: true },
+    })
+      && event.metadata.status.isHidden === true
       && agendaEvent.occurrenceId === occurrenceId
       && agendaEvent.metadata.status.isHidden === true
-      && sibling?.metadata?.status?.isHidden === false;
-  }, 'hide persistence', { allowOccurrenceVisibilityMismatch: true });
+      && sibling?.metadata?.status?.isHidden === true;
+  }, 'hide persistence');
   recordPass('Hide persisted', hide?.requestId ? `request ${hide.requestId}` : 'event + agenda');
-  recordPass('Same-HEX sibling remained visible', hidden.agendaEvent.occurrenceId);
+  recordPass('Same-HEX sibling hidden', hidden.agendaEvent.occurrenceId);
 
-  const unhide = await postCommand({ realm: 'scouts', action: 'unhide', subject: { hex, occurrenceId, isHidden: false } });
+  const refresh = await postCommand({ realm: 'scouts', subject: 'agenda', action: 0, maxEvents: 0 });
+  await waitForEventAndAgenda(hex, (event) => {
+    const agenda = readJson(AGENDA_KEY);
+    const siblings = eventsFromAgenda(agenda, hex);
+    return event.metadata.status.isHidden === true
+      && siblings.length === agendaEntries.length
+      && siblings.every((entry) => entry.metadata?.status?.isHidden === true);
+  }, 'post-hide agenda refresh');
+  recordPass('Hidden state survived agenda refresh', refresh?.requestId ? `request ${refresh.requestId}` : 'canonical event + all agenda siblings');
+
+  const unhide = await postCommand({ realm: 'scouts', action: 'unhide', subject: { hex, isHidden: false } });
   const unhidden = await waitForEventAndAgenda(
     hex,
     (event, agendaEvent) => {
@@ -581,7 +594,6 @@ try {
         && sibling?.metadata?.status?.isHidden === false;
     },
     'unhide persistence',
-    { allowOccurrenceVisibilityMismatch: true },
   );
   if (!unhidden.agendaEvent.uid.startsWith(REGRESSION_UID_PREFIX)) {
     throw new Error('Unhidden canary lost the reserved regression UID prefix');

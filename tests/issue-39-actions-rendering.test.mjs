@@ -135,7 +135,7 @@ test('live regression canary uses conditional S3 writes and explicit ownership f
   assert.match(liveRegressionSource, /eventCreatedByRun/);
   assert.match(liveRegressionSource, /agendaEntryCreatedByRun/);
   assert.match(liveRegressionSource, /assertOwnedAgendaEvent/);
-  assert.match(liveRegressionSource, /Same-HEX sibling remained visible/);
+  assert.match(liveRegressionSource, /Same-HEX sibling hidden/);
   assert.match(liveRegressionSource, /S3 object still exists after delete/);
 });
 

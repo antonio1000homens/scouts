@@ -203,6 +203,7 @@ export function translateCompactPersistRequest(message) {
     requestId,
     rootRequestId: rootRequestIdOf(message, requestId),
     source: text(message?.source) || 'scouts2sqs',
+    ...(text(message?.visibilityIntent) ? { visibilityIntent: text(message.visibilityIntent) } : {}),
     ...(occurrenceId ? { occurrenceId } : {}),
     ...(text(message?.decisionSource) ? { decisionSource: text(message.decisionSource) } : {}),
     ...(message?.slackMetadata && typeof message.slackMetadata === 'object'
@@ -222,6 +223,7 @@ export function buildDownstreamPersistMessage(message) {
     subject: translated.hex,
     action: JSON.stringify(translated.subject),
     operation: 'persist',
+    ...(translated.visibilityIntent ? { visibilityIntent: translated.visibilityIntent } : {}),
     ...(translated.occurrenceId ? { occurrenceId: translated.occurrenceId } : {}),
   };
 }

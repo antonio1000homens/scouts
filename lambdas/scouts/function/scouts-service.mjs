@@ -3783,6 +3783,7 @@ export async function lambdaHandler(event = {}) {
           isHidden: isHideOperation,
         },
         action: 'persist',
+        visibilityIntent: isHideOperation ? 'hide' : 'unhide',
       },
       isHideOperation ? 'AdminHide' : 'AdminUnhide',
     );

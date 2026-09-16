@@ -76,7 +76,7 @@ test('real request router forwards a persist mutation with occurrence and root i
   const router = await loadRouter();
   const response = await router.handler({ Records: [{ eventSource: 'aws:sqs', body: JSON.stringify({
     realm: 'persist', action: 'persist', requestId: 'request-persist', rootRequestId: 'operation-persist',
-    occurrenceId: 'occ_0123456789abcdef01234567', subject: { metadata: { hex: HEX, status: { isHidden: true } } },
+    occurrenceId: 'occ_0123456789abcdef01234567', visibilityIntent: 'hide', subject: { metadata: { hex: HEX, status: { isHidden: true } } },
   }) }] });
   assert.equal(response.statusCode, 200);
   assert.equal(router.sentMessages.length, 1);
@@ -85,5 +85,6 @@ test('real request router forwards a persist mutation with occurrence and root i
   assert.equal(forwarded.requestId, 'request-persist');
   assert.equal(forwarded.rootRequestId, 'operation-persist');
   assert.equal(forwarded.occurrenceId, 'occ_0123456789abcdef01234567');
+  assert.equal(forwarded.visibilityIntent, 'hide');
   assert.deepEqual(JSON.parse(forwarded.action).metadata.status, { isHidden: true });
 });

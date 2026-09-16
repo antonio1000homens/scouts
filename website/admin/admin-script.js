@@ -2786,9 +2786,9 @@ function isEntryHidden(entry) {
 }
 
 function getEventMergeKey(event, index) {
-    if (hasText(event?.occurrenceId)) return `occurrence:${event.occurrenceId.trim()}`;
     const hex = getEventHex(event);
     if (hex) return `hex:${hex}`;
+    if (hasText(event?.occurrenceId)) return `occurrence:${event.occurrenceId.trim()}`;
 
     const uid = hasText(event?.uid) ? event.uid.trim() : '';
     if (uid) return `uid:${uid}`;

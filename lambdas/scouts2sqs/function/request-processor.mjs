@@ -1457,6 +1457,9 @@ export async function lambdaHandler(event) {
                                     realm: 'persist',
                                     subject: expandedPersist.subject,
                                     action: expandedPersist.action,
+                                    ...(typeof messageBody.visibilityIntent === 'string' && messageBody.visibilityIntent.trim()
+                                        ? { visibilityIntent: messageBody.visibilityIntent.trim() }
+                                        : {}),
                                     ...(expandedPersist.occurrenceId ? { occurrenceId: expandedPersist.occurrenceId } : {}),
                                 };
                             }

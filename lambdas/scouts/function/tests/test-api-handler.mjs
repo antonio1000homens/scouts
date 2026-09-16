@@ -71,6 +71,7 @@ test('real Scouts API handler publishes full-enrich and HEX-canonical mutations'
   assert.equal(hide.statusCode, 200);
   const hideMessage = JSON.parse(service.sent[1].MessageBody);
   assert.deepEqual(hideMessage.subject, { hex: HEX, isHidden: true }, JSON.stringify(hideMessage));
+  assert.equal(hideMessage.visibilityIntent, 'hide');
 
   const approve = await service.handler(request({ realm: 'scouts', action: 'approve', subject: { hex: HEX, isApproved: true } }));
   assert.equal(approve.statusCode, 200);
@@ -81,6 +82,7 @@ test('real Scouts API handler publishes full-enrich and HEX-canonical mutations'
   assert.equal(unhide.statusCode, 200);
   const unhideMessage = JSON.parse(service.sent[3].MessageBody);
   assert.deepEqual(unhideMessage.subject, { hex: HEX, isHidden: false });
+  assert.equal(unhideMessage.visibilityIntent, 'unhide');
 });
 
 test('real Scouts API handler accepts HEX-wide visibility without an occurrence selector', async () => {
