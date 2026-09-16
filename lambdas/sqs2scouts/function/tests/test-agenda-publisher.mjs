@@ -44,7 +44,7 @@ test('publishes a partial direct tagline without requiring an image', () => {
   assert.equal(result.agenda.events[0].metadata.image.url, null);
 });
 
-test('shared metadata publication preserves occurrence-owned visibility', () => {
+test('canonical HEX publication overwrites stale per-occurrence visibility', () => {
   const hiddenAgenda = agenda();
   hiddenAgenda.events[0].metadata.status.isHidden = true;
   const result = mergeCanonicalEventIntoAgenda(hiddenAgenda, canonical({
@@ -55,35 +55,29 @@ test('shared metadata publication preserves occurrence-owned visibility', () => 
       status: { isHidden: false, isApproved: true },
     },
   }), HEX);
-  assert.deepEqual(result.agenda.events[0].metadata, {
-    hex: HEX,
-    tagline: 'Updated',
-    image: { theme: 'Watercolour water fight', url: 'website/eventImages/water-games.jpg' },
-    status: { isHidden: true, isApproved: true },
-  });
+  assert.deepEqual(result.agenda.events[0].metadata.status, { isHidden: false, isApproved: true });
 });
 
-test('explicit occurrence visibility changes only the selected same-HEX occurrence', () => {
+test('legacy occurrence options cannot split same-HEX visibility', () => {
   const source = agenda();
-  source.events = [
-    source.events[0],
-    {
-      ...structuredClone(source.events[0]),
-      uid: 'osm-water-games-2',
-      occurrenceId: 'occ_89abcdef0123456701234567',
-      dtstart: '20260716T183000',
-    },
-  ];
-  const result = mergeCanonicalEventIntoAgenda(source, canonical(), HEX, {
+  source.events.push({
+    ...structuredClone(source.events[0]),
+    uid: 'osm-water-games-2',
     occurrenceId: 'occ_89abcdef0123456701234567',
-    visibility: true,
+    dtstart: '20260716T183000',
   });
-  assert.equal(result.matched, 1);
-  assert.equal(result.agenda.events[0].metadata.status.isHidden, false);
-  assert.equal(result.agenda.events[1].metadata.status.isHidden, true);
+  const hidden = canonical({
+    metadata: { ...canonical().metadata, status: { isHidden: true, isApproved: false } },
+  });
+  const result = mergeCanonicalEventIntoAgenda(source, hidden, HEX, {
+    occurrenceId: 'occ_89abcdef0123456701234567',
+    visibility: false,
+  });
+  assert.equal(result.matched, 2);
+  assert.deepEqual(result.agenda.events.map((event) => event.metadata.status.isHidden), [true, true]);
 });
 
-test('HEX-wide visibility changes every matching occurrence', () => {
+test('a later same-HEX occurrence inherits canonical hidden state on publication', () => {
   const source = agenda();
   source.events = [source.events[0], ...[2, 3, 4, 5].map((index) => ({
     ...structuredClone(source.events[0]),
@@ -91,7 +85,10 @@ test('HEX-wide visibility changes every matching occurrence', () => {
     occurrenceId: `occ_${String(index).repeat(24)}`,
     dtstart: `202607${String(15 + index).padStart(2, '0')}T183000`,
   }))];
-  const result = mergeCanonicalEventIntoAgenda(source, canonical(), HEX, { visibility: true });
+  const hidden = canonical({
+    metadata: { ...canonical().metadata, status: { isHidden: true, isApproved: false } },
+  });
+  const result = mergeCanonicalEventIntoAgenda(source, hidden, HEX);
   assert.equal(result.matched, 5);
   assert.deepEqual(result.agenda.events.map((event) => event.metadata.status.isHidden), [true, true, true, true, true]);
 });

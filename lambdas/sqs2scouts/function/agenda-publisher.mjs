@@ -65,48 +65,26 @@ function metadataForAgenda(event, expectedHex) {
   };
 }
 
-export function mergeCanonicalEventIntoAgenda(agenda, canonicalEvent, hex, options = {}) {
+export function mergeCanonicalEventIntoAgenda(agenda, canonicalEvent, hex) {
   if (!agenda || typeof agenda !== 'object' || !Array.isArray(agenda.events)) {
     throw new Error('agenda.json is missing its events array');
   }
   const normalisedHex = canonicalHex(hex, 'Agenda publication HEX');
   const canonicalMetadata = metadataForAgenda(canonicalEvent, normalisedHex);
 
-  const occurrenceId = text(options?.occurrenceId);
-  const hasExplicitVisibility = typeof options.visibility === 'boolean';
   let matched = 0;
-  let occurrenceMatched = 0;
   const events = agenda.events.map((event) => {
     if (eventHex(event) !== normalisedHex) return event;
-    if (occurrenceId && text(event?.occurrenceId) !== occurrenceId) return event;
     matched += 1;
-    occurrenceMatched += 1;
-
-    // Shared HEX metadata may update all matching occurrences, but visibility is
-    // occurrence-owned state. Never copy the shared canonical isHidden value over
-    // an agenda occurrence unless this publication explicitly targets that
-    // occurrence with a visibility mutation.
-    const existingHidden = event?.metadata?.status?.isHidden === true;
-    const metadata = clone(canonicalMetadata);
-    metadata.status = {
-      ...metadata.status,
-      isHidden: hasExplicitVisibility ? options.visibility === true : existingHidden,
-    };
-
     return {
       ...event,
-      metadata,
+      metadata: clone(canonicalMetadata),
     };
   });
 
   if (matched === 0) {
     const error = new Error(`No agenda event matches HEX ${normalisedHex}`);
     error.code = 'AGENDA_EVENT_NOT_FOUND';
-    throw error;
-  }
-  if (occurrenceId && occurrenceMatched !== 1) {
-    const error = new Error(`No unique agenda occurrence matches ${occurrenceId}`);
-    error.code = 'VISIBILITY_OCCURRENCE_NOT_FOUND';
     throw error;
   }
   return {
@@ -119,12 +97,12 @@ export function mergeCanonicalEventIntoAgenda(agenda, canonicalEvent, hex, optio
   };
 }
 
-export async function publishCanonicalEventToAgenda({ loadAgenda, writeAgenda, hex, event, occurrenceId = null, visibility }) {
+export async function publishCanonicalEventToAgenda({ loadAgenda, writeAgenda, hex, event }) {
   if (typeof loadAgenda !== 'function' || typeof writeAgenda !== 'function') {
     throw new Error('Agenda publication requires loadAgenda and writeAgenda functions');
   }
   const agenda = await loadAgenda();
-  const merged = mergeCanonicalEventIntoAgenda(agenda, event, hex, { occurrenceId, visibility });
+  const merged = mergeCanonicalEventIntoAgenda(agenda, event, hex);
   const put = await writeAgenda(merged.agenda);
   return {
     matched: merged.matched,

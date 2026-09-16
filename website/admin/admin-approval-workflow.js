@@ -292,7 +292,7 @@
 
         const operationKey = typeof uiOperationKey === 'function'
             ? uiOperationKey(entry, 'approve')
-            : `${entry?.occurrenceId || event?.occurrenceId || hex}:approve`;
+            : `${hex}:approve`;
         if (typeof pendingUiOperations !== 'undefined' && pendingUiOperations.has(operationKey)) return null;
         if (typeof pendingUiOperations !== 'undefined') pendingUiOperations.set(operationKey, true);
         const originalButtonLabel = button?.textContent;

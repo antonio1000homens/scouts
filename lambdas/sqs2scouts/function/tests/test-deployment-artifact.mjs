@@ -121,71 +121,63 @@ test('visibility guard understands the live subject-HEX plus encoded-action cont
 
 test('visibility guard accepts HEX-wide visibility for five HOLIDAY occurrences', () => {
   const agendaSnapshot = {
-    value: {
-      events: [1, 2, 3, 4, 5].map((index) => agendaEvent(`osm-event-${index}`)),
-    },
+    value: { events: [1, 2, 3, 4, 5].map((index) => agendaEvent(`osm-event-${index}`)) },
     eTag: '"agenda-before"',
   };
   const eventSnapshot = { value: canonicalEvent(false), eTag: '"0fe52dbc"' };
-
   const guard = buildVisibilityPersistGuard(visibilityMessage(true), agendaSnapshot, eventSnapshot);
   assert.equal(guard.beforeMatched, 5);
+  assert.equal(guard.beforeHidden, false);
 });
 
-test('visibility guard selects exactly one same-HEX occurrence when occurrenceId is supplied', () => {
+test('legacy occurrence selector is ignored by the visibility guard', () => {
   const occurrenceId = 'occ_0123456789abcdef01234567';
   const agendaSnapshot = {
-    value: {
-      events: [1, 2, 3].map((index) => ({ ...agendaEvent(`osm-event-${index}`), occurrenceId: index === 2 ? occurrenceId : `occ_${String(index).repeat(24)}` })),
-    },
+    value: { events: [1, 2, 3].map((index) => ({ ...agendaEvent(`osm-event-${index}`), occurrenceId: index === 2 ? occurrenceId : `occ_${String(index).repeat(24)}` })) },
   };
   const eventSnapshot = { value: canonicalEvent(false), eTag: '"before"' };
+  assert.deepEqual(extractVisibilityPersistMutation(occurrenceVisibilityMessage(occurrenceId)), { hex: HOLIDAY_HEX, isHidden: true });
   const guard = buildVisibilityPersistGuard(occurrenceVisibilityMessage(occurrenceId), agendaSnapshot, eventSnapshot);
-  assert.equal(guard.occurrenceId, occurrenceId);
-  assert.equal(guard.hex, HOLIDAY_HEX);
+  assert.equal(guard.beforeMatched, 3);
+  assert.equal('occurrenceId' in guard, false);
 });
 
-test('visibility read-back rejects a mismatched HEX-wide agenda occurrence', () => {
+test('visibility read-back rejects an unchanged canonical value', () => {
   const beforeAgenda = { value: { events: [agendaEvent('osm-event-1', false)] } };
   const beforeEvent = { value: canonicalEvent(false), eTag: '"0fe52dbc"' };
   const guard = buildVisibilityPersistGuard(visibilityMessage(true), beforeAgenda, beforeEvent);
-
   assert.throws(
-    () => verifyVisibilityPersistReadback(
-      guard,
-      { value: { events: [agendaEvent('osm-event-1', false)] }, eTag: '"agenda-after"' },
-      { value: canonicalEvent(false), eTag: '"0fe52dbc"' },
-    ),
+    () => verifyVisibilityPersistReadback(guard, { value: { events: [agendaEvent('osm-event-1', true)] } }, { value: canonicalEvent(false), eTag: '"0fe52dbc"' }),
+    (error) => error?.code === 'PERSISTENCE_READ_BACK_MISMATCH',
+  );
+});
+
+test('visibility read-back rejects an unchanged S3 ETag when canonical visibility changed', () => {
+  const beforeAgenda = { value: { events: [agendaEvent('osm-event-1', false)] } };
+  const beforeEvent = { value: canonicalEvent(false), eTag: '"0fe52dbc"' };
+  const guard = buildVisibilityPersistGuard(visibilityMessage(true), beforeAgenda, beforeEvent);
+  assert.throws(
+    () => verifyVisibilityPersistReadback(guard, { value: { events: [agendaEvent('osm-event-1', true)] } }, { value: canonicalEvent(true), eTag: '"0fe52dbc"' }),
+    (error) => error?.code === 'PERSISTENCE_ETAG_UNCHANGED',
+  );
+});
+
+test('visibility read-back rejects one divergent same-HEX agenda instance', () => {
+  const beforeAgenda = { value: { events: [agendaEvent('a', false), agendaEvent('b', false)] } };
+  const beforeEvent = { value: canonicalEvent(false), eTag: '"old"' };
+  const guard = buildVisibilityPersistGuard(visibilityMessage(true), beforeAgenda, beforeEvent);
+  assert.throws(
+    () => verifyVisibilityPersistReadback(guard, { value: { events: [agendaEvent('a', true), agendaEvent('b', false)] } }, { value: canonicalEvent(true), eTag: '"new"' }),
     (error) => error?.code === 'PERSISTENCE_AGENDA_READ_BACK_MISMATCH',
   );
 });
 
-test('visibility read-back ignores the shared canonical visibility field', () => {
-  const beforeAgenda = { value: { events: [agendaEvent('osm-event-1', false)] } };
-  const beforeEvent = { value: canonicalEvent(false), eTag: '"0fe52dbc"' };
+test('visibility read-back succeeds only when canonical S3 and every agenda instance match', () => {
+  const beforeAgenda = { value: { events: [agendaEvent('a', false), agendaEvent('b', false)] } };
+  const beforeEvent = { value: canonicalEvent(false), eTag: '"old"' };
   const guard = buildVisibilityPersistGuard(visibilityMessage(true), beforeAgenda, beforeEvent);
-
   assert.deepEqual(
-    verifyVisibilityPersistReadback(
-      guard,
-      { value: { events: [agendaEvent('osm-event-1', true)] }, eTag: '"agenda-after"' },
-      { value: canonicalEvent(false), eTag: '"0fe52dbc"' },
-    ),
-    { hex: HOLIDAY_HEX, isHidden: true, eTag: '"0fe52dbc"', matched: 1 },
-  );
-});
-
-test('visibility read-back succeeds only when canonical S3 and agenda both match', () => {
-  const beforeAgenda = { value: { events: [agendaEvent('osm-event-1', false)] } };
-  const beforeEvent = { value: canonicalEvent(false), eTag: '"0fe52dbc"' };
-  const guard = buildVisibilityPersistGuard(visibilityMessage(true), beforeAgenda, beforeEvent);
-
-  assert.deepEqual(
-    verifyVisibilityPersistReadback(
-      guard,
-      { value: { events: [agendaEvent('osm-event-1', true)] }, eTag: '"agenda-after"' },
-      { value: canonicalEvent(true), eTag: '"new-etag"' },
-    ),
-    { hex: HOLIDAY_HEX, isHidden: true, eTag: '"new-etag"', matched: 1 },
+    verifyVisibilityPersistReadback(guard, { value: { events: [agendaEvent('a', true), agendaEvent('b', true)] } }, { value: canonicalEvent(true), eTag: '"new"' }),
+    { hex: HOLIDAY_HEX, isHidden: true, eTag: '"new"', matched: 2 },
   );
 });

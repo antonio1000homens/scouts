@@ -14,9 +14,9 @@ The browser does not run calendar reconciliation on page load, expose polling in
 
 ## Identity and visibility
 
-Each published occurrence carries a server-owned opaque `occurrenceId`. Shared enrichment metadata is grouped by HEX, but Hide/Unhide commands are selected by `occurrenceId`; same-title occurrences therefore remain independently addressable. HEX and UID are shown only under Advanced diagnostics.
+Each published calendar instance carries a server-owned opaque `occurrenceId`, but `occurrenceId` is instance identity only. Shared event state is owned by the canonical HEX document (`events/<hex>.json`): tagline, image theme, image URL, approval and visibility all apply to every agenda instance that resolves to that HEX. HEX and UID are shown only under Advanced diagnostics.
 
-Visibility is stored per occurrence, but a HEX-only hide/unhide is the shared control: it writes an overlay and agenda state for every current occurrence with that HEX. An explicit `occurrenceId` remains available when one occurrence must be changed alone. Shared metadata publication preserves occurrence visibility unless the publication carries an explicit visibility mutation. Review/approval may reuse shared HEX metadata, but approval does not write occurrence visibility back into the shared HEX record. Admin and Slack use the HEX-wide contract by default. UI pending state is action-scoped, so one accepted or slow operation does not disable unrelated event actions or permit duplicate submission of the same action.
+Hide/Unhide therefore writes `metadata.status.isHidden` on the canonical HEX document and republishes that state to every current same-HEX agenda instance. A legacy request may still contain an `occurrenceId`, but it must not narrow or override the HEX-wide mutation. Per-occurrence visibility overlays are no longer read or written; existing `occurrences/*.json` objects are ignored and may be cleaned up separately. Admin and Slack submit the HEX contract. UI pending state for shared actions is HEX-scoped, so same-HEX cards cannot submit duplicate shared operations while one is already pending.
 
 ## Security and API
 

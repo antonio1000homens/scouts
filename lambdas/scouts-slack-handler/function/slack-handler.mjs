@@ -1069,7 +1069,6 @@ export async function lambdaHandler(event) {
                     const hidePayload = {
                         realm: 'persist',
                         subject: {
-                            ...(occurrenceId ? { occurrenceId } : {}),
                             metadata: {
                                 hex,
                                 status: { isHidden: true },

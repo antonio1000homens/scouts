@@ -21,7 +21,7 @@ def replace(path, old, new, count=1):
 
 def sub(path, pattern, repl, count=1, flags=re.S):
     text = read(path)
-    text2, n = re.subn(pattern, repl, text, count=count, flags=flags)
+    text2, n = re.subn(pattern, lambda _match: repl, text, count=count, flags=flags)
     if n != count:
         raise SystemExit(f'{path}: expected {count} regex matches, found {n}: {pattern[:80]}')
     write(path, text2)

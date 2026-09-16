@@ -55,7 +55,7 @@ function request(body, apiKey = 'fixture-key') {
   };
 }
 
-test('real Scouts API handler publishes full-enrich and occurrence mutations with identity intact', async () => {
+test('real Scouts API handler publishes full-enrich and HEX-canonical mutations', async () => {
   const service = await loadService();
   const full = await service.handler(request({ realm: 'scouts', action: 'generateFull', subject: { hex: HEX } }));
   assert.equal(full.statusCode, 200);
@@ -70,8 +70,7 @@ test('real Scouts API handler publishes full-enrich and occurrence mutations wit
   const hide = await service.handler(request({ realm: 'scouts', action: 'hide', subject: { hex: HEX, occurrenceId: OCCURRENCE, isHidden: true } }));
   assert.equal(hide.statusCode, 200);
   const hideMessage = JSON.parse(service.sent[1].MessageBody);
-  assert.equal(hideMessage.subject.occurrenceId, OCCURRENCE, JSON.stringify(hideMessage));
-  assert.equal(hideMessage.subject.hex, HEX, JSON.stringify(hideMessage));
+  assert.deepEqual(hideMessage.subject, { hex: HEX, isHidden: true }, JSON.stringify(hideMessage));
 
   const approve = await service.handler(request({ realm: 'scouts', action: 'approve', subject: { hex: HEX, isApproved: true } }));
   assert.equal(approve.statusCode, 200);
@@ -81,8 +80,7 @@ test('real Scouts API handler publishes full-enrich and occurrence mutations wit
   const unhide = await service.handler(request({ realm: 'scouts', action: 'unhide', subject: { hex: HEX, occurrenceId: OCCURRENCE, isHidden: false } }));
   assert.equal(unhide.statusCode, 200);
   const unhideMessage = JSON.parse(service.sent[3].MessageBody);
-  assert.equal(unhideMessage.subject.occurrenceId, OCCURRENCE);
-  assert.equal(unhideMessage.subject.isHidden, false);
+  assert.deepEqual(unhideMessage.subject, { hex: HEX, isHidden: false });
 });
 
 test('real Scouts API handler accepts HEX-wide visibility without an occurrence selector', async () => {

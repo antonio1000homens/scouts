@@ -9,7 +9,6 @@ import { resolveCanonicalImageDimensions, normaliseGeneratedJpeg } from '/opt/no
 import { getOptionalSecret, getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import { recordRequestActivity as defaultRecordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 import { publishCanonicalEventToAgenda as defaultPublishCanonicalEventToAgenda } from './agenda-publisher.mjs';
-import { occurrenceStorageKey } from './occurrence-identity.mjs';
 import { generateGeminiTextWithFallback, parseGeminiTextModels, GEMINI_TEXT_RESPONSE_SCHEMAS, validateGeminiTextResponse } from './gemini-text-models.mjs';
 import { buildRuntimeRequestEntry } from './runtime-request-entry.mjs';
 import { reconcileSlackDecision } from './slack-decision-sync.mjs';
@@ -2436,63 +2435,15 @@ function extractOccurrenceVisibility(message, rawSubject, action) {
     const subjectObject = rawSubject && typeof rawSubject === 'object'
         ? rawSubject
         : parsePersistPatch(rawSubject) || {};
-    const occurrenceId = actionObject.occurrenceId
-        ?? actionObject.metadata?.occurrenceId
-        ?? subjectObject.occurrenceId
-        ?? subjectObject.metadata?.occurrenceId
-        ?? message?.occurrenceId;
     const hidden = actionObject.metadata?.status?.isHidden
         ?? actionObject.status?.isHidden
         ?? actionObject.isHidden
         ?? subjectObject.metadata?.status?.isHidden
         ?? subjectObject.isHidden;
     if (typeof hidden !== 'boolean') return null;
-    return { ...(occurrenceId ? { occurrenceId: String(occurrenceId).trim() } : {}), isHidden: hidden };
-}
-
-async function persistVisibilityOverlays({ occurrenceId = null, isHidden, hex, title, sourceUid, lastKnownStart, requestId }) {
-    if (occurrenceId && !/^occ_[a-f0-9]{24,}$/i.test(occurrenceId)) {
-        throw new Error('Invalid occurrenceId for visibility persistence');
-    }
-    const agendaResponse = await s3Client.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: 'agenda.json' }));
-    const agenda = JSON.parse(await readBodyStream(agendaResponse.Body));
-    const requestedHex = String(hex || '').trim().toLowerCase();
-    const matches = Array.isArray(agenda?.events)
-        ? agenda.events.filter((event) => event?.metadata?.hex === requestedHex
-            && (!occurrenceId || event?.occurrenceId === occurrenceId))
-        : [];
-    if (matches.length === 0 || (occurrenceId && matches.length !== 1)) {
-        const target = occurrenceId ? `occurrence ${occurrenceId}` : `HEX ${requestedHex}`;
-        const error = new Error(`Visibility ${target} resolved to ${matches.length} agenda records`);
-        error.code = matches.length === 0 ? 'VISIBILITY_OCCURRENCE_NOT_FOUND' : 'VISIBILITY_OCCURRENCE_AMBIGUOUS';
-        throw error;
-    }
-    const updatedAt = new Date().toISOString();
-    const persisted = [];
-    for (const occurrence of matches) {
-        const occurrenceOverlay = {
-            occurrenceId: occurrence.occurrenceId,
-            metadataId: requestedHex,
-            sourceUid: sourceUid || occurrence.uid || null,
-            lastKnownStart: lastKnownStart || occurrence.dtstart || null,
-            status: { isHidden },
-            updatedAt,
-            requestId: requestId || null,
-        };
-        const key = occurrenceStorageKey(occurrence.occurrenceId);
-        await s3Client.send(new PutObjectCommand({
-            Bucket: TARGET_BUCKET,
-            Key: key,
-            Body: JSON.stringify(occurrenceOverlay, null, 2),
-            ContentType: 'application/json',
-            CacheControl: 'no-store',
-        }));
-        const verify = await s3Client.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: key }));
-        const readBack = JSON.parse(await readBodyStream(verify.Body));
-        if (readBack?.status?.isHidden !== isHidden) throw new Error(`Occurrence visibility read-back mismatch for ${occurrence.occurrenceId}`);
-        persisted.push(readBack);
-    }
-    return occurrenceId ? persisted[0] : persisted;
+    // Visibility is canonical HEX state. Legacy occurrenceId selectors are
+    // deliberately ignored so one calendar instance cannot diverge from siblings.
+    return { isHidden: hidden };
 }
 
 export function buildPersistEventPayload(existingEvent, rawSubject, action) {
@@ -3613,36 +3564,8 @@ async function lambdaHandlerWithDependencies(event) {
             }
 
             const existingEvent = (await loadHexEventFromS3(hexValue)) || {};
-            let persistSubject = rawSubject;
-            let persistAction = action;
             const visibility = extractOccurrenceVisibility(messageBody, rawSubject, action);
-            if (visibility) {
-                const agendaOccurrence = await persistVisibilityOverlays({
-                    ...visibility,
-                    hex: hexValue,
-                    title: existingEvent.title || existingEvent.summary,
-                    sourceUid: existingEvent.uid,
-                    requestId: requestContext.requestId,
-                });
-                console.log('[Persist] Occurrence visibility overlay persisted', {
-                    occurrenceId: visibility.occurrenceId,
-                    isHidden: visibility.isHidden,
-                });
-                // The shared HEX document is enrichment state. Do not make its
-                // legacy status field authoritative for an occurrence mutation.
-                if (rawSubject && typeof rawSubject === 'object') {
-                    persistSubject = cloneJsonValue(rawSubject);
-                    delete persistSubject.isHidden;
-                    if (persistSubject.metadata?.status) delete persistSubject.metadata.status.isHidden;
-                }
-                if (typeof action === 'string') {
-                    const actionObject = cloneJsonValue(parsePersistPatch(action));
-                    if (actionObject?.metadata?.status) delete actionObject.metadata.status.isHidden;
-                    persistAction = actionObject ? JSON.stringify(actionObject) : action;
-                }
-                if (!agendaOccurrence) throw new Error('Occurrence visibility persistence returned no state');
-            }
-            const event = buildPersistEventPayload(existingEvent, persistSubject, persistAction);
+            const event = buildPersistEventPayload(existingEvent, rawSubject, action);
             event.hex = hexValue;
             normalizeHexEventShape(event, hexValue);
             ensureRuntimeMetadata(event, hexValue);
@@ -3658,9 +3581,9 @@ async function lambdaHandlerWithDependencies(event) {
                 || visibility?.isHidden === true;
             event.metadata.status = {
                 isApproved: metadataStatus.isApproved === true,
-                isHidden: visibility ? (existingEvent.metadata?.status?.isHidden === true) : ((actionIsHidden || statusIsHidden)
-                    ? true
-                    : metadataStatus.isHidden === true),
+                isHidden: typeof visibility?.isHidden === 'boolean'
+                    ? visibility.isHidden
+                    : ((actionIsHidden || statusIsHidden) ? true : metadataStatus.isHidden === true),
             };
             ensureRuntimeMetadata(event, hexValue);
 
@@ -3717,30 +3640,10 @@ async function lambdaHandlerWithDependencies(event) {
                 setImageApprovalState(event, true);
             }
 
-            // Replace the hex file content with the subject content
-            if (!visibility) {
-                await saveHexEventToS3(hexValue, event);
-                await publishHexEventToAgenda(hexValue, event);
-            } else {
-                await saveHexEventToS3(hexValue, event);
-                await publishCanonicalEventToAgenda({
-                hex: hexValue,
-                event,
-                occurrenceId: visibility?.occurrenceId || null,
-                visibility: visibility?.isHidden,
-                loadAgenda: async () => {
-                    const response = await s3Client.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: 'agenda.json' }));
-                    return JSON.parse(await readBodyStream(response.Body));
-                },
-                writeAgenda: (agenda) => s3Client.send(new PutObjectCommand({
-                    Bucket: TARGET_BUCKET,
-                    Key: 'agenda.json',
-                    Body: JSON.stringify(agenda, null, 2),
-                    ContentType: 'application/json',
-                    CacheControl: 'no-store',
-                })),
-                });
-            }
+            // Persist the HEX document first, then publish that canonical state to
+            // every current agenda instance sharing the HEX.
+            await saveHexEventToS3(hexValue, event);
+            await publishHexEventToAgenda(hexValue, event);
             
             // Reconcile the existing review card with canonical persisted state.
             // This is deliberately best-effort: Slack failures must never roll back a successful event write.
@@ -3762,7 +3665,6 @@ async function lambdaHandlerWithDependencies(event) {
             const decisionSubject = {
                 hex: hexValue,
                 title: eventTitle,
-                ...(visibility?.occurrenceId ? { occurrenceId: visibility.occurrenceId } : {}),
             };
             if (event.uid) {
                 decisionSubject.uid = event.uid;

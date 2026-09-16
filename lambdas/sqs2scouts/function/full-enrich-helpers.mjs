@@ -65,8 +65,6 @@ function eventHidden(event) {
 }
 
 export function extractVisibilityPersistMutation(message) {
-  if (text(message?.realm) !== 'persist') return null;
-
   const actionPatch = parseObject(message?.action);
   const subjectPatch = parseObject(message?.subject);
   const patch = actionPatch || subjectPatch || {};
@@ -99,13 +97,7 @@ export function extractVisibilityPersistMutation(message) {
   if (!hex) {
     throw codedError('VISIBILITY_PERSIST_HEX_MISSING', 'Visibility persistence request is missing a canonical HEX identifier');
   }
-
-  const occurrenceId = text(
-    actionPatch?.occurrenceId
-      ?? subject?.occurrenceId
-      ?? message?.occurrenceId,
-  );
-  return { hex, isHidden, ...(occurrenceId ? { occurrenceId } : {}) };
+  return { hex, isHidden };
 }
 
 export function buildVisibilityPersistGuard(message, agendaSnapshot, eventSnapshot) {
@@ -116,8 +108,7 @@ export function buildVisibilityPersistGuard(message, agendaSnapshot, eventSnapsh
   const canonical = snapshotValue(eventSnapshot);
   const beforeETag = text(eventSnapshot?.eTag);
   const matching = Array.isArray(agenda?.events)
-    ? agenda.events.filter((event) => eventHex(event) === mutation.hex
-      && (!mutation.occurrenceId || text(event?.occurrenceId) === mutation.occurrenceId))
+    ? agenda.events.filter((event) => eventHex(event) === mutation.hex)
     : [];
 
   if (matching.length === 0) {
@@ -127,7 +118,6 @@ export function buildVisibilityPersistGuard(message, agendaSnapshot, eventSnapsh
       { hex: mutation.hex, matched: 0 },
     );
   }
-
   if (!canonical || typeof canonical !== 'object') {
     throw codedError(
       'VISIBILITY_CANONICAL_EVENT_NOT_FOUND',
@@ -135,33 +125,46 @@ export function buildVisibilityPersistGuard(message, agendaSnapshot, eventSnapsh
       { hex: mutation.hex },
     );
   }
-
   return {
     ...mutation,
     beforeETag,
-    beforeHidden: mutation.occurrenceId ? eventHidden(matching[0]) : null,
+    beforeHidden: eventHidden(canonical),
     beforeMatched: matching.length,
   };
 }
 
 export function verifyVisibilityPersistReadback(guard, agendaSnapshot, eventSnapshot) {
   if (!guard) return null;
-
   const agenda = snapshotValue(agendaSnapshot);
   const canonical = snapshotValue(eventSnapshot);
   const afterETag = text(eventSnapshot?.eTag);
-  const matching = Array.isArray(agenda?.events)
-    ? agenda.events.filter((event) => eventHex(event) === guard.hex
-      && (!guard.occurrenceId || text(event?.occurrenceId) === guard.occurrenceId))
-    : [];
-  if (matching.length === 0 || (guard.occurrenceId && matching.length !== 1)) {
+  const actualHidden = eventHidden(canonical);
+
+  if (actualHidden !== guard.isHidden) {
     throw codedError(
-      'PERSISTENCE_AGENDA_IDENTITY_MISMATCH',
-      `Visibility persistence read-back for ${guard.hex} resolved ${matching.length} agenda occurrences; expected ${guard.occurrenceId ? 'exactly one' : 'at least one'}`,
-      { hex: guard.hex, matched: matching.length },
+      'PERSISTENCE_READ_BACK_MISMATCH',
+      `Canonical event ${guard.hex} read-back has metadata.status.isHidden=${String(actualHidden)}; expected ${guard.isHidden}`,
+      { hex: guard.hex, expected: guard.isHidden, actual: actualHidden },
+    );
+  }
+  if (guard.beforeHidden !== guard.isHidden && guard.beforeETag && afterETag === guard.beforeETag) {
+    throw codedError(
+      'PERSISTENCE_ETAG_UNCHANGED',
+      `Canonical event ${guard.hex} changed visibility but its S3 ETag did not change`,
+      { hex: guard.hex, eTag: afterETag },
     );
   }
 
+  const matching = Array.isArray(agenda?.events)
+    ? agenda.events.filter((event) => eventHex(event) === guard.hex)
+    : [];
+  if (matching.length === 0) {
+    throw codedError(
+      'PERSISTENCE_AGENDA_IDENTITY_MISMATCH',
+      `Visibility persistence read-back for ${guard.hex} resolved no agenda occurrences`,
+      { hex: guard.hex, matched: 0 },
+    );
+  }
   const mismatched = matching.filter((event) => eventHidden(event) !== guard.isHidden);
   if (mismatched.length > 0) {
     throw codedError(
@@ -170,13 +173,11 @@ export function verifyVisibilityPersistReadback(guard, agendaSnapshot, eventSnap
       { hex: guard.hex, expected: guard.isHidden, mismatched: mismatched.length, matched: matching.length },
     );
   }
-
   return {
     hex: guard.hex,
     isHidden: guard.isHidden,
     eTag: afterETag,
     matched: matching.length,
-    ...(guard.occurrenceId ? { occurrenceId: guard.occurrenceId } : {}),
   };
 }
 
