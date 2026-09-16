@@ -65,6 +65,8 @@ function eventHidden(event) {
 }
 
 export function extractVisibilityPersistMutation(message) {
+  if (text(message?.realm) !== 'persist') return null;
+
   const actionPatch = parseObject(message?.action);
   const subjectPatch = parseObject(message?.subject);
   const patch = actionPatch || subjectPatch || {};
