@@ -1,0 +1,37 @@
+name: PR127 reconciliation follow-up
+
+on:
+  push:
+    branches:
+      - changes
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile-pr127:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: changes
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply reconciliation patch
+        run: python3 scripts/pr127-reconcile-fix.py
+      - name: Verify canonical reconciliation
+        run: |
+          git diff --check
+          node --check lambdas/scouts/function/scouts-service.mjs
+          node --test tests/issue-127-hex-canonical.test.mjs
+          node --experimental-vm-modules --test lambdas/scouts/function/tests/test-api-handler.mjs
+          node --test tests/issue-125-regression-safety.test.mjs
+      - name: Commit reconciliation fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lambdas/scouts/function/scouts-service.mjs tests/issue-127-hex-canonical.test.mjs
+          git commit -m 'fix: make HEX status authoritative during refresh'
+          git push origin HEAD:changes
