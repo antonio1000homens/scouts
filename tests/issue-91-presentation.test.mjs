@@ -9,6 +9,7 @@ const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'ut
 const adminHtml = readFileSync('website/admin/index.html', 'utf8');
 const activityCentre = readFileSync('website/admin/admin-activity-centre.js', 'utf8');
 const approvalWorkflow = readFileSync('website/admin/admin-approval-workflow.js', 'utf8');
+const adminScript = readFileSync('website/admin/admin-script.js', 'utf8');
 const privateStorage = readFileSync('website/admin/private-storage-client.js', 'utf8');
 const diagnosticsEnhancements = readFileSync('website/admin/admin-diagnostics-enhancements.js', 'utf8');
 const eventReview = readFileSync('lambdas/shared-layer/nodejs/event-review.mjs', 'utf8');
@@ -97,6 +98,14 @@ test('issue 91 admin final generated-image review keeps the original root and us
   assert.match(approvalWorkflow, /rootRequestId: workflow\.rootRequestId/);
   assert.match(approvalWorkflow, /!result\?\.requiresGeneratedImage/);
   assert.match(approvalWorkflow, /Activity Centre owns that long-lived phase/);
+});
+
+test('issue 91 shared Admin state uses HEX-scoped optimistic updates and pending keys', () => {
+  assert.match(adminScript, /function hexScopedEntries\(entry\)/);
+  assert.match(adminScript, /function applyLocalApprovalState[\s\S]*hexScopedEntries\(entry\)/);
+  assert.match(adminScript, /function applyLocalPersistedField[\s\S]*hexScopedEntries\(entry\)/);
+  assert.match(adminScript, /return `\$\{getEventHex\(event\) \|\| entry\?\.occurrenceId/);
+  assert.match(approvalWorkflow, /: `\$\{hex\}:approve`/);
 });
 
 test('issue 91 successful final approval updates state and immediately refreshes its presentation', () => {

@@ -101,7 +101,7 @@ async function loadPersistenceModule(store, sentMessages) {
         const agenda = await loadAgenda();
         agenda.events = agenda.events.map((entry) => {
           if (entry?.metadata?.hex !== hex || (occurrenceId && entry.occurrenceId !== occurrenceId)) return entry;
-          return { ...entry, metadata: { ...entry.metadata, image: clone(event.metadata.image), tagline: event.metadata.tagline, status: { ...entry.metadata.status, isHidden: occurrenceId ? visibility === true : entry.metadata.status.isHidden } } };
+          return { ...entry, metadata: { ...entry.metadata, image: clone(event.metadata.image), tagline: event.metadata.tagline, status: { ...entry.metadata.status, isHidden: typeof visibility === 'boolean' ? visibility === true : entry.metadata.status.isHidden } } };
         });
         await writeAgenda(agenda);
         return { matched: 1 };
@@ -143,7 +143,7 @@ function fixtureStore() {
   };
 }
 
-test('real persistence handler exercises SQS messageBody occurrence hide and unhide boundaries', async () => {
+test('real persistence handler treats legacy occurrence selectors as HEX-wide visibility', async () => {
   const store = fixtureStore();
   const sentMessages = [];
   const activity = [];
@@ -160,13 +160,16 @@ test('real persistence handler exercises SQS messageBody occurrence hide and unh
       throw new Error(`Unexpected S3 command ${request.name}`);
     } },
     sqsClient: { send: async (request) => { sentMessages.push(request.input); return {}; } },
-    publishCanonicalEventToAgenda: async ({ loadAgenda, writeAgenda, occurrenceId, visibility, hex, event }) => {
+    publishCanonicalEventToAgenda: async ({ loadAgenda, writeAgenda, hex, event }) => {
       const agenda = await loadAgenda();
-      agenda.events = agenda.events.map((entry) => entry.occurrenceId === occurrenceId && entry.metadata.hex === hex
-        ? { ...entry, metadata: { ...entry.metadata, status: { ...entry.metadata.status, isHidden: visibility === true } } }
-        : entry);
+      let matched = 0;
+      agenda.events = agenda.events.map((entry) => {
+        if (entry.metadata.hex !== hex) return entry;
+        matched += 1;
+        return { ...entry, metadata: clone(event.metadata) };
+      });
       await writeAgenda(agenda);
-      return { matched: 1 };
+      return { matched };
     },
   });
   const invoke = async (requestId, occurrenceId, isHidden) => handler({ Records: [{ eventSource: 'aws:sqs', messageId: `message-${requestId}`, body: JSON.stringify({
@@ -176,49 +179,24 @@ test('real persistence handler exercises SQS messageBody occurrence hide and unh
 
   const hideResult = await invoke('request-hide', OCCURRENCE_A, true);
   assert.equal(hideResult.statusCode, 200, hideResult.body);
-  assert.equal(store[`occurrences/${OCCURRENCE_A}.json`].status.isHidden, true);
-  assert.equal(store['agenda.json'].events.find((entry) => entry.occurrenceId === OCCURRENCE_A).metadata.status.isHidden, true);
-  assert.equal(store['agenda.json'].events.find((entry) => entry.occurrenceId === OCCURRENCE_B).metadata.status.isHidden, false);
-  assert.equal(store[`events/${HEX}.json`].metadata.status.isHidden, false);
+  assert.equal(store[`events/${HEX}.json`].metadata.status.isHidden, true);
+  assert.equal(store['agenda.json'].events.every((entry) => entry.metadata.status.isHidden === true), true);
+  assert.equal(`occurrences/${OCCURRENCE_A}.json` in store, false);
+  assert.equal(`occurrences/${OCCURRENCE_B}.json` in store, false);
   assert.equal(activity.at(-1).state, 'completed');
 
   assert.equal((await invoke('request-hide', OCCURRENCE_A, true)).statusCode, 200);
-  assert.equal(store['agenda.json'].events.find((entry) => entry.occurrenceId === OCCURRENCE_B).metadata.status.isHidden, false);
+  assert.equal(store['agenda.json'].events.every((entry) => entry.metadata.status.isHidden === true), true);
 
   await invoke('request-unhide', OCCURRENCE_A, false);
-  assert.equal(store[`occurrences/${OCCURRENCE_A}.json`].status.isHidden, false);
-  assert.equal(store['agenda.json'].events.find((entry) => entry.occurrenceId === OCCURRENCE_A).metadata.status.isHidden, false);
-  assert.equal(store['agenda.json'].events.find((entry) => entry.occurrenceId === OCCURRENCE_B).metadata.status.isHidden, false);
   assert.equal(store[`events/${HEX}.json`].metadata.status.isHidden, false);
+  assert.equal(store['agenda.json'].events.every((entry) => entry.metadata.status.isHidden === false), true);
   assert.equal(activity.at(-1).state, 'completed');
   assert.equal(sentMessages.length, 3);
-});
 
-test('real persistence handler rejects an occurrence read-back mismatch and records attention', async () => {
-  const store = fixtureStore();
-  const activity = [];
-  const sentMessages = [];
-  const { createPersistenceHandler } = await loadPersistenceModule(store, sentMessages);
-  const handler = createPersistenceHandler({
-    recordRequestActivity: async (entry) => activity.push(entry),
-    s3Client: { send: async (request) => {
-      const { Key } = request.input;
-      if (request.name === 'GetObjectCommand') {
-        if (!(Key in store)) { const error = new Error('Missing'); error.name = 'NoSuchKey'; throw error; }
-        const value = Key.startsWith('occurrences/') ? { ...store[Key], status: { isHidden: false } } : store[Key];
-        return { Body: body(value), ETag: '"fixture"' };
-      }
-      if (request.name === 'PutObjectCommand') { store[Key] = JSON.parse(Buffer.from(request.input.Body).toString('utf8')); return { ETag: '"fixture-after"' }; }
-      throw new Error(`Unexpected S3 command ${request.name}`);
-    } },
-    sqsClient: { send: async (request) => { sentMessages.push(request.input); return {}; } },
-  });
-  const result = await handler({ Records: [{ eventSource: 'aws:sqs', messageId: 'message-mismatch', body: JSON.stringify({
-    realm: 'persist', operation: 'persist', requestId: 'request-mismatch', hex: HEX, occurrenceId: OCCURRENCE_A,
-    subject: HEX, action: JSON.stringify({ metadata: { hex: HEX, status: { isHidden: true } } }),
-  }) }] });
-  assert.equal(result.statusCode, 500);
-  assert.equal(activity.at(-1).state, 'needs_attention');
-  assert.equal(sentMessages.length, 1, 'only the processing DLQ message should be emitted');
-  assert.match(sentMessages[0].MessageBody, /Occurrence visibility read-back mismatch/);
+  await invoke('request-hide-wide', undefined, true);
+  assert.equal(store[`events/${HEX}.json`].metadata.status.isHidden, true);
+  assert.equal(store['agenda.json'].events.every((entry) => entry.metadata.status.isHidden === true), true);
+  assert.equal(activity.at(-1).state, 'completed');
+  assert.equal(sentMessages.length, 4);
 });

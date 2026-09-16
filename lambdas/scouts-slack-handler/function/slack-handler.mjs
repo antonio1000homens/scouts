@@ -1049,9 +1049,9 @@ export async function lambdaHandler(event) {
 
                     const occurrenceId = String(actionMeta?.occurrenceId ?? eventData?.occurrenceId ?? '').trim();
                     const hex = String(eventData?.metadata?.hex ?? eventData?.hex ?? '').trim().toLowerCase();
-                    if (!occurrenceId || !hex) {
-                        const staleMessage = `This review is stale or ambiguous for ${eventTitle}. Refresh the review before hiding this occurrence.`;
-                        console.warn('[Slack] Refusing hide without canonical occurrence selector', {
+                    if (!hex) {
+                        const staleMessage = `This review is stale or missing its canonical HEX for ${eventTitle}. Refresh the review before hiding it.`;
+                        console.warn('[Slack] Refusing hide without canonical HEX', {
                             eventTitle,
                             occurrenceIdPresent: Boolean(occurrenceId),
                             hexPresent: Boolean(hex),
@@ -1063,13 +1063,12 @@ export async function lambdaHandler(event) {
                                 console.error('[Slack] Failed to report stale hide action:', responseError.message);
                             }
                         }
-                        return { statusCode: 200, body: JSON.stringify({ ok: false, error: 'visibility_selector_required' }) };
+                        return { statusCode: 200, body: JSON.stringify({ ok: false, error: 'visibility_hex_required' }) };
                     }
 
                     const hidePayload = {
                         realm: 'persist',
                         subject: {
-                            occurrenceId,
                             metadata: {
                                 hex,
                                 status: { isHidden: true },

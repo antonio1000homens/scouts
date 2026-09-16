@@ -72,9 +72,9 @@ The fake provider exists under `tests/helpers/` only. Production provider allowl
 The persistence boundary also has a handler-level test. It invokes the real
 `persistence-processor.mjs` Lambda handler through its SQS entry point with a
 production-shaped message and injected fake S3/SQS/SFN/activity adapters. The
-fixture hides and unhides one occurrence, reads back the overlay and agenda,
-checks the same-HEX sibling and canonical metadata, and requires a completed
-activity result.
+fixture hides and unhides a canonical HEX, reads back the HEX document and agenda,
+checks every same-HEX sibling receives the same state (including a later-added
+occurrence), and requires a completed activity result.
 
 ### Layer C — deployed smoke test (future, manual/post-merge only)
 

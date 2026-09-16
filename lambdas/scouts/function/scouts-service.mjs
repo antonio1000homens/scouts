@@ -17,7 +17,7 @@ import {
   evaluateEnrichmentEligibility,
   buildGenerationId,
 } from '/opt/nodejs/enrichment-state.mjs';
-import { resolveOccurrenceId, occurrenceStorageKey } from '/opt/nodejs/occurrence-identity.mjs';
+import { resolveOccurrenceId } from '/opt/nodejs/occurrence-identity.mjs';
 // Updated: Testing CI deployment mode to bypass environment parsing issues
 
 const {
@@ -2673,25 +2673,6 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
   const processedTitles = new Set(); // Track processed titles to avoid duplicates
   const liveQueuedProcessingByHex = new Map(); // Map<hexValue, Array<'tagline'|'imageTheme'|'image'>>
 
-  const occurrenceStateById = new Map();
-  const occurrenceIds = [...new Set(events.map((event) => resolveOccurrenceId(event)).filter(Boolean))];
-  const occurrenceReadConcurrency = 8;
-  for (let offset = 0; offset < occurrenceIds.length; offset += occurrenceReadConcurrency) {
-    const batchIds = occurrenceIds.slice(offset, offset + occurrenceReadConcurrency);
-    const batch = await Promise.all(batchIds.map(async (occurrenceId) => {
-      try {
-        const state = await getJsonFromS3(bucketName, occurrenceStorageKey(occurrenceId), `occurrence:${occurrenceId}`);
-        return [occurrenceId, state];
-      } catch (error) {
-        if (!/NoSuchKey|not found/i.test(error?.name || error?.message || '')) {
-          console.warn(`[Occurrence] Failed to load visibility overlay ${occurrenceId}:`, error?.message || error);
-        }
-        return [occurrenceId, null];
-      }
-    }));
-    for (const [occurrenceId, state] of batch) occurrenceStateById.set(occurrenceId, state);
-  }
-
   for (let index = 0; index < events.length; index++) {
     const event = events[index];
     const baseEvent = {
@@ -2743,20 +2724,16 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
           }
           const existingHexStatus = getEventStatusObject(existingHexFile);
           if (existingHexStatus) {
+            isHidden = existingHexStatus.isHidden === true;
+            baseEvent.approved = existingHexStatus.isApproved === true;
             baseEvent.status = existingHexStatus;
             baseEvent.metadata = baseEvent.metadata && typeof baseEvent.metadata === 'object'
               ? baseEvent.metadata
               : {};
             baseEvent.metadata.status = {
-              isHidden: existingHexStatus.isHidden === true,
+              isHidden,
               isApproved: existingHexStatus.isApproved === true,
             };
-          }
-          if (isEventApproved(existingHexFile)) {
-            baseEvent.approved = true;
-          }
-          if (!isHidden && isEventHidden(existingHexFile)) {
-            isHidden = true;
           }
         } else {
           // No HEX file exists, populate it with event data if available
@@ -2795,21 +2772,6 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
 
     if (!isHidden) {
       isHidden = isEventHidden(baseEvent);
-    }
-    if (baseEvent.occurrenceId) {
-      const occurrenceState = occurrenceStateById.get(baseEvent.occurrenceId) ?? null;
-      if (occurrenceState?.status && typeof occurrenceState.status.isHidden === 'boolean') {
-        isHidden = occurrenceState.status.isHidden;
-        baseEvent.status = {
-          ...(baseEvent.status && typeof baseEvent.status === 'object' ? baseEvent.status : {}),
-          isHidden,
-        };
-        baseEvent.metadata = baseEvent.metadata && typeof baseEvent.metadata === 'object' ? baseEvent.metadata : {};
-        baseEvent.metadata.status = {
-          ...(baseEvent.metadata.status && typeof baseEvent.metadata.status === 'object' ? baseEvent.metadata.status : {}),
-          isHidden,
-        };
-      }
     }
 
     const needsAi = !isHidden && !hasEventTagline(baseEvent);
@@ -3789,16 +3751,6 @@ export async function lambdaHandler(event = {}) {
     const subjectObject =
       (bodyParams?.subject && typeof bodyParams.subject === 'object' ? bodyParams.subject : null)
       ?? (structuredCommand?.subject && typeof structuredCommand.subject === 'object' ? structuredCommand.subject : null);
-    const candidateOccurrenceId = normalizeNullableText(
-      firstDefinedValue(subjectObject?.occurrenceId, bodyParams?.occurrenceId, queryParams?.occurrenceId),
-    );
-    if (!candidateOccurrenceId) {
-      return {
-        statusCode: 400,
-        headers: corsHeaders,
-        body: JSON.stringify({ error: 'visibility_selector_required', message: 'Hide and unhide require a canonical occurrenceId.' }),
-      };
-    }
     const candidateHex = normalizeNullableText(
       firstDefinedValue(
         subjectObject?.hex,
@@ -3828,7 +3780,6 @@ export async function lambdaHandler(event = {}) {
         realm: 'persist',
         subject: {
           hex: candidateHex,
-          occurrenceId: candidateOccurrenceId,
           isHidden: isHideOperation,
         },
         action: 'persist',
@@ -3844,7 +3795,6 @@ export async function lambdaHandler(event = {}) {
         message: `${isHideOperation ? 'Hide' : 'Unhide'} request submitted for ${candidateHex}`,
         queueAccepted: true,
         queuedHex: candidateHex,
-        occurrenceId: candidateOccurrenceId,
         requestId: queueResult?.payload?.requestId ?? null,
         queuedMessage: {
           requestId: queueResult?.payload?.requestId ?? null,

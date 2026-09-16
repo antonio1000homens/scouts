@@ -3550,88 +3550,86 @@ async function copyImagePromptForEvent(eventIndex) {
     }
 }
 
+function hexScopedEntries(entry) {
+    if (!entry || !entry.event) return [];
+    const hex = getEventHex(entry.event);
+    if (!hex) return [entry];
+    const matches = uniqueEventEntries.filter((candidate) => getEventHex(candidate?.event) === hex);
+    return matches.length > 0 ? matches : [entry];
+}
+
 function applyLocalPersistedField(entry, field, value) {
-    if (!entry || !entry.event) return;
-    const event = entry.event;
-    if (field === 'tagline') {
-        event.tagline = value;
-        if (Object.prototype.hasOwnProperty.call(event, 'AI')) delete event.AI;
-        if (Object.prototype.hasOwnProperty.call(event, 'ai')) delete event.ai;
-        return;
-    }
-    if (!event.image || typeof event.image !== 'object') {
-        event.image = {};
-    }
-    if (field === 'imageTheme') {
-        event.image.theme = value;
-        if (Object.prototype.hasOwnProperty.call(event.image, 'prompt')) delete event.image.prompt;
-        return;
-    }
-    event.image.url = value;
+    hexScopedEntries(entry).forEach((candidate) => {
+        const event = candidate.event;
+        event.metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+        if (field === 'tagline') {
+            event.tagline = value;
+            event.metadata.tagline = value;
+            if (Object.prototype.hasOwnProperty.call(event, 'AI')) delete event.AI;
+            if (Object.prototype.hasOwnProperty.call(event, 'ai')) delete event.ai;
+            return;
+        }
+        if (!event.image || typeof event.image !== 'object') event.image = {};
+        event.metadata.image = event.metadata.image && typeof event.metadata.image === 'object' ? event.metadata.image : {};
+        if (field === 'imageTheme') {
+            event.image.theme = value;
+            event.metadata.image.theme = value;
+            if (Object.prototype.hasOwnProperty.call(event.image, 'prompt')) delete event.image.prompt;
+            return;
+        }
+        event.image.url = value;
+        event.metadata.image.url = value;
+    });
 }
 
 function applyLocalHiddenState(entry, hiddenAtIso, hidden = true) {
     if (!entry || !entry.event) return;
-    const event = entry.event;
-    const occurrenceId = entry.occurrenceId || event.occurrenceId;
-    if (!occurrenceId) return;
-    if (hidden) {
-        event.isHidden = true;
-        event.hiddenAt = hasText(hiddenAtIso) ? hiddenAtIso : new Date().toISOString();
-        entry.allHidden = true;
-        localVisibilityOverrides.set(occurrenceId, {
-            hidden: true,
-            hiddenAt: event.hiddenAt,
-        });
-    } else {
-        event.isHidden = false;
-        event.hiddenAt = null;
-        entry.allHidden = false;
-        localVisibilityOverrides.set(occurrenceId, {
-            hidden: false,
-            hiddenAt: null,
-        });
-    }
+    const hex = getEventHex(entry.event);
+    const effectiveHiddenAt = hidden
+        ? (hasText(hiddenAtIso) ? hiddenAtIso : new Date().toISOString())
+        : null;
+    hexScopedEntries(entry).forEach((candidate) => {
+        const event = candidate.event;
+        event.isHidden = hidden === true;
+        event.hiddenAt = effectiveHiddenAt;
+        event.status = event.status && typeof event.status === 'object' ? event.status : {};
+        event.status.isHidden = hidden === true;
+        event.metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+        event.metadata.status = event.metadata.status && typeof event.metadata.status === 'object' ? event.metadata.status : {};
+        event.metadata.status.isHidden = hidden === true;
+        candidate.allHidden = hidden === true;
+    });
+    if (hex) localVisibilityOverrides.set(hex, { hidden: hidden === true, hiddenAt: effectiveHiddenAt });
 }
 
 function applyVisibilityOverrides(entries, options = {}) {
     if (!Array.isArray(entries) || localVisibilityOverrides.size === 0) return false;
     const allowConfirm = options.allowConfirm !== false;
     let changed = false;
-
-    entries.forEach((entry) => {
-        const event = entry?.event;
-        const occurrenceId = entry?.occurrenceId || event?.occurrenceId;
-        if (!occurrenceId) return;
-
-        const override = localVisibilityOverrides.get(occurrenceId);
-        if (!override) return;
-
-        const backendStateMatches = isHiddenEvent(event) === Boolean(override.hidden);
+    for (const [hex, override] of localVisibilityOverrides.entries()) {
+        const candidates = entries.filter((entry) => getEventHex(entry?.event) === hex);
+        if (candidates.length === 0) continue;
+        const backendStateMatches = candidates.every((entry) => isHiddenEvent(entry.event) === Boolean(override.hidden));
         if (allowConfirm && backendStateMatches) {
-            localVisibilityOverrides.delete(occurrenceId);
-            return;
+            localVisibilityOverrides.delete(hex);
+            continue;
         }
-
-        if (override.hidden) {
-            const nextHiddenAt = hasText(override.hiddenAt) ? override.hiddenAt : (event.hiddenAt || new Date().toISOString());
-            if (event.isHidden !== true || event.hiddenAt !== nextHiddenAt || entry.allHidden !== true) {
-                event.isHidden = true;
-                event.hiddenAt = nextHiddenAt;
-                entry.allHidden = true;
-                changed = true;
-            }
-            return;
-        }
-
-        if (event.isHidden !== false || event.hiddenAt !== null || entry.allHidden !== false) {
-            event.isHidden = false;
-            event.hiddenAt = null;
-            entry.allHidden = false;
-            changed = true;
-        }
-    });
-
+        candidates.forEach((entry) => {
+            const event = entry.event;
+            const nextHiddenAt = override.hidden
+                ? (hasText(override.hiddenAt) ? override.hiddenAt : (event.hiddenAt || new Date().toISOString()))
+                : null;
+            if (event.isHidden !== Boolean(override.hidden) || event.hiddenAt !== nextHiddenAt || entry.allHidden !== Boolean(override.hidden)) changed = true;
+            event.isHidden = Boolean(override.hidden);
+            event.hiddenAt = nextHiddenAt;
+            event.status = event.status && typeof event.status === 'object' ? event.status : {};
+            event.status.isHidden = Boolean(override.hidden);
+            event.metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+            event.metadata.status = event.metadata.status && typeof event.metadata.status === 'object' ? event.metadata.status : {};
+            event.metadata.status.isHidden = Boolean(override.hidden);
+            entry.allHidden = Boolean(override.hidden);
+        });
+    }
     return changed;
 }
 
@@ -3821,15 +3819,14 @@ async function requestGeneratedField(field, action = 'generate', button = null, 
 function buildVisibilityCommand(entry, hidden) {
     const event = entry?.event || {};
     return {
-        occurrenceId: entry?.occurrenceId || event.occurrenceId || null,
-        hex: getEventHex(event) || null, // diagnostic/context only; server resolves grouping
+        hex: getEventHex(event) || null,
         isHidden: hidden === true,
     };
 }
 
 function uiOperationKey(entry, action) {
     const event = entry?.event || {};
-    return `${entry?.occurrenceId || event.occurrenceId || getEventHex(event) || entry?.key || 'unknown'}:${action}`;
+    return `${getEventHex(event) || entry?.occurrenceId || event.occurrenceId || entry?.key || 'unknown'}:${action}`;
 }
 
 async function hideEvent(eventIndex, fromModal = false, action = 'hide', button = null) {
@@ -3861,19 +3858,13 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide', button 
 
     const eventLabel = event.summary || event.title || `Event ${eventIndex + 1}`;
     const hex = getEventHex(event);
-    const occurrenceId = entry.occurrenceId || event.occurrenceId;
-    if (!occurrenceId) {
-        const message = 'Cannot hide event: this occurrence has no canonical identity. Refresh the agenda and try again.';
-        if (fromModal) updateModalStatus(message, 'error'); else updateRuntimeDetails(message, 'error');
-        return;
-    }
     if (!hex) {
         const message = 'Cannot hide event: missing HEX.';
         if (fromModal) updateModalStatus(message, 'error');
         else updateRuntimeDetails(message, 'error');
         return;
     }
-    const operationKey = uiOperationKey(entry, 'hide');
+    const operationKey = `${hex}:hide`;
     if (pendingUiOperations.has(operationKey)) return;
     pendingUiOperations.set(operationKey, true);
 
@@ -3966,19 +3957,13 @@ async function unhideEvent(eventIndex, fromModal = false, action = 'unhide', but
 
     const eventLabel = event.summary || event.title || `Event ${eventIndex + 1}`;
     const hex = getEventHex(event);
-    const occurrenceId = entry.occurrenceId || event.occurrenceId;
-    if (!occurrenceId) {
-        const message = 'Cannot unhide event: this occurrence has no canonical identity. Refresh the agenda and try again.';
-        if (fromModal) updateModalStatus(message, 'error'); else updateRuntimeDetails(message, 'error');
-        return;
-    }
     if (!hex) {
         const message = 'Cannot unhide event: missing HEX.';
         if (fromModal) updateModalStatus(message, 'error');
         else updateRuntimeDetails(message, 'error');
         return;
     }
-    const operationKey = uiOperationKey(entry, 'unhide');
+    const operationKey = `${hex}:unhide`;
     if (pendingUiOperations.has(operationKey)) return;
     pendingUiOperations.set(operationKey, true);
 
@@ -4058,21 +4043,16 @@ function toggleCurrentEventHidden(action = null, button = null) {
 }
 
 function applyLocalApprovalState(entry, approved = true) {
-    if (!entry || !entry.event) return;
-    const event = entry.event;
-    event.approved = approved;
-    event.isApproved = approved;
-    if (!event.status || typeof event.status !== 'object') {
-        event.status = {};
-    }
-    event.status.isApproved = approved;
-    if (!event.metadata || typeof event.metadata !== 'object') {
-        event.metadata = {};
-    }
-    if (!event.metadata.status || typeof event.metadata.status !== 'object') {
-        event.metadata.status = {};
-    }
-    event.metadata.status.isApproved = approved;
+    hexScopedEntries(entry).forEach((candidate) => {
+        const event = candidate.event;
+        event.approved = approved;
+        event.isApproved = approved;
+        event.status = event.status && typeof event.status === 'object' ? event.status : {};
+        event.status.isApproved = approved;
+        event.metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+        event.metadata.status = event.metadata.status && typeof event.metadata.status === 'object' ? event.metadata.status : {};
+        event.metadata.status.isApproved = approved;
+    });
 }
 
 async function approveEvent(eventIndex, fromModal = false, action = 'approve', button = null) {
