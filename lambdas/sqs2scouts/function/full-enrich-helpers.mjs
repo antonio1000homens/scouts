@@ -128,17 +128,6 @@ export function buildVisibilityPersistGuard(message, agendaSnapshot, eventSnapsh
     );
   }
 
-  // Visibility belongs to an occurrence, not to title-derived shared metadata.
-  // Until the ingress contract carries an occurrence selector end-to-end, a
-  // duplicate HEX must fail before the canonical event file can be mutated.
-  if (!mutation.occurrenceId && matching.length > 1) {
-    throw codedError(
-      'AMBIGUOUS_EVENT_OCCURRENCE',
-      `Visibility persistence for HEX ${mutation.hex} matches ${matching.length} agenda occurrences; refusing a shared-title mutation`,
-      { hex: mutation.hex, matched: matching.length },
-    );
-  }
-
   if (!canonical || typeof canonical !== 'object') {
     throw codedError(
       'VISIBILITY_CANONICAL_EVENT_NOT_FOUND',
@@ -150,7 +139,8 @@ export function buildVisibilityPersistGuard(message, agendaSnapshot, eventSnapsh
   return {
     ...mutation,
     beforeETag,
-    beforeHidden: mutation.occurrenceId ? eventHidden(matching[0]) : eventHidden(canonical),
+    beforeHidden: mutation.occurrenceId ? eventHidden(matching[0]) : null,
+    beforeMatched: matching.length,
   };
 }
 
@@ -160,42 +150,24 @@ export function verifyVisibilityPersistReadback(guard, agendaSnapshot, eventSnap
   const agenda = snapshotValue(agendaSnapshot);
   const canonical = snapshotValue(eventSnapshot);
   const afterETag = text(eventSnapshot?.eTag);
-  const actualHidden = eventHidden(canonical);
-
-  if (!guard.occurrenceId && actualHidden !== guard.isHidden) {
-    throw codedError(
-      'PERSISTENCE_READ_BACK_MISMATCH',
-      `Canonical event ${guard.hex} read-back has metadata.status.isHidden=${String(actualHidden)}; expected ${guard.isHidden}`,
-      { hex: guard.hex, expected: guard.isHidden, actual: actualHidden },
-    );
-  }
-
-  if (!guard.occurrenceId && guard.beforeHidden !== guard.isHidden && guard.beforeETag && afterETag === guard.beforeETag) {
-    throw codedError(
-      'PERSISTENCE_ETAG_UNCHANGED',
-      `Canonical event ${guard.hex} changed visibility but its S3 ETag did not change`,
-      { hex: guard.hex, eTag: afterETag },
-    );
-  }
-
   const matching = Array.isArray(agenda?.events)
     ? agenda.events.filter((event) => eventHex(event) === guard.hex
       && (!guard.occurrenceId || text(event?.occurrenceId) === guard.occurrenceId))
     : [];
-  if (matching.length !== 1) {
+  if (matching.length === 0 || (guard.occurrenceId && matching.length !== 1)) {
     throw codedError(
       'PERSISTENCE_AGENDA_IDENTITY_MISMATCH',
-      `Visibility persistence read-back for ${guard.hex} resolved ${matching.length} agenda occurrences; expected exactly one`,
+      `Visibility persistence read-back for ${guard.hex} resolved ${matching.length} agenda occurrences; expected ${guard.occurrenceId ? 'exactly one' : 'at least one'}`,
       { hex: guard.hex, matched: matching.length },
     );
   }
 
-  const agendaHidden = eventHidden(matching[0]);
-  if (agendaHidden !== guard.isHidden) {
+  const mismatched = matching.filter((event) => eventHidden(event) !== guard.isHidden);
+  if (mismatched.length > 0) {
     throw codedError(
       'PERSISTENCE_AGENDA_READ_BACK_MISMATCH',
-      `Agenda occurrence ${guard.hex} read-back has metadata.status.isHidden=${String(agendaHidden)}; expected ${guard.isHidden}`,
-      { hex: guard.hex, expected: guard.isHidden, actual: agendaHidden },
+      `Agenda visibility read-back for ${guard.hex} has ${mismatched.length} mismatched occurrences; expected ${guard.isHidden}`,
+      { hex: guard.hex, expected: guard.isHidden, mismatched: mismatched.length, matched: matching.length },
     );
   }
 
@@ -203,6 +175,7 @@ export function verifyVisibilityPersistReadback(guard, agendaSnapshot, eventSnap
     hex: guard.hex,
     isHidden: guard.isHidden,
     eTag: afterETag,
+    matched: matching.length,
     ...(guard.occurrenceId ? { occurrenceId: guard.occurrenceId } : {}),
   };
 }

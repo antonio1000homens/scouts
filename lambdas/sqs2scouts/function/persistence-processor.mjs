@@ -2446,53 +2446,53 @@ function extractOccurrenceVisibility(message, rawSubject, action) {
         ?? actionObject.isHidden
         ?? subjectObject.metadata?.status?.isHidden
         ?? subjectObject.isHidden;
-    if (!occurrenceId || typeof hidden !== 'boolean') return null;
-    return { occurrenceId: String(occurrenceId).trim(), isHidden: hidden };
+    if (typeof hidden !== 'boolean') return null;
+    return { ...(occurrenceId ? { occurrenceId: String(occurrenceId).trim() } : {}), isHidden: hidden };
 }
 
-async function persistOccurrenceVisibility({ occurrenceId, isHidden, hex, title, sourceUid, lastKnownStart, requestId }) {
-    if (!/^occ_[a-f0-9]{24,}$/i.test(occurrenceId)) {
+async function persistVisibilityOverlays({ occurrenceId = null, isHidden, hex, title, sourceUid, lastKnownStart, requestId }) {
+    if (occurrenceId && !/^occ_[a-f0-9]{24,}$/i.test(occurrenceId)) {
         throw new Error('Invalid occurrenceId for visibility persistence');
     }
     const agendaResponse = await s3Client.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: 'agenda.json' }));
     const agenda = JSON.parse(await readBodyStream(agendaResponse.Body));
+    const requestedHex = String(hex || '').trim().toLowerCase();
     const matches = Array.isArray(agenda?.events)
-        ? agenda.events.filter((event) => event?.occurrenceId === occurrenceId)
+        ? agenda.events.filter((event) => event?.metadata?.hex === requestedHex
+            && (!occurrenceId || event?.occurrenceId === occurrenceId))
         : [];
-    if (matches.length !== 1) {
-        const error = new Error(`Visibility occurrence ${occurrenceId} resolved to ${matches.length} agenda records`);
+    if (matches.length === 0 || (occurrenceId && matches.length !== 1)) {
+        const target = occurrenceId ? `occurrence ${occurrenceId}` : `HEX ${requestedHex}`;
+        const error = new Error(`Visibility ${target} resolved to ${matches.length} agenda records`);
         error.code = matches.length === 0 ? 'VISIBILITY_OCCURRENCE_NOT_FOUND' : 'VISIBILITY_OCCURRENCE_AMBIGUOUS';
         throw error;
     }
-    const occurrence = matches[0];
-    const occurrenceHex = String(occurrence?.metadata?.hex || '').trim().toLowerCase();
-    const requestedHex = String(hex || '').trim().toLowerCase();
-    if (!occurrenceHex || occurrenceHex !== requestedHex) {
-        const error = new Error(`Visibility occurrence ${occurrenceId} does not belong to HEX ${requestedHex}`);
-        error.code = 'VISIBILITY_OCCURRENCE_HEX_MISMATCH';
-        throw error;
+    const updatedAt = new Date().toISOString();
+    const persisted = [];
+    for (const occurrence of matches) {
+        const occurrenceOverlay = {
+            occurrenceId: occurrence.occurrenceId,
+            metadataId: requestedHex,
+            sourceUid: sourceUid || occurrence.uid || null,
+            lastKnownStart: lastKnownStart || occurrence.dtstart || null,
+            status: { isHidden },
+            updatedAt,
+            requestId: requestId || null,
+        };
+        const key = occurrenceStorageKey(occurrence.occurrenceId);
+        await s3Client.send(new PutObjectCommand({
+            Bucket: TARGET_BUCKET,
+            Key: key,
+            Body: JSON.stringify(occurrenceOverlay, null, 2),
+            ContentType: 'application/json',
+            CacheControl: 'no-store',
+        }));
+        const verify = await s3Client.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: key }));
+        const readBack = JSON.parse(await readBodyStream(verify.Body));
+        if (readBack?.status?.isHidden !== isHidden) throw new Error(`Occurrence visibility read-back mismatch for ${occurrence.occurrenceId}`);
+        persisted.push(readBack);
     }
-    const overlay = {
-        occurrenceId,
-        metadataId: occurrenceHex,
-        sourceUid: sourceUid || occurrence.uid || null,
-        lastKnownStart: lastKnownStart || occurrence.dtstart || null,
-        status: { isHidden },
-        updatedAt: new Date().toISOString(),
-        requestId: requestId || null,
-    };
-    const key = occurrenceStorageKey(occurrenceId);
-    await s3Client.send(new PutObjectCommand({
-        Bucket: TARGET_BUCKET,
-        Key: key,
-        Body: JSON.stringify(overlay, null, 2),
-        ContentType: 'application/json',
-        CacheControl: 'no-store',
-    }));
-    const verify = await s3Client.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: key }));
-    const persisted = JSON.parse(await readBodyStream(verify.Body));
-    if (persisted?.status?.isHidden !== isHidden) throw new Error('Occurrence visibility read-back mismatch');
-    return persisted;
+    return occurrenceId ? persisted[0] : persisted;
 }
 
 export function buildPersistEventPayload(existingEvent, rawSubject, action) {
@@ -3617,7 +3617,7 @@ async function lambdaHandlerWithDependencies(event) {
             let persistAction = action;
             const visibility = extractOccurrenceVisibility(messageBody, rawSubject, action);
             if (visibility) {
-                const agendaOccurrence = await persistOccurrenceVisibility({
+                const agendaOccurrence = await persistVisibilityOverlays({
                     ...visibility,
                     hex: hexValue,
                     title: existingEvent.title || existingEvent.summary,

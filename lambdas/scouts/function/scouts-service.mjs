@@ -3792,13 +3792,6 @@ export async function lambdaHandler(event = {}) {
     const candidateOccurrenceId = normalizeNullableText(
       firstDefinedValue(subjectObject?.occurrenceId, bodyParams?.occurrenceId, queryParams?.occurrenceId),
     );
-    if (!candidateOccurrenceId) {
-      return {
-        statusCode: 400,
-        headers: corsHeaders,
-        body: JSON.stringify({ error: 'visibility_selector_required', message: 'Hide and unhide require a canonical occurrenceId.' }),
-      };
-    }
     const candidateHex = normalizeNullableText(
       firstDefinedValue(
         subjectObject?.hex,
@@ -3828,7 +3821,7 @@ export async function lambdaHandler(event = {}) {
         realm: 'persist',
         subject: {
           hex: candidateHex,
-          occurrenceId: candidateOccurrenceId,
+          ...(candidateOccurrenceId ? { occurrenceId: candidateOccurrenceId } : {}),
           isHidden: isHideOperation,
         },
         action: 'persist',
@@ -3844,7 +3837,7 @@ export async function lambdaHandler(event = {}) {
         message: `${isHideOperation ? 'Hide' : 'Unhide'} request submitted for ${candidateHex}`,
         queueAccepted: true,
         queuedHex: candidateHex,
-        occurrenceId: candidateOccurrenceId,
+        ...(candidateOccurrenceId ? { occurrenceId: candidateOccurrenceId } : {}),
         requestId: queueResult?.payload?.requestId ?? null,
         queuedMessage: {
           requestId: queueResult?.payload?.requestId ?? null,

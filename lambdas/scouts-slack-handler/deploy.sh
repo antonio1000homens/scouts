@@ -80,9 +80,11 @@ fi
 
 cd "${SCRIPT_DIR}"
 
-if [ -z "${SLACK_SIGNING_SECRET}" ] || [ -z "${SLACK_BOT_TOKEN}" ] || [ -z "${REQUIRED_API_KEY}" ]; then
-  error "SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN, and REQUIRED_API_KEY must be set before deploying."
-fi
+for parameter_name in "${SLACK_SIGNING_SECRET_PARAMETER}" "${SLACK_BOT_TOKEN_PARAMETER}" "${REQUIRED_API_KEY_PARAMETER}"; do
+  if ! aws ssm get-parameter --region "${REGION}" --name "${parameter_name}" --query 'Parameter.ARN' --output text >/dev/null; then
+    error "Required SSM parameter is missing: ${parameter_name}"
+  fi
+done
 
 log "Resolving shared Lambda layer version..."
 prepare_shared_layer_artifact \
@@ -141,9 +143,9 @@ CFN_ARGS+=(
 
 aws cloudformation deploy "${CFN_ARGS[@]}"
 
-put_standard_secure_parameter "${SLACK_SIGNING_SECRET_PARAMETER}" "${SLACK_SIGNING_SECRET}"
-put_standard_secure_parameter "${SLACK_BOT_TOKEN_PARAMETER}" "${SLACK_BOT_TOKEN}"
-put_standard_secure_parameter "${REQUIRED_API_KEY_PARAMETER}" "${REQUIRED_API_KEY}"
+if [ -n "${SLACK_SIGNING_SECRET}" ]; then put_standard_secure_parameter "${SLACK_SIGNING_SECRET_PARAMETER}" "${SLACK_SIGNING_SECRET}"; fi
+if [ -n "${SLACK_BOT_TOKEN}" ]; then put_standard_secure_parameter "${SLACK_BOT_TOKEN_PARAMETER}" "${SLACK_BOT_TOKEN}"; fi
+if [ -n "${REQUIRED_API_KEY}" ]; then put_standard_secure_parameter "${REQUIRED_API_KEY_PARAMETER}" "${REQUIRED_API_KEY}"; fi
 
 log "Stack outputs:"
 aws cloudformation describe-stacks \

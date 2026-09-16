@@ -101,7 +101,7 @@ async function loadPersistenceModule(store, sentMessages) {
         const agenda = await loadAgenda();
         agenda.events = agenda.events.map((entry) => {
           if (entry?.metadata?.hex !== hex || (occurrenceId && entry.occurrenceId !== occurrenceId)) return entry;
-          return { ...entry, metadata: { ...entry.metadata, image: clone(event.metadata.image), tagline: event.metadata.tagline, status: { ...entry.metadata.status, isHidden: occurrenceId ? visibility === true : entry.metadata.status.isHidden } } };
+          return { ...entry, metadata: { ...entry.metadata, image: clone(event.metadata.image), tagline: event.metadata.tagline, status: { ...entry.metadata.status, isHidden: typeof visibility === 'boolean' ? visibility === true : entry.metadata.status.isHidden } } };
         });
         await writeAgenda(agenda);
         return { matched: 1 };
@@ -162,7 +162,8 @@ test('real persistence handler exercises SQS messageBody occurrence hide and unh
     sqsClient: { send: async (request) => { sentMessages.push(request.input); return {}; } },
     publishCanonicalEventToAgenda: async ({ loadAgenda, writeAgenda, occurrenceId, visibility, hex, event }) => {
       const agenda = await loadAgenda();
-      agenda.events = agenda.events.map((entry) => entry.occurrenceId === occurrenceId && entry.metadata.hex === hex
+      agenda.events = agenda.events.map((entry) => entry.metadata.hex === hex
+        && (!occurrenceId || entry.occurrenceId === occurrenceId)
         ? { ...entry, metadata: { ...entry.metadata, status: { ...entry.metadata.status, isHidden: visibility === true } } }
         : entry);
       await writeAgenda(agenda);
@@ -192,6 +193,14 @@ test('real persistence handler exercises SQS messageBody occurrence hide and unh
   assert.equal(store[`events/${HEX}.json`].metadata.status.isHidden, false);
   assert.equal(activity.at(-1).state, 'completed');
   assert.equal(sentMessages.length, 3);
+
+  await invoke('request-hide-wide', undefined, true);
+  assert.equal(store[`occurrences/${OCCURRENCE_A}.json`].status.isHidden, true);
+  assert.equal(store[`occurrences/${OCCURRENCE_B}.json`].status.isHidden, true);
+  assert.equal(store['agenda.json'].events.every((entry) => entry.metadata.status.isHidden === true), true);
+  assert.equal(store[`events/${HEX}.json`].metadata.status.isHidden, false);
+  assert.equal(activity.at(-1).state, 'completed');
+  assert.equal(sentMessages.length, 4);
 });
 
 test('real persistence handler rejects an occurrence read-back mismatch and records attention', async () => {

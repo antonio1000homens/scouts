@@ -119,7 +119,7 @@ test('visibility guard understands the live subject-HEX plus encoded-action cont
   });
 });
 
-test('visibility guard refuses five HOLIDAY occurrences before persistence', () => {
+test('visibility guard accepts HEX-wide visibility for five HOLIDAY occurrences', () => {
   const agendaSnapshot = {
     value: {
       events: [1, 2, 3, 4, 5].map((index) => agendaEvent(`osm-event-${index}`)),
@@ -128,10 +128,8 @@ test('visibility guard refuses five HOLIDAY occurrences before persistence', () 
   };
   const eventSnapshot = { value: canonicalEvent(false), eTag: '"0fe52dbc"' };
 
-  assert.throws(
-    () => buildVisibilityPersistGuard(visibilityMessage(true), agendaSnapshot, eventSnapshot),
-    (error) => error?.code === 'AMBIGUOUS_EVENT_OCCURRENCE' && error?.matched === 5,
-  );
+  const guard = buildVisibilityPersistGuard(visibilityMessage(true), agendaSnapshot, eventSnapshot);
+  assert.equal(guard.beforeMatched, 5);
 });
 
 test('visibility guard selects exactly one same-HEX occurrence when occurrenceId is supplied', () => {
@@ -147,7 +145,7 @@ test('visibility guard selects exactly one same-HEX occurrence when occurrenceId
   assert.equal(guard.hex, HOLIDAY_HEX);
 });
 
-test('visibility read-back rejects an unchanged canonical value', () => {
+test('visibility read-back rejects a mismatched HEX-wide agenda occurrence', () => {
   const beforeAgenda = { value: { events: [agendaEvent('osm-event-1', false)] } };
   const beforeEvent = { value: canonicalEvent(false), eTag: '"0fe52dbc"' };
   const guard = buildVisibilityPersistGuard(visibilityMessage(true), beforeAgenda, beforeEvent);
@@ -158,22 +156,22 @@ test('visibility read-back rejects an unchanged canonical value', () => {
       { value: { events: [agendaEvent('osm-event-1', false)] }, eTag: '"agenda-after"' },
       { value: canonicalEvent(false), eTag: '"0fe52dbc"' },
     ),
-    (error) => error?.code === 'PERSISTENCE_READ_BACK_MISMATCH',
+    (error) => error?.code === 'PERSISTENCE_AGENDA_READ_BACK_MISMATCH',
   );
 });
 
-test('visibility read-back rejects an unchanged S3 ETag when the boolean changed', () => {
+test('visibility read-back ignores the shared canonical visibility field', () => {
   const beforeAgenda = { value: { events: [agendaEvent('osm-event-1', false)] } };
   const beforeEvent = { value: canonicalEvent(false), eTag: '"0fe52dbc"' };
   const guard = buildVisibilityPersistGuard(visibilityMessage(true), beforeAgenda, beforeEvent);
 
-  assert.throws(
-    () => verifyVisibilityPersistReadback(
+  assert.deepEqual(
+    verifyVisibilityPersistReadback(
       guard,
       { value: { events: [agendaEvent('osm-event-1', true)] }, eTag: '"agenda-after"' },
-      { value: canonicalEvent(true), eTag: '"0fe52dbc"' },
+      { value: canonicalEvent(false), eTag: '"0fe52dbc"' },
     ),
-    (error) => error?.code === 'PERSISTENCE_ETAG_UNCHANGED',
+    { hex: HOLIDAY_HEX, isHidden: true, eTag: '"0fe52dbc"', matched: 1 },
   );
 });
 
@@ -188,6 +186,6 @@ test('visibility read-back succeeds only when canonical S3 and agenda both match
       { value: { events: [agendaEvent('osm-event-1', true)] }, eTag: '"agenda-after"' },
       { value: canonicalEvent(true), eTag: '"new-etag"' },
     ),
-    { hex: HOLIDAY_HEX, isHidden: true, eTag: '"new-etag"' },
+    { hex: HOLIDAY_HEX, isHidden: true, eTag: '"new-etag"', matched: 1 },
   );
 });

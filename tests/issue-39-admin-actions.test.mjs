@@ -208,7 +208,6 @@ test('admin hide and unhide publish idempotent visibility state for the same HEX
   assert.equal(hide.sent[0].action, 'hide');
   assert.deepEqual(hide.sent[0].subject, {
     hex: TEST_HEX,
-    occurrenceId: hide.event.occurrenceId,
     isHidden: true,
   });
   assert.match(hide.sent[0].hiddenAt, /^\d{4}-\d{2}-\d{2}T/);
@@ -218,7 +217,7 @@ test('admin hide and unhide publish idempotent visibility state for the same HEX
   await invokeAdminFunction('unhideEvent', [0, false, 'unhide'], unhide.sandbox);
   assert.deepEqual(unhide.sent, [{
     realm: 'scouts',
-    subject: { hex: TEST_HEX, occurrenceId: unhide.event.occurrenceId, isHidden: false },
+    subject: { hex: TEST_HEX, isHidden: false },
     action: 'unhide',
   }]);
 });

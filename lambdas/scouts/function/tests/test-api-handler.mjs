@@ -85,6 +85,15 @@ test('real Scouts API handler publishes full-enrich and occurrence mutations wit
   assert.equal(unhideMessage.subject.isHidden, false);
 });
 
+test('real Scouts API handler accepts HEX-wide visibility without an occurrence selector', async () => {
+  const service = await loadService();
+  const hide = await service.handler(request({ realm: 'scouts', action: 'hide', subject: { hex: HEX, isHidden: true } }));
+  assert.equal(hide.statusCode, 200);
+  const hideMessage = JSON.parse(service.sent[0].MessageBody);
+  assert.deepEqual(hideMessage.subject, { hex: HEX, isHidden: true });
+  assert.equal(hideMessage.realm, 'persist');
+});
+
 test('real Scouts API handler rejects a missing API key before publishing', async () => {
   const service = await loadService();
   const response = await service.handler(request({ realm: 'scouts', action: 'generateFull', subject: { hex: HEX } }, null));

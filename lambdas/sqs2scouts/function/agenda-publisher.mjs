@@ -73,7 +73,7 @@ export function mergeCanonicalEventIntoAgenda(agenda, canonicalEvent, hex, optio
   const canonicalMetadata = metadataForAgenda(canonicalEvent, normalisedHex);
 
   const occurrenceId = text(options?.occurrenceId);
-  const hasExplicitVisibility = occurrenceId && typeof options.visibility === 'boolean';
+  const hasExplicitVisibility = typeof options.visibility === 'boolean';
   let matched = 0;
   let occurrenceMatched = 0;
   const events = agenda.events.map((event) => {

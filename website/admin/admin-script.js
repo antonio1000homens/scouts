@@ -3572,26 +3572,25 @@ function applyLocalPersistedField(entry, field, value) {
 
 function applyLocalHiddenState(entry, hiddenAtIso, hidden = true) {
     if (!entry || !entry.event) return;
-    const event = entry.event;
-    const occurrenceId = entry.occurrenceId || event.occurrenceId;
-    if (!occurrenceId) return;
-    if (hidden) {
-        event.isHidden = true;
-        event.hiddenAt = hasText(hiddenAtIso) ? hiddenAtIso : new Date().toISOString();
-        entry.allHidden = true;
+    const hex = getEventHex(entry.event);
+    const candidates = hex
+        ? uniqueEventEntries.filter((candidate) => getEventHex(candidate?.event) === hex)
+        : [entry];
+    const effectiveHiddenAt = hidden
+        ? (hasText(hiddenAtIso) ? hiddenAtIso : new Date().toISOString())
+        : null;
+    candidates.forEach((candidate) => {
+        const event = candidate.event;
+        const occurrenceId = candidate.occurrenceId || event.occurrenceId;
+        if (!occurrenceId) return;
+        event.isHidden = hidden === true;
+        event.hiddenAt = effectiveHiddenAt;
+        candidate.allHidden = hidden === true;
         localVisibilityOverrides.set(occurrenceId, {
-            hidden: true,
-            hiddenAt: event.hiddenAt,
+            hidden: hidden === true,
+            hiddenAt: effectiveHiddenAt,
         });
-    } else {
-        event.isHidden = false;
-        event.hiddenAt = null;
-        entry.allHidden = false;
-        localVisibilityOverrides.set(occurrenceId, {
-            hidden: false,
-            hiddenAt: null,
-        });
-    }
+    });
 }
 
 function applyVisibilityOverrides(entries, options = {}) {
@@ -3821,8 +3820,7 @@ async function requestGeneratedField(field, action = 'generate', button = null, 
 function buildVisibilityCommand(entry, hidden) {
     const event = entry?.event || {};
     return {
-        occurrenceId: entry?.occurrenceId || event.occurrenceId || null,
-        hex: getEventHex(event) || null, // diagnostic/context only; server resolves grouping
+        hex: getEventHex(event) || null,
         isHidden: hidden === true,
     };
 }
@@ -3861,19 +3859,13 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide', button 
 
     const eventLabel = event.summary || event.title || `Event ${eventIndex + 1}`;
     const hex = getEventHex(event);
-    const occurrenceId = entry.occurrenceId || event.occurrenceId;
-    if (!occurrenceId) {
-        const message = 'Cannot hide event: this occurrence has no canonical identity. Refresh the agenda and try again.';
-        if (fromModal) updateModalStatus(message, 'error'); else updateRuntimeDetails(message, 'error');
-        return;
-    }
     if (!hex) {
         const message = 'Cannot hide event: missing HEX.';
         if (fromModal) updateModalStatus(message, 'error');
         else updateRuntimeDetails(message, 'error');
         return;
     }
-    const operationKey = uiOperationKey(entry, 'hide');
+    const operationKey = `${hex}:hide`;
     if (pendingUiOperations.has(operationKey)) return;
     pendingUiOperations.set(operationKey, true);
 
@@ -3966,19 +3958,13 @@ async function unhideEvent(eventIndex, fromModal = false, action = 'unhide', but
 
     const eventLabel = event.summary || event.title || `Event ${eventIndex + 1}`;
     const hex = getEventHex(event);
-    const occurrenceId = entry.occurrenceId || event.occurrenceId;
-    if (!occurrenceId) {
-        const message = 'Cannot unhide event: this occurrence has no canonical identity. Refresh the agenda and try again.';
-        if (fromModal) updateModalStatus(message, 'error'); else updateRuntimeDetails(message, 'error');
-        return;
-    }
     if (!hex) {
         const message = 'Cannot unhide event: missing HEX.';
         if (fromModal) updateModalStatus(message, 'error');
         else updateRuntimeDetails(message, 'error');
         return;
     }
-    const operationKey = uiOperationKey(entry, 'unhide');
+    const operationKey = `${hex}:unhide`;
     if (pendingUiOperations.has(operationKey)) return;
     pendingUiOperations.set(operationKey, true);
 

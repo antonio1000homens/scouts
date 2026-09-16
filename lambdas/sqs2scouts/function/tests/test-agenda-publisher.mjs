@@ -83,6 +83,19 @@ test('explicit occurrence visibility changes only the selected same-HEX occurren
   assert.equal(result.agenda.events[1].metadata.status.isHidden, true);
 });
 
+test('HEX-wide visibility changes every matching occurrence', () => {
+  const source = agenda();
+  source.events = [source.events[0], ...[2, 3, 4, 5].map((index) => ({
+    ...structuredClone(source.events[0]),
+    uid: `osm-water-games-${index}`,
+    occurrenceId: `occ_${String(index).repeat(24)}`,
+    dtstart: `202607${String(15 + index).padStart(2, '0')}T183000`,
+  }))];
+  const result = mergeCanonicalEventIntoAgenda(source, canonical(), HEX, { visibility: true });
+  assert.equal(result.matched, 5);
+  assert.deepEqual(result.agenda.events.map((event) => event.metadata.status.isHidden), [true, true, true, true, true]);
+});
+
 test('publisher rejects compatibility fields in canonical metadata', () => {
   const legacy = canonical();
   legacy.metadata.hexId = HEX;
