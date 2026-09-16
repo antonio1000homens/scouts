@@ -35,4 +35,4 @@ text, n = re.subn(
 )
 if n != 1:
     raise SystemExit('expected obsolete occurrence read-back test')
-path.write_text(text)
+path.write_text(text.rstrip() + '\n')
