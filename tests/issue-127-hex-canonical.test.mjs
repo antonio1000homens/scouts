@@ -25,6 +25,13 @@ test('calendar reconciliation treats canonical HEX approval as authoritative in 
   );
 });
 
+test('orphan cleanup retains intentionally hidden canonical HEX documents', () => {
+  assert.match(
+    scoutsService,
+    /const missingAllContent = !hasAI && !hasImageTheme && !hasImageUrl;[\s\S]{0,500}if \(isEventHidden\(hexData\)\) continue;/,
+  );
+});
+
 test('production visibility no longer reads or writes per-occurrence overlays', () => {
   assert.doesNotMatch(scoutsService, /occurrenceStorageKey|occurrences\//);
   assert.doesNotMatch(persistence, /occurrenceStorageKey|persistOccurrenceVisibility|persistVisibilityOverlays|occurrences\//);

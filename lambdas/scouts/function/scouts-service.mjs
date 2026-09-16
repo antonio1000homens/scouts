@@ -1598,6 +1598,11 @@ async function deleteOrphanedHexFiles(bucket, agendaData) {
 
       if (!missingAllContent) continue;
 
+      // A hidden canonical document is deliberate state, not disposable
+      // enrichment debris. Its agenda instances may have aged out, but retain
+      // the shared-HEX visibility decision for later reconciliation.
+      if (isEventHidden(hexData)) continue;
+
       // Check if title exists in agenda (case insensitive)
       const normalizedTitle = normalizeComparableText(title);
       const isInAgenda = agendaTitles.has(normalizedTitle);
