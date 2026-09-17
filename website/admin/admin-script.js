@@ -512,6 +512,8 @@ function isEntryApproved(entry) {
 }
 
 function isEntryPendingApproval(entry) {
+    const controller = window.scoutsApprovalController;
+    if (controller?.isEntryPendingApproval) return controller.isEntryPendingApproval(entry);
     if (isEntryHidden(entry)) return false;
     return hasText(entry?.event?.hex) && !isEntryApproved(entry);
 }
@@ -1676,37 +1678,54 @@ async function fetchJsonWithTimeout(url, options, timeoutMs) {
 
 async function sendScoutsCommand(payload, options = {}) {
     const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : ADMIN_WRITE_TIMEOUT_MS;
-    const response = await fetchJsonWithTimeout(SCOUTS_URL, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'text/plain',
-        },
-        credentials: 'same-origin',
-        body: JSON.stringify(payload),
-    }, timeoutMs);
-
-    if (!response.ok) {
-        throw await buildHttpError(response);
-    }
-
+    const readOnly = options.readOnly === true;
     try {
-        const parsed = await response.json();
-        if (parsed && typeof parsed === 'object') {
-            parsed._httpStatus = response.status;
-            const requestId = extractBackendRequestId(parsed);
-            if (requestId) {
-                updateRuntimeRequestId(requestId);
-            }
-            return parsed;
+        const response = await fetchJsonWithTimeout(SCOUTS_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'text/plain',
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(payload),
+        }, timeoutMs);
+
+        if (!response.ok) {
+            throw await buildHttpError(response);
         }
-        return { value: parsed, _httpStatus: response.status };
-    } catch {
-        return { _httpStatus: response.status };
+
+        let result;
+        try {
+            const parsed = await response.json();
+            if (parsed && typeof parsed === 'object') {
+                parsed._httpStatus = response.status;
+                const requestId = extractBackendRequestId(parsed);
+                if (requestId) updateRuntimeRequestId(requestId);
+                result = parsed;
+            } else {
+                result = { value: parsed, _httpStatus: response.status };
+            }
+        } catch {
+            result = { _httpStatus: response.status };
+        }
+
+        if (!readOnly && payload?.realm !== 'runtime') {
+            window.adminActivityController?.trackAcceptedMutation?.(payload, result);
+        }
+        return result;
+    } catch (error) {
+        if (!readOnly && error?.code === 'ADMIN_API_TIMEOUT') {
+            window.adminActivityController?.scheduleNearTerm?.(0);
+        }
+        throw error;
     }
 }
 
 async function sendScoutsReadCommand(payload, options = {}) {
-    return sendScoutsCommand(payload, { ...options, timeoutMs: options.timeoutMs ?? ADMIN_READ_TIMEOUT_MS });
+    return sendScoutsCommand(payload, {
+        ...options,
+        readOnly: true,
+        timeoutMs: options.timeoutMs ?? ADMIN_READ_TIMEOUT_MS,
+    });
 }
 
 function setApiActionState(enabled) {
@@ -2167,71 +2186,22 @@ function formatObservedTitles(snapshot) {
     return Array.from(titles).slice(0, 6).join(' | ');
 }
 
-async function fetchQueueSnapshot(url) {
-    try {
-        const response = await fetch(`${url}?ts=${Date.now()}`, {
-            method: 'GET',
-            credentials: 'same-origin',
-            cache: 'no-store',
-        });
-        if (!response.ok) return null;
-        const payload = await response.json();
-        return payload && typeof payload === 'object' ? payload : null;
-    } catch {
-        return null;
-    }
+async function fetchQueueSnapshot(snapshotRef) {
+    const controller = window.privateStorageController;
+    if (!controller?.fetchQueueSnapshot) return null;
+    return controller.fetchQueueSnapshot(snapshotRef);
 }
 
 async function fetchHexEventByHex(hexValue) {
-    const hex = hasText(hexValue) ? String(hexValue).trim().toLowerCase() : '';
-    if (!hex) return null;
-    const now = Date.now();
-    const nextRetryAt = missingHexRetryAtByHex.get(hex) || 0;
-    if (nextRetryAt > now) return null;
-    try {
-        const response = await fetch(`../../events/${hex}.json?ts=${Date.now()}`, {
-            method: 'GET',
-            credentials: 'same-origin',
-            cache: 'no-store',
-        });
-        if (!response.ok) {
-            if (response.status === 404 || response.status === 410) {
-                missingHexRetryAtByHex.set(hex, now + HEX_NOT_FOUND_BACKOFF_MS);
-            }
-            return null;
-        }
-        const payload = await response.json();
-        missingHexRetryAtByHex.delete(hex);
-        return payload && typeof payload === 'object' ? normaliseEventRecordForUi(payload) : null;
-    } catch {
-        return null;
-    }
+    const controller = window.privateStorageController;
+    if (!controller?.fetchHexEventByHex) return null;
+    return controller.fetchHexEventByHex(hexValue);
 }
 
 async function fetchRawHexEventByHex(hexValue) {
-    const hex = hasText(hexValue) ? String(hexValue).trim().toLowerCase() : '';
-    if (!hex) return null;
-    const now = Date.now();
-    const nextRetryAt = missingHexRetryAtByHex.get(hex) || 0;
-    if (nextRetryAt > now) return null;
-    try {
-        const response = await fetch(`../../events/${hex}.json?ts=${Date.now()}`, {
-            method: 'GET',
-            credentials: 'same-origin',
-            cache: 'no-store',
-        });
-        if (!response.ok) {
-            if (response.status === 404 || response.status === 410) {
-                missingHexRetryAtByHex.set(hex, now + HEX_NOT_FOUND_BACKOFF_MS);
-            }
-            return null;
-        }
-        const payload = await response.json();
-        missingHexRetryAtByHex.delete(hex);
-        return payload && typeof payload === 'object' ? payload : null;
-    } catch {
-        return null;
-    }
+    const controller = window.privateStorageController;
+    if (!controller?.fetchRawHexEventByHex) return null;
+    return controller.fetchRawHexEventByHex(hexValue);
 }
 
 function getHexPreviewBody(cardIndex) {
@@ -2421,56 +2391,9 @@ function applyHexEventMetadata(targetEvent, hexEvent) {
 
 
 async function pollQueueDepthSnapshots() {
-    const updatedEl = document.getElementById('queue-depth-updated');
-    const checkedEl = document.getElementById('queue-depth-checked');
-    if (!updatedEl || !checkedEl) {
-        return;
-    }
-
-    checkedEl.title = 'Last checked is when this admin page last polled S3 for the runtime request snapshot files.';
-    checkedEl.textContent = `Last checked: ${new Date().toLocaleString('en-GB')}`;
-
-    const [queuedSnapshot, processingSnapshot, completedSnapshot] = await Promise.all([
-        fetchQueueSnapshot(QUEUED_REQUESTS_RUNTIME_URL),
-        fetchQueueSnapshot(PROCESSING_REQUESTS_RUNTIME_URL),
-        fetchQueueSnapshot(COMPLETED_REQUESTS_RUNTIME_URL),
-    ]);
-    latestQueuedSnapshot = queuedSnapshot;
-    latestProcessingSnapshot = processingSnapshot;
-    latestCompletedSnapshot = completedSnapshot;
-
-    const aggregateRequests = getAggregateRuntimeRequests(queuedSnapshot, processingSnapshot, completedSnapshot);
-    const timestamps = [queuedSnapshot?.updatedAt, processingSnapshot?.updatedAt, completedSnapshot?.updatedAt]
-        .filter((value) => typeof value === 'string' && value.trim().length > 0)
-        .map((value) => new Date(value))
-        .filter((date) => !Number.isNaN(date.getTime()));
-    const mostRecentTimestamp = timestamps.length > 0
-        ? timestamps.sort((a, b) => b.getTime() - a.getTime())[0].toISOString()
-        : (completedSnapshot?.updatedAt ?? null);
-    setRequests(aggregateRequests, mostRecentTimestamp);
-
-    const queuedUpdatedAt = hasText(queuedSnapshot?.updatedAt) ? String(queuedSnapshot.updatedAt).trim() : '';
-    const parsedQueuedUpdatedAt = queuedUpdatedAt ? new Date(queuedUpdatedAt) : null;
-    if (parsedQueuedUpdatedAt && !Number.isNaN(parsedQueuedUpdatedAt.getTime())) {
-        updatedEl.title = 'Last update is the updatedAt timestamp from runtime/scoutsQueued.json fetched from S3.';
-        updatedEl.textContent = `Last update: ${parsedQueuedUpdatedAt.toLocaleString('en-GB')}`;
-        updateRuntimeStatus('Runtime request snapshots ready.', 'success');
-    } else {
-        updatedEl.title = 'Last update is the updatedAt timestamp from runtime/scoutsQueued.json fetched from S3.';
-        updatedEl.textContent = 'Last update: n/a';
-        updateRuntimeStatus('Runtime request snapshots unavailable.', 'error');
-    }
-
-    if (!getPinnedRuntimeDetails()) {
-        const queuedCount = Array.isArray(queuedSnapshot?.requests) ? queuedSnapshot.requests.length : 0;
-        const processingCount = Array.isArray(processingSnapshot?.requests) ? processingSnapshot.requests.length : 0;
-        const completedCount = Array.isArray(completedSnapshot?.requests) ? completedSnapshot.requests.length : 0;
-        updateRuntimeDetails(`Queued ${queuedCount} | Processing ${processingCount} | Completed ${completedCount}`, 'info');
-    }
-
-    if (uniqueEventEntries.length > 0) {
-        refreshVisibleEventRuntimeBadges();
-    }
+    const controller = window.adminActivityController;
+    if (!controller?.refreshNow) return null;
+    return controller.refreshNow();
 }
 
 function showError(message) {
@@ -2920,6 +2843,16 @@ function formatTrackerTimestamp(isoString) {
     return parsed.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+function getMissingMetadataFields(event) {
+    const controller = window.adminAgendaController;
+    if (controller?.getMissingMetadataFields) return controller.getMissingMetadataFields(event);
+    const missing = [];
+    if (!hasText(getAIPrompt(event))) missing.push('Tagline');
+    if (!hasText(getImageThemeOrLegacyPrompt(event))) missing.push('Image Theme');
+    if (!hasRelativeImageUrl(event)) missing.push('Image URL');
+    return missing;
+}
+
 // Render all events
 function getEventActionModel(entry) {
     const event = entry?.event || {};
@@ -2935,7 +2868,7 @@ function getEventActionModel(entry) {
     if (!hidden && !approved) {
         actions.push({ label: 'Approve shown event', className: 'btn-primary', onclick: 'approveEvent' });
     }
-    if (missingFields.length === 1 && missingFields[0] === 'Image URL' && hasText(getImageTheme(event))) {
+    if (missingFields.length === 1 && missingFields[0] === 'Image URL' && hasText(getImageThemeOrLegacyPrompt(event))) {
         actions.push({ label: 'Generate image', className: 'btn-secondary', onclick: 'generateImage' });
     } else if (missingFields.length > 0) {
         actions.push({ label: 'Generate all missing metadata', className: 'btn-secondary', onclick: 'generateFull' });
@@ -3069,6 +3002,7 @@ function renderEvents() {
             </div>
         `;
     }).join('');
+    window.scoutsApprovalController?.refreshLabels?.();
 }
 
 function normaliseEventDateString(value) {
@@ -3172,6 +3106,7 @@ function openUploadModal(index) {
     document.getElementById('modal-status').className = 'status-text';
     
     modal.style.display = 'flex';
+    window.scoutsApprovalController?.refreshLabels?.();
 }
 
 function openAdminEventByHex(hex) {
@@ -3302,154 +3237,13 @@ window.onclick = function(event) {
 }
 
 // Lambda refresh functionality
-async function refreshLambda(action = 'refreshAgenda') {
-    if (!apiAuthReady) {
-        updateApiAuthStatus(
-            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
-            'error',
-        );
-        const statusElement = document.getElementById('refresh-status');
-        statusElement.textContent = 'Admin API auth not ready';
-        statusElement.className = 'refresh-status error';
-        return;
-    }
-
-    const actionInput = document.getElementById('refresh-action');
-    const statusElement = document.getElementById('refresh-status');
-    const requestedCount = actionInput.value;
-
-    const actionCount = Number.isFinite(parseInt(requestedCount, 10)) ? parseInt(requestedCount, 10) : 0;
-
-    // Show loading state
-    statusElement.textContent = 'Sending request...';
-    statusElement.className = 'refresh-status loading';
-
-    const payload = {
-        realm: 'scouts',
-        subject: 'agenda',
-        action: actionCount,
-        maxEvents: actionCount,
-    };
-
-    refreshApiActionButtons();
-    try {
-        const result = await sendScoutsCommand(payload);
-        await pollQueueDepthSnapshots();
-        updateRuntimePanelsFromResult(result);
-
-        const modifiedEvents = Array.isArray(result?.modifiedEvents) ? result.modifiedEvents : [];
-        const modifiedCount = Number.isFinite(result?.modifiedEventsCount)
-            ? result.modifiedEventsCount
-            : modifiedEvents.length;
-        const generatedAt = result?.generatedAt ? new Date(result.generatedAt).toLocaleString('en-GB') : null;
-        const modifiedSuffix = modifiedCount > 0 ? ` (${modifiedCount} events modified)` : ' (no event metadata changes)';
-        statusElement.textContent = generatedAt
-            ? `Agenda-only enrichment completed: ${generatedAt}${modifiedSuffix}`
-            : `Agenda-only enrichment completed${modifiedSuffix}`;
-        statusElement.className = 'refresh-status success';
-        if (modifiedEvents.length > 0) {
-            const preview = modifiedEvents
-                .slice(0, 5)
-                .map((entry) => entry?.title || entry?.hex || entry?.uid || entry?.key || 'unknown')
-                .join(' | ');
-            updateRuntimeDetails(`Agenda-only modified events: ${preview}${modifiedEvents.length > 5 ? ' ...' : ''}`, 'success');
-        }
-
-    } catch (error) {
-        console.error('Error triggering Lambda:', error);
-        const errorMessage = error instanceof TypeError
-            ? 'Network/CORS error calling refresh Lambda. Verify Lambda Function URL CORS settings and response headers.'
-            : `Error: ${error.message}`;
-        statusElement.textContent = errorMessage;
-        statusElement.className = 'refresh-status error';
-    } finally {
-        refreshApiActionButtons();
-    }
-}
-
-async function refreshSelectedCalendar(calendarToken = 'all', label = 'Selected Calendar', action = 'refreshCalendars') {
-    if (!apiAuthReady) {
-        updateApiAuthStatus(
-            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
-            'error',
-        );
-        updateGlobalRefreshStatus('Admin API auth not ready', 'error');
-        return;
-    }
-
-    const payload = {
-        realm: 'scouts',
-        subject: calendarToken && calendarToken !== 'all' ? String(calendarToken).trim().toLowerCase() : 'calendars',
-        action,
-    };
-
-    updateGlobalRefreshStatus(`Refreshing ${label}...`, 'loading');
-
-    refreshApiActionButtons();
-    try {
-        const result = await sendScoutsCommand(payload);
-        await pollQueueDepthSnapshots();
-        updateRuntimePanelsFromResult(result);
-        const count = Number.isFinite(result?.eventsCount) ? result.eventsCount : null;
-        const generatedAt = result?.generatedAt ? new Date(result.generatedAt).toLocaleString('en-GB') : null;
-        const countSuffix = count !== null ? ` (${count} events in agenda)` : '';
-        updateGlobalRefreshStatus(
-            generatedAt
-                ? `Refresh complete for ${label}: ${generatedAt}${countSuffix}`
-                : `Refresh complete for ${label}${countSuffix}`,
-            'success',
-        );
-    } catch (error) {
-        console.error(`Error refreshing ${label}:`, error);
-        updateGlobalRefreshStatus(`Failed to refresh ${label}: ${error.message}`, 'error');
-    } finally {
-        refreshApiActionButtons();
-    }
-}
-
-async function invokeLambdaHeartbeat() {
-    if (!apiAuthReady) return;
-    if (!autoLambdaInvokeEnabled) return;
-    if (autoLambdaInvokeInFlight) return;
-
-    autoLambdaInvokeInFlight = true;
-    try {
-        const payload = {
-            realm: 'scouts',
-            subject: 'agenda',
-            action: 0,
-        };
-        const result = await sendScoutsCommand(payload);
-        await pollQueueDepthSnapshots();
-        updateRuntimePanelsFromResult(result);
-    } catch (error) {
-        console.warn('[Admin] Auto lambda heartbeat failed:', error?.message || error);
-    } finally {
-        autoLambdaInvokeInFlight = false;
-    }
-}
-
-function isAcceptedAdminImageUrl(value) {
-    if (!hasText(value)) return false;
-    const trimmed = String(value).trim();
-    return /^https?:\/\//i.test(trimmed)
-        || trimmed.startsWith('/')
-        || trimmed.startsWith('website/');
-}
-
-function getSelectedModalEntry() {
-    if (currentEventIndex === null) {
-        updateModalStatus('Open an event first.', 'error');
+async function refreshLambda(...args) {
+    const controller = window.adminAgendaController;
+    if (!controller?.refresh) {
+        updateGlobalRefreshStatus('Calendar synchronisation controller is unavailable.', 'error');
         return null;
     }
-
-    const entry = visibleEventEntries[currentEventIndex];
-    if (!entry || !entry.event) {
-        updateModalStatus('Unable to find selected event entry.', 'error');
-        return null;
-    }
-
-    return entry;
+    return controller.refresh(...args);
 }
 
 function getFieldOperationConfig(field) {
@@ -4056,93 +3850,15 @@ function applyLocalApprovalState(entry, approved = true) {
 }
 
 async function approveEvent(eventIndex, fromModal = false, action = 'approve', button = null) {
-    if (!apiAuthReady) {
-        updateApiAuthStatus(
-            'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
-            'error',
-        );
-        if (fromModal) updateModalStatus('Admin API auth not ready.', 'error');
-        else updateRuntimeDetails('Admin API auth not ready.', 'error');
-        return;
-    }
-
-    const entry = visibleEventEntries[eventIndex];
-    if (!entry || !entry.event) {
-        const message = 'Unable to find selected event entry.';
+    const controller = window.scoutsApprovalController;
+    if (!controller?.approveEvent) {
+        const message = window.scoutsApprovalWorkflowLoadErrorMessage
+            || 'Approval controls are unavailable. Reload the Admin page before approving events.';
         if (fromModal) updateModalStatus(message, 'error');
         else updateRuntimeDetails(message, 'error');
-        return;
+        return null;
     }
-
-    const event = entry.event;
-    if (isEntryApproved(entry)) {
-        const message = 'Event is already approved.';
-        if (fromModal) updateModalStatus(message, 'info');
-        else updateRuntimeDetails(message, 'info');
-        return;
-    }
-
-    const eventLabel = event.summary || event.title || `Event ${eventIndex + 1}`;
-    const hex = getEventHex(event);
-    if (!hex) {
-        const message = 'Cannot approve event: missing HEX.';
-        if (fromModal) updateModalStatus(message, 'error');
-        else updateRuntimeDetails(message, 'error');
-        return;
-    }
-
-    const payload = {
-        realm: 'scouts',
-        subject: {
-            hex,
-            isApproved: true,
-        },
-        action,
-    };
-
-    const loadingMessage = `Approving "${eventLabel}"...`;
-    if (fromModal) updateModalStatus(loadingMessage, 'loading');
-    else pinRuntimeDetails(loadingMessage, 'loading');
-    const originalButtonLabel = button?.textContent;
-    if (button) { button.disabled = true; button.textContent = 'Approving…'; }
-
-    refreshApiActionButtons();
-    try {
-        const result = await sendScoutsCommand(payload);
-        const requestId = extractBackendRequestId(result);
-        await pollQueueDepthSnapshots();
-        applyLocalApprovalState(entry, true);
-        updateEventsCount(
-            uniqueEventEntries.length,
-            eventsData.length,
-            uniqueEventEntries.filter((candidate) => isEntryHidden(candidate)).length,
-            uniqueEventEntries.filter((candidate) => isEntryComplete(candidate)).length,
-        );
-        updateSidebarUi();
-        renderEvents();
-        if (fromModal) {
-            updateModalContent(currentEventIndex);
-        }
-        const backendMessage = typeof result?.message === 'string' && result.message.trim()
-            ? ` ${result.message.trim()}`
-            : '';
-        updateRuntimeRequestId(requestId || latestBackendRequestId);
-        const successMessage = appendBackendRequestIdMessage(
-            `Approve request queued for "${eventLabel}".${backendMessage}`,
-            result,
-            { updateFooter: false, includeInMessage: false },
-        );
-        if (fromModal) updateModalStatus(successMessage, 'success');
-        pinRuntimeDetails(successMessage, 'success');
-    } catch (error) {
-        console.error('Error approving event:', error);
-        const failureMessage = `Failed to approve event: ${error.message}`;
-        if (fromModal) updateModalStatus(failureMessage, 'error');
-        else pinRuntimeDetails(failureMessage, 'error');
-    } finally {
-        if (button) { button.disabled = !apiAuthReady; button.textContent = originalButtonLabel; }
-        refreshApiActionButtons();
-    }
+    return controller.approveEvent(eventIndex, fromModal, action, button);
 }
 
 function approveCurrentEvent(action = 'approve', button = null) {
@@ -4160,12 +3876,10 @@ document.addEventListener('DOMContentLoaded', () => {
     hexPreviewAutoRefreshEnabled = readHexPreviewAutoRefreshPreference();
     hexPreviewIntervalMs = readHexPreviewIntervalPreference();
     initializeBrowserNotificationsPreference();
-    setAutoLambdaInvocationEnabled(readAutoLambdaInvocationPreference(), false);
-    setStatusPollingEnabled(readStatusPollingPreference(), false);
-    persistAutoLambdaInvocationPreference(autoLambdaInvokeEnabled);
-    persistAutoLambdaIntervalPreference(autoLambdaInvokeIntervalMs);
-    persistStatusPollingPreference(statusPollingEnabled);
-    persistStatusPollingIntervalPreference(statusPollingIntervalMs);
+    // Browser-owned reconciliation/status timers are retired. Activity owns the
+    // only recurring request-status poll; AWS owns scheduled reconciliation.
+    setAutoLambdaInvocationEnabled(false, false);
+    setStatusPollingEnabled(false, false);
     setApiActionState(false);
     checkApiAuthStatus();
     loadEvents();

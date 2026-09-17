@@ -13,6 +13,8 @@ const simplify = readFileSync('website/admin/admin-simplify.js', 'utf8');
 const css = readFileSync('website/admin/admin-simplify.css', 'utf8');
 const adminScript = readFileSync('website/admin/admin-script.js', 'utf8');
 const agendaRefresh = readFileSync('website/admin/admin-agenda-refresh.js', 'utf8');
+const activityCentre = readFileSync('website/admin/admin-activity-centre.js', 'utf8');
+const diagnosticsEnhancements = readFileSync('website/admin/admin-diagnostics-enhancements.js', 'utf8');
 const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'utf8');
 const scoutsService = readFileSync('lambdas/scouts/function/scouts-service.mjs', 'utf8');
 const requestActivity = readFileSync('lambdas/shared-layer/nodejs/request-activity.mjs', 'utf8');
@@ -38,20 +40,12 @@ test('admin page loads simplified agenda refresh controller after legacy control
   assertSyntax('lambdas/shared-layer/nodejs/request-activity.mjs');
 });
 
-test('default UI exposes diagnostics separately and keeps activity user-facing', () => {
-  assert.match(simplify, /Diagnostics/);
-  assert.match(simplify, /Activity/);
-  assert.match(simplify, /All services available/);
-  assert.match(simplify, /Waiting for retry|Waiting/);
+test('default UI exposes Operations separately while Activity owns lifecycle presentation', () => {
+  assert.match(simplify, /Operations/);
+  assert.match(simplify, /Scheduled refresh and recovery controls/);
+  assert.match(activityCentre, /Activity/);
   assert.match(css, /admin-diagnostics-drawer/);
-  assert.match(css, /admin-primary-summary/);
-});
-
-test('age alone is not an authoritative lifecycle state', () => {
-  assert.match(simplify, /classifyAggregateRuntimeRequestStatus = function/);
-  assert.match(simplify, /if \(hasProcessing\) return 'processing'/);
-  assert.match(simplify, /if \(hasQueued\) return 'queued'/);
-  assert.doesNotMatch(simplify, /QUEUED_STALLED_THRESHOLD_MS/);
+  assert.doesNotMatch(simplify, /pollAuthoritativeActivity|request lifecycle ready|All services available/);
 });
 
 test('agenda UI no longer exposes an enrichment-count selector', () => {
@@ -135,7 +129,7 @@ test('admin commands stay on the same-origin proxy and derive missing agenda HEX
 
 test('missing metadata classification excludes approval and visibility workflow state', () => {
   const classificationBody = agendaRefresh.match(
-    /window\.getMissingMetadataFields = function \(event\) \{([\s\S]*?)\n    \};/,
+    /function getMissingMetadataFields\(event\) \{([\s\S]*?)\n    \}/,
   )?.[1] || '';
 
   assert.match(classificationBody, /missing\.push\('Tagline'\)/);
@@ -144,33 +138,19 @@ test('missing metadata classification excludes approval and visibility workflow 
   assert.doesNotMatch(classificationBody, /Approval|Visibility|isEventApproved|isHiddenEvent/);
 });
 
-test('activity rendering uses lifecycle data and textContent rather than cloned diagnostics DOM', () => {
-  assert.match(simplify, /function renderCanonicalActivity/);
-  assert.match(simplify, /statusEl\.textContent = stateLabel\(request\)/);
-  assert.match(simplify, /titleEl\.textContent = requestTitle\(request\)/);
-  assert.doesNotMatch(simplify, /function cloneActivityCards/);
+test('Activity Centre is the single recurring lifecycle presentation owner', () => {
+  assert.match(activityCentre, /activityCommand\('status'\)/);
+  assert.match(activityCentre, /function schedulePoll/);
+  assert.match(activityCentre, /window\.adminActivityController = Object\.freeze/);
+  assert.match(adminScript, /return controller\.refreshNow\(\)/);
+  assert.doesNotMatch(simplify, /activityCommand|pollAuthoritativeActivity|pollQueueDepthSnapshots\s*=/);
 });
 
-test('diagnostics split request lifecycle from queue and workflow telemetry', () => {
-  assert.match(simplify, /Authoritative requests, infrastructure health and raw state/);
-  assert.match(simplify, /'Requests'/);
-  assert.match(simplify, /'Queue health'/);
-  assert.match(simplify, /'Step Functions'/);
-  assert.match(simplify, /'Raw snapshots and tools'/);
-});
-
-test('presentation sanitisation never mutates diagnostics or raw snapshot detail', () => {
-  assert.match(simplify, /function isDiagnosticsNode\(el\)/);
-  assert.match(simplify, /normalizeStatusClasses[\s\S]*if \(isDiagnosticsNode\(el\)\) return;/);
-  assert.match(simplify, /sanitizeRenderedStatuses[\s\S]*if \(isDiagnosticsNode\(el\)\) return;/);
-  assert.match(simplify, /hideImplementationLanguage[\s\S]*if \(isDiagnosticsNode\(el\)\) return;/);
-});
-
-test('one authoritative status poll replaces snapshot polling for the presentation layer', () => {
-  assert.match(simplify, /realm: 'runtime', subject: 'activity', action: 'status'/);
-  assert.match(simplify, /pollQueueDepthSnapshots = pollAuthoritativeActivity/);
-  assert.match(simplify, /lastActivitySuccessAt/);
-  assert.match(simplify, /retaining last good result/);
+test('Operations contains only scheduled refresh and recovery controls', () => {
+  assert.match(diagnosticsEnhancements, /Scheduled calendar refresh/);
+  assert.match(diagnosticsEnhancements, /Dead-letter queues/);
+  assert.match(diagnosticsEnhancements, /operationsBody/);
+  assert.doesNotMatch(diagnosticsEnhancements, /installEventCardRenderHook|enhanceEventCards/);
 });
 
 test('presentation updates do not install a document-wide observer', () => {

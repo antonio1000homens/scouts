@@ -1,13 +1,13 @@
 // Manual calendar/agenda synchronisation and metadata classification.
 // Browser startup must remain read-only; durable scheduled refresh is owned by AWS.
 (function () {
-    window.getMissingMetadataFields = function (event) {
+    function getMissingMetadataFields(event) {
         const missing = [];
         if (!hasText(getAIPrompt(event))) missing.push('Tagline');
         if (!hasText(getImageThemeOrLegacyPrompt(event))) missing.push('Image Theme');
         if (!hasRelativeImageUrl(event)) missing.push('Image URL');
         return missing;
-    };
+    }
 
     function reconciliationPayload() {
         return {
@@ -18,7 +18,7 @@
         };
     }
 
-    window.refreshLambda = async function refreshLambda() {
+    async function refresh() {
         if (!apiAuthReady) {
             updateGlobalRefreshStatus('Admin API auth not ready', 'error');
             return null;
@@ -39,11 +39,9 @@
         } finally {
             if (button) { button.disabled = !apiAuthReady; button.textContent = 'Sync calendars & agenda'; }
         }
-    };
+    }
 
-    // Keep named legacy hooks harmless for cached markup. They never reconcile or schedule.
-    window.toggleAgendaAutoRefresh = () => {};
-    window.updateAgendaAutoRefreshInterval = () => {};
+    window.adminAgendaController = Object.freeze({ getMissingMetadataFields, refresh });
 
     document.addEventListener('DOMContentLoaded', () => {
         const refreshButton = document.getElementById('refresh-button');

@@ -7,10 +7,11 @@
     const IDLE_POLL_MS = 25000;
     const TERMINAL = new Set(['completed', 'failed', 'needs_attention', 'manual_review']);
     const RETRYABLE_ENRICHMENT_STAGES = new Set(['tagline', 'imageTheme', 'image']);
-    const originalSend = window.sendScoutsCommand;
     const tracked = new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]').filter(Boolean));
     const known = new Map();
     let pollTimer = null;
+    let pollPromise = null;
+    let latestStatusActivity = null;
     let unread = 0;
 
     function text(value) { return value == null ? '' : String(value).trim(); }
@@ -23,39 +24,11 @@
             .replaceAll("'", '&#039;');
     }
     function saveTracked() { localStorage.setItem(STORAGE_KEY, JSON.stringify([...tracked].slice(-100))); }
-    function eventFromEntry(entry) {
-        if (!entry || typeof entry !== 'object') return null;
-        return entry.event && typeof entry.event === 'object' ? entry.event : entry;
-    }
-    function canonicalEventHex(event) {
-        if (!event || typeof event !== 'object') return '';
-        if (typeof getEventHex === 'function') return text(getEventHex(event)).toLowerCase();
-        return text(event.hex || event.hexId || event.metadata?.hex || event.metadata?.hexId).toLowerCase();
-    }
-    function loadedEventEntries() {
-        const visible = typeof visibleEventEntries !== 'undefined' && Array.isArray(visibleEventEntries) ? visibleEventEntries : [];
-        const unique = typeof uniqueEventEntries !== 'undefined' && Array.isArray(uniqueEventEntries) ? uniqueEventEntries : [];
-        const raw = typeof eventsData !== 'undefined' && Array.isArray(eventsData) ? eventsData : [];
-        return [...visible, ...unique, ...raw];
-    }
-    function activityEventTitle(request) {
-        const activityTitle = text(request?.title);
-        if (activityTitle) return activityTitle;
-        const requestHex = text(request?.hex).toLowerCase();
-        if (!requestHex) return 'Activity';
-        for (const entry of loadedEventEntries()) {
-            const event = eventFromEntry(entry);
-            if (!event || canonicalEventHex(event) !== requestHex) continue;
-            const eventTitle = text(event.summary || event.title || event.name);
-            if (eventTitle) return eventTitle;
-        }
-        return 'Unknown event';
-    }
-    function requestLabel(request) { return activityEventTitle(request); }
+    function requestLabel(request) { return request.title || request.hex || 'Event change'; }
     function activityCommand(action, extra = {}) {
         const sendRead = typeof window.sendScoutsReadCommand === 'function'
             ? window.sendScoutsReadCommand
-            : originalSend;
+            : window.sendScoutsCommand;
         return sendRead({ realm: 'runtime', subject: 'activity', action, ...extra });
     }
     function stateLabel(request) {
@@ -69,77 +42,6 @@
         if (state === 'queued' || state === 'accepted') return 'Waiting';
         return state.replaceAll('_', ' ') || 'Processing';
     }
-    function activityTimestamp(value) {
-        if (!value) return '';
-        const parsed = new Date(value);
-        if (!Number.isFinite(parsed.getTime())) return '';
-        return parsed.toLocaleString('en-GB');
-    }
-    function formatActivityForClipboard(request) {
-        const lines = [];
-        const title = activityEventTitle(request);
-        const hex = text(request?.hex);
-        if (hex) {
-            lines.push(`Event: ${title}`, `HEX: ${hex}`);
-        } else {
-            lines.push(`Activity: ${title}`);
-        }
-        lines.push(`Status: ${stateLabel(request)}`);
-        const action = text(request?.action);
-        if (action) lines.push(`Action: ${action}`);
-        const updated = activityTimestamp(request?.updatedAt || request?.createdAt);
-        if (updated) lines.push(`Updated: ${updated}`);
-        const failure = text(request?.failure?.message);
-        if (failure) lines.push(`Failure: ${failure}`);
-        const timeline = Array.isArray(request?.timeline) ? request.timeline : [];
-        if (timeline.length) {
-            lines.push('', 'Timeline:');
-            timeline.forEach((entry) => {
-                const at = activityTimestamp(entry?.at);
-                lines.push(`${at ? `${at} · ` : ''}${stateLabel(entry)}`);
-            });
-        }
-        return lines.join('\n');
-    }
-    function copyTextFallback(value) {
-        const textarea = document.createElement('textarea');
-        textarea.value = value;
-        textarea.setAttribute('readonly', '');
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        const copied = typeof document.execCommand === 'function' && document.execCommand('copy') === true;
-        textarea.remove();
-        if (!copied) throw new Error('Clipboard API unavailable');
-    }
-    async function writeClipboard(value) {
-        if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-            await navigator.clipboard.writeText(value);
-            return;
-        }
-        copyTextFallback(value);
-    }
-    async function copyActivity(request, button) {
-        const originalLabel = text(button?.textContent) || 'Copy';
-        if (button) button.disabled = true;
-        try {
-            await writeClipboard(formatActivityForClipboard(request));
-            if (button) {
-                button.textContent = 'Copied';
-                button.disabled = false;
-            }
-            setTimeout(() => {
-                if (button?.isConnected) button.textContent = originalLabel;
-            }, 1500);
-        } catch (error) {
-            if (button) {
-                button.textContent = originalLabel;
-                button.disabled = false;
-            }
-            notifyMessage('Could not copy activity.', 'warning');
-        }
-    }
 
     function ensureUi() {
         if (document.getElementById('activity-centre-open')) return;
@@ -151,10 +53,49 @@
 
         const stack = document.createElement('div'); stack.id = 'activity-toast-stack'; stack.setAttribute('aria-live', 'polite'); document.body.appendChild(stack);
         const drawer = document.createElement('aside'); drawer.id = 'activity-centre-drawer'; drawer.setAttribute('aria-label', 'Activity log');
-        drawer.innerHTML = '<header><div><h2>Activity</h2><p>Changes from the last seven days.</p></div><button type="button" class="btn btn-secondary" id="activity-centre-close">Close</button></header><div class="activity-log-filters"><input id="activity-log-hex" placeholder="Filter by HEX"><select id="activity-log-state"><option value="">All states</option><option value="completed">Completed</option><option value="needs_attention">Needs attention</option><option value="failed">Failed</option><option value="processing">Processing</option><option value="awaiting_image">Generating image</option><option value="awaiting_review">Awaiting image approval</option></select><button type="button" class="btn btn-secondary" id="activity-log-filter">Filter</button></div><div id="activity-log-list"><p>Loading activity…</p></div>';
+        drawer.innerHTML = `
+            <header>
+                <div><h2>Activity</h2><p>Changes from the last seven days.</p></div>
+                <button type="button" class="btn btn-secondary" id="activity-centre-close">Close</button>
+            </header>
+            <label class="activity-notification-toggle" for="browser-notifications-toggle" title="Show native browser notifications when the agenda changes.">
+                <input type="checkbox" id="browser-notifications-toggle">
+                Browser notifications
+            </label>
+            <div class="activity-log-filters">
+                <input id="activity-log-hex" placeholder="Filter by HEX">
+                <select id="activity-log-state">
+                    <option value="">All states</option>
+                    <option value="completed">Completed</option>
+                    <option value="needs_attention">Needs attention</option>
+                    <option value="failed">Failed</option>
+                    <option value="processing">Processing</option>
+                    <option value="awaiting_image">Generating image</option>
+                    <option value="awaiting_review">Awaiting image approval</option>
+                </select>
+                <button type="button" class="btn btn-secondary" id="activity-log-filter">Filter</button>
+            </div>
+            <div id="activity-log-list"><p>Loading activity…</p></div>
+        `;
         document.body.appendChild(drawer);
         drawer.querySelector('#activity-centre-close').addEventListener('click', () => drawer.classList.remove('open'));
         drawer.querySelector('#activity-log-filter').addEventListener('click', () => loadHistory());
+
+        const notificationToggle = drawer.querySelector('#browser-notifications-toggle');
+        notificationToggle.checked = typeof readBrowserNotificationsPreference === 'function'
+            ? readBrowserNotificationsPreference()
+            : false;
+        notificationToggle.addEventListener('change', async () => {
+            if (typeof setBrowserNotificationsEnabled !== 'function') {
+                notificationToggle.checked = false;
+                return;
+            }
+            await setBrowserNotificationsEnabled(notificationToggle.checked);
+            notificationToggle.checked = typeof readBrowserNotificationsPreference === 'function'
+                ? readBrowserNotificationsPreference()
+                : false;
+        });
+        if (typeof updateBrowserNotificationsUi === 'function') updateBrowserNotificationsUi();
     }
 
     function renderUnread() { const badge = document.getElementById('activity-centre-unread'); if (badge) { badge.hidden = unread === 0; badge.textContent = String(unread); } }
@@ -257,28 +198,39 @@
     }
 
     async function poll() {
-        try {
-            const result = await activityCommand('status');
-            const statusRequests = Array.isArray(result?.activity?.requests) ? result.activity.requests : [];
-            const lookup = tracked.size
-                ? await activityCommand('lookup', { requestIds: [...tracked] })
-                : { activity: { requests: [] } };
-            const requests = [...statusRequests, ...(lookup?.activity?.requests || [])]
-                .filter((request, index, list) => list.findIndex((candidate) => candidate.requestId === request.requestId) === index);
-            const changed = [];
-            for (const request of requests) {
-                const fingerprint = `${request.state}|${request.stage}|${request.displayMessage || ''}|${request.publication || ''}|${request.updatedAt}|${request.failure?.message || ''}|${request.recovery?.type || ''}`;
-                const previous = known.get(request.requestId);
-                known.set(request.requestId, fingerprint);
-                if (request.requestId && !TERMINAL.has(request.state)) { tracked.add(request.requestId); saveTracked(); }
-                if (request.requestId && TERMINAL.has(request.state)) { tracked.delete(request.requestId); saveTracked(); }
-                if (previous !== fingerprint) {
-                    changed.push(request);
-                    notify(request, previous === undefined && !tracked.has(request.requestId));
+        if (pollPromise) return pollPromise;
+        pollPromise = (async () => {
+            try {
+                const result = await activityCommand('status');
+                latestStatusActivity = result?.activity || null;
+                const statusRequests = Array.isArray(latestStatusActivity?.requests) ? latestStatusActivity.requests : [];
+                const lookup = tracked.size
+                    ? await activityCommand('lookup', { requestIds: [...tracked] })
+                    : { activity: { requests: [] } };
+                const requests = [...statusRequests, ...(lookup?.activity?.requests || [])]
+                    .filter((request, index, list) => list.findIndex((candidate) => candidate.requestId === request.requestId) === index);
+                const changed = [];
+                for (const request of requests) {
+                    const fingerprint = `${request.state}|${request.stage}|${request.displayMessage || ''}|${request.publication || ''}|${request.updatedAt}|${request.failure?.message || ''}|${request.recovery?.type || ''}`;
+                    const previous = known.get(request.requestId);
+                    known.set(request.requestId, fingerprint);
+                    if (request.requestId && !TERMINAL.has(request.state)) { tracked.add(request.requestId); saveTracked(); }
+                    if (request.requestId && TERMINAL.has(request.state)) { tracked.delete(request.requestId); saveTracked(); }
+                    if (previous !== fingerprint) {
+                        changed.push(request);
+                        notify(request, previous === undefined && !tracked.has(request.requestId));
+                    }
                 }
+                await reconcileAgenda(changed);
+                return latestStatusActivity;
+            } catch (error) {
+                console.warn('[ActivityCentre] Activity refresh failed', error);
+                return latestStatusActivity;
+            } finally {
+                pollPromise = null;
             }
-            await reconcileAgenda(changed);
-        } catch (error) { console.warn('[ActivityCentre] Activity refresh failed', error); }
+        })();
+        return pollPromise;
     }
 
     function schedulePoll(delay = tracked.size ? ACTIVE_POLL_MS : IDLE_POLL_MS) {
@@ -302,7 +254,7 @@
         });
         requests.forEach((request) => {
             const item = document.createElement('article'); item.className = `activity-log-item activity-${request.displayState || request.state}`;
-            const failure = request.failure?.message ? `<p class="activity-failure">${escapeHtml(request.failure.message)}</p>` : '';
+            const failure = request.failure?.message ? `<p>${escapeHtml(request.failure.message)}</p>` : '';
             const timeline = (request.timeline || []).map((entry) => `<li>${new Date(entry.at).toLocaleString('en-GB')} · ${escapeHtml(stateLabel(entry))}</li>`).join('');
             const childIds = Array.isArray(request.childRequestIds) ? request.childRequestIds.filter(Boolean) : [];
             const diagnostics = [
@@ -313,12 +265,7 @@
                 request.publication ? `<p><strong>Publication:</strong> <code>${escapeHtml(request.publication)}</code></p>` : '',
                 childIds.length ? `<p><strong>Child requests:</strong> ${childIds.map((id) => `<code>${escapeHtml(id)}</code>`).join(' ')}</p>` : '',
             ].join('');
-            const identity = request.hex
-                ? `<p class="activity-event-hex"><span>HEX</span> <code>${escapeHtml(request.hex)}</code></p>`
-                : '';
-            item.innerHTML = `<div class="activity-log-heading"><h3>${escapeHtml(requestLabel(request))}</h3>${identity}</div><p class="activity-status">${escapeHtml(stateLabel(request))}</p>${failure}<details><summary>Timeline and diagnostics</summary><ol>${timeline}</ol>${diagnostics}</details>`;
-            const actions = document.createElement('div');
-            actions.className = 'activity-log-actions';
+            item.innerHTML = `<h3>${escapeHtml(requestLabel(request))}</h3><p>${escapeHtml(stateLabel(request))}</p>${failure}<details><summary>Timeline and diagnostics</summary><ol>${timeline}</ol>${diagnostics}</details>`;
             const stage = enrichmentStage(request);
             const stageKey = text(request?.hex) && stage ? `${text(request.hex).toLowerCase()}|${stage}` : '';
             if (request.state === 'manual_review' && stageKey && latestByEnrichmentStage.get(stageKey) === request) {
@@ -329,7 +276,7 @@
                 retryButton.title = request.recovery?.message || `Retry the ${stage} enrichment from durable manual-review state.`;
                 retryButton.disabled = !apiAuthReady;
                 retryButton.addEventListener('click', () => retryManualReview(request, retryButton));
-                actions.appendChild(retryButton);
+                item.appendChild(retryButton);
             } else if (request.recovery?.type === 'dlq_recovery') {
                 const recoveryButton = document.createElement('button');
                 recoveryButton.type = 'button';
@@ -338,7 +285,7 @@
                 recoveryButton.title = request.recovery?.message || 'Inspect and confirm the DLQ before redriving.';
                 recoveryButton.disabled = !apiAuthReady;
                 recoveryButton.addEventListener('click', openOperationsRecovery);
-                actions.appendChild(recoveryButton);
+                item.appendChild(recoveryButton);
             } else if (request.recovery?.type === 'unsupported') {
                 const note = document.createElement('p');
                 note.className = 'activity-recovery-note';
@@ -349,16 +296,8 @@
                 const button = document.createElement('button');
                 button.type = 'button'; button.className = 'btn btn-secondary activity-view-event'; button.textContent = 'View event';
                 button.addEventListener('click', () => viewEvent(request.hex));
-                actions.appendChild(button);
+                item.appendChild(button);
             }
-            const copyButton = document.createElement('button');
-            copyButton.type = 'button';
-            copyButton.className = 'btn btn-secondary activity-copy-event';
-            copyButton.textContent = 'Copy';
-            copyButton.setAttribute('aria-label', `Copy activity for ${requestLabel(request)}`);
-            copyButton.addEventListener('click', () => copyActivity(request, copyButton));
-            actions.appendChild(copyButton);
-            item.appendChild(actions);
             target.appendChild(item);
         });
     }
@@ -369,47 +308,28 @@
         catch (error) { const target = document.getElementById('activity-log-list'); if (target) target.textContent = `Activity log unavailable: ${error.message}`; }
     }
 
-    function removeLegacyUi() {
-        document.querySelector('.viewer-menu-shell')?.remove();
-        ['agenda-viewer', 'events-json-viewer', 'scouts-config-viewer', 'runtime-json-viewer'].forEach((id) => document.getElementById(id)?.remove());
-        document.querySelector('.requests-sidebar')?.remove(); document.querySelector('.admin-runtime-footer')?.remove();
-        document.getElementById('admin-primary-summary')?.remove();
-        const diagnostics = document.getElementById('admin-diagnostics-drawer');
-        if (diagnostics) {
-            diagnostics.querySelector('h2').textContent = 'Operations';
-            diagnostics.querySelector('.admin-diagnostics-header p').textContent = 'Scheduled refresh and recovery controls.';
-            ['diagnostics-activity-status', 'diagnostics-authoritative-requests', 'diagnostics-step-functions', 'diagnostics-raw-state'].forEach((id) => document.getElementById(id)?.remove());
-            // These two sections are the insertion points used by the retained
-            // scheduled-refresh and DLQ recovery controls. Hide their raw telemetry.
-            document.getElementById('diagnostics-queue-health-content')?.remove();
-            const recovery = document.getElementById('diagnostics-queue-health');
-            recovery?.querySelector('h3') && (recovery.querySelector('h3').textContent = 'Recovery');
-            const open = document.getElementById('diagnostics-open'); if (open) open.textContent = 'Operations';
-        }
+    function trackAcceptedMutation(payload, result) {
+        if (payload?.realm === 'runtime') return;
+        const requestId = text(result?.rootRequestId || result?.requestId || result?.request?.requestId || result?.activity?.requestId);
+        if (requestId) { tracked.add(requestId); saveTracked(); }
+        schedulePoll(250);
     }
 
-    window.sendScoutsCommand = async function activityAwareCommand(payload) {
-        try {
-            const result = await originalSend(payload);
-            if (payload?.realm !== 'runtime') {
-                const requestId = text(result?.rootRequestId || result?.requestId || result?.request?.requestId || result?.activity?.requestId);
-                if (requestId) { tracked.add(requestId); saveTracked(); }
-                schedulePoll(250);
-            }
-            return result;
-        } catch (error) {
-            // A timed-out write has unknown state. Refresh read-only Activity once;
-            // never replay the mutation in the browser.
-            if (error?.code === 'ADMIN_API_TIMEOUT') schedulePoll(0);
-            throw error;
-        }
-    };
+    window.adminActivityController = Object.freeze({
+        refreshNow: async () => {
+            const activity = await poll();
+            schedulePoll();
+            return activity;
+        },
+        scheduleNearTerm: (delay = 250) => schedulePoll(delay),
+        trackAcceptedMutation,
+        getLatest: () => latestStatusActivity,
+    });
+
     document.addEventListener('DOMContentLoaded', () => {
         ensureUi();
         // Native-notification denial and agenda-change fallback share the same
         // stack and log affordance instead of reviving the single legacy toast.
-        window.showAdminNotification = notifyMessage;
-        removeLegacyUi();
         void poll().finally(() => schedulePoll());
         window.addEventListener('beforeunload', () => clearTimeout(pollTimer));
     });

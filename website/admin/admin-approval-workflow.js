@@ -1,8 +1,7 @@
 // Issue #91: event-level, snapshot-based approval.
 //
-// This controller deliberately loads after admin-script.js and replaces only the
-// approval action. The legacy handler remains available during deployment
-// rollback, while all normal approval clicks use the revisioned backend contract.
+// This controller owns the revisioned approval workflow behind an explicit
+// controller contract. admin-script.js keeps the stable UI entry point.
 (function () {
     const REVIEW_REQUEST_TIMEOUT_MS = 15000;
 
@@ -44,7 +43,6 @@
         const readiness = approvalReadiness(event);
         return readiness.tagline && readiness.imageTheme && readiness.imageUrl;
     }
-    window.isEventReadyForApproval = isEventReadyForApproval;
 
     function missingApprovalMetadata(event) {
         const readiness = approvalReadiness(event);
@@ -64,12 +62,6 @@
         return hasText(hex) && isEventReadyForApproval(event);
     }
 
-    // "Need Approval" is a workflow state only after enrichment has completed.
-    // Incomplete events remain under Missing Metadata and must not expose any
-    // approval affordance.
-    window.isEntryPendingApproval = function enrichedEntryPendingApproval(entry) {
-        return isEntryReadyForApproval(entry);
-    };
 
     function sameReviewableValues(left, right) {
         if (!left || !right) return false;
@@ -204,14 +196,6 @@
         syncApprovalBadges(root);
     }
 
-    function relabelAfterRender(original) {
-        if (typeof original !== 'function') return original;
-        return function approvalAwareRender(...args) {
-            const result = original.apply(this, args);
-            relabelApprovalButtons();
-            return result;
-        };
-    }
 
     function refreshApprovedPresentation(entry, fromModal = false) {
         const approvedHex = typeof getEventHex === 'function'
@@ -243,21 +227,8 @@
         if (typeof closeUploadModal === 'function') closeUploadModal();
     }
 
-    // Approval copy and visibility are derived from application state at the points
-    // where the event grid/modal are rendered. Do not observe the entire document:
-    // broad MutationObservers can turn presentation writes into self-sustaining
-    // microtask loops and starve clicks/timers on the main thread.
-    if (typeof window.renderEvents === 'function') window.renderEvents = relabelAfterRender(window.renderEvents);
-    if (typeof window.openUploadModal === 'function') window.openUploadModal = relabelAfterRender(window.openUploadModal);
-    if (typeof window.updateModalContent === 'function') window.updateModalContent = relabelAfterRender(window.updateModalContent);
-    window.refreshApprovalButtonLabels = relabelApprovalButtons;
-
-    const legacyApproveEvent = typeof approveEvent === 'function' ? approveEvent : null;
-
-    window.approveEvent = async function issue91ApproveEvent(eventIndex, fromModal = false, action = 'approve', button = null) {
-        if (String(action || '').toLowerCase() !== 'approve') {
-            return legacyApproveEvent?.(eventIndex, fromModal, action, button);
-        }
+    async function issue91ApproveEvent(eventIndex, fromModal = false, action = 'approve', button = null) {
+        if (String(action || '').toLowerCase() !== 'approve') return null;
         if (!apiAuthReady) {
             updateApiAuthStatus(
                 'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -392,8 +363,14 @@
             if (typeof refreshApiActionButtons === 'function') refreshApiActionButtons();
             relabelApprovalButtons();
         }
-    };
+    }
 
+    window.scoutsApprovalController = Object.freeze({
+        approveEvent: issue91ApproveEvent,
+        isEntryPendingApproval: isEntryReadyForApproval,
+        isEventReadyForApproval,
+        refreshLabels: relabelApprovalButtons,
+    });
     relabelApprovalButtons();
     window.scoutsApprovalWorkflowReady = true;
 })();
