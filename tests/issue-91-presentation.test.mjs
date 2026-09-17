@@ -57,7 +57,7 @@ test('issue 91 activity reads bypass mutation wrappers and mutation tracking doe
 
 test('issue 91 Admin consumes a server-issued canonical revision before approval', () => {
   assert.match(scoutsEntry, /buildEventReviewSnapshot/);
-  assert.match(scoutsEntry, /\['get', 'review'\]\.includes\(command\.action\)/);
+  assert.match(scoutsEntry, /\['get', 'review', 'list'\]\.includes\(command\.action\)/);
   assert.match(scoutsEntry, /review: buildEventReviewSnapshot\(eventObject\)/);
   assert.match(approvalWorkflow, /subject: 'event'/);
   assert.match(approvalWorkflow, /action: 'review'/);
