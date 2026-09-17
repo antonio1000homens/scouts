@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { loadFunctionsFromSource } from './helpers/source-function-loader.mjs';
 
 const adminSource = readFileSync('website/admin/admin-script.js', 'utf8');
+const activitySource = readFileSync('website/admin/admin-activity-centre.js', 'utf8');
 const enhancementsSource = readFileSync('website/admin/admin-diagnostics-enhancements.js', 'utf8');
 
 function loadChangeHelpers() {
@@ -18,9 +19,11 @@ function entry(event) {
   return { event };
 }
 
-test('browser notification control is opt-in and permission is requested from its change handler', () => {
-  assert.match(enhancementsSource, /id = 'browser-notifications-toggle'/);
-  assert.match(enhancementsSource, /input\.addEventListener\('change'/);
+test('browser notification control is opt-in, owned by Activity and requests permission from its change handler', () => {
+  assert.match(activitySource, /id="browser-notifications-toggle"/);
+  assert.match(activitySource, /notificationToggle\.addEventListener\('change'/);
+  assert.match(activitySource, /setBrowserNotificationsEnabled\(notificationToggle\.checked\)/);
+  assert.doesNotMatch(enhancementsSource, /browser-notifications-toggle/);
   assert.match(adminSource, /Notification\.requestPermission\(\)/);
   assert.match(adminSource, /readBrowserNotificationsPreference[\s\S]*return false/);
   assert.match(adminSource, /BROWSER_NOTIFICATIONS_PREF_KEY/);
