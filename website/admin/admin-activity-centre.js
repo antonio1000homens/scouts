@@ -23,7 +23,35 @@
             .replaceAll("'", '&#039;');
     }
     function saveTracked() { localStorage.setItem(STORAGE_KEY, JSON.stringify([...tracked].slice(-100))); }
-    function requestLabel(request) { return request.title || request.hex || 'Event change'; }
+    function eventFromEntry(entry) {
+        if (!entry || typeof entry !== 'object') return null;
+        return entry.event && typeof entry.event === 'object' ? entry.event : entry;
+    }
+    function canonicalEventHex(event) {
+        if (!event || typeof event !== 'object') return '';
+        if (typeof getEventHex === 'function') return text(getEventHex(event)).toLowerCase();
+        return text(event.hex || event.hexId || event.metadata?.hex || event.metadata?.hexId).toLowerCase();
+    }
+    function loadedEventEntries() {
+        const visible = typeof visibleEventEntries !== 'undefined' && Array.isArray(visibleEventEntries) ? visibleEventEntries : [];
+        const unique = typeof uniqueEventEntries !== 'undefined' && Array.isArray(uniqueEventEntries) ? uniqueEventEntries : [];
+        const raw = typeof eventsData !== 'undefined' && Array.isArray(eventsData) ? eventsData : [];
+        return [...visible, ...unique, ...raw];
+    }
+    function activityEventTitle(request) {
+        const activityTitle = text(request?.title);
+        if (activityTitle) return activityTitle;
+        const requestHex = text(request?.hex).toLowerCase();
+        if (!requestHex) return 'Activity';
+        for (const entry of loadedEventEntries()) {
+            const event = eventFromEntry(entry);
+            if (!event || canonicalEventHex(event) !== requestHex) continue;
+            const eventTitle = text(event.summary || event.title || event.name);
+            if (eventTitle) return eventTitle;
+        }
+        return 'Unknown event';
+    }
+    function requestLabel(request) { return activityEventTitle(request); }
     function activityCommand(action, extra = {}) {
         const sendRead = typeof window.sendScoutsReadCommand === 'function'
             ? window.sendScoutsReadCommand
@@ -40,6 +68,77 @@
         if (state === 'completed') return 'Completed';
         if (state === 'queued' || state === 'accepted') return 'Waiting';
         return state.replaceAll('_', ' ') || 'Processing';
+    }
+    function activityTimestamp(value) {
+        if (!value) return '';
+        const parsed = new Date(value);
+        if (!Number.isFinite(parsed.getTime())) return '';
+        return parsed.toLocaleString('en-GB');
+    }
+    function formatActivityForClipboard(request) {
+        const lines = [];
+        const title = activityEventTitle(request);
+        const hex = text(request?.hex);
+        if (hex) {
+            lines.push(`Event: ${title}`, `HEX: ${hex}`);
+        } else {
+            lines.push(`Activity: ${title}`);
+        }
+        lines.push(`Status: ${stateLabel(request)}`);
+        const action = text(request?.action);
+        if (action) lines.push(`Action: ${action}`);
+        const updated = activityTimestamp(request?.updatedAt || request?.createdAt);
+        if (updated) lines.push(`Updated: ${updated}`);
+        const failure = text(request?.failure?.message);
+        if (failure) lines.push(`Failure: ${failure}`);
+        const timeline = Array.isArray(request?.timeline) ? request.timeline : [];
+        if (timeline.length) {
+            lines.push('', 'Timeline:');
+            timeline.forEach((entry) => {
+                const at = activityTimestamp(entry?.at);
+                lines.push(`${at ? `${at} · ` : ''}${stateLabel(entry)}`);
+            });
+        }
+        return lines.join('\n');
+    }
+    function copyTextFallback(value) {
+        const textarea = document.createElement('textarea');
+        textarea.value = value;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = typeof document.execCommand === 'function' && document.execCommand('copy') === true;
+        textarea.remove();
+        if (!copied) throw new Error('Clipboard API unavailable');
+    }
+    async function writeClipboard(value) {
+        if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            await navigator.clipboard.writeText(value);
+            return;
+        }
+        copyTextFallback(value);
+    }
+    async function copyActivity(request, button) {
+        const originalLabel = text(button?.textContent) || 'Copy';
+        if (button) button.disabled = true;
+        try {
+            await writeClipboard(formatActivityForClipboard(request));
+            if (button) {
+                button.textContent = 'Copied';
+                button.disabled = false;
+            }
+            setTimeout(() => {
+                if (button?.isConnected) button.textContent = originalLabel;
+            }, 1500);
+        } catch (error) {
+            if (button) {
+                button.textContent = originalLabel;
+                button.disabled = false;
+            }
+            notifyMessage('Could not copy activity.', 'warning');
+        }
     }
 
     function ensureUi() {
@@ -152,7 +251,7 @@
             setTimeout(() => poll(), 500);
         } catch (error) {
             notifyMessage(`Enrichment retry failed: ${error?.message || error}`, 'error', 8000);
-                button.disabled = !apiAuthReady;
+            button.disabled = !apiAuthReady;
             button.textContent = originalLabel;
         }
     }
@@ -203,7 +302,7 @@
         });
         requests.forEach((request) => {
             const item = document.createElement('article'); item.className = `activity-log-item activity-${request.displayState || request.state}`;
-            const failure = request.failure?.message ? `<p>${escapeHtml(request.failure.message)}</p>` : '';
+            const failure = request.failure?.message ? `<p class="activity-failure">${escapeHtml(request.failure.message)}</p>` : '';
             const timeline = (request.timeline || []).map((entry) => `<li>${new Date(entry.at).toLocaleString('en-GB')} · ${escapeHtml(stateLabel(entry))}</li>`).join('');
             const childIds = Array.isArray(request.childRequestIds) ? request.childRequestIds.filter(Boolean) : [];
             const diagnostics = [
@@ -214,7 +313,12 @@
                 request.publication ? `<p><strong>Publication:</strong> <code>${escapeHtml(request.publication)}</code></p>` : '',
                 childIds.length ? `<p><strong>Child requests:</strong> ${childIds.map((id) => `<code>${escapeHtml(id)}</code>`).join(' ')}</p>` : '',
             ].join('');
-            item.innerHTML = `<h3>${escapeHtml(requestLabel(request))}</h3><p>${escapeHtml(stateLabel(request))}</p>${failure}<details><summary>Timeline and diagnostics</summary><ol>${timeline}</ol>${diagnostics}</details>`;
+            const identity = request.hex
+                ? `<p class="activity-event-hex"><span>HEX</span> <code>${escapeHtml(request.hex)}</code></p>`
+                : '';
+            item.innerHTML = `<div class="activity-log-heading"><h3>${escapeHtml(requestLabel(request))}</h3>${identity}</div><p class="activity-status">${escapeHtml(stateLabel(request))}</p>${failure}<details><summary>Timeline and diagnostics</summary><ol>${timeline}</ol>${diagnostics}</details>`;
+            const actions = document.createElement('div');
+            actions.className = 'activity-log-actions';
             const stage = enrichmentStage(request);
             const stageKey = text(request?.hex) && stage ? `${text(request.hex).toLowerCase()}|${stage}` : '';
             if (request.state === 'manual_review' && stageKey && latestByEnrichmentStage.get(stageKey) === request) {
@@ -225,7 +329,7 @@
                 retryButton.title = request.recovery?.message || `Retry the ${stage} enrichment from durable manual-review state.`;
                 retryButton.disabled = !apiAuthReady;
                 retryButton.addEventListener('click', () => retryManualReview(request, retryButton));
-                item.appendChild(retryButton);
+                actions.appendChild(retryButton);
             } else if (request.recovery?.type === 'dlq_recovery') {
                 const recoveryButton = document.createElement('button');
                 recoveryButton.type = 'button';
@@ -234,7 +338,7 @@
                 recoveryButton.title = request.recovery?.message || 'Inspect and confirm the DLQ before redriving.';
                 recoveryButton.disabled = !apiAuthReady;
                 recoveryButton.addEventListener('click', openOperationsRecovery);
-                item.appendChild(recoveryButton);
+                actions.appendChild(recoveryButton);
             } else if (request.recovery?.type === 'unsupported') {
                 const note = document.createElement('p');
                 note.className = 'activity-recovery-note';
@@ -245,8 +349,16 @@
                 const button = document.createElement('button');
                 button.type = 'button'; button.className = 'btn btn-secondary activity-view-event'; button.textContent = 'View event';
                 button.addEventListener('click', () => viewEvent(request.hex));
-                item.appendChild(button);
+                actions.appendChild(button);
             }
+            const copyButton = document.createElement('button');
+            copyButton.type = 'button';
+            copyButton.className = 'btn btn-secondary activity-copy-event';
+            copyButton.textContent = 'Copy';
+            copyButton.setAttribute('aria-label', `Copy activity for ${requestLabel(request)}`);
+            copyButton.addEventListener('click', () => copyActivity(request, copyButton));
+            actions.appendChild(copyButton);
+            item.appendChild(actions);
             target.appendChild(item);
         });
     }
