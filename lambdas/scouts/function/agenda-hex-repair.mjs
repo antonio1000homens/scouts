@@ -24,8 +24,6 @@ function normalizeComparableText(value) {
   return text(value)
     .toLowerCase()
     .replace(/&amp;/g, '&')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
     .replace(/\s+/g, ' ');
 }
 
@@ -314,6 +312,10 @@ async function loadFreshCalendarSnapshot(now = Date.now()) {
 
       const raw = await response.Body.transformToString();
       const parsed = parseCalendarFeedEvents(raw);
+      if (!String(raw || '').includes('BEGIN:VCALENDAR') || parsed.length === 0) {
+        feedStatus.push({ key: feed.key, fresh: false, reason: 'empty-or-invalid-calendar' });
+        continue;
+      }
       events.push(...parsed);
       feedStatus.push({ key: feed.key, fresh: true, events: parsed.length });
     } catch (error) {
