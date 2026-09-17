@@ -20,6 +20,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install shared test dependencies
+        run: npm ci --prefix lambdas/shared-layer/nodejs
       - name: Apply controller ownership cleanup
         run: |
           python scripts/issue-122-controller-cleanup.py
