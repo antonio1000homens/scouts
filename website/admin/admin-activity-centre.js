@@ -53,10 +53,49 @@
 
         const stack = document.createElement('div'); stack.id = 'activity-toast-stack'; stack.setAttribute('aria-live', 'polite'); document.body.appendChild(stack);
         const drawer = document.createElement('aside'); drawer.id = 'activity-centre-drawer'; drawer.setAttribute('aria-label', 'Activity log');
-        drawer.innerHTML = '<header><div><h2>Activity</h2><p>Changes from the last seven days.</p></div><button type="button" class="btn btn-secondary" id="activity-centre-close">Close</button></header><div class="activity-log-filters"><input id="activity-log-hex" placeholder="Filter by HEX"><select id="activity-log-state"><option value="">All states</option><option value="completed">Completed</option><option value="needs_attention">Needs attention</option><option value="failed">Failed</option><option value="processing">Processing</option><option value="awaiting_image">Generating image</option><option value="awaiting_review">Awaiting image approval</option></select><button type="button" class="btn btn-secondary" id="activity-log-filter">Filter</button></div><div id="activity-log-list"><p>Loading activity…</p></div>';
+        drawer.innerHTML = `
+            <header>
+                <div><h2>Activity</h2><p>Changes from the last seven days.</p></div>
+                <button type="button" class="btn btn-secondary" id="activity-centre-close">Close</button>
+            </header>
+            <label class="activity-notification-toggle" for="browser-notifications-toggle" title="Show native browser notifications when the agenda changes.">
+                <input type="checkbox" id="browser-notifications-toggle">
+                Browser notifications
+            </label>
+            <div class="activity-log-filters">
+                <input id="activity-log-hex" placeholder="Filter by HEX">
+                <select id="activity-log-state">
+                    <option value="">All states</option>
+                    <option value="completed">Completed</option>
+                    <option value="needs_attention">Needs attention</option>
+                    <option value="failed">Failed</option>
+                    <option value="processing">Processing</option>
+                    <option value="awaiting_image">Generating image</option>
+                    <option value="awaiting_review">Awaiting image approval</option>
+                </select>
+                <button type="button" class="btn btn-secondary" id="activity-log-filter">Filter</button>
+            </div>
+            <div id="activity-log-list"><p>Loading activity…</p></div>
+        `;
         document.body.appendChild(drawer);
         drawer.querySelector('#activity-centre-close').addEventListener('click', () => drawer.classList.remove('open'));
         drawer.querySelector('#activity-log-filter').addEventListener('click', () => loadHistory());
+
+        const notificationToggle = drawer.querySelector('#browser-notifications-toggle');
+        notificationToggle.checked = typeof readBrowserNotificationsPreference === 'function'
+            ? readBrowserNotificationsPreference()
+            : false;
+        notificationToggle.addEventListener('change', async () => {
+            if (typeof setBrowserNotificationsEnabled !== 'function') {
+                notificationToggle.checked = false;
+                return;
+            }
+            await setBrowserNotificationsEnabled(notificationToggle.checked);
+            notificationToggle.checked = typeof readBrowserNotificationsPreference === 'function'
+                ? readBrowserNotificationsPreference()
+                : false;
+        });
+        if (typeof updateBrowserNotificationsUi === 'function') updateBrowserNotificationsUi();
     }
 
     function renderUnread() { const badge = document.getElementById('activity-centre-unread'); if (badge) { badge.hidden = unread === 0; badge.textContent = String(unread); } }
@@ -153,7 +192,7 @@
             setTimeout(() => poll(), 500);
         } catch (error) {
             notifyMessage(`Enrichment retry failed: ${error?.message || error}`, 'error', 8000);
-                button.disabled = !apiAuthReady;
+            button.disabled = !apiAuthReady;
             button.textContent = originalLabel;
         }
     }
