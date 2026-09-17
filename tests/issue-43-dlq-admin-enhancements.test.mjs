@@ -10,6 +10,8 @@ const scoutsEntry = readFileSync('lambdas/scouts/function/scouts-entry.mjs', 'ut
 const scoutsTemplate = readFileSync('lambdas/cloudformation/templates/scouts.yaml', 'utf8');
 const queuesTemplate = readFileSync('lambdas/cloudformation/templates/scouts-queues.yaml', 'utf8');
 const adminEnhancements = readFileSync('website/admin/admin-diagnostics-enhancements.js', 'utf8');
+const adminScript = readFileSync('website/admin/admin-script.js', 'utf8');
+const activityCentre = readFileSync('website/admin/admin-activity-centre.js', 'utf8');
 const adminHtml = readFileSync('website/admin/index.html', 'utf8');
 
 function assertSyntax(path) {
@@ -130,12 +132,12 @@ test('scheduled refresh status stays observable when persisted state is unavaila
 });
 
 test('status polling remains read-only and browser Auto Lambda is replaced by AWS scheduled refresh', () => {
-  assert.match(adminEnhancements, /setAutoLambdaInvocationEnabled\(false, true\)/);
-  assert.match(adminEnhancements, /Scheduled refresh/);
-  assert.match(adminEnhancements, /EventBridge scheduled calendar refresh/);
-  assert.match(adminEnhancements, /Status polling refreshes the canonical request lifecycle, queue counts and Step Functions status/);
-  assert.match(adminEnhancements, /It does not invoke workers, create requests or process queues/);
-  assert.match(adminEnhancements, /label\.append\(document\.createTextNode\(' Status polling'\)\)/);
+  assert.match(adminEnhancements, /setAutoLambdaInvocationEnabled\(false, false\)/);
+  assert.match(adminEnhancements, /Scheduled calendar refresh/);
+  assert.match(adminEnhancements, /EventBridge refreshes all configured calendars/);
+  assert.match(activityCentre, /activityCommand\('status'\)/);
+  assert.match(activityCentre, /sendScoutsReadCommand/);
+  assert.doesNotMatch(activityCentre, /window\.sendScoutsCommand\s*=(?!=)/);
 });
 
 test('admin can enable, disable, inspect and manually run scheduled refresh', () => {
@@ -161,14 +163,14 @@ test('DLQ message sampling happens only behind an explicit Inspect action', () =
   assert.doesNotMatch(adminEnhancements, /setInterval\([^)]*inspectDlq/);
 });
 
-test('event cards expose Request Image only when image is absent and theme or prompt exists', () => {
-  assert.match(adminEnhancements, /getImageThemeOrLegacyPrompt/);
-  assert.match(adminEnhancements, /imageMissing: !imageUrl/);
-  assert.match(adminEnhancements, /ready: Boolean\(hex && !imageUrl && imageThemeOrPrompt\)/);
-  assert.match(adminEnhancements, /event-direct-image-request/);
-  assert.match(adminEnhancements, /Request Image/);
-  assert.match(adminEnhancements, /action: 'generateImage'/);
-  assert.match(adminEnhancements, /subject: \{ hex: prerequisites\.hex \}/);
+test('event cards expose direct image generation only when image is absent and theme or legacy prompt exists', () => {
+  assert.match(adminScript, /missingFields\.length === 1/);
+  assert.match(adminScript, /missingFields\[0\] === 'Image URL'/);
+  assert.match(adminScript, /hasText\(getImageThemeOrLegacyPrompt\(event\)\)/);
+  assert.match(adminScript, /onclick: 'generateImage'/);
+  assert.match(adminScript, /value="generateImage"/);
+  assert.match(adminScript, /requestGeneratedField\('imageUrl'/);
+  assert.doesNotMatch(adminEnhancements, /installEventCardRenderHook|event-direct-image-request/);
 });
 
 test('enhancement assets load after the canonical admin presentation layer', () => {

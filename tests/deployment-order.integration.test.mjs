@@ -16,7 +16,6 @@ const bootstrapTemplate = readFileSync('aws/bootstrap/scouts-account-bootstrap.y
 const slackTemplate = readFileSync('lambdas/cloudformation/templates/slack-handler.yaml', 'utf8');
 const adminIndex = readFileSync('website/admin/index.html', 'utf8');
 const adminScript = readFileSync('website/admin/admin-script.js', 'utf8');
-const adminSimplify = readFileSync('website/admin/admin-simplify.js', 'utf8');
 const adminActivityCentre = readFileSync('website/admin/admin-activity-centre.js', 'utf8');
 const adminAgendaRefresh = readFileSync('website/admin/admin-agenda-refresh.js', 'utf8');
 const requestActivity = readFileSync('lambdas/shared-layer/nodejs/request-activity.mjs', 'utf8');
@@ -199,15 +198,18 @@ test('Scouts Lambda packaging includes every local module imported by the deploy
   assert.match(scoutsDeploy, /zip -q scouts-lambda\.zip[\s\S]*agenda-hex-repair\.mjs/);
 });
 
-test('admin polling is cut over to the durable request activity ledger', () => {
+test('admin polling is cut over to one durable request activity owner', () => {
   const legacyScriptIndex = adminIndex.indexOf('<script src="admin-script.js"></script>');
-  const simplifyScriptIndex = adminIndex.indexOf('<script src="admin-simplify.js"></script>');
+  const activityScriptIndex = adminIndex.indexOf('<script src="admin-activity-centre.js"></script>');
   assert.notEqual(legacyScriptIndex, -1);
-  assert.notEqual(simplifyScriptIndex, -1);
-  assert.ok(legacyScriptIndex < simplifyScriptIndex, 'admin-simplify must load after the legacy controller it overrides');
+  assert.ok(activityScriptIndex > legacyScriptIndex, 'Activity controller must load after the base controller');
 
-  assert.match(adminSimplify, /legacySendScoutsCommand\(\{ realm: 'runtime', subject: 'activity', action: 'status' \}\)/);
-  assert.match(adminSimplify, /pollQueueDepthSnapshots = pollAuthoritativeActivity;/);
+  assert.match(adminScript, /window\.adminActivityController/);
+  assert.match(adminActivityCentre, /window\.adminActivityController = Object\.freeze/);
+  assert.match(adminActivityCentre, /activityCommand\('status'\)/);
+  assert.match(adminActivityCentre, /activityCommand\('history'/);
+  assert.match(adminActivityCentre, /localStorage/);
+  assert.doesNotMatch(adminActivityCentre, /window\.sendScoutsCommand\s*=/);
   assert.match(scoutsEntry, /buildRuntimeActivity/);
   assert.match(scoutsEntry, /text\(body\?\.realm\)\.toLowerCase\(\) !== 'runtime'/);
   assert.match(scoutsEntry, /command\.subject === 'activity'/);
@@ -216,9 +218,6 @@ test('admin polling is cut over to the durable request activity ledger', () => {
   assert.match(runtimeActivity, /request-activity-ledger/);
   assert.match(requestActivity, /activity-feed/);
   assert.match(requestActivity, /RETENTION_SECONDS = 7 \* 24 \* 60 \* 60/);
-  assert.match(adminActivityCentre, /activityCommand\('status'\)/);
-  assert.match(adminActivityCentre, /activityCommand\('history'/);
-  assert.match(adminActivityCentre, /localStorage/);
 });
 
 test('activity ledger table and every request hop are deployed together', () => {

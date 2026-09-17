@@ -116,15 +116,17 @@ function progressSandbox(activityResponses, overrides = {}) {
   return { sandbox, statuses, refreshed };
 }
 
-test('admin agenda refresh publishes the selected enrichment count', async () => {
-  const { sandbox, sent } = actionSandbox();
+test('admin agenda refresh delegates to the manual agenda controller', async () => {
+  const calls = [];
+  const { sandbox } = actionSandbox({
+    window: {
+      adminAgendaController: {
+        refresh: async (...args) => { calls.push(args); return { ok: true }; },
+      },
+    },
+  });
   await invokeAdminFunction('refreshLambda', ['refreshAgenda'], sandbox);
-  assert.deepEqual(sent, [{
-    realm: 'scouts',
-    subject: 'agenda',
-    action: 5,
-    maxEvents: 5,
-  }]);
+  assert.deepEqual(calls, [['refreshAgenda']]);
 });
 
 test('admin generation buttons publish field-specific actions with only the selected HEX', async () => {
@@ -222,18 +224,18 @@ test('admin hide and unhide publish idempotent visibility state for the same HEX
   }]);
 });
 
-test('admin approve publishes approval state and refuses an already-approved event', async () => {
-  const approval = actionSandbox();
+test('admin approval delegates to the revisioned approval owner', async () => {
+  const calls = [];
+  const approval = actionSandbox({
+    window: {
+      scoutsApprovalController: {
+        approveEvent: async (...args) => { calls.push(args); return { ok: true }; },
+      },
+    },
+  });
   await invokeAdminFunction('approveEvent', [0, false, 'approve'], approval.sandbox);
-  assert.deepEqual(approval.sent, [{
-    realm: 'scouts',
-    subject: { hex: TEST_HEX, isApproved: true },
-    action: 'approve',
-  }]);
-
-  const duplicate = actionSandbox({ isEntryApproved: () => true });
-  await invokeAdminFunction('approveEvent', [0, false, 'approve'], duplicate.sandbox);
-  assert.equal(duplicate.sent.length, 0, 'duplicate approval must not publish another request');
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], [0, false, 'approve', null]);
 });
 
 test('admin actions fail closed when auth is unavailable or the event has no HEX', async () => {
@@ -246,16 +248,15 @@ test('admin actions fail closed when auth is unavailable or the event has no HEX
   assert.equal(missingHex.sent.length, 0);
 });
 
-test('issue 91 loads the revisioned approval controller immediately after its bootstrap dependencies', () => {
+test('issue 91 loads one revisioned approval owner without bootstrap monkey-patching', () => {
   const privateStorageIndex = adminHtml.indexOf('<script src="private-storage-client.js"></script>');
   const approvalIndex = adminHtml.indexOf('<script src="admin-approval-workflow.js"');
-  const simplifyIndex = adminHtml.indexOf('<script src="admin-simplify.js"></script>');
-  assert.ok(privateStorageIndex >= 0 && approvalIndex > privateStorageIndex, 'approval controller must load after private storage bootstrap');
-  assert.ok(simplifyIndex > approvalIndex, 'approval controller must load before mutation/presentation wrappers');
-  assert.match(privateStorageSource, /approvalBootstrapGuard/);
+  assert.ok(privateStorageIndex >= 0 && approvalIndex > privateStorageIndex);
+  assert.doesNotMatch(privateStorageSource, /approvalBootstrapGuard|window\.approveEvent\s*=/);
   assert.match(privateStorageSource, /handleApprovalWorkflowLoadError/);
-  assert.match(approvalWorkflowSource, /window\.scoutsApprovalWorkflowReady = true/);
-  assert.match(approvalWorkflowSource, /window\.approveEvent = async function issue91ApproveEvent/);
+  assert.match(adminSource, /window\.scoutsApprovalController/);
+  assert.match(approvalWorkflowSource, /window\.scoutsApprovalController = Object\.freeze/);
+  assert.doesNotMatch(approvalWorkflowSource, /window\.approveEvent\s*=/);
   assert.match(approvalWorkflowSource, /Approve shown changes/);
 });
 
