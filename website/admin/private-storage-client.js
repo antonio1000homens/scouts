@@ -1,15 +1,6 @@
-// Keep operational S3 objects private while preserving the legacy admin UI API.
-// This script loads after admin-script.js and replaces the direct S3 readers
-// with authenticated calls through /admin-api/scouts.
+// Authenticated read owner for operational state and canonical HEX records.
+// Stable entry points live in admin-script.js and delegate here.
 (function () {
-    // Capture the base transport before presentation/activity layers wrap the
-    // mutation path. Runtime reads must not schedule mutation-side Activity
-    // refreshes simply because they share the same HTTP endpoint.
-    const readOnlySendScoutsCommand = sendScoutsCommand;
-    window.sendScoutsReadCommand = async function sendScoutsReadCommand(payload) {
-        return readOnlySendScoutsCommand(payload);
-    };
-
     function snapshotName(value) {
         const textValue = String(value || '').toLowerCase();
         if (textValue === 'queued' || textValue.includes('scoutsqueued')) return 'queued';
@@ -18,24 +9,22 @@
         return '';
     }
 
-    fetchQueueSnapshot = async function (snapshotRef) {
+    async function fetchQueueSnapshot(snapshotRef) {
         const snapshot = snapshotName(snapshotRef);
         if (!snapshot) return null;
         try {
-            const result = await window.sendScoutsReadCommand({
+            const result = await sendScoutsReadCommand({
                 realm: 'runtime',
                 subject: 'snapshot',
                 action: 'get',
                 snapshot,
             });
-            return result?.snapshot && typeof result.snapshot === 'object'
-                ? result.snapshot
-                : null;
+            return result?.snapshot && typeof result.snapshot === 'object' ? result.snapshot : null;
         } catch (error) {
             console.warn(`[PrivateStorage] Unable to load ${snapshot} runtime snapshot`, error?.message || error);
             return null;
         }
-    };
+    }
 
     async function fetchPrivateEvent(hexValue, normaliseForUi) {
         const hex = typeof hexValue === 'string' ? hexValue.trim().toLowerCase() : '';
@@ -43,9 +32,8 @@
         const now = Date.now();
         const nextRetryAt = missingHexRetryAtByHex.get(hex) || 0;
         if (nextRetryAt > now) return null;
-
         try {
-            const result = await window.sendScoutsReadCommand({
+            const result = await sendScoutsReadCommand({
                 realm: 'runtime',
                 subject: 'event',
                 action: 'get',
@@ -65,35 +53,17 @@
         }
     }
 
-    fetchHexEventByHex = async function (hexValue) {
-        return fetchPrivateEvent(hexValue, true);
-    };
+    window.privateStorageController = Object.freeze({
+        fetchQueueSnapshot,
+        fetchHexEventByHex: (hexValue) => fetchPrivateEvent(hexValue, true),
+        fetchRawHexEventByHex: (hexValue) => fetchPrivateEvent(hexValue, false),
+    });
 
-    fetchRawHexEventByHex = async function (hexValue) {
-        return fetchPrivateEvent(hexValue, false);
-    };
-
-    // Do not allow a fast click during controller bootstrap to fall back to the
-    // legacy approval contract. Non-approval legacy actions remain delegated.
-    const bootstrapLegacyApproveEvent = typeof approveEvent === 'function' ? approveEvent : null;
     window.scoutsApprovalWorkflowReady = false;
-    window.approveEvent = function approvalBootstrapGuard(eventIndex, fromModal = false, action = 'approve') {
-        if (String(action || '').toLowerCase() === 'approve' && !window.scoutsApprovalWorkflowReady) {
-            const message = 'Approval controls are still loading. Reload the Admin page if this message persists.';
-            if (fromModal && typeof updateModalStatus === 'function') updateModalStatus(message, 'error');
-            else if (typeof updateRuntimeDetails === 'function') updateRuntimeDetails(message, 'error');
-            return null;
-        }
-        return bootstrapLegacyApproveEvent?.(eventIndex, fromModal, action);
-    };
-
     window.handleApprovalWorkflowLoadError = function handleApprovalWorkflowLoadError() {
         window.scoutsApprovalWorkflowReady = false;
+        window.scoutsApprovalWorkflowLoadErrorMessage = 'Approval controls failed to load. Reload the Admin page before approving events.';
         console.error('[ApprovalWorkflow] Failed to load admin-approval-workflow.js');
-        if (typeof showAdminNotification === 'function') {
-            showAdminNotification('Approval controls failed to load. Reload the Admin page before approving events.', 'error', 10000);
-        } else if (typeof updateRuntimeDetails === 'function') {
-            updateRuntimeDetails('Approval controls failed to load. Reload the Admin page before approving events.', 'error');
-        }
+        showAdminNotification?.(window.scoutsApprovalWorkflowLoadErrorMessage, 'error', 10000);
     };
 })();

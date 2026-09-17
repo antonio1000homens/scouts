@@ -50,8 +50,9 @@ test('issue 91 activity reads bypass mutation wrappers and mutation tracking doe
   assert.match(activityCentre, /window\.sendScoutsReadCommand/);
   assert.match(activityCentre, /if \(requestId\) \{ tracked\.add\(requestId\); saveTracked\(\); \}/);
   assert.doesNotMatch(activityCentre, /saveTracked\(\); poll\(\);/);
-  assert.match(privateStorage, /const readOnlySendScoutsCommand = sendScoutsCommand/);
-  assert.match(privateStorage, /window\.sendScoutsReadCommand/);
+  assert.match(adminScript, /async function sendScoutsReadCommand/);
+  assert.match(adminScript, /window\.adminActivityController\?\.trackAcceptedMutation/);
+  assert.doesNotMatch(privateStorage, /readOnlySendScoutsCommand|window\.sendScoutsReadCommand\s*=/);
 });
 
 test('issue 91 Admin consumes a server-issued canonical revision before approval', () => {
@@ -80,7 +81,7 @@ test('issue 91 approval is unavailable until all enrichment metadata is complete
   assert.match(approvalWorkflow, /hasText\(getAIPrompt\(event\)\)/);
   assert.match(approvalWorkflow, /hasText\(getImageThemeOrLegacyPrompt\(event\)\)/);
   assert.match(approvalWorkflow, /hasRelativeImageUrl\(event\)/);
-  assert.match(approvalWorkflow, /window\.isEntryPendingApproval = function enrichedEntryPendingApproval/);
+  assert.match(approvalWorkflow, /isEntryPendingApproval: isEntryReadyForApproval/);
   assert.match(approvalWorkflow, /function syncApprovalBadges/);
   assert.match(approvalWorkflow, /button\.hidden/);
   assert.match(approvalWorkflow, /Cannot approve until enrichment completes\. Missing:/);
@@ -119,8 +120,8 @@ test('issue 91 successful final approval updates state and immediately refreshes
 });
 
 test('issue 91 approval labels are render-driven and idempotent without a document-wide observer', () => {
-  assert.match(approvalWorkflow, /window\.renderEvents = relabelAfterRender/);
-  assert.match(approvalWorkflow, /window\.openUploadModal = relabelAfterRender/);
+  assert.doesNotMatch(approvalWorkflow, /window\.(renderEvents|openUploadModal|updateModalContent)\s*=/);
+  assert.match(adminScript, /window\.scoutsApprovalController\?\.refreshLabels\?\.\(\)/);
   assert.doesNotMatch(approvalWorkflow, /new MutationObserver/);
 
   let label = 'Approve';
@@ -161,27 +162,21 @@ test('issue 91 approval acceptance is not blocked by a secondary activity refres
 test('issue 91 approval controller loads statically in dependency order and fails closed', () => {
   const privateStorageIndex = adminHtml.indexOf('<script src="private-storage-client.js"></script>');
   const approvalIndex = adminHtml.indexOf('<script src="admin-approval-workflow.js"');
-  const simplifyIndex = adminHtml.indexOf('<script src="admin-simplify.js"></script>');
   assert.ok(privateStorageIndex >= 0 && approvalIndex > privateStorageIndex);
-  assert.ok(simplifyIndex > approvalIndex);
   assert.match(adminHtml, /onerror="window\.handleApprovalWorkflowLoadError\?\.\(\)"/);
-  assert.match(privateStorage, /approvalBootstrapGuard/);
+  assert.doesNotMatch(privateStorage, /approvalBootstrapGuard|window\.approveEvent\s*=/);
+  assert.match(adminScript, /window\.scoutsApprovalController/);
+  assert.match(approvalWorkflow, /window\.scoutsApprovalController = Object\.freeze/);
   assert.match(privateStorage, /handleApprovalWorkflowLoadError/);
   assert.match(approvalWorkflow, /window\.scoutsApprovalWorkflowReady = true/);
   assert.doesNotMatch(privateStorage, /createElement\('script'\)/);
 });
 
-test('admin direct-image controls are render-driven and preserve pending disabled state after generic refresh', () => {
-  assert.match(diagnosticsEnhancements, /function installEventCardRenderHook/);
-  assert.match(diagnosticsEnhancements, /window\.renderEvents = diagnosticsAwareRender/);
+test('admin direct-image controls are rendered by the canonical event action model without a render wrapper', () => {
+  assert.match(adminScript, /action\.onclick === 'generateImage'/);
+  assert.match(adminScript, /requestGeneratedField\('imageUrl', this\.value, this, \$\{index\}\)/);
+  assert.doesNotMatch(diagnosticsEnhancements, /installEventCardRenderHook|window\.renderEvents\s*=/);
   assert.doesNotMatch(diagnosticsEnhancements, /new MutationObserver/);
-  assert.match(diagnosticsEnhancements, /existing\.textContent !== desiredLabel/);
-  assert.match(diagnosticsEnhancements, /void Promise\.resolve\(pollQueueDepthSnapshots\(\)\)/);
-  assert.doesNotMatch(diagnosticsEnhancements, /await pollQueueDepthSnapshots\(\)/);
-  assert.match(
-    diagnosticsEnhancements,
-    /finally \{[\s\S]*refreshApiActionButtons\(\);[\s\S]*enhanceEventCards\(\);[\s\S]*\}/,
-  );
 });
 
 test('issue 91 generated review notification has durable external identity and Slack reference', () => {

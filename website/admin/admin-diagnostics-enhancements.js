@@ -1,6 +1,6 @@
-// Operational admin enhancements: explicit DLQ inspection/redrive, clear polling
-// semantics, scheduled calendar refresh controls, and a direct Request Image action
-// when an event already has the image-generation prerequisite metadata.
+// Operations-only admin enhancements: explicit DLQ inspection/redrive and
+// scheduled calendar refresh controls. Request lifecycle polling is owned by
+// admin-activity-centre.js and event actions are rendered by admin-script.js.
 
 (function () {
     const DLQ_NAMES = ['scoutsRequestsDLQ', 'scoutsProcessingDLQ'];
@@ -10,7 +10,6 @@
     };
     const dlqSamples = new Map();
     const dlqActionState = new Map();
-    const pendingDirectImageHexes = new Set();
     let latestDlqActivity = null;
     let scheduledRefreshSettings = null;
     let scheduledRefreshBusy = false;
@@ -35,93 +34,21 @@
     }
 
     function replaceAutoLambdaHeartbeat() {
-        // The browser-based heartbeat is no longer responsible for periodic
-        // refresh. Disable its persisted timer and replace the header control
-        // with the durable AWS scheduled-refresh switch.
-        if (typeof setAutoLambdaInvocationEnabled === 'function') {
-            setAutoLambdaInvocationEnabled(false, true);
-        }
-
-        const oldLabel = document.querySelector('label[for="auto-lambda-toggle"]');
-        const oldInterval = document.getElementById('auto-lambda-interval-seconds');
-        oldInterval?.remove();
-
-        if (oldLabel && !document.getElementById('scheduled-refresh-toggle')) {
-            const label = document.createElement('label');
-            label.className = oldLabel.className;
-            label.htmlFor = 'scheduled-refresh-toggle';
-            label.title = 'Enable or disable automatic EventBridge calendar/agenda refresh.';
-
-            const input = document.createElement('input');
-            input.type = 'checkbox';
-            input.id = 'scheduled-refresh-toggle';
-            input.disabled = true;
-            input.addEventListener('change', () => setScheduledRefreshEnabled(input.checked));
-
-            label.append(input, document.createTextNode(' Scheduled refresh'));
-            oldLabel.replaceWith(label);
-        } else {
-            oldLabel?.remove();
-        }
+        if (typeof setAutoLambdaInvocationEnabled === 'function') setAutoLambdaInvocationEnabled(false, false);
+        document.querySelector('label[for="auto-lambda-toggle"]')?.remove();
+        document.getElementById('auto-lambda-interval-seconds')?.remove();
     }
 
-    function clarifyPollingControls() {
-        const section = document.getElementById('diagnostics-polling');
-        if (!section) return;
-
-        const label = section.querySelector('label[for="status-polling-toggle"]');
-        if (label) {
-            const input = label.querySelector('#status-polling-toggle');
-            label.replaceChildren();
-            if (input) label.appendChild(input);
-            label.append(document.createTextNode(' Status polling'));
-            label.title = 'Refreshes admin status only. It does not start or process queue work.';
-        }
-
-        const interval = section.querySelector('#status-polling-interval-seconds');
-        if (interval) {
-            interval.title = 'How often this page refreshes canonical request lifecycle, queue counts and Step Functions status.';
-            interval.setAttribute('aria-label', 'Status polling interval in seconds');
-        }
-
-        if (!section.querySelector('#browser-notifications-toggle')) {
-            const label = document.createElement('label');
-            label.className = 'auto-invoke-header-label';
-            label.htmlFor = 'browser-notifications-toggle';
-            label.title = 'Show a native browser notification when the agenda changes.';
-            const input = document.createElement('input');
-            input.type = 'checkbox';
-            input.id = 'browser-notifications-toggle';
-            input.checked = typeof readBrowserNotificationsPreference === 'function'
-                ? readBrowserNotificationsPreference()
-                : false;
-            input.addEventListener('change', () => {
-                if (typeof setBrowserNotificationsEnabled === 'function') {
-                    setBrowserNotificationsEnabled(input.checked);
-                }
-            });
-            label.append(input, document.createTextNode(' Browser notifications'));
-            interval?.insertAdjacentElement('afterend', label);
-        }
-        if (typeof updateBrowserNotificationsUi === 'function') updateBrowserNotificationsUi();
-
-        if (!section.querySelector('.diagnostics-polling-help')) {
-            const help = makeHelp('Status polling refreshes the canonical request lifecycle, queue counts and Step Functions status. It does not invoke workers, create requests or process queues, so it is safe to leave enabled.');
-            help.classList.add('diagnostics-polling-help');
-            section.appendChild(help);
-
-            const retired = makeHelp('The old browser Auto Lambda heartbeat has been replaced by an AWS EventBridge scheduled calendar refresh. SQS event-source mappings and full-enrich Step Functions continue to process queued jobs independently.');
-            retired.classList.add('diagnostics-polling-help');
-            section.appendChild(retired);
-        }
+    function operationsBody() {
+        return document.querySelector('#admin-diagnostics-drawer .admin-diagnostics-body');
     }
 
     function ensureScheduledRefreshSection() {
         let section = document.getElementById('diagnostics-scheduled-refresh');
         if (section) return section;
 
-        const pollingSection = document.getElementById('diagnostics-polling');
-        if (!pollingSection) return null;
+        const body = operationsBody();
+        if (!body) return null;
 
         section = document.createElement('section');
         section.id = 'diagnostics-scheduled-refresh';
@@ -129,6 +56,10 @@
         section.innerHTML = `
             <h3>Scheduled calendar refresh</h3>
             <p class="admin-diagnostics-section-description">EventBridge refreshes all configured calendars and rebuilds agenda state on an AWS-owned schedule.</p>
+            <label class="request-archive-toggle" for="scheduled-refresh-toggle">
+                <input type="checkbox" id="scheduled-refresh-toggle" disabled>
+                Scheduled refresh enabled
+            </label>
             <div id="diagnostics-scheduled-refresh-content"><p>Waiting for admin API authentication…</p></div>
             <div class="dlq-actions">
                 <button type="button" class="btn btn-secondary requires-api" id="scheduled-refresh-run-now">Run refresh now</button>
@@ -137,7 +68,8 @@
             <p class="diagnostics-help">Scheduled runs are discovery-only by default: they refresh calendars/agenda but publish 0 new enrichment jobs. Existing queued jobs continue automatically through SQS and Step Functions.</p>
             <p class="diagnostics-help">Turning scheduled refresh off is durable. EventBridge still invokes the lightweight guard on its cadence, but the Lambda exits before calendar downloads, agenda refresh or queue publication.</p>
         `;
-        pollingSection.insertAdjacentElement('afterend', section);
+        body.appendChild(section);
+        section.querySelector('#scheduled-refresh-toggle')?.addEventListener('change', (event) => setScheduledRefreshEnabled(event.target.checked));
         section.querySelector('#scheduled-refresh-run-now')?.addEventListener('click', () => runScheduledRefreshNow());
         section.querySelector('#scheduled-refresh-status-refresh')?.addEventListener('click', () => refreshScheduledRefreshStatus(true));
         return section;
@@ -188,7 +120,7 @@
         }
         if (showStatus) renderScheduledRefreshControls('Refreshing scheduled refresh status…');
         try {
-            const result = await sendScoutsCommand({ realm: 'runtime', subject: 'schedule', action: 'status' });
+            const result = await sendScoutsReadCommand({ realm: 'runtime', subject: 'schedule', action: 'status' });
             if (!result?.schedule) throw new Error('Scheduled refresh status payload missing');
             scheduledRefreshSettings = result.schedule;
             renderScheduledRefreshControls();
@@ -255,8 +187,8 @@
         let section = document.getElementById('diagnostics-dlq');
         if (section) return section;
 
-        const queueSection = document.getElementById('diagnostics-queue-health');
-        if (!queueSection) return null;
+        const body = operationsBody();
+        if (!body) return null;
 
         section = document.createElement('section');
         section.id = 'diagnostics-dlq';
@@ -268,7 +200,9 @@
             <div class="dlq-toolbar"><button type="button" class="btn btn-secondary requires-api" id="dlq-refresh-overview">Refresh DLQ counts</button></div>
             <div id="diagnostics-dlq-content"><p>DLQ status not loaded yet.</p></div>
         `;
-        queueSection.insertAdjacentElement('afterend', section);
+        const scheduled = document.getElementById('diagnostics-scheduled-refresh');
+        if (scheduled) scheduled.insertAdjacentElement('afterend', section);
+        else body.appendChild(section);
         section.querySelector('#dlq-refresh-overview')?.addEventListener('click', () => refreshDlqOverview(true));
         return section;
     }
@@ -420,9 +354,11 @@
             if (showStatus) {
                 DLQ_NAMES.forEach((name) => setDlqState(name, { message: 'Refreshing queue counts…', tone: 'info', busy: 'refresh' }));
             }
-            const result = await sendScoutsCommand({ realm: 'runtime', subject: 'activity', action: 'status' });
-            if (!result?.activity) throw new Error('Activity payload missing');
-            latestDlqActivity = result.activity;
+            const controller = window.adminActivityController;
+            if (!controller?.refreshNow) throw new Error('Activity controller unavailable');
+            const activity = await controller.refreshNow();
+            if (!activity) throw new Error('Activity payload missing');
+            latestDlqActivity = activity;
             DLQ_NAMES.forEach((name) => dlqActionState.delete(name));
             renderDlqDiagnostics();
         } catch (error) {
@@ -510,139 +446,10 @@
         }
     }
 
-    function directImagePrerequisites(event) {
-        const hex = typeof getEventHex === 'function' ? text(getEventHex(event)).toLowerCase() : '';
-        const imageUrl = typeof getImageUrl === 'function' ? text(getImageUrl(event)) : '';
-        const imageThemeOrPrompt = typeof getImageThemeOrLegacyPrompt === 'function'
-            ? text(getImageThemeOrLegacyPrompt(event))
-            : '';
-        return {
-            hex,
-            imageMissing: !imageUrl,
-            imageThemeOrPrompt,
-            ready: Boolean(hex && !imageUrl && imageThemeOrPrompt),
-        };
-    }
-
-    async function requestDirectImage(index, button) {
-        const entry = Array.isArray(visibleEventEntries) ? visibleEventEntries[index] : null;
-        const event = entry?.event;
-        if (!event) return;
-        const prerequisites = directImagePrerequisites(event);
-        if (!prerequisites.ready) {
-            pinRuntimeDetails('Image request is not ready: the event needs a HEX and image theme/prompt, and must not already have an image URL.', 'error');
-            enhanceEventCards();
-            return;
-        }
-        if (!apiAuthReady) {
-            pinRuntimeDetails('Admin API auth is not ready.', 'error');
-            return;
-        }
-        if (pendingDirectImageHexes.has(prerequisites.hex)) return;
-
-        const title = text(event.summary || event.title) || `Event ${index + 1}`;
-        pendingDirectImageHexes.add(prerequisites.hex);
-        if (button) {
-            button.disabled = true;
-            if (button.textContent !== 'Requesting image…') button.textContent = 'Requesting image…';
-        }
-        refreshApiActionButtons();
-        pinRuntimeDetails(`Requesting image for "${title}"…`, 'loading');
-
-        try {
-            const result = await sendScoutsCommand({
-                realm: 'scouts',
-                subject: { hex: prerequisites.hex },
-                action: 'generateImage',
-            });
-            const requestId = typeof extractBackendRequestId === 'function' ? extractBackendRequestId(result) : '';
-            const message = `Image requested for "${title}"${requestId ? ` · request ${requestId}` : ''}.`;
-            pinRuntimeDetails(message, 'success');
-            if (typeof showAdminNotification === 'function') showAdminNotification(message, 'success', 5000);
-            if (button && button.textContent !== 'Image requested') button.textContent = 'Image requested';
-            if (typeof pollQueueDepthSnapshots === 'function') {
-                void Promise.resolve(pollQueueDepthSnapshots()).catch(() => {});
-            }
-            setTimeout(() => {
-                loadEvents({ silent: true });
-            }, 2000);
-            setTimeout(() => {
-                pendingDirectImageHexes.delete(prerequisites.hex);
-                enhanceEventCards();
-            }, 120000);
-        } catch (error) {
-            pendingDirectImageHexes.delete(prerequisites.hex);
-            const message = `Failed to request image for "${title}": ${error?.message || error}`;
-            pinRuntimeDetails(message, 'error');
-            if (typeof showAdminNotification === 'function') showAdminNotification(message, 'error', 7000);
-            enhanceEventCards();
-        } finally {
-            refreshApiActionButtons();
-            // Generic API button refresh enables every `.requires-api` control.
-            // Reapply the direct-image pending state immediately so a request that
-            // has already been accepted cannot look clickable while its duplicate
-            // guard still rejects clicks.
-            enhanceEventCards();
-        }
-    }
-
-    function enhanceEventCards() {
-        const cards = document.querySelectorAll('#events-container .event-card[data-event-card-index]');
-        cards.forEach((card) => {
-            const index = Number(card.dataset.eventCardIndex);
-            if (!Number.isInteger(index) || index < 0) return;
-            const entry = Array.isArray(visibleEventEntries) ? visibleEventEntries[index] : null;
-            const event = entry?.event;
-            const actions = card.querySelector('.event-actions');
-            if (!event || !actions) return;
-
-            const existing = actions.querySelector('.event-direct-image-request');
-            const prerequisites = directImagePrerequisites(event);
-            if (!prerequisites.ready) {
-                existing?.remove();
-                if (!prerequisites.imageMissing && prerequisites.hex) pendingDirectImageHexes.delete(prerequisites.hex);
-                return;
-            }
-            const pending = pendingDirectImageHexes.has(prerequisites.hex);
-            if (existing) {
-                const shouldDisable = !apiAuthReady || pending;
-                const desiredLabel = pending ? 'Image requested' : 'Request Image';
-                if (existing.disabled !== shouldDisable) existing.disabled = shouldDisable;
-                if (existing.textContent !== desiredLabel) existing.textContent = desiredLabel;
-                return;
-            }
-
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'btn btn-secondary requires-api event-direct-image-request';
-            button.textContent = pending ? 'Image requested' : 'Request Image';
-            button.title = 'Image theme/prompt is already available. Generate the missing image without opening View Details.';
-            button.disabled = !apiAuthReady || pending;
-            button.addEventListener('click', () => requestDirectImage(index, button));
-
-            const detailsButton = actions.querySelector('button');
-            if (detailsButton?.nextSibling) actions.insertBefore(button, detailsButton.nextSibling);
-            else actions.appendChild(button);
-        });
-    }
-
-    function installEventCardRenderHook() {
-        const originalRenderEvents = window.renderEvents;
-        if (typeof originalRenderEvents !== 'function' || originalRenderEvents.__scoutsDiagnosticsEnhanced) return;
-        function diagnosticsAwareRender(...args) {
-            const result = originalRenderEvents.apply(this, args);
-            enhanceEventCards();
-            return result;
-        }
-        diagnosticsAwareRender.__scoutsDiagnosticsEnhanced = true;
-        window.renderEvents = diagnosticsAwareRender;
-    }
-
     function refreshOperationalStatusWhenReady(attempt = 0) {
         if (apiAuthReady) {
             refreshDlqOverview(false);
             refreshScheduledRefreshStatus(false);
-            enhanceEventCards();
             return;
         }
         renderScheduledRefreshControls();
@@ -653,11 +460,8 @@
 
     function initialize() {
         replaceAutoLambdaHeartbeat();
-        clarifyPollingControls();
         ensureScheduledRefreshSection();
         ensureDlqSection();
-        installEventCardRenderHook();
-        enhanceEventCards();
         document.getElementById('diagnostics-open')?.addEventListener('click', () => {
             if (!apiAuthReady) return;
             refreshDlqOverview(false);
@@ -667,8 +471,8 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-        // admin-simplify builds the Diagnostics drawer in its own DOMContentLoaded
-        // handler. Deferring one task ensures those canonical controls exist first.
+        // admin-simplify builds the Operations drawer in its own DOMContentLoaded
+        // handler. Deferring one task ensures those controls exist first.
         setTimeout(initialize, 0);
     });
 })();

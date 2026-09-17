@@ -7,10 +7,11 @@
     const IDLE_POLL_MS = 25000;
     const TERMINAL = new Set(['completed', 'failed', 'needs_attention', 'manual_review']);
     const RETRYABLE_ENRICHMENT_STAGES = new Set(['tagline', 'imageTheme', 'image']);
-    const originalSend = window.sendScoutsCommand;
     const tracked = new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]').filter(Boolean));
     const known = new Map();
     let pollTimer = null;
+    let pollPromise = null;
+    let latestStatusActivity = null;
     let unread = 0;
 
     function text(value) { return value == null ? '' : String(value).trim(); }
@@ -27,7 +28,7 @@
     function activityCommand(action, extra = {}) {
         const sendRead = typeof window.sendScoutsReadCommand === 'function'
             ? window.sendScoutsReadCommand
-            : originalSend;
+            : window.sendScoutsCommand;
         return sendRead({ realm: 'runtime', subject: 'activity', action, ...extra });
     }
     function stateLabel(request) {
@@ -52,10 +53,49 @@
 
         const stack = document.createElement('div'); stack.id = 'activity-toast-stack'; stack.setAttribute('aria-live', 'polite'); document.body.appendChild(stack);
         const drawer = document.createElement('aside'); drawer.id = 'activity-centre-drawer'; drawer.setAttribute('aria-label', 'Activity log');
-        drawer.innerHTML = '<header><div><h2>Activity</h2><p>Changes from the last seven days.</p></div><button type="button" class="btn btn-secondary" id="activity-centre-close">Close</button></header><div class="activity-log-filters"><input id="activity-log-hex" placeholder="Filter by HEX"><select id="activity-log-state"><option value="">All states</option><option value="completed">Completed</option><option value="needs_attention">Needs attention</option><option value="failed">Failed</option><option value="processing">Processing</option><option value="awaiting_image">Generating image</option><option value="awaiting_review">Awaiting image approval</option></select><button type="button" class="btn btn-secondary" id="activity-log-filter">Filter</button></div><div id="activity-log-list"><p>Loading activity…</p></div>';
+        drawer.innerHTML = `
+            <header>
+                <div><h2>Activity</h2><p>Changes from the last seven days.</p></div>
+                <button type="button" class="btn btn-secondary" id="activity-centre-close">Close</button>
+            </header>
+            <label class="activity-notification-toggle" for="browser-notifications-toggle" title="Show native browser notifications when the agenda changes.">
+                <input type="checkbox" id="browser-notifications-toggle">
+                Browser notifications
+            </label>
+            <div class="activity-log-filters">
+                <input id="activity-log-hex" placeholder="Filter by HEX">
+                <select id="activity-log-state">
+                    <option value="">All states</option>
+                    <option value="completed">Completed</option>
+                    <option value="needs_attention">Needs attention</option>
+                    <option value="failed">Failed</option>
+                    <option value="processing">Processing</option>
+                    <option value="awaiting_image">Generating image</option>
+                    <option value="awaiting_review">Awaiting image approval</option>
+                </select>
+                <button type="button" class="btn btn-secondary" id="activity-log-filter">Filter</button>
+            </div>
+            <div id="activity-log-list"><p>Loading activity…</p></div>
+        `;
         document.body.appendChild(drawer);
         drawer.querySelector('#activity-centre-close').addEventListener('click', () => drawer.classList.remove('open'));
         drawer.querySelector('#activity-log-filter').addEventListener('click', () => loadHistory());
+
+        const notificationToggle = drawer.querySelector('#browser-notifications-toggle');
+        notificationToggle.checked = typeof readBrowserNotificationsPreference === 'function'
+            ? readBrowserNotificationsPreference()
+            : false;
+        notificationToggle.addEventListener('change', async () => {
+            if (typeof setBrowserNotificationsEnabled !== 'function') {
+                notificationToggle.checked = false;
+                return;
+            }
+            await setBrowserNotificationsEnabled(notificationToggle.checked);
+            notificationToggle.checked = typeof readBrowserNotificationsPreference === 'function'
+                ? readBrowserNotificationsPreference()
+                : false;
+        });
+        if (typeof updateBrowserNotificationsUi === 'function') updateBrowserNotificationsUi();
     }
 
     function renderUnread() { const badge = document.getElementById('activity-centre-unread'); if (badge) { badge.hidden = unread === 0; badge.textContent = String(unread); } }
@@ -152,34 +192,45 @@
             setTimeout(() => poll(), 500);
         } catch (error) {
             notifyMessage(`Enrichment retry failed: ${error?.message || error}`, 'error', 8000);
-                button.disabled = !apiAuthReady;
+            button.disabled = !apiAuthReady;
             button.textContent = originalLabel;
         }
     }
 
     async function poll() {
-        try {
-            const result = await activityCommand('status');
-            const statusRequests = Array.isArray(result?.activity?.requests) ? result.activity.requests : [];
-            const lookup = tracked.size
-                ? await activityCommand('lookup', { requestIds: [...tracked] })
-                : { activity: { requests: [] } };
-            const requests = [...statusRequests, ...(lookup?.activity?.requests || [])]
-                .filter((request, index, list) => list.findIndex((candidate) => candidate.requestId === request.requestId) === index);
-            const changed = [];
-            for (const request of requests) {
-                const fingerprint = `${request.state}|${request.stage}|${request.displayMessage || ''}|${request.publication || ''}|${request.updatedAt}|${request.failure?.message || ''}|${request.recovery?.type || ''}`;
-                const previous = known.get(request.requestId);
-                known.set(request.requestId, fingerprint);
-                if (request.requestId && !TERMINAL.has(request.state)) { tracked.add(request.requestId); saveTracked(); }
-                if (request.requestId && TERMINAL.has(request.state)) { tracked.delete(request.requestId); saveTracked(); }
-                if (previous !== fingerprint) {
-                    changed.push(request);
-                    notify(request, previous === undefined && !tracked.has(request.requestId));
+        if (pollPromise) return pollPromise;
+        pollPromise = (async () => {
+            try {
+                const result = await activityCommand('status');
+                latestStatusActivity = result?.activity || null;
+                const statusRequests = Array.isArray(latestStatusActivity?.requests) ? latestStatusActivity.requests : [];
+                const lookup = tracked.size
+                    ? await activityCommand('lookup', { requestIds: [...tracked] })
+                    : { activity: { requests: [] } };
+                const requests = [...statusRequests, ...(lookup?.activity?.requests || [])]
+                    .filter((request, index, list) => list.findIndex((candidate) => candidate.requestId === request.requestId) === index);
+                const changed = [];
+                for (const request of requests) {
+                    const fingerprint = `${request.state}|${request.stage}|${request.displayMessage || ''}|${request.publication || ''}|${request.updatedAt}|${request.failure?.message || ''}|${request.recovery?.type || ''}`;
+                    const previous = known.get(request.requestId);
+                    known.set(request.requestId, fingerprint);
+                    if (request.requestId && !TERMINAL.has(request.state)) { tracked.add(request.requestId); saveTracked(); }
+                    if (request.requestId && TERMINAL.has(request.state)) { tracked.delete(request.requestId); saveTracked(); }
+                    if (previous !== fingerprint) {
+                        changed.push(request);
+                        notify(request, previous === undefined && !tracked.has(request.requestId));
+                    }
                 }
+                await reconcileAgenda(changed);
+                return latestStatusActivity;
+            } catch (error) {
+                console.warn('[ActivityCentre] Activity refresh failed', error);
+                return latestStatusActivity;
+            } finally {
+                pollPromise = null;
             }
-            await reconcileAgenda(changed);
-        } catch (error) { console.warn('[ActivityCentre] Activity refresh failed', error); }
+        })();
+        return pollPromise;
     }
 
     function schedulePoll(delay = tracked.size ? ACTIVE_POLL_MS : IDLE_POLL_MS) {
@@ -257,47 +308,28 @@
         catch (error) { const target = document.getElementById('activity-log-list'); if (target) target.textContent = `Activity log unavailable: ${error.message}`; }
     }
 
-    function removeLegacyUi() {
-        document.querySelector('.viewer-menu-shell')?.remove();
-        ['agenda-viewer', 'events-json-viewer', 'scouts-config-viewer', 'runtime-json-viewer'].forEach((id) => document.getElementById(id)?.remove());
-        document.querySelector('.requests-sidebar')?.remove(); document.querySelector('.admin-runtime-footer')?.remove();
-        document.getElementById('admin-primary-summary')?.remove();
-        const diagnostics = document.getElementById('admin-diagnostics-drawer');
-        if (diagnostics) {
-            diagnostics.querySelector('h2').textContent = 'Operations';
-            diagnostics.querySelector('.admin-diagnostics-header p').textContent = 'Scheduled refresh and recovery controls.';
-            ['diagnostics-activity-status', 'diagnostics-authoritative-requests', 'diagnostics-step-functions', 'diagnostics-raw-state'].forEach((id) => document.getElementById(id)?.remove());
-            // These two sections are the insertion points used by the retained
-            // scheduled-refresh and DLQ recovery controls. Hide their raw telemetry.
-            document.getElementById('diagnostics-queue-health-content')?.remove();
-            const recovery = document.getElementById('diagnostics-queue-health');
-            recovery?.querySelector('h3') && (recovery.querySelector('h3').textContent = 'Recovery');
-            const open = document.getElementById('diagnostics-open'); if (open) open.textContent = 'Operations';
-        }
+    function trackAcceptedMutation(payload, result) {
+        if (payload?.realm === 'runtime') return;
+        const requestId = text(result?.rootRequestId || result?.requestId || result?.request?.requestId || result?.activity?.requestId);
+        if (requestId) { tracked.add(requestId); saveTracked(); }
+        schedulePoll(250);
     }
 
-    window.sendScoutsCommand = async function activityAwareCommand(payload) {
-        try {
-            const result = await originalSend(payload);
-            if (payload?.realm !== 'runtime') {
-                const requestId = text(result?.rootRequestId || result?.requestId || result?.request?.requestId || result?.activity?.requestId);
-                if (requestId) { tracked.add(requestId); saveTracked(); }
-                schedulePoll(250);
-            }
-            return result;
-        } catch (error) {
-            // A timed-out write has unknown state. Refresh read-only Activity once;
-            // never replay the mutation in the browser.
-            if (error?.code === 'ADMIN_API_TIMEOUT') schedulePoll(0);
-            throw error;
-        }
-    };
+    window.adminActivityController = Object.freeze({
+        refreshNow: async () => {
+            const activity = await poll();
+            schedulePoll();
+            return activity;
+        },
+        scheduleNearTerm: (delay = 250) => schedulePoll(delay),
+        trackAcceptedMutation,
+        getLatest: () => latestStatusActivity,
+    });
+
     document.addEventListener('DOMContentLoaded', () => {
         ensureUi();
         // Native-notification denial and agenda-change fallback share the same
         // stack and log affordance instead of reviving the single legacy toast.
-        window.showAdminNotification = notifyMessage;
-        removeLegacyUi();
         void poll().finally(() => schedulePoll());
         window.addEventListener('beforeunload', () => clearTimeout(pollTimer));
     });
