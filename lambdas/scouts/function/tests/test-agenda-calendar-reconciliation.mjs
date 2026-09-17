@@ -140,6 +140,28 @@ test('source rename without an already-current candidate resets title-keyed enri
   assert.equal(result.renamedCount, 1);
 });
 
+test('punctuation-only source title changes are still treated as renames', () => {
+  const uid = 'osm-scouts-programme-9971004';
+  const agenda = {
+    events: [agendaEvent({
+      uid,
+      summary: 'LGBT History Month',
+      dtstart: '20270203T183000',
+      lastModified: '20260912T233431Z',
+    })],
+  };
+
+  const result = api.reconcileAgendaDocument(agenda, [{
+    uid,
+    summary: 'LGBT+ History Month',
+    dtstart: '20270203T183000',
+    lastModified: '20260917T010405Z',
+  }], { authoritative: true, now: NOW });
+
+  assert.equal(result.agenda.events[0].summary, 'LGBT+ History Month');
+  assert.equal(result.renamedCount, 1);
+});
+
 test('authoritative calendar snapshot prunes a future agenda event removed from the source', () => {
   const agenda = {
     events: [agendaEvent({
