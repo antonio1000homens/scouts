@@ -25,6 +25,23 @@ test('calendar reconciliation treats canonical HEX approval as authoritative in 
   );
 });
 
+
+test('calendar reconciliation projects canonical HEX enrichment into agenda metadata', () => {
+  assert.match(
+    scoutsService,
+    /const canonicalHex = existingHexFile\.metadata\?\.hex \?\? titleHex;/,
+  );
+  assert.match(scoutsService, /baseEvent\.metadata\.hex = canonicalHex;/);
+  assert.match(scoutsService, /baseEvent\.metadata\.tagline = existingTagline;/);
+  assert.match(
+    scoutsService,
+    /baseEvent\.metadata\.image = \{\s*theme: existingHexTheme,\s*url: existingHexUrl,\s*\};/,
+  );
+  assert.match(scoutsService, /baseEvent\.tagline = existingTagline;/);
+  assert.match(scoutsService, /baseEvent\.image\.theme = existingHexTheme;/);
+  assert.match(scoutsService, /baseEvent\.image\.url = existingHexUrl;/);
+});
+
 test('orphan cleanup retains intentionally hidden canonical HEX documents', () => {
   assert.match(
     scoutsService,

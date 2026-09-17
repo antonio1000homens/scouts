@@ -2712,29 +2712,37 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
         existingHexFile = await getJsonFromS3(bucketName, hexKey, hexLabel);
         if (existingHexFile) {
           hadPersistedHex = true;
-          baseEvent.hex = existingHexFile.metadata?.hex ?? titleHex;
-          // Hex file is canonical source - always use its values when present
+          const canonicalHex = existingHexFile.metadata?.hex ?? titleHex;
           const existingTagline = getEventTagline(existingHexFile);
-          if (existingTagline) {
-            baseEvent.tagline = existingTagline;
-            if ('AI' in baseEvent) delete baseEvent.AI;
-          }
           const existingHexTheme = getEventImageTheme(existingHexFile);
-          if (existingHexTheme) {
-            baseEvent.image.theme = existingHexTheme;
-          }
           const existingHexUrl = getEventImageUrl(existingHexFile);
-          if (existingHexUrl) {
-            baseEvent.image.url = existingHexUrl;
-          }
+
+          // The HEX document is authoritative for shared enrichment. Hydrate
+          // both the legacy working fields and the canonical metadata shape so
+          // prepareEventForStorage()/buildAgendaMetadata() cannot drop values
+          // during a calendar reconciliation.
+          baseEvent.hex = canonicalHex;
+          baseEvent.tagline = existingTagline;
+          baseEvent.image.theme = existingHexTheme;
+          baseEvent.image.url = existingHexUrl;
+          if ('AI' in baseEvent) delete baseEvent.AI;
+          if ('ai' in baseEvent) delete baseEvent.ai;
+
+          baseEvent.metadata = baseEvent.metadata && typeof baseEvent.metadata === 'object'
+            ? baseEvent.metadata
+            : {};
+          baseEvent.metadata.hex = canonicalHex;
+          baseEvent.metadata.tagline = existingTagline;
+          baseEvent.metadata.image = {
+            theme: existingHexTheme,
+            url: existingHexUrl,
+          };
+
           const existingHexStatus = getEventStatusObject(existingHexFile);
           if (existingHexStatus) {
             isHidden = existingHexStatus.isHidden === true;
             baseEvent.approved = existingHexStatus.isApproved === true;
             baseEvent.status = existingHexStatus;
-            baseEvent.metadata = baseEvent.metadata && typeof baseEvent.metadata === 'object'
-              ? baseEvent.metadata
-              : {};
             baseEvent.metadata.status = {
               isHidden,
               isApproved: existingHexStatus.isApproved === true,
