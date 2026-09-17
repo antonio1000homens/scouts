@@ -5,6 +5,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 const sourcePath = path.resolve(import.meta.dirname, '../agenda-hex-repair.mjs');
+const entryPath = path.resolve(import.meta.dirname, '../scouts-entry.mjs');
 
 async function loadModule() {
   const context = vm.createContext({ Buffer, console, process, Date });
@@ -140,6 +141,36 @@ test('source rename without an already-current candidate resets title-keyed enri
   assert.equal(result.renamedCount, 1);
 });
 
+test('stable-UID rename already applied by mergeEvents is detected from stale title HEX metadata', () => {
+  const previousSummary = 'Surbiton Festival';
+  const currentSummary = 'Surbiton Festival Parade';
+  const event = agendaEvent({
+    uid: 'osm-scouts-myscout-event-1777118',
+    summary: currentSummary,
+    dtstart: '20260926T114000',
+    lastModified: '20260917T010404Z',
+    hex: api.titleToHex(previousSummary),
+  });
+  event.metadata.tagline = 'stale festival enrichment';
+  event.metadata.image = { theme: 'stale-theme', url: 'stale.jpg' };
+  event.metadata.status = { isHidden: true, isApproved: true };
+
+  const result = api.repairAgendaDocument({ events: [event] });
+
+  assert.equal(result.repairedCount, 1);
+  assert.equal(result.renamedHexResets.length, 1);
+  assert.equal(event.metadata.hex, api.titleToHex(currentSummary));
+  assert.equal(event.metadata.tagline, null);
+  assert.equal(event.metadata.image.theme, null);
+  assert.equal(event.metadata.image.url, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(event.metadata.status)), {
+    isHidden: false,
+    isApproved: false,
+  });
+  assert.equal(result.renamedHexResets[0].previousHex, api.titleToHex(previousSummary));
+  assert.equal(result.renamedHexResets[0].previousMetadata.tagline, 'stale festival enrichment');
+});
+
 test('punctuation-only source title changes are still treated as renames', () => {
   const uid = 'osm-scouts-programme-9971004';
   const agenda = {
@@ -200,4 +231,11 @@ test('non-authoritative refresh retains unmatched future agenda events', () => {
 
   assert.equal(result.agenda.events.length, 1);
   assert.equal(result.prunedCount, 0);
+});
+
+test('targeted calendar refreshes cannot enable source or destructive reconciliation', () => {
+  const entrySource = readFileSync(entryPath, 'utf8');
+  assert.match(entrySource, /allowSourceReconciliation:\s*isFullCalendarRefresh/);
+  assert.match(entrySource, /allowDestructiveReconciliation:\s*isFullCalendarRefresh/);
+  assert.match(entrySource, /return selectors\.length === 0 \|\| selectors\.includes\('all'\)/);
 });
