@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import { withRequestActivityContext } from '/opt/nodejs/request-activity.mjs';
@@ -90,6 +90,56 @@ async function readPrivateJsonObject(key) {
     if (privateObjectNotFound(error)) return null;
     throw error;
   }
+}
+
+async function listPrivateEventObjects() {
+  if (!TARGET_BUCKET) {
+    const error = new Error('TARGET_BUCKET is not configured');
+    error.statusCode = 503;
+    throw error;
+  }
+
+  const keys = [];
+  let continuationToken;
+  do {
+    const result = await s3.send(new ListObjectsV2Command({
+      Bucket: TARGET_BUCKET,
+      Prefix: 'events/',
+      ContinuationToken: continuationToken,
+    }));
+    for (const object of result?.Contents || []) {
+      const key = text(object?.Key);
+      if (/^events\/[0-9a-f]+\.json$/i.test(key)) keys.push(key);
+    }
+    continuationToken = result?.IsTruncated ? result?.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  const events = [];
+  const batchSize = 20;
+  for (let index = 0; index < keys.length; index += batchSize) {
+    const batch = keys.slice(index, index + batchSize);
+    const objects = await Promise.all(batch.map((key) => readPrivateJsonObject(key)));
+    objects.forEach((eventObject, batchIndex) => {
+      if (!eventObject || typeof eventObject !== 'object') return;
+      const keyHex = batch[batchIndex].slice('events/'.length, -'.json'.length).toLowerCase();
+      const metadata = eventObject.metadata && typeof eventObject.metadata === 'object'
+        ? { ...eventObject.metadata }
+        : {};
+      metadata.hex = text(metadata.hex).toLowerCase() || keyHex;
+      events.push({ ...eventObject, metadata });
+    });
+  }
+
+  events.sort((left, right) => {
+    const leftDate = text(left?.dtstart ?? left?.start?.sortKey ?? left?.start?.raw);
+    const rightDate = text(right?.dtstart ?? right?.start?.sortKey ?? right?.start?.raw);
+    if (leftDate && rightDate && leftDate !== rightDate) return leftDate.localeCompare(rightDate);
+    if (leftDate && !rightDate) return -1;
+    if (!leftDate && rightDate) return 1;
+    return text(left?.summary ?? left?.title).localeCompare(text(right?.summary ?? right?.title));
+  });
+
+  return events;
 }
 
 function normalizePrivateEventHex(value) {
@@ -216,7 +266,7 @@ function isInterceptedRuntimeCommand(command) {
   if (!command) return false;
   if (command.subject === 'activity' && ['status', 'history', 'lookup'].includes(command.action)) return true;
   if (command.subject === 'snapshot' && command.action === 'get') return true;
-  if (command.subject === 'event' && ['get', 'review'].includes(command.action)) return true;
+  if (command.subject === 'event' && ['get', 'review', 'list'].includes(command.action)) return true;
   if (command.subject === 'enrichment' && command.action === 'retry') return true;
   if (command.subject === 'dlq' && ['inspect', 'redrive'].includes(command.action)) return true;
   return command.subject === 'schedule' && ['status', 'enable', 'disable'].includes(command.action);
@@ -498,6 +548,11 @@ export async function handler(event = {}) {
     }
 
     if (command.subject === 'event') {
+      if (command.action === 'list') {
+        const events = await listPrivateEventObjects();
+        return response(200, { status: 'ok', events, count: events.length });
+      }
+
       const hex = normalizePrivateEventHex(command.body?.hex);
       if (!hex) {
         return response(400, { status: 'error', error: 'Invalid event HEX' });
