@@ -21,8 +21,10 @@ jobs:
         with:
           node-version: '22'
       - name: Apply controller ownership cleanup
-        run: python scripts/issue-122-controller-cleanup.py
-      - name: Validate focused Admin tests
+        run: |
+          python scripts/issue-122-controller-cleanup.py
+          python scripts/issue-122-controller-cleanup-fixes.py
+      - name: Validate Admin v2 changes
         run: |
           node --check website/admin/admin-script.js
           node --check website/admin/private-storage-client.js
@@ -31,7 +33,12 @@ jobs:
           node --check website/admin/admin-agenda-refresh.js
           node --check website/admin/admin-diagnostics-enhancements.js
           node --check website/admin/admin-activity-centre.js
-          node --test tests/issue-122-controller-ownership.test.mjs tests/issue-39-admin-actions.test.mjs tests/issue-91-presentation.test.mjs
+          node --test \
+            tests/issue-122-controller-ownership.test.mjs \
+            tests/issue-39-admin-actions.test.mjs \
+            tests/issue-91-presentation.test.mjs \
+            tests/issue-34-admin-ui.integration.test.mjs \
+            tests/deployment-order.integration.test.mjs
       - name: Commit cleanup
         run: |
           git config user.name github-actions[bot]
