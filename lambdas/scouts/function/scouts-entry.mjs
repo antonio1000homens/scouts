@@ -176,6 +176,39 @@ function isCalendarRefreshInvocation(event) {
   return ['calendar', 'calendars', 'all'].includes(subject) && action.startsWith('refresh');
 }
 
+function calendarSelectorTokens(value) {
+  if (value === undefined || value === null) return [];
+  if (Array.isArray(value)) return value.flatMap((entry) => calendarSelectorTokens(entry));
+  if (typeof value === 'object') return [];
+  const raw = text(value).toLowerCase();
+  if (!raw) return [];
+  if (raw.startsWith('[') && raw.endsWith(']')) {
+    try {
+      return calendarSelectorTokens(JSON.parse(raw));
+    } catch {
+      // Fall through to comma-separated parsing.
+    }
+  }
+  return raw.split(',').map((entry) => entry.trim()).filter(Boolean);
+}
+
+function isFullCalendarRefreshInvocation(event) {
+  if (!isCalendarRefreshInvocation(event)) return false;
+  const body = decodeBody(event);
+  const query = event?.queryStringParameters || {};
+  const selectors = [
+    ...calendarSelectorTokens(body?.calendar),
+    ...calendarSelectorTokens(body?.calendars),
+    ...calendarSelectorTokens(body?.feed),
+    ...calendarSelectorTokens(query?.calendar),
+    ...calendarSelectorTokens(query?.calendars),
+    ...calendarSelectorTokens(query?.feed),
+  ];
+  // No selector means scouts-service resolves all configured feeds. An explicit
+  // `all` selector is the other destructive-reconciliation-safe case.
+  return selectors.length === 0 || selectors.includes('all');
+}
+
 function isAgendaRefreshInvocation(event) {
   const body = decodeBody(event);
   if (text(body?.realm).toLowerCase() !== 'scouts') return false;
@@ -231,6 +264,8 @@ async function callScoutsService(event, reconciliationContext = null) {
 }
 
 async function invokeScoutsService(event) {
+  const isCalendarRefresh = isCalendarRefreshInvocation(event);
+  const isFullCalendarRefresh = isFullCalendarRefreshInvocation(event);
   const isReconciliation = isAgendaReconciliationInvocation(event);
   const reconciliationContext = isReconciliation
     ? {
@@ -239,13 +274,37 @@ async function invokeScoutsService(event) {
         enrichmentRequestIds: new Set(),
       }
     : null;
+
+  // On full refreshes, reconcile against the last fresh complete cache before
+  // enrichment starts. This prevents stable-UID title changes already present
+  // in the cache from carrying title-keyed enrichment into the replacement.
+  if (isFullCalendarRefresh) {
+    try {
+      await repairAgendaHexMetadata({
+        allowSourceReconciliation: true,
+        allowDestructiveReconciliation: false,
+      });
+    } catch (error) {
+      console.warn('[AgendaHexRepair] Pre-refresh reconciliation skipped.', error?.message || error);
+    }
+  }
+
   const result = await callScoutsService(event, reconciliationContext);
   let responseResult = result;
 
-  if (isCalendarRefreshInvocation(event)) {
+  if (isCalendarRefresh) {
     try {
-      const repair = await repairAgendaHexMetadata();
-      if (repair.repairedCount > 0 || repair.missingCount > 0) {
+      const repair = await repairAgendaHexMetadata({
+        // Targeted refreshes must not reconcile/prune unrelated source feeds.
+        allowSourceReconciliation: isFullCalendarRefresh,
+        allowDestructiveReconciliation: isFullCalendarRefresh,
+      });
+      if (
+        repair.repairedCount > 0
+        || repair.missingCount > 0
+        || repair.prunedCount > 0
+        || repair.renamedHexResetCount > 0
+      ) {
         console.log('[AgendaHexRepair] Refresh post-processing result.', repair);
       }
     } catch (error) {
