@@ -23,7 +23,7 @@ const sqs = new SQSClient({});
 const dynamodb = new DynamoDBClient({});
 const TARGET_BUCKET = process.env.TARGET_BUCKET || '';
 const SCOUTS_REQUESTS_QUEUE_URL = process.env.SCOUTS_REQUESTS_QUEUE_URL || '';
-const ENRICHMENT_STATE_TABLE_NAME = String(process.env.GEMINI_ENRICH_STATE_TABLE_NAME || '').trim();
+const ENRICHMENT_STATE_TABLE_NAME = String(process.env.GEMINI_ENRICHMENT_STATE_TABLE_NAME || '').trim();
 const REQUEST_ACTIVITY_TABLE_NAME = String(process.env.SCOUTS_REQUEST_ACTIVITY_TABLE_NAME || '').trim();
 const PRIVATE_RUNTIME_SNAPSHOT_KEYS = Object.freeze({
   queued: 'runtime/scoutsQueued.json',
