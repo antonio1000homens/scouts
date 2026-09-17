@@ -154,6 +154,27 @@ function resetTitleKeyedMetadata(event, summary) {
   };
 }
 
+function titleKeyedState(metadata) {
+  const source = metadata && typeof metadata === 'object' ? metadata : {};
+  const image = source.image && typeof source.image === 'object' ? source.image : {};
+  const status = source.status && typeof source.status === 'object' ? source.status : {};
+  return {
+    tagline: text(source.tagline) || null,
+    image: {
+      theme: text(image.theme) || null,
+      url: text(image.url) || null,
+    },
+    status: {
+      isHidden: status.isHidden === true,
+      isApproved: status.isApproved === true,
+    },
+  };
+}
+
+function sameTitleKeyedState(left, right) {
+  return JSON.stringify(titleKeyedState(left)) === JSON.stringify(titleKeyedState(right));
+}
+
 export function ensureAgendaEventHex(event) {
   if (!event || typeof event !== 'object') {
     return { changed: false, hex: null };
@@ -272,13 +293,36 @@ export function reconcileAgendaDocument(agenda, calendarEvents = [], { authorita
 
 export function repairAgendaDocument(agenda) {
   if (!agenda || typeof agenda !== 'object' || !Array.isArray(agenda.events)) {
-    return { agenda, changed: false, repairedCount: 0, missingCount: 0 };
+    return { agenda, changed: false, repairedCount: 0, missingCount: 0, renamedHexResets: [] };
   }
 
   let repairedCount = 0;
   let missingCount = 0;
+  const renamedHexResets = [];
 
   for (const event of agenda.events) {
+    const summary = event?.summary ?? event?.title ?? null;
+    const derivedHex = titleToHex(summary);
+    const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+    const storedHex = text(metadata.hex || event?.hex || event?.hexId).toLowerCase();
+
+    // A stable source UID can be renamed by mergeEvents before this post-refresh
+    // hook runs. In that path the summary is already current, but metadata.hex
+    // still identifies the old title. Treat that mismatch as a rename signal so
+    // title-keyed enrichment/approval state cannot leak to the renamed event.
+    if (storedHex && derivedHex && storedHex !== derivedHex) {
+      const previousMetadata = JSON.parse(JSON.stringify(metadata));
+      resetTitleKeyedMetadata(event, summary);
+      renamedHexResets.push({
+        previousHex: storedHex,
+        hex: derivedHex,
+        title: summary,
+        previousMetadata,
+      });
+      repairedCount += 1;
+      continue;
+    }
+
     const result = ensureAgendaEventHex(event);
     if (result.changed) repairedCount += 1;
     if (!result.hex) missingCount += 1;
@@ -289,6 +333,7 @@ export function repairAgendaDocument(agenda) {
     changed: repairedCount > 0,
     repairedCount,
     missingCount,
+    renamedHexResets,
   };
 }
 
@@ -330,7 +375,62 @@ async function loadFreshCalendarSnapshot(now = Date.now()) {
   return { events, authoritative, feedStatus, configuredFeedCount: configuredFeeds.length };
 }
 
-export async function repairAgendaHexMetadata() {
+async function resetContaminatedRenamedHexDocuments(resets = []) {
+  let resetCount = 0;
+  const seen = new Set();
+
+  for (const reset of Array.isArray(resets) ? resets : []) {
+    const hex = text(reset?.hex).toLowerCase();
+    const title = text(reset?.title);
+    if (!hex || !title || seen.has(hex)) continue;
+    seen.add(hex);
+
+    const key = `events/${hex}.json`;
+    try {
+      const response = await s3.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: key }));
+      const raw = await response.Body.transformToString();
+      const current = JSON.parse(raw);
+
+      // If the new-title HEX already existed legitimately, enrichEvents will
+      // have hydrated the agenda with its current metadata/HEX and there will
+      // be no mismatch above. This extra equality guard ensures we only clear a
+      // document whose title-keyed state exactly matches the stale state carried
+      // from the old title during this refresh.
+      if (!sameTitleKeyedState(current?.metadata, reset.previousMetadata)) continue;
+
+      const cleaned = {
+        title,
+        metadata: {
+          hex,
+          tagline: null,
+          image: { theme: null, url: null },
+          status: { isHidden: false, isApproved: false },
+        },
+        requests: [],
+      };
+      await s3.send(new PutObjectCommand({
+        Bucket: TARGET_BUCKET,
+        Key: key,
+        Body: JSON.stringify(cleaned, null, 2),
+        ContentType: 'application/json',
+        CacheControl: 'no-store',
+      }));
+      resetCount += 1;
+    } catch (error) {
+      if (error?.name === 'NoSuchKey' || error?.name === 'NotFound' || error?.Code === 'NoSuchKey') {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return resetCount;
+}
+
+export async function repairAgendaHexMetadata({
+  allowSourceReconciliation = true,
+  allowDestructiveReconciliation = false,
+} = {}) {
   const response = await s3.send(new GetObjectCommand({
     Bucket: TARGET_BUCKET,
     Key: AGENDA_KEY,
@@ -338,10 +438,15 @@ export async function repairAgendaHexMetadata() {
   const raw = await response.Body.transformToString();
   const agenda = JSON.parse(raw);
   const calendarSnapshot = await loadFreshCalendarSnapshot();
-  const reconciliation = reconcileAgendaDocument(agenda, calendarSnapshot.events, {
-    authoritative: calendarSnapshot.authoritative,
+  const sourceEvents = allowSourceReconciliation ? calendarSnapshot.events : [];
+  const effectiveAuthoritative = allowSourceReconciliation
+    && allowDestructiveReconciliation
+    && calendarSnapshot.authoritative;
+  const reconciliation = reconcileAgendaDocument(agenda, sourceEvents, {
+    authoritative: effectiveAuthoritative,
   });
   const repair = repairAgendaDocument(reconciliation.agenda);
+  const contaminatedHexResetCount = await resetContaminatedRenamedHexDocuments(repair.renamedHexResets);
   const changed = reconciliation.changed || repair.changed;
 
   if (!changed) {
@@ -352,7 +457,11 @@ export async function repairAgendaHexMetadata() {
       deduplicatedCount: 0,
       renamedCount: 0,
       movedCount: 0,
-      authoritative: calendarSnapshot.authoritative,
+      renamedHexResetCount: contaminatedHexResetCount,
+      authoritative: effectiveAuthoritative,
+      snapshotAuthoritative: calendarSnapshot.authoritative,
+      sourceReconciliation: allowSourceReconciliation,
+      destructiveReconciliation: allowDestructiveReconciliation,
       feedStatus: calendarSnapshot.feedStatus,
       bucket: TARGET_BUCKET,
       key: AGENDA_KEY,
@@ -374,7 +483,11 @@ export async function repairAgendaHexMetadata() {
     deduplicatedCount: reconciliation.deduplicatedCount,
     renamedCount: reconciliation.renamedCount,
     movedCount: reconciliation.movedCount,
-    authoritative: calendarSnapshot.authoritative,
+    renamedHexResetCount: contaminatedHexResetCount,
+    authoritative: effectiveAuthoritative,
+    snapshotAuthoritative: calendarSnapshot.authoritative,
+    sourceReconciliation: allowSourceReconciliation,
+    destructiveReconciliation: allowDestructiveReconciliation,
     feedStatus: calendarSnapshot.feedStatus,
     bucket: TARGET_BUCKET,
     key: AGENDA_KEY,
@@ -387,7 +500,11 @@ export async function repairAgendaHexMetadata() {
     deduplicatedCount: reconciliation.deduplicatedCount,
     renamedCount: reconciliation.renamedCount,
     movedCount: reconciliation.movedCount,
-    authoritative: calendarSnapshot.authoritative,
+    renamedHexResetCount: contaminatedHexResetCount,
+    authoritative: effectiveAuthoritative,
+    snapshotAuthoritative: calendarSnapshot.authoritative,
+    sourceReconciliation: allowSourceReconciliation,
+    destructiveReconciliation: allowDestructiveReconciliation,
     feedStatus: calendarSnapshot.feedStatus,
     bucket: TARGET_BUCKET,
     key: AGENDA_KEY,
