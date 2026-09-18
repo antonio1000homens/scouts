@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 process.env.SCOUTS_REQUEST_ACTIVITY_TABLE_NAME = 'test-request-activity';
 const {
@@ -16,6 +17,13 @@ test('activity ledger update only supplies DynamoDB placeholders used by the exp
   assert.equal(update.command.input.ExpressionAttributeValues[':requestId'], undefined);
   assert.match(update.command.input.UpdateExpression, /feed = :feed/);
   assert.match(update.command.input.ConditionExpression, /priority <= :priority/);
+});
+
+test('activity lookup only supplies the state alias when a state filter uses it', () => {
+  const source = readFileSync(new URL('./request-activity.mjs', import.meta.url), 'utf8');
+  assert.match(source, /const expressionAttributeNames = allowedStates\.length \? \{ '#state': 'state' \} : undefined/);
+  assert.match(source, /\.\.\.\(expressionAttributeNames \? \{ ExpressionAttributeNames: expressionAttributeNames \} : \{\}\)/);
+  assert.doesNotMatch(source, /filters\.length \? \{ FilterExpression: filters\.join\(' AND '\), ExpressionAttributeNames: \{ '#state': 'state' \} \}/);
 });
 
 test('activity ledger derives HEX from subject metadata', () => {
