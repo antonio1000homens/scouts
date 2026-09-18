@@ -2522,18 +2522,45 @@ function extractOccurrenceVisibility(message, rawSubject, action) {
     return { isHidden: hidden };
 }
 
+function parseSparsePersistSubject(subject) {
+    if (!subject) return {};
+
+    if (typeof subject === 'object' && !Array.isArray(subject)) {
+        return cloneJsonValue(subject);
+    }
+
+    if (typeof subject !== 'string') return {};
+    const trimmed = subject.trim();
+    if (!trimmed) return {};
+
+    if (trimmed.startsWith('{')) {
+        try {
+            const parsed = JSON.parse(trimmed);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                ? parsed
+                : {};
+        } catch (error) {
+            console.warn('[Persist] Failed to parse sparse subject JSON:', error.message);
+        }
+    }
+
+    if (/^[0-9a-f]+$/i.test(trimmed) && trimmed.length % 2 === 0) {
+        return { hex: trimmed };
+    }
+
+    return { value: trimmed };
+}
+
 export function buildPersistEventPayload(existingEvent, rawSubject, action) {
     const baseEvent =
         existingEvent && typeof existingEvent === 'object' && !Array.isArray(existingEvent)
             ? cloneJsonValue(existingEvent)
             : {};
     const persistPatch = parsePersistPatch(action);
-    // ensureObjectSubject canonicalizes its input in place, so preserve any
-    // legacy top-level field aliases before normalization can erase them.
-    const legacySubjectPatch = rawSubject && typeof rawSubject === 'object' && !Array.isArray(rawSubject)
-        ? cloneJsonValue(rawSubject)
-        : parsePersistPatch(rawSubject);
-    const subjectObject = ensureObjectSubject(rawSubject);
+    // Persist messages are patches, not complete event documents. Do not call
+    // ensureObjectSubject() here: its canonicalizer fills absent fields with
+    // null/defaults, which would overwrite unrelated persisted metadata.
+    const subjectObject = parseSparsePersistSubject(rawSubject);
 
     if (persistPatch) {
         mergePersistPatch(baseEvent, persistPatch);
@@ -2541,7 +2568,7 @@ export function buildPersistEventPayload(existingEvent, rawSubject, action) {
     }
     if (subjectObject && Object.keys(subjectObject).length > 0) {
         mergePersistPatch(baseEvent, subjectObject);
-        applyLegacyPersistFieldAliases(baseEvent, legacySubjectPatch ?? subjectObject);
+        applyLegacyPersistFieldAliases(baseEvent, subjectObject);
     }
 
     ensureRuntimeMetadata(baseEvent);
