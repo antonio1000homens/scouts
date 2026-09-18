@@ -4,6 +4,12 @@ let eventsData = [];
 let uniqueEventEntries = [];
 let visibleEventEntries = [];
 let currentEventIndex = null;
+
+function getSelectedModalEntry() {
+    if (!Number.isInteger(currentEventIndex)) return null;
+    return visibleEventEntries[currentEventIndex] || null;
+}
+
 let apiAuthReady = false;
 // A command acknowledgement must never freeze the whole page.  This map is
 // presentation-only duplicate-click protection; backend idempotency remains
