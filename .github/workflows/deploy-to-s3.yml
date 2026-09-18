@@ -36,8 +36,8 @@ permissions:
 
 env:
   AWS_REGION: eu-west-2
-  EXPECTED_AWS_ACCOUNT: "553490163883"
-  WEBSITE_BUCKET: scouts-2ndtolworth-prod-553490163883
+  EXPECTED_AWS_ACCOUNT: ${{ vars.EXPECTED_AWS_ACCOUNT }}
+  WEBSITE_BUCKET: ${{ vars.WEBSITE_BUCKET }}
   AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
   CLOUDFORMATION_ROLE_ARN: ${{ vars.CLOUDFORMATION_ROLE_ARN }}
   CODE_BUCKET: ${{ vars.CODE_BUCKET || 'aws2022-lambda-code-eu-west-2-553490163883' }}
@@ -237,6 +237,11 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
+      - name: Validate website deployment configuration
+        run: |
+          set -euo pipefail
+          test -n "${WEBSITE_BUCKET:-}" || { echo "GitHub Actions variable WEBSITE_BUCKET is required" >&2; exit 1; }
+
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         if: needs.plan-and-test.outputs.cloudflare == 'true'
         with:
@@ -390,6 +395,11 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Validate AWS deployment configuration
+        run: |
+          set -euo pipefail
+          test -n "${EXPECTED_AWS_ACCOUNT:-}" || { echo "GitHub Actions variable EXPECTED_AWS_ACCOUNT is required" >&2; exit 1; }
 
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
