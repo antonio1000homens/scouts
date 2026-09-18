@@ -447,20 +447,65 @@ async function processImageProvider(message, provider) {
   }
 }
 
+function parseProcessorResponseBody(response) {
+  if (!response?.body) return {};
+  if (typeof response.body === 'object') return response.body;
+  try {
+    const parsed = JSON.parse(response.body);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 async function resultAfterProcessor(message, response) {
   const stage = normaliseStage(message?.orchestrationStep ?? message?.realm);
   const hex = getHex(message);
-  // Combined text enrichment deliberately reuses the tagline state row as its
-  // retry/idempotency owner while satisfying imageTheme after durable read-back.
-  const stateStage = stage === 'taglineTheme' ? 'tagline' : stage;
-  const state = hex && stateStage ? await getEnrichmentState(hex, stateStage).catch(() => null) : null;
+  const responseBody = parseProcessorResponseBody(response);
+  // The combined task can become a single-field task after worker-time durable
+  // re-read. The processor returns the effective state owner so recovery reads
+  // the row that actually reserved/generated the result.
+  const effectiveStage = normaliseStage(responseBody?.effectiveStage)
+    || (stage === 'taglineTheme' ? 'tagline' : stage);
+  const state = hex && effectiveStage ? await getEnrichmentState(hex, effectiveStage).catch(() => null) : null;
   const event = hex ? await loadEvent(hex).catch(() => null) : null;
   const statusCode = Number(response?.statusCode || 0);
+  const manualRequest = text(message?.requestMode).toLowerCase() === 'manual';
+  const requestedGenerationId = text(responseBody?.generationId) || null;
+
+  // Durable combined fields are authoritative after a successful processor
+  // response. This recovers the write-succeeded/state-update-failed window.
+  if (stage === 'taglineTheme' && statusCode >= 200 && statusCode < 300 && stageFieldPresent(event, 'taglineTheme')) {
+    return buildCallbackResultFromState({
+      state: null,
+      stage,
+      hex,
+      generationId: requestedGenerationId || state?.generationId || null,
+      fallbackStatus: 'succeeded',
+    });
+  }
+
+  // A manual regeneration must only be satisfied by its own generation. If an
+  // automatic attempt currently owns the stage, return a normal deferred
+  // callback instead of treating its old/in-flight state as this click's result.
+  const stateMatchesManualGeneration = !manualRequest
+    || !requestedGenerationId
+    || !state?.generationId
+    || state.generationId === requestedGenerationId;
+  const resultState = stateMatchesManualGeneration ? state : null;
+
   let fallbackStatus = null;
-  if (stageFieldPresent(event, stage)) fallbackStatus = 'succeeded';
-  else if (statusCode === 202) fallbackStatus = 'quota';
-  else if (statusCode >= 500 && !state) throw new Error(`Canonical ${stage || 'enrichment'} processor failed without persisted safety state`);
-  return buildCallbackResultFromState({ state, stage, hex, fallbackStatus });
+  if (!manualRequest && stageFieldPresent(event, stage)) fallbackStatus = 'succeeded';
+  else if (statusCode === 202) fallbackStatus = 'provider_deferred';
+  else if (statusCode >= 500 && !resultState) throw new Error(`Canonical ${stage || 'enrichment'} processor failed without persisted safety state`);
+
+  return buildCallbackResultFromState({
+    state: resultState,
+    stage,
+    hex,
+    generationId: requestedGenerationId || resultState?.generationId || null,
+    fallbackStatus,
+  });
 }
 
 async function sendTaskSuccess(message, result) {
