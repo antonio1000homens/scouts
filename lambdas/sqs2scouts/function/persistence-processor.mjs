@@ -3543,7 +3543,22 @@ async function lambdaHandlerWithDependencies(event) {
                 throw new Error(`HEX ${hexValue} not found`);
             }
             
-            const generationId = buildGenerationId(hexValue, 'imageTheme', hexData, GEMINI_PROMPT_VERSION);
+            const baseGenerationId = buildGenerationId(hexValue, 'imageTheme', hexData, GEMINI_PROMPT_VERSION);
+            const manualRegeneration = messageBody.requestMode === 'manual' && Boolean(requestContext.requestId);
+            const generationId = manualRegeneration
+                ? crypto.createHash('sha256').update(`${baseGenerationId}\nmanual:${requestContext.requestId}`).digest('hex')
+                : baseGenerationId;
+            if (manualRegeneration) {
+                await clearEnrichmentState(hexValue, 'imageTheme');
+                console.log(JSON.stringify({
+                    event: 'gemini_text_manual_regeneration',
+                    requestedTextMode: 'imageTheme',
+                    enrichmentStateStage: 'imageTheme',
+                    hex: hexValue,
+                    requestId: requestContext.requestId,
+                    generationId,
+                }));
+            }
             const result = await generateGeminiTextSuggestion(hexData, 'imageTheme', scoutsConfig, { hexValue, generationId, requestId: requestContext.requestId });
             if (result?.enrichmentBlocked) {
                 await completeImageEnrichTask(messageBody, {
