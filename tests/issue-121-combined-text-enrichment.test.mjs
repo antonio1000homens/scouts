@@ -217,6 +217,17 @@ test('field saves are canonicalized before persistence and legacy aliases remain
   assert.match(worker, /target\.metadata\.image\.url = patch\.imageUrl/);
 });
 
+test('full-enrich callback honors effective text state and does not accept stale manual field presence', () => {
+  const core = readFileSync('lambdas/sqs2scouts/function/full-enrich-core.mjs', 'utf8');
+
+  assert.match(core, /parseProcessorResponseBody/);
+  assert.match(core, /effectiveStage = normaliseStage\(responseBody\?\.effectiveStage\)/);
+  assert.match(core, /stage === 'taglineTheme'[\s\S]*stageFieldPresent\(event, 'taglineTheme'\)/);
+  assert.match(core, /manualRequest = text\(message\?\.requestMode\)\.toLowerCase\(\) === 'manual'/);
+  assert.match(core, /stateMatchesManualGeneration/);
+  assert.match(core, /if \(!manualRequest && stageFieldPresent\(event, stage\)\) fallbackStatus = 'succeeded'/);
+});
+
 test('production worker enforces atomic read-back, manual regeneration, state satisfaction and observability', () => {
   const worker = readFileSync('lambdas/sqs2scouts/function/persistence-processor.mjs', 'utf8');
 
@@ -229,6 +240,11 @@ test('production worker enforces atomic read-back, manual regeneration, state sa
   assert.match(worker, /both_fields_already_present/);
   assert.match(worker, /manualRegeneration/);
   assert.match(worker, /manual:\$\{requestContext\.requestId\}/);
+  assert.match(worker, /retryManualReviewEnrichment\(\{/);
+  assert.doesNotMatch(worker, /manualRegeneration[\s\S]{0,500}clearEnrichmentState\(hexValue, stateStage\)/);
+  assert.match(worker, /effectiveStage: stateStage/);
+  assert.match(worker, /setImageTheme\(hexData, result\.imageTheme\);\s*setImageApprovalState\(hexData, false\);/);
+  assert.match(worker, /status: 'failed'[\s\S]*failureCategory:/);
   assert.match(worker, /Tagline-only enrichment modified the existing image theme/);
   assert.match(worker, /Image-theme-only enrichment modified the existing tagline/);
   assert.match(worker, /markEnrichmentSucceeded\(\{ hex: hexValue, stage: 'tagline'/);
