@@ -1865,14 +1865,26 @@ async function retryEventEnrichment(index, stage, button = null) {
             hex,
             stage,
         });
+        const processingFields = markMetadataProcessing(entry, [stage]);
+        const eventLabel = getEventDisplayTitle(event, entry, index);
         showAdminNotification(
-            `${enrichmentStageLabel(stage)} enrichment retry queued for "${getEventDisplayTitle(event, entry, index)}".`,
+            `${enrichmentStageLabel(stage)} enrichment retry queued for "${eventLabel}".`,
             'success',
             6000,
         );
         await hydrateDurableEnrichmentState(uniqueEventEntries);
         updateSidebarUi();
         renderEvents();
+        if (getEventHex(getSelectedModalEntry()?.event) === hex) refreshModalCurrentMetadata(event);
+        const requestId = extractBackendRequestId(result);
+        if (requestId) {
+            void pollGeneratedRequestUntilSettled(requestId, {
+                hex,
+                config: getFieldOperationConfig(normaliseMetadataProcessingField(stage)),
+                eventLabel,
+                processingFields,
+            });
+        }
         window.adminActivityController?.scheduleNearTerm?.(0);
         return result;
     } catch (error) {
