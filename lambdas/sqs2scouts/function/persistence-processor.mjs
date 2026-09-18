@@ -3418,6 +3418,7 @@ async function lambdaHandlerWithDependencies(event) {
                 : baseGenerationId;
             const imageThemeGenerationId = buildGenerationId(hexValue, 'imageTheme', hexData, GEMINI_PROMPT_VERSION);
             if (manualRegeneration) {
+                await clearEnrichmentState(hexValue, stateStage);
                 console.log(JSON.stringify({
                     event: 'gemini_text_manual_regeneration',
                     requestedTextMode: textMode,
