@@ -19,16 +19,18 @@ REGION="${AWS_REGION:-eu-west-2}"
 # older unmanaged state machine named scouts-full-enrich, so changing to that
 # physical name here would collide rather than perform a safe cutover.
 STACK_NAME="${STACK_NAME:-scouts-full-enrich-managed-poc}"
-EXPECTED_AWS_ACCOUNT="${EXPECTED_AWS_ACCOUNT:-553490163883}"
+EXPECTED_AWS_ACCOUNT="${EXPECTED_AWS_ACCOUNT:-}"
 CLOUDFORMATION_ROLE_ARN="${CLOUDFORMATION_ROLE_ARN:-}"
+
+: "${EXPECTED_AWS_ACCOUNT:?EXPECTED_AWS_ACCOUNT must be set}"
 
 if [ -z "${AWS_ACCESS_KEY_ID:-}" ] && [ -z "${AWS_WEB_IDENTITY_TOKEN_FILE:-}" ] && [ -z "${AWS_CONTAINER_CREDENTIALS_RELATIVE_URI:-}" ] && [ -z "${AWS_CONTAINER_CREDENTIALS_FULL_URI:-}" ]; then
   export AWS_PROFILE="${AWS_PROFILE_NAME:-${AWS_PROFILE:-scouts}}"
 fi
 
 STATE_MACHINE_NAME="${STATE_MACHINE_NAME:-scouts-full-enrich-managed-poc}"
-REQUESTS_QUEUE_URL="${REQUESTS_QUEUE_URL:-https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests}"
-REQUESTS_QUEUE_ARN="${REQUESTS_QUEUE_ARN:-arn:aws:sqs:eu-west-2:553490163883:scoutsRequests}"
+REQUESTS_QUEUE_URL="${REQUESTS_QUEUE_URL:-https://sqs.${REGION}.amazonaws.com/${EXPECTED_AWS_ACCOUNT}/scoutsRequests}"
+REQUESTS_QUEUE_ARN="${REQUESTS_QUEUE_ARN:-arn:aws:sqs:${REGION}:${EXPECTED_AWS_ACCOUNT}:scoutsRequests}"
 STAGE_TIMEOUT_SECONDS="${STAGE_TIMEOUT_SECONDS:-900}"
 
 TEMPLATE_FILE="${ROOT_DIR}/cloudformation/templates/scouts-full-enrich.yaml"
