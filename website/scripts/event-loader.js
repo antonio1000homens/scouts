@@ -1,12 +1,3 @@
-const dateFormatter = new Intl.DateTimeFormat(undefined, {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-});
-
 const AGENDA_URL = '/agenda.json';
 const FALLBACK_AGENDA_URL = 'https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com/agenda.json';
 const S3_OBJECT_BASE_URL = 'https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com';
@@ -115,13 +106,6 @@ function getEventDate(event) {
     if (!normalised) return null;
     const parsed = new Date(normalised);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function formatDisplayDate(dateOrString) {
-    if (!dateOrString) return '';
-    const date = dateOrString instanceof Date ? dateOrString : new Date(normaliseDateString(dateOrString));
-    if (Number.isNaN(date.getTime())) return '';
-    return dateFormatter.format(date);
 }
 
 function isApprovedEventImage(event) {
@@ -233,12 +217,10 @@ function renderNextEventCard(event, container) {
         return;
     }
 
-    const dateLabel = formatDisplayDate(event.__eventDate || event.dtstart || event.start?.iso || event.start?.raw);
     const locationLabel = event.location || '';
     const tagline = getTagline(event);
     const aiCopy = tagline ? `<p class="ai-text">${tagline}</p>` : '';
     const metaBlock = [
-        dateLabel ? `<p><span class="label">Date:</span> ${dateLabel}</p>` : '',
         locationLabel ? `<p><span class="label">Location:</span> ${locationLabel}</p>` : ''
     ].filter(Boolean).join('');
     const image = createEventImageMarkup(event);
@@ -310,7 +292,6 @@ function renderPastEventsCarousel(events, container) {
     }
 
     const cards = events.map(event => {
-        const dateLabel = formatDisplayDate(event.__eventDate || event.dtstart || event.start?.iso || event.start?.raw);
         const locationLabel = event.location ? `<p class="location">${event.location}</p>` : '';
         const tagline = getTagline(event);
         const aiCopy = tagline ? `<p class="ai-text">${tagline}</p>` : '';
@@ -321,7 +302,6 @@ function renderPastEventsCarousel(events, container) {
             <div class="event-card carousel-item" data-section="${sectionKey}">
                 ${image}
                 ${headingMarkup}
-                ${dateLabel ? `<p class="date">${dateLabel}</p>` : ''}
                 ${locationLabel}
                 ${aiCopy}
             </div>
