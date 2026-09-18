@@ -20,7 +20,18 @@ async function loadRouter(eventOverride = null) {
   const completeEvent = eventOverride ?? { title: 'Rewards Trip', metadata: { hex: HEX, tagline: 'Join us', image: { theme: 'trip', url: '/website/eventImages/rewards.jpg' }, status: { isHidden: false, isApproved: true } } };
   const S3Client = class { async send(request) { return { Body: { transformToString: async () => JSON.stringify(completeEvent) } }; } };
   const SQSClient = class { async send(request) { sentMessages.push(request.input); return { MessageId: 'downstream-message' }; } };
-  const SFNClient = class { async send(request) { executions.push(request.input); return { executionArn: 'arn:fixture' }; } };
+  const SFNClient = class {
+    async send(request) {
+      if (request.name === 'StartExecutionCommand') {
+        executions.push(request.input);
+        return { executionArn: 'arn:fixture' };
+      }
+      if (request.name === 'ListExecutionsCommand') {
+        return { executions: [] };
+      }
+      throw new Error(`Unexpected SFN command ${request.name}`);
+    }
+  };
   const context = vm.createContext({ Buffer, URL, console, process, setTimeout, clearTimeout });
   const module = new vm.SourceTextModule(readFileSync(sourcePath, 'utf8'), { context, identifier: sourcePath });
   const modules = new Map();
