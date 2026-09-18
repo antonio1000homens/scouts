@@ -194,12 +194,12 @@ test('production orchestration routes direct text buttons through the state mach
 
   assert.match(stateMachine, /"GenerateTaglineAndTheme"/);
   assert.match(stateMachine, /"subject": "taglineTheme"/);
-  assert.match(stateMachine, /"\\$\\.taglineThemeResult\\.status"[\\s\\S]*"Next": "SelectImageProvider"/);
-  assert.match(stateMachine, /"\\$\\.taglineResult\\.status"[\\s\\S]*"BooleanEquals": false[\\s\\S]*"Next": "Complete"/);
-  assert.match(stateMachine, /"\\$\\.imageThemeResult\\.status"[\\s\\S]*"BooleanEquals": false[\\s\\S]*"Next": "Complete"/);
+  assert.match(stateMachine, /"\$\.taglineThemeResult\.status"[\s\S]*"Next": "SelectImageProvider"/);
+  assert.match(stateMachine, /"\$\.taglineResult\.status"[\s\S]*"BooleanEquals": false[\s\S]*"Next": "Complete"/);
+  assert.match(stateMachine, /"\$\.imageThemeResult\.status"[\s\S]*"BooleanEquals": false[\s\S]*"Next": "Complete"/);
   assert.doesNotMatch(
     stateMachine,
-    /"\\$\\.taglineResult\\.status"\\s*,?\\s*\\n\\s*"StringEquals": "succeeded"[\\s\\S]{0,120}"Next": "GenerateImageTheme"/,
+    /"\$\.taglineResult\.status"\s*,?\s*\n\s*"StringEquals": "succeeded"[\s\S]{0,120}"Next": "GenerateImageTheme"/,
   );
 });
 
