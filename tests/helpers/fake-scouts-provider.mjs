@@ -4,10 +4,17 @@ const ONE_PIXEL_PNG = Buffer.from(
 );
 
 export function createFakeScoutsProvider() {
-  const calls = { tagline: 0, imageTheme: 0, image: 0 };
+  const calls = { taglineTheme: 0, tagline: 0, imageTheme: 0, image: 0 };
 
   return {
     calls,
+    async generateTaglineTheme() {
+      calls.taglineTheme += 1;
+      return {
+        tagline: 'Automated test tagline',
+        imageTheme: 'friendly scouts outdoors illustration',
+      };
+    },
     async generateTagline() {
       calls.tagline += 1;
       return 'Automated test tagline';
