@@ -233,12 +233,10 @@ function renderNextEventCard(event, container) {
         return;
     }
 
-    const dateLabel = formatDisplayDate(event.__eventDate || event.dtstart || event.start?.iso || event.start?.raw);
     const locationLabel = event.location || '';
     const tagline = getTagline(event);
     const aiCopy = tagline ? `<p class="ai-text">${tagline}</p>` : '';
     const metaBlock = [
-        dateLabel ? `<p><span class="label">Date:</span> ${dateLabel}</p>` : '',
         locationLabel ? `<p><span class="label">Location:</span> ${locationLabel}</p>` : ''
     ].filter(Boolean).join('');
     const image = createEventImageMarkup(event);
@@ -310,7 +308,6 @@ function renderPastEventsCarousel(events, container) {
     }
 
     const cards = events.map(event => {
-        const dateLabel = formatDisplayDate(event.__eventDate || event.dtstart || event.start?.iso || event.start?.raw);
         const locationLabel = event.location ? `<p class="location">${event.location}</p>` : '';
         const tagline = getTagline(event);
         const aiCopy = tagline ? `<p class="ai-text">${tagline}</p>` : '';
@@ -321,7 +318,6 @@ function renderPastEventsCarousel(events, container) {
             <div class="event-card carousel-item" data-section="${sectionKey}">
                 ${image}
                 ${headingMarkup}
-                ${dateLabel ? `<p class="date">${dateLabel}</p>` : ''}
                 ${locationLabel}
                 ${aiCopy}
             </div>
