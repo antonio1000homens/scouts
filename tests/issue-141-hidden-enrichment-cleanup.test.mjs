@@ -22,6 +22,11 @@ test('hidden events take precedence over durable manual-review presentation', ()
   assert.match(admin, /attention: uniqueEventEntries\.filter\(\(entry\) => isEntryNeedsAttention\(entry\)\)/);
 });
 
+test('hidden cards do not expose generation actions after destructive cleanup', () => {
+  assert.match(admin, /if \(!hidden && missingFields\.length === 1/);
+  assert.match(admin, /else if \(!hidden && missingFields\.length > 0 && manualReviewStages\.length === 0\)/);
+});
+
 test('normal hide remains non-destructive and destructive hide is explicit', () => {
   assert.match(admin, /async function hideEvent\(eventIndex, fromModal = false, action = 'hide', button = null, purgeGeneratedData = false\)/);
   assert.match(admin, /Hide & clear generated data/);
