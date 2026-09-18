@@ -51,7 +51,6 @@ function actionSandbox(overrides = {}) {
     updateModalContent: () => {},
     refreshModalCurrentMetadata: () => {},
     loadEvents: () => {},
-    getSelectedModalEntry: () => entry,
     getEventHex: () => TEST_HEX,
     isHiddenEvent: () => false,
     isEntryHidden: (candidate) => Boolean(candidate?.allHidden),
@@ -89,7 +88,7 @@ function actionSandbox(overrides = {}) {
 async function invokeAdminFunction(functionName, args, sandbox) {
   const dependencies = functionName === 'pollGeneratedRequestUntilSettled'
     ? ['stopGeneratedRequestPolling', 'findAuthoritativeRequest', 'isTerminalAuthoritativeRequest', 'describeAuthoritativeRequestOutcome', 'refreshGeneratedEvent']
-    : ['buildVisibilityCommand', 'uiOperationKey'];
+    : ['buildVisibilityCommand', 'uiOperationKey', 'getSelectedModalEntry'];
   const { functions } = loadFunctionsFromSource(adminSource, [functionName, ...dependencies], sandbox);
   return functions[functionName](...args);
 }
@@ -133,6 +132,16 @@ test('admin agenda refresh delegates to the manual agenda controller', async () 
   });
   await invokeAdminFunction('refreshLambda', ['refreshAgenda'], sandbox);
   assert.deepEqual(calls, [['refreshAgenda']]);
+});
+
+test('admin Details actions resolve the selected modal entry from currentEventIndex', () => {
+  const { sandbox, entry } = actionSandbox();
+  const { functions } = loadFunctionsFromSource(adminSource, ['getSelectedModalEntry'], sandbox);
+  assert.equal(functions.getSelectedModalEntry(), entry);
+
+  const missingSelection = actionSandbox({ currentEventIndex: null });
+  const missing = loadFunctionsFromSource(adminSource, ['getSelectedModalEntry'], missingSelection.sandbox);
+  assert.equal(missing.functions.getSelectedModalEntry(), null);
 });
 
 test('admin generation buttons publish field-specific actions with only the selected HEX', async () => {
