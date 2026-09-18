@@ -246,6 +246,34 @@ export async function loadReusableGeneration({ hex, stage, generationId }) {
   return { state, generatedValue: state.generatedValue };
 }
 
+function buildManualReviewRetryUpdateInput({ normalisedHex, normalisedStage, requestedBy, now, previousFailure }) {
+  const nowIso = now.toISOString();
+  return {
+    TableName: TABLE_NAME,
+    Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
+    UpdateExpression: 'SET #state = :pending, #attemptCount = :zero, #manualReviewRetryCount = if_not_exists(#manualReviewRetryCount, :zero) + :one, #manualReviewRetriedAt = :now, #manualReviewRetriedBy = :requestedBy, #previousManualReviewErrorType = :previousErrorType, #previousManualReviewErrorMessage = :previousErrorMessage, #previousManualReviewUpdatedAt = :previousUpdatedAt, #updatedAt = :now, #expiresAt = :expiresAt REMOVE #nextRetryAt, #inProgressExpiresAt, #geminiSucceeded, #generatedValue, #generationId, #lastErrorType, #lastErrorMessage, #escalatedAt, #firstAttemptAt, #lastAttemptAt, #lastRequestId',
+    ConditionExpression: '#state = :manualReview',
+    ExpressionAttributeNames: {
+      '#state': 'state', '#attemptCount': 'attemptCount', '#manualReviewRetryCount': 'manualReviewRetryCount',
+      '#manualReviewRetriedAt': 'manualReviewRetriedAt', '#manualReviewRetriedBy': 'manualReviewRetriedBy',
+      '#previousManualReviewErrorType': 'previousManualReviewErrorType', '#previousManualReviewErrorMessage': 'previousManualReviewErrorMessage',
+      '#previousManualReviewUpdatedAt': 'previousManualReviewUpdatedAt', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt',
+      '#nextRetryAt': 'nextRetryAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#geminiSucceeded': 'geminiSucceeded',
+      '#generatedValue': 'generatedValue', '#generationId': 'generationId', '#lastErrorType': 'lastErrorType',
+      '#lastErrorMessage': 'lastErrorMessage', '#escalatedAt': 'escalatedAt', '#firstAttemptAt': 'firstAttemptAt',
+      '#lastAttemptAt': 'lastAttemptAt', '#lastRequestId': 'lastRequestId',
+    },
+    ExpressionAttributeValues: {
+      ':pending': asString('pending'), ':manualReview': asString('manual_review'), ':zero': asNumber(0), ':one': asNumber(1),
+      ':now': asString(nowIso), ':requestedBy': asString(normalise(requestedBy) || 'admin'),
+      ':previousErrorType': asString(previousFailure.type), ':previousErrorMessage': asString(previousFailure.message || ''),
+      ':previousUpdatedAt': asString(previousFailure.updatedAt || ''),
+      ':expiresAt': asNumber(Math.floor(now.getTime() / 1000) + TTL_DAYS * 86400),
+    },
+    ReturnValues: 'ALL_NEW',
+  };
+}
+
 export async function retryManualReviewEnrichment({ hex, stage, requestedBy = 'admin', now = new Date() }) {
   const normalisedHex = normalise(hex).toLowerCase();
   const normalisedStage = normaliseEnrichmentStage(stage);
@@ -259,7 +287,6 @@ export async function retryManualReviewEnrichment({ hex, stage, requestedBy = 'a
     return { reset: false, reason: 'not_manual_review', state: existing };
   }
 
-  const nowIso = now.toISOString();
   const previousFailure = {
     type: normalise(existing.lastErrorType) || 'UNKNOWN',
     message: normalise(existing.lastErrorMessage) || null,
@@ -267,30 +294,14 @@ export async function retryManualReviewEnrichment({ hex, stage, requestedBy = 'a
   };
 
   try {
-    const result = await client.send(new UpdateItemCommand({
-      TableName: TABLE_NAME,
-      Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
-      UpdateExpression: 'SET #state = :pending, #attemptCount = :zero, #manualReviewRetryCount = if_not_exists(#manualReviewRetryCount, :zero) + :one, #manualReviewRetriedAt = :now, #manualReviewRetriedBy = :requestedBy, #previousManualReviewErrorType = :previousErrorType, #previousManualReviewErrorMessage = :previousErrorMessage, #previousManualReviewUpdatedAt = :previousUpdatedAt, #updatedAt = :now, #expiresAt = :expiresAt REMOVE #nextRetryAt, #inProgressExpiresAt, #geminiSucceeded, #generatedValue, #generationId, #lastErrorType, #lastErrorMessage, #escalatedAt, #firstAttemptAt, #lastAttemptAt, #lastRequestId',
-      ConditionExpression: '#state = :manualReview',
-      ExpressionAttributeNames: {
-        '#state': 'state', '#attemptCount': 'attemptCount', '#manualReviewRetryCount': 'manualReviewRetryCount',
-        '#manualReviewRetriedAt': 'manualReviewRetriedAt', '#manualReviewRetriedBy': 'manualReviewRetriedBy',
-        '#previousManualReviewErrorType': 'previousManualReviewErrorType', '#previousManualReviewErrorMessage': 'previousManualReviewErrorMessage',
-        '#previousManualReviewUpdatedAt': 'previousManualReviewUpdatedAt', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt',
-        '#nextRetryAt': 'nextRetryAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#geminiSucceeded': 'geminiSucceeded',
-        '#generatedValue': 'generatedValue', '#generationId': 'generationId', '#lastErrorType': 'lastErrorType',
-        '#lastErrorMessage': 'lastErrorMessage', '#escalatedAt': 'escalatedAt', '#firstAttemptAt': 'firstAttemptAt',
-        '#lastAttemptAt': 'lastAttemptAt', '#lastRequestId': 'lastRequestId',
-      },
-      ExpressionAttributeValues: {
-        ':pending': asString('pending'), ':manualReview': asString('manual_review'), ':zero': asNumber(0), ':one': asNumber(1),
-        ':now': asString(nowIso), ':requestedBy': asString(normalise(requestedBy) || 'admin'),
-        ':previousErrorType': asString(previousFailure.type), ':previousErrorMessage': asString(previousFailure.message || ''),
-        ':previousUpdatedAt': asString(previousFailure.updatedAt || ''),
-        ':expiresAt': asNumber(Math.floor(now.getTime() / 1000) + TTL_DAYS * 86400),
-      },
-      ReturnValues: 'ALL_NEW',
-    }));
+    const updateInput = buildManualReviewRetryUpdateInput({
+      normalisedHex,
+      normalisedStage,
+      requestedBy,
+      now,
+      previousFailure,
+    });
+    const result = await client.send(new UpdateItemCommand(updateInput));
     return { reset: true, reason: null, previousFailure, state: unmarshallItem(result?.Attributes) };
   } catch (error) {
     if (error?.name !== 'ConditionalCheckFailedException') throw error;
