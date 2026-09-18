@@ -299,6 +299,7 @@ export function buildFullEnrichExecutionInput(message, event, name = null) {
     imageProvider,
     startStage,
     continueAfterStage: !directFieldRequest,
+    continueToImage: !getImageUrl(event),
     generationKey: eventGenerationKey(hex, event),
   };
   return {
