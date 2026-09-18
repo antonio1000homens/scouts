@@ -3512,7 +3512,7 @@ async function lambdaHandlerWithDependencies(event) {
                         skipped: 'both_fields_already_present',
                         imageTheme: existingImageTheme,
                     });
-                    runtimeOutcome = { status: 'completed', enrichmentStage: stateStage, providerCallCount: result.providerCallCount ?? 0 };
+                    runtimeOutcome = { status: 'completed', enrichmentStage: 'tagline', providerCallCount: 0 };
                     return {
                         statusCode: 200,
                         body: JSON.stringify({
@@ -3646,7 +3646,7 @@ async function lambdaHandlerWithDependencies(event) {
                 orchestrationStep: realm,
                 imageTheme: getImageThemeValue(hexData),
             });
-            runtimeOutcome = { status: 'completed', enrichmentStage: 'imageTheme', providerCallCount: result.providerCallCount ?? 0 };
+            runtimeOutcome = { status: 'completed', enrichmentStage: stateStage, providerCallCount: result.providerCallCount ?? 0 };
 
             const requiresApproval = hasCompleteApprovalData(hexData);
             if (!requiresApproval || autoApproval) {
