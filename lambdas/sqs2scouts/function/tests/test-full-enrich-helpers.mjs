@@ -290,8 +290,9 @@ test('all direct enrichment persistence paths publish their canonical HEX event 
   assert.match(sqs2scoutsDeploy, /agenda-publisher\.mjs/);
   assert.match(persistenceProcessor, /await saveHexEventToS3\(hexValue, hexData\);\s*await publishHexEventToAgenda\(hexValue, hexData\);/);
   assert.match(persistenceProcessor, /await saveHexEventToS3\(hexValue, event\);\s*await publishHexEventToAgenda\(hexValue, event\);/);
-  assert.match(persistenceProcessor, /orchestrationStep: 'tagline'/);
+  assert.match(persistenceProcessor, /orchestrationStep: realm/);
   assert.match(persistenceProcessor, /orchestrationStep: 'imageTheme'/);
+  assert.match(persistenceProcessor, /realm === 'taglineTheme' \|\| realm === 'tagline'/);
   assert.match(imageProviderWorker, /await saveEvent\(hex, event\);\s*await publishEvent\(hex, event\);/);
   assert.match(approvalLifecycleAdapter, /await saveEvent\(hex, accepted, current\.eTag\);[\s\S]*?await publishEvent\(hex, accepted\);/);
 });
