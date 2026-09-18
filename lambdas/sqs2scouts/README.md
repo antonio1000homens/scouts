@@ -113,13 +113,39 @@ Related Gemini env vars:
 - Sends notifications to the configured Slack channel (default: `#scouts-website`, ID `C0C1996TGQZ`)
 - Returns 200 on success, 500 on errors
 
+## Text enrichment orchestration
+
+Issue #121 makes automatic text enrichment a single provider operation when both text fields are absent, while preserving field-specific admin regeneration.
+
+```mermaid
+flowchart LR
+    A["Full/new enrichment"] --> B{"Persisted text fields"}
+    B -->|"tagline + theme missing"| C["taglineTheme\none Gemini text call"]
+    C --> D["atomic save + durable read-back\ntagline and imageTheme"]
+    D --> I["image generation"]
+    B -->|"tagline only missing"| T["tagline-only Gemini call"]
+    T --> I
+    B -->|"theme only missing"| H["imageTheme-only Gemini call"]
+    H --> I
+    B -->|"both text fields present"| I
+
+    U["Details: Regenerate tagline"] --> UT["direct tagline request\nmanual generation identity"]
+    UT --> X["Complete after selected field"]
+    V["Details: Regenerate image theme"] --> VT["direct imageTheme request\nmanual generation identity"]
+    VT --> X
+```
+
+The combined call uses the `tagline` enrichment-state record as the attempt/retry owner. After the canonical event is saved and read back successfully, the `imageTheme` state is also marked succeeded. A replay therefore does not schedule a second text call, and a successful combined response does not flow through a separate theme-generation stage.
+
+Direct Details actions are deliberately different: `generateTagline` and `generateImageTheme` are routed into the same state machine with `continueAfterStage=false` and `requestMode=manual`. A request-specific generation identity prevents an old cached automatic result from satisfying an explicit regeneration request.
+
 ## Supported SQS Message Schemas
 
 `sqs2scouts` reads the first SQS record body as JSON with this envelope:
 
 ```json
 {
-   "realm": "tagline | imageTheme | image | persist",
+   "realm": "taglineTheme | tagline | imageTheme | image | persist",
    "action": "string",
    "subject": "string | object",
    "title": "optional string used for runtime tracking",
@@ -134,6 +160,7 @@ Related Gemini env vars:
 ```
 
 Only these `realm` values are accepted:
+- `taglineTheme`
 - `tagline`
 - `imageTheme`
 - `image`
@@ -144,8 +171,9 @@ Any other `realm` is dropped and sent to DLQ.
 ### Key: `realm`
 
 `realm` routes the message to a specific handler:
-- `tagline`: generate tagline and, when missing, an `imageTheme` from HEX event data.
-- `imageTheme`: generate the persisted image theme only.
+- `taglineTheme`: automatic combined text enrichment. One Gemini text call returns both `tagline` and `imageTheme`; both values are written together and read back before image generation may continue.
+- `tagline`: generate only the persisted tagline. The existing image theme is left unchanged.
+- `imageTheme`: generate only the persisted image theme. The existing tagline is left unchanged.
 - `image`: generate an event image from the stored theme-derived prompt and store the returned image URL.
 - `persist`: persist the event payload (and optionally download image to website bucket).
 
@@ -175,7 +203,7 @@ Slack action IDs are also accepted and mapped before handling:
 
 #### 1. HEX string form
 
-Used by `tagline`, `imageTheme`, and `image` standard paths.
+Used by `taglineTheme`, `tagline`, `imageTheme`, and `image` standard paths.
 
 ```json
 {
@@ -242,6 +270,16 @@ HEX resolution priority inside `subject` object:
 2. `subject.hex`
 
 ## Realm-Specific Examples
+
+### `taglineTheme` (automatic combined text)
+
+```json
+{
+   "realm": "taglineTheme",
+   "action": "request",
+   "subject": "68656c6c6f2d6576656e74"
+}
+```
 
 ### `tagline`
 
