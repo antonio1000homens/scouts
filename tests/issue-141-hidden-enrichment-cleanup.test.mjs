@@ -89,6 +89,8 @@ test('metadata regeneration and manual retry replace the displayed value with a 
   assert.match(admin, /markMetadataProcessing\(entry, processingFields\)/);
   assert.match(admin, /markMetadataProcessing\(entry, \[stage\]\)/);
   assert.match(admin, /clearMetadataProcessing\(hex, processingFields\)/);
+  assert.match(admin, /This metadata field is still processing\. Please wait for the current request to finish\./);
+  assert.match(admin, /Metadata generation is already processing for this event\. Please wait for the current request to finish\./);
   assert.match(admin, /processingFields,/);
   assert.match(admin, /isMetadataFieldProcessing\(event, 'imageUrl'\) \? METADATA_PROCESSING_LABEL/);
 });
