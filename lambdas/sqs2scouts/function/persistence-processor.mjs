@@ -3363,63 +3363,137 @@ async function lambdaHandlerWithDependencies(event) {
             return { statusCode: 200, body: JSON.stringify({ message: 'Dropped unsupported realm' }) };
         }
 
-        // Handle tagline realm - generate tagline and image prompt
-        if (realm === 'tagline') {
+        // Handle combined automatic text enrichment and independent tagline regeneration.
+        // The combined realm uses the tagline enrichment-state record as the retry/idempotency
+        // owner and marks imageTheme satisfied only after both fields are durably read back.
+        if (realm === 'taglineTheme' || realm === 'tagline') {
             const hexValue = typeof rawSubject === 'string' ? rawSubject.trim() : null;
             if (!hexValue) {
-                throw new Error('tagline request missing hex identifier');
+                throw new Error(`${realm} request missing hex identifier`);
             }
-            
+
             const hexData = await loadHexEventFromS3(hexValue);
             if (!hexData) {
                 throw new Error(`HEX ${hexValue} not found`);
             }
-            
-            const generationId = buildGenerationId(hexValue, 'tagline', hexData, GEMINI_PROMPT_VERSION);
-            const result = await generateGeminiTextSuggestion(hexData, 'tagline', scoutsConfig, { hexValue, generationId, requestId: requestContext.requestId });
+
+            const existingTagline = getTagline(hexData);
+            const existingImageTheme = getImageThemeValue(hexData);
+            let textMode = realm;
+
+            // Re-evaluate persisted state at worker time so replay/race conditions cannot
+            // overwrite a field that became durable after the Step Function was started.
+            if (realm === 'taglineTheme') {
+                if (existingTagline && existingImageTheme) {
+                    console.log(JSON.stringify({
+                        event: 'gemini_text_stage_skipped',
+                        requestedTextMode: 'combined',
+                        hex: hexValue,
+                        reason: 'both_fields_already_present',
+                        providerCallCount: 0,
+                    }));
+                    await completeImageEnrichTask(messageBody, {
+                        status: 'succeeded',
+                        hex: hexValue,
+                        requestId: requestContext.requestId,
+                        orchestrationStep: 'taglineTheme',
+                        skipped: 'both_fields_already_present',
+                        imageTheme: existingImageTheme,
+                    });
+                    runtimeOutcome = { status: 'completed' };
+                    return {
+                        statusCode: 200,
+                        body: JSON.stringify({ message: `Combined text enrichment already satisfied for HEX ${hexValue}` }),
+                    };
+                }
+                if (existingTagline) textMode = 'imageTheme';
+                else if (existingImageTheme) textMode = 'tagline';
+            }
+
+            const stateStage = textMode === 'imageTheme' ? 'imageTheme' : 'tagline';
+            const generationId = buildGenerationId(hexValue, stateStage, hexData, GEMINI_PROMPT_VERSION);
+            const imageThemeGenerationId = buildGenerationId(hexValue, 'imageTheme', hexData, GEMINI_PROMPT_VERSION);
+            const result = await generateGeminiTextSuggestion(hexData, textMode, scoutsConfig, {
+                hexValue,
+                generationId,
+                requestId: requestContext.requestId,
+            });
+
             if (result?.enrichmentBlocked) {
                 await completeImageEnrichTask(messageBody, {
                     status: result.state || 'manual_review',
                     hex: hexValue,
                     requestId: requestContext.requestId,
-                    orchestrationStep: 'imageTheme',
+                    orchestrationStep: realm,
                     skipped: result.reason || 'enrichment_unavailable',
                 });
-                runtimeOutcome = { status: result.state === 'retry_wait' ? 'waiting_for_retry' : 'manual_review', failure: { type: result.failureCategory || 'ENRICHMENT_BLOCKED', message: result.failureMessage || result.reason } };
+                runtimeOutcome = {
+                    status: result.state === 'retry_wait' ? 'waiting_for_retry' : 'manual_review',
+                    failure: {
+                        type: result.failureCategory || 'ENRICHMENT_BLOCKED',
+                        message: result.failureMessage || result.reason,
+                    },
+                };
                 return {
                     statusCode: 202,
-                    body: JSON.stringify({ message: 'Tagline enrichment is currently deferred' }),
+                    body: JSON.stringify({ message: `${realm === 'taglineTheme' ? 'Combined text' : 'Tagline'} enrichment is currently deferred` }),
                 };
             }
-            if (!result?.tagline || !result?.imageTheme) throw Object.assign(new Error('Validated tagline response did not contain required event data'), { name: 'INVALID_EVENT_DATA' });
-            setTagline(hexData, result.tagline);
-            if (result?.imageTheme && !getImageThemeValue(hexData)) setImageTheme(hexData, result.imageTheme);
+
+            if ((textMode === 'tagline' || textMode === 'taglineTheme') && !result?.tagline) {
+                throw Object.assign(new Error('Validated text response did not contain tagline'), { name: 'INVALID_EVENT_DATA' });
+            }
+            if ((textMode === 'imageTheme' || textMode === 'taglineTheme') && !result?.imageTheme) {
+                throw Object.assign(new Error('Validated text response did not contain imageTheme'), { name: 'INVALID_EVENT_DATA' });
+            }
+
+            if (textMode === 'tagline' || textMode === 'taglineTheme') {
+                setTagline(hexData, result.tagline);
+            }
+            if (textMode === 'imageTheme' || textMode === 'taglineTheme') {
+                setImageTheme(hexData, result.imageTheme);
+                if (textMode === 'imageTheme') setImageApprovalState(hexData, false);
+            }
 
             try {
                 await saveHexEventToS3(hexValue, hexData);
                 const persisted = await loadHexEventFromS3(hexValue);
                 const persistedTagline = getTagline(persisted);
                 const persistedImageTheme = getImageThemeValue(persisted);
-                // A tagline request may receive an image theme from Gemini,
-                // but must preserve an existing theme. Compare read-back with
-                // the effective value on the event, not the unused suggestion.
-                const expectedImageTheme = getImageThemeValue(hexData);
-                if (persistedTagline !== result.tagline || persistedImageTheme !== expectedImageTheme) {
-                    throw new Error('Tagline enrichment read-back did not contain the generated fields');
+
+                if ((textMode === 'tagline' || textMode === 'taglineTheme') && persistedTagline !== result.tagline) {
+                    throw new Error('Text enrichment read-back did not contain the generated tagline');
                 }
+                if ((textMode === 'imageTheme' || textMode === 'taglineTheme') && persistedImageTheme !== result.imageTheme) {
+                    throw new Error('Text enrichment read-back did not contain the generated image theme');
+                }
+                if (textMode === 'tagline' && persistedImageTheme !== existingImageTheme) {
+                    throw new Error('Tagline-only enrichment modified the existing image theme');
+                }
+                if (textMode === 'imageTheme' && persistedTagline !== existingTagline) {
+                    throw new Error('Image-theme-only enrichment modified the existing tagline');
+                }
+
                 await publishHexEventToAgenda(hexValue, hexData);
             } catch (error) {
-                emitEnrichmentMetric('PersistenceRetry', 'tagline', 'publication_failed');
+                emitEnrichmentMetric('PersistenceRetry', stateStage, 'publication_failed');
                 throw error;
             }
-            if (result) {
-                await markEnrichmentSucceeded({ hex: hexValue, stage: 'tagline', generationId });
+
+            if (textMode === 'taglineTheme') {
+                await Promise.all([
+                    markEnrichmentSucceeded({ hex: hexValue, stage: 'tagline', generationId }),
+                    markEnrichmentSucceeded({ hex: hexValue, stage: 'imageTheme', generationId: imageThemeGenerationId }),
+                ]);
+            } else {
+                await markEnrichmentSucceeded({ hex: hexValue, stage: stateStage, generationId });
             }
+
             await completeImageEnrichTask(messageBody, {
                 status: 'succeeded',
                 hex: hexValue,
                 requestId: requestContext.requestId,
-                orchestrationStep: 'tagline',
+                orchestrationStep: realm,
                 imageTheme: getImageThemeValue(hexData),
             });
             runtimeOutcome = { status: 'completed' };
@@ -3428,20 +3502,20 @@ async function lambdaHandlerWithDependencies(event) {
             if (!requiresApproval || autoApproval) {
                 return {
                     statusCode: 200,
-                    body: JSON.stringify({ message: `Tagline enrichment persisted for HEX ${hexValue}` })
+                    body: JSON.stringify({ message: `${realm === 'taglineTheme' ? 'Combined text enrichment' : 'Tagline enrichment'} persisted for HEX ${hexValue}` }),
                 };
             }
 
             const message = await prepareEnrichmentReview('approval', hexData, scoutsConfig);
             const slackResponse = await postSlackMessage(message);
             await storeApprovalMessageReference(hexData, 'approval', slackResponse);
-            
+
             return {
                 statusCode: 200,
-                body: JSON.stringify({ message: `Tagline enrichment review generated for HEX ${hexValue}` })
+                body: JSON.stringify({ message: `${realm === 'taglineTheme' ? 'Combined text enrichment' : 'Tagline enrichment'} review generated for HEX ${hexValue}` }),
             };
         }
-        
+
         // Handle imageTheme realm - generate only the persisted image theme
         if (realm === 'imageTheme') {
             const hexValue = typeof rawSubject === 'string' ? rawSubject.trim() : null;
