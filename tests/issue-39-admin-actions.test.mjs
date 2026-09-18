@@ -68,6 +68,9 @@ function actionSandbox(overrides = {}) {
       label: field,
       queueLabel: field === 'tagline' ? 'AI tagline' : field === 'imageTheme' ? 'AI image theme' : field === 'full' ? 'full enrichment' : 'AI image',
     }),
+    metadataProcessingFieldsForRequest: (_event, field) => field === 'full' ? ['tagline', 'imageTheme', 'imageUrl'] : [field === 'image' ? 'imageUrl' : field],
+    markMetadataProcessing: (_entry, fields) => fields,
+    clearMetadataProcessing: () => {},
     getModalFieldValue: () => 'synthetic-value',
     isAcceptedAdminImageUrl: () => true,
     document: {
@@ -108,6 +111,7 @@ function progressSandbox(activityResponses, overrides = {}) {
     loadEvents: async () => { refreshed.events += 1; },
     updateModalContent: () => { refreshed.modal += 1; },
     getEventHex: (event) => event?.metadata?.hex || '',
+    clearMetadataProcessing: () => {},
     setTimeout: () => 0,
     clearTimeout: () => {},
     Date: { now: () => 0 },
@@ -195,7 +199,7 @@ test('admin generation progress times out when no matching request update arrive
     eventLabel: 'Progress Test Event',
   }], progress.sandbox);
 
-  assert.equal(progress.refreshed.events, 0);
+  assert.equal(progress.refreshed.events, 1);
   assert.deepEqual(progress.statuses.at(-1), {
     message: 'No AI tagline update received for "Progress Test Event" within 30 seconds.',
     tone: 'error',
