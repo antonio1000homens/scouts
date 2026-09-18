@@ -50,7 +50,7 @@ These are not sent directly by the admin page, but they affect the real pipeline
 
 | Producer | Message published to `scoutsRequests` | `scouts2sqs` result | Notes |
 | --- | --- | --- | --- |
-| Enrichment run finds new or stale work | `realm: 'scoutsRequest'`, `action: 'new'`, `subject: <merged event object>` | Derives `tagline/request`, `imageTheme/request`, `image/request`, or no publish | Used by agenda/calendar processing and retry handling. |
+| Enrichment run finds new or stale work | `realm: 'scoutsRequest'`, `action: 'new'`, `subject: <merged event object>` | Starts the canonical full-enrich workflow at `taglineTheme` when both text fields are absent, otherwise at the single missing text field or image stage | Used by agenda/calendar processing and retry handling. |
 | Reset cleanup notification | `realm: 'scouts'`, `subject: 'reset'`, `action: <removed-events summary>` | Dropped by `scouts2sqs` | `scouts2sqs` does not support the `scouts` realm on the SQS path. |
 | `sqs2scouts` callback for incomplete persisted HEX | No outbound queue message | No downstream queue work is emitted from this callback path | Persisted-but-incomplete HEX is logged and left in place. |
 
