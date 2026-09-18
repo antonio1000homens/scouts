@@ -3692,6 +3692,10 @@ async function persistCurrentField(field, action = 'persist', button = null) {
 
     const entry = getSelectedModalEntry();
     if (!entry) return;
+    if (isMetadataFieldProcessing(entry.event, field)) {
+        updateModalStatus('This metadata field is still processing. Please wait for the current request to finish.', 'info');
+        return;
+    }
 
     const config = getFieldOperationConfig(field);
     const nextValue = getModalFieldValue(field);
@@ -3792,6 +3796,11 @@ async function requestGeneratedField(field, action = 'generate', button = null, 
 
     const config = getFieldOperationConfig(field);
     const event = entry.event;
+    const requestedFields = field === 'full' ? ['tagline', 'imageTheme', 'imageUrl'] : [normaliseMetadataProcessingField(field)];
+    if (requestedFields.filter(Boolean).some((candidate) => isMetadataFieldProcessing(event, candidate))) {
+        updateModalStatus('Metadata generation is already processing for this event. Please wait for the current request to finish.', 'info');
+        return;
+    }
     const processingFields = metadataProcessingFieldsForRequest(event, field);
     const displayIndex = Number.isInteger(eventIndex) ? eventIndex : currentEventIndex;
     const eventLabel = event.summary || event.title || `Event ${(displayIndex ?? 0) + 1}`;
