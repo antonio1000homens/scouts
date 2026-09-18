@@ -154,6 +154,27 @@ test('admin generation buttons publish field-specific actions with only the sele
   }
 });
 
+test('admin field save buttons publish only the selected field and HEX', async () => {
+  const cases = [
+    ['tagline', 'persistTagline', 'saved tagline'],
+    ['imageTheme', 'persistImageTheme', 'saved theme'],
+    ['imageUrl', 'persistImageUrl', 'https://example.test/saved.jpg'],
+  ];
+
+  for (const [field, action, value] of cases) {
+    const { sandbox, sent } = actionSandbox({
+      getModalFieldValue: () => value,
+      setTimeout: () => 0,
+    });
+    await invokeAdminFunction('persistCurrentField', [field, action], sandbox);
+    assert.deepEqual(sent, [{
+      realm: 'scouts',
+      subject: { hex: TEST_HEX, [field]: value },
+      action,
+    }], `${field} persist request contract changed`);
+  }
+});
+
 test('admin generation progress stops on a matching completed request and refreshes the modal', async () => {
   const progress = progressSandbox([{ requests: [{ requestId: 'request-1', state: 'completed' }] }]);
   await invokeAdminFunction('pollGeneratedRequestUntilSettled', ['request-1', {
