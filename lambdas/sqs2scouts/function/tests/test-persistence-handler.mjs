@@ -175,6 +175,51 @@ test('field-level persist aliases update canonical metadata instead of being ove
   assert.equal(imageUrl.metadata.image.url, 'https://example.test/new.jpg');
 });
 
+test('real persistence handler merges canonical sparse field saves without clearing unrelated metadata', async () => {
+  const store = fixtureStore();
+  const sentMessages = [];
+  const { createPersistenceHandler } = await loadPersistenceModule(store, sentMessages);
+  const handler = createPersistenceHandler({
+    recordRequestActivity: async () => null,
+    s3Client: { send: async (request) => {
+      const { Key } = request.input;
+      if (request.name === 'GetObjectCommand') {
+        if (!(Key in store)) { const error = new Error('Missing'); error.name = 'NoSuchKey'; throw error; }
+        return { Body: body(store[Key]), ETag: '"fixture"' };
+      }
+      if (request.name === 'PutObjectCommand') {
+        store[Key] = JSON.parse(Buffer.from(request.input.Body).toString('utf8'));
+        return { ETag: '"fixture-after"' };
+      }
+      throw new Error(`Unexpected S3 command ${request.name}`);
+    } },
+    sqsClient: { send: async (request) => { sentMessages.push(request.input); return {}; } },
+    publishCanonicalEventToAgenda: async ({ loadAgenda, writeAgenda, hex, event }) => {
+      const agenda = await loadAgenda();
+      agenda.events = agenda.events.map((entry) => entry.metadata.hex === hex
+        ? { ...entry, metadata: clone(event.metadata) }
+        : entry);
+      await writeAgenda(agenda);
+      return { matched: 2 };
+    },
+  });
+
+  const result = await handler({ Records: [{ eventSource: 'aws:sqs', messageId: 'message-save-tagline', body: JSON.stringify({
+    realm: 'persist',
+    action: 'persist',
+    requestId: 'save-tagline',
+    hex: HEX,
+    subject: { metadata: { hex: HEX, tagline: 'Updated through handler' } },
+    subjectLabel: 'tagline',
+  }) }] });
+
+  assert.equal(result.statusCode, 200, result.body);
+  const persisted = store[`events/${HEX}.json`];
+  assert.equal(persisted.metadata.tagline, 'Updated through handler');
+  assert.equal(persisted.metadata.image.theme, 'calendar');
+  assert.equal(persisted.metadata.image.url, '/website/eventImages/holiday.webp');
+});
+
 test('real persistence handler treats legacy occurrence selectors as HEX-wide visibility', async () => {
   const store = fixtureStore();
   const sentMessages = [];
