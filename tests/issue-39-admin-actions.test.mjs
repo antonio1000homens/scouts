@@ -68,6 +68,8 @@ function actionSandbox(overrides = {}) {
       label: field,
       queueLabel: field === 'tagline' ? 'AI tagline' : field === 'imageTheme' ? 'AI image theme' : field === 'full' ? 'full enrichment' : 'AI image',
     }),
+    normaliseMetadataProcessingField: (field) => field === 'image' ? 'imageUrl' : field,
+    isMetadataFieldProcessing: () => false,
     metadataProcessingFieldsForRequest: (_event, field) => field === 'full' ? ['tagline', 'imageTheme', 'imageUrl'] : [field === 'image' ? 'imageUrl' : field],
     markMetadataProcessing: (_entry, fields) => fields,
     clearMetadataProcessing: () => {},
