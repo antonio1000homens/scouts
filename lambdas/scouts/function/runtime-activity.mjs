@@ -130,14 +130,23 @@ function collapseRootActivity(rows = []) {
   return [...grouped.values()].sort((a, b) => time(b.updatedAt || b.createdAt) - time(a.updatedAt || a.createdAt));
 }
 
+function normaliseRecoverableEnrichmentStage(value) {
+  const stage = text(value);
+  // Combined text enrichment uses the tagline state row unless the worker-time
+  // re-read narrows it to imageTheme; newer worker activity records that
+  // effective stage directly. Keep this mapping for older/in-flight activity.
+  if (stage === 'taglineTheme') return 'tagline';
+  return RECOVERABLE_ENRICHMENT_STAGES.has(stage) ? stage : '';
+}
+
 function enrichmentStageFromActivity(request) {
   request = request || {};
-  const direct = text(request.stage);
-  if (RECOVERABLE_ENRICHMENT_STAGES.has(direct)) return direct;
+  const direct = normaliseRecoverableEnrichmentStage(request.stage);
+  if (direct) return direct;
   const timeline = Array.isArray(request.timeline) ? request.timeline : [];
   for (let index = timeline.length - 1; index >= 0; index -= 1) {
-    const stage = text(timeline[index]?.stage);
-    if (RECOVERABLE_ENRICHMENT_STAGES.has(stage)) return stage;
+    const stage = normaliseRecoverableEnrichmentStage(timeline[index]?.stage);
+    if (stage) return stage;
   }
   return '';
 }
