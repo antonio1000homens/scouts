@@ -49,17 +49,32 @@ test('tracked text does not contain developer home-directory paths', () => {
   assert.deepEqual(offenders, [], `Developer home-directory paths found in:\n${offenders.join('\n')}`);
 });
 
-test('deployment targets come from GitHub Actions variables rather than public workflow literals', () => {
+test('deployment targets come from environment configuration rather than public deployment literals', () => {
   const workflows = [
     readFileSync('.github/workflows/deploy-to-s3.yml', 'utf8'),
     readFileSync('.github/workflows/live-regression-canary.yml', 'utf8'),
+  ];
+  const deploymentFiles = [
+    '.github/workflows/deploy-to-s3.yml',
+    '.github/workflows/live-regression-canary.yml',
+    'lambdas/shared-layer/deploy.sh',
+    'lambdas/scouts-queues/deploy.sh',
+    'lambdas/scouts-full-enrich/deploy.sh',
+    'lambdas/scouts2sqs/deploy.sh',
+    'lambdas/scouts-slack-handler/deploy.sh',
+    'lambdas/scouts/deploy.sh',
+    'lambdas/sqs2scouts/deploy.sh',
   ];
 
   for (const workflow of workflows) {
     assert.match(workflow, /EXPECTED_AWS_ACCOUNT: \$\{\{ vars\.EXPECTED_AWS_ACCOUNT \}\}/);
     assert.match(workflow, /WEBSITE_BUCKET: \$\{\{ vars\.WEBSITE_BUCKET \}\}/);
-    assert.doesNotMatch(workflow, /553490163883/);
-    assert.doesNotMatch(workflow, /scouts-2ndtolworth-prod-553490163883/);
+  }
+
+  for (const path of deploymentFiles) {
+    const source = readFileSync(path, 'utf8');
+    assert.doesNotMatch(source, /553490163883/, `${path} must not hardcode the production AWS account`);
+    assert.doesNotMatch(source, /scouts-2ndtolworth-prod-553490163883/, `${path} must not hardcode the production website bucket`);
   }
 });
 
