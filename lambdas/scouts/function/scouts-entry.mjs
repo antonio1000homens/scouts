@@ -457,6 +457,13 @@ function recoveryActivityId(body) {
   return text(body?.activityId || body?.requestId || body?.operationId);
 }
 
+function activityRecoveryCoordinates(request, recovery, activityId) {
+  const hex = normalizePrivateEventHex(request.hex);
+  const stage = normaliseEnrichmentStage(recovery.stage);
+  const rootRequestId = text(request.rootRequestId || request.requestId || activityId);
+  return { hex, stage, rootRequestId };
+}
+
 function activityMatchesId(request, activityId) {
   return text(request?.requestId) === activityId
     || text(request?.rootRequestId) === activityId
@@ -759,9 +766,7 @@ export async function handler(event = {}) {
           });
         }
 
-        hex = normalizePrivateEventHex(request.hex);
-        stage = normaliseEnrichmentStage(recovery.stage);
-        rootRequestId = text(request.rootRequestId || request.requestId || activityId);
+        ({ hex, stage, rootRequestId } = activityRecoveryCoordinates(request, recovery, activityId));
       } else {
         hex = normalizePrivateEventHex(command.body?.hex);
         stage = normaliseEnrichmentStage(command.body?.stage);
