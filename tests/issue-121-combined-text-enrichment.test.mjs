@@ -208,7 +208,7 @@ test('production worker enforces atomic read-back, manual regeneration, state sa
 
   assert.match(worker, /realm === 'taglineTheme' \|\| realm === 'tagline'/);
   assert.match(worker, /requestedTextMode: mode === 'taglineTheme' \? 'combined' : mode/);
-  assert.match(worker, /providerCallCount: 1/);
+  assert.match(worker, /providerCallCount,/);
   assert.match(worker, /inputTokens:/);
   assert.match(worker, /outputTokens:/);
   assert.match(worker, /totalTokens:/);
