@@ -117,6 +117,7 @@ async function loadPersistenceModule(store, sentMessages) {
   await module.evaluate();
   return {
     createPersistenceHandler: module.namespace.createPersistenceHandler,
+    buildPersistEventPayload: module.namespace.buildPersistEventPayload,
   };
 }
 
@@ -142,6 +143,36 @@ function fixtureStore() {
     'scouts.conf': {},
   };
 }
+
+test('field-level persist aliases update canonical metadata instead of being overwritten by normalization', async () => {
+  const store = fixtureStore();
+  const { buildPersistEventPayload } = await loadPersistenceModule(store, []);
+
+  const tagline = buildPersistEventPayload(
+    store[`events/${HEX}.json`],
+    { hex: HEX, tagline: 'Updated tagline' },
+    'persist',
+  );
+  assert.equal(tagline.metadata.tagline, 'Updated tagline');
+  assert.equal(tagline.metadata.image.theme, 'calendar');
+
+  const theme = buildPersistEventPayload(
+    store[`events/${HEX}.json`],
+    { hex: HEX, imageTheme: 'updated theme' },
+    'persist',
+  );
+  assert.equal(theme.metadata.tagline, 'School holiday');
+  assert.equal(theme.metadata.image.theme, 'updated theme');
+  assert.equal(theme.metadata.image.url, '/website/eventImages/holiday.webp');
+
+  const imageUrl = buildPersistEventPayload(
+    store[`events/${HEX}.json`],
+    { hex: HEX, imageUrl: 'https://example.test/new.jpg' },
+    'persist',
+  );
+  assert.equal(imageUrl.metadata.image.theme, 'calendar');
+  assert.equal(imageUrl.metadata.image.url, 'https://example.test/new.jpg');
+});
 
 test('real persistence handler treats legacy occurrence selectors as HEX-wide visibility', async () => {
   const store = fixtureStore();
