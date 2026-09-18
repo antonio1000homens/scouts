@@ -99,7 +99,7 @@ Resources:
                     "hex.$": "$.requestHex",
                     "orchestrationType": "fullEnrich",
                     "orchestrationStep": "taglineTheme",
-                    "taskToken.$": "$.Task.Token"
+                    "taskToken.$": "$$.Task.Token"
                   }
                 },
                 "TimeoutSeconds": ${StageTimeoutSeconds},
@@ -116,6 +116,19 @@ Resources:
               "EvaluateTaglineThemeResult": {
                 "Type": "Choice",
                 "Choices": [
+                  {
+                    "And": [
+                      {
+                        "Variable": "$.taglineThemeResult.status",
+                        "StringEquals": "succeeded"
+                      },
+                      {
+                        "Variable": "$.continueToImage",
+                        "BooleanEquals": false
+                      }
+                    ],
+                    "Next": "Complete"
+                  },
                   {
                     "Variable": "$.taglineThemeResult.status",
                     "StringEquals": "succeeded",
@@ -188,6 +201,19 @@ Resources:
                     "Next": "Complete"
                   },
                   {
+                    "And": [
+                      {
+                        "Variable": "$.taglineResult.status",
+                        "StringEquals": "succeeded"
+                      },
+                      {
+                        "Variable": "$.continueToImage",
+                        "BooleanEquals": false
+                      }
+                    ],
+                    "Next": "Complete"
+                  },
+                  {
                     "Variable": "$.taglineResult.status",
                     "StringEquals": "succeeded",
                     "Next": "SelectImageProvider"
@@ -253,6 +279,19 @@ Resources:
                       },
                       {
                         "Variable": "$.continueAfterStage",
+                        "BooleanEquals": false
+                      }
+                    ],
+                    "Next": "Complete"
+                  },
+                  {
+                    "And": [
+                      {
+                        "Variable": "$.imageThemeResult.status",
+                        "StringEquals": "succeeded"
+                      },
+                      {
+                        "Variable": "$.continueToImage",
                         "BooleanEquals": false
                       }
                     ],
