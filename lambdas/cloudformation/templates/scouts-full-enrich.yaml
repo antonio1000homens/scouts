@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Scouts full enrichment Step Functions workflow (tagline -> imageTheme -> image)
+Description: Scouts full enrichment Step Functions workflow (combined text or field-specific text -> image)
 
 Parameters:
   StateMachineName:
@@ -67,9 +67,77 @@ Resources:
                     "Variable": "$.startStage",
                     "StringEquals": "imageTheme",
                     "Next": "GenerateImageTheme"
+                  },
+                  {
+                    "Variable": "$.startStage",
+                    "StringEquals": "tagline",
+                    "Next": "GenerateTagline"
+                  },
+                  {
+                    "Variable": "$.startStage",
+                    "StringEquals": "taglineTheme",
+                    "Next": "GenerateTaglineAndTheme"
                   }
                 ],
-                "Default": "GenerateTagline"
+                "Default": "GenerateTaglineAndTheme"
+              },
+              "GenerateTaglineAndTheme": {
+                "Type": "Task",
+                "Resource": "arn:${AWS::Partition}:states:::sqs:sendMessage.waitForTaskToken",
+                "Parameters": {
+                  "QueueUrl": "${RequestsQueueUrl}",
+                  "MessageBody": {
+                    "realm": "scoutsRequest",
+                    "action": "request",
+                    "subject": "taglineTheme",
+                    "subjectLabel": "taglineTheme",
+                    "source": "scouts-full-enrich",
+                    "approvalMode.$": "$.approvalMode",
+                    "requestMode.$": "$.requestMode",
+                    "requestId.$": "$.requestId",
+                    "requestHex.$": "$.requestHex",
+                    "hex.$": "$.requestHex",
+                    "orchestrationType": "fullEnrich",
+                    "orchestrationStep": "taglineTheme",
+                    "taskToken.$": "$.Task.Token"
+                  }
+                },
+                "TimeoutSeconds": ${StageTimeoutSeconds},
+                "ResultPath": "$.taglineThemeResult",
+                "Catch": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "ResultPath": "$.failure",
+                    "Next": "UnexpectedFailure"
+                  }
+                ],
+                "Next": "EvaluateTaglineThemeResult"
+              },
+              "EvaluateTaglineThemeResult": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.taglineThemeResult.status",
+                    "StringEquals": "succeeded",
+                    "Next": "SelectImageProvider"
+                  },
+                  {
+                    "Variable": "$.taglineThemeResult.status",
+                    "StringEquals": "manual_review",
+                    "Next": "ManualReview"
+                  },
+                  {
+                    "Variable": "$.taglineThemeResult.status",
+                    "StringEquals": "retry_wait",
+                    "Next": "Deferred"
+                  },
+                  {
+                    "Variable": "$.taglineThemeResult.status",
+                    "StringEquals": "deferred",
+                    "Next": "Deferred"
+                  }
+                ],
+                "Default": "UnexpectedFailure"
               },
               "GenerateTagline": {
                 "Type": "Task",
@@ -107,9 +175,22 @@ Resources:
                 "Type": "Choice",
                 "Choices": [
                   {
+                    "And": [
+                      {
+                        "Variable": "$.taglineResult.status",
+                        "StringEquals": "succeeded"
+                      },
+                      {
+                        "Variable": "$.continueAfterStage",
+                        "BooleanEquals": false
+                      }
+                    ],
+                    "Next": "Complete"
+                  },
+                  {
                     "Variable": "$.taglineResult.status",
                     "StringEquals": "succeeded",
-                    "Next": "GenerateImageTheme"
+                    "Next": "SelectImageProvider"
                   },
                   {
                     "Variable": "$.taglineResult.status",
@@ -164,6 +245,19 @@ Resources:
               "EvaluateImageThemeResult": {
                 "Type": "Choice",
                 "Choices": [
+                  {
+                    "And": [
+                      {
+                        "Variable": "$.imageThemeResult.status",
+                        "StringEquals": "succeeded"
+                      },
+                      {
+                        "Variable": "$.continueAfterStage",
+                        "BooleanEquals": false
+                      }
+                    ],
+                    "Next": "Complete"
+                  },
                   {
                     "Variable": "$.imageThemeResult.status",
                     "StringEquals": "succeeded",
