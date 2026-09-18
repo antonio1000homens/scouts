@@ -4,10 +4,38 @@ let eventsData = [];
 let uniqueEventEntries = [];
 let visibleEventEntries = [];
 let currentEventIndex = null;
+let currentEventHex = null;
+
+function findEventEntryByHex(hex) {
+    const normalizedHex = String(hex || '').trim().toLowerCase();
+    if (!normalizedHex) return { entry: null, index: null };
+
+    const visibleIndex = visibleEventEntries.findIndex(
+        (candidate) => String(getEventHex(candidate?.event) || '').trim().toLowerCase() === normalizedHex,
+    );
+    if (visibleIndex >= 0) {
+        return { entry: visibleEventEntries[visibleIndex], index: visibleIndex };
+    }
+
+    const uniqueEntry = uniqueEventEntries.find(
+        (candidate) => String(getEventHex(candidate?.event) || '').trim().toLowerCase() === normalizedHex,
+    ) || null;
+    return { entry: uniqueEntry, index: null };
+}
 
 function getSelectedModalEntry() {
+    if (currentEventHex) {
+        const resolved = findEventEntryByHex(currentEventHex);
+        if (resolved.entry) {
+            if (Number.isInteger(resolved.index)) currentEventIndex = resolved.index;
+            return resolved.entry;
+        }
+    }
+
     if (!Number.isInteger(currentEventIndex)) return null;
-    return visibleEventEntries[currentEventIndex] || null;
+    const entry = visibleEventEntries[currentEventIndex] || null;
+    if (entry?.event) currentEventHex = getEventHex(entry.event) || null;
+    return entry;
 }
 
 let apiAuthReady = false;
@@ -89,6 +117,8 @@ const ADMIN_READ_TIMEOUT_MS = 12_000;
 const HEX_PREVIEW_POLL_INTERVAL_MS = 5000;
 const GENERATED_REQUEST_POLL_INTERVAL_MS = 3000;
 const GENERATED_REQUEST_POLL_TIMEOUT_MS = 30000;
+const PERSISTED_FIELD_POLL_INTERVAL_MS = 1000;
+const PERSISTED_FIELD_POLL_TIMEOUT_MS = 30000;
 const QUEUED_STALLED_THRESHOLD_MS = 60 * 1000;
 let activeHexPreviewCardIndex = null;
 let activeHexPreviewHex = null;
@@ -97,6 +127,9 @@ let hexPreviewAutoRefreshEnabled = false;
 let hexPreviewIntervalMs = HEX_PREVIEW_POLL_INTERVAL_MS;
 let generatedRequestPollTimer = null;
 let generatedRequestPollToken = 0;
+let imageThemePersistPollTimer = null;
+let imageThemePersistPollToken = 0;
+let pendingImageThemePersist = null;
 
 async function buildHttpError(response) {
     let details = '';
@@ -3299,13 +3332,14 @@ function openUploadModal(index) {
         return;
     }
 
-    currentEventIndex = index;
     const entry = visibleEventEntries[index];
     if (!entry || !entry.event) {
         updateRuntimeDetails('Unable to open editor for selected event.', 'error');
         return;
     }
     const event = entry.event;
+    currentEventIndex = index;
+    currentEventHex = getEventHex(event) || null;
     const modal = document.getElementById('upload-modal');
     
     document.getElementById('modal-event-name').textContent = event.summary || event.title || 'Event ' + index;
@@ -3360,6 +3394,7 @@ function openUploadModal(index) {
     document.getElementById('modal-status').className = 'status-text';
     
     modal.style.display = 'flex';
+    syncPendingImageThemeUi();
     window.scoutsApprovalController?.refreshLabels?.();
 }
 
@@ -3414,16 +3449,149 @@ function describeAuthoritativeRequestOutcome(request) {
 
 async function refreshGeneratedEvent(hex) {
     await loadEvents({ silent: true });
-    if (currentEventIndex === null) return;
+    const normalizedHex = String(hex || '').trim().toLowerCase();
+    if (!normalizedHex) return;
+
+    const resolved = findEventEntryByHex(normalizedHex);
+    if (!resolved.entry) return;
+
+    currentEventHex = normalizedHex;
+    if (Number.isInteger(resolved.index)) {
+        currentEventIndex = resolved.index;
+        updateModalContent(resolved.index);
+    } else {
+        refreshModalCurrentMetadata(resolved.entry.event);
+    }
+}
+
+function isImageThemePersistPending(hex = currentEventHex) {
+    if (!pendingImageThemePersist) return false;
+    const normalizedHex = String(hex || '').trim().toLowerCase();
+    return Boolean(normalizedHex && pendingImageThemePersist.hex === normalizedHex);
+}
+
+function syncPendingImageThemeUi() {
+    const button = document.getElementById('modal-generate-image-button');
+    if (!button) return;
+
+    if (isImageThemePersistPending()) {
+        button.dataset.apiPending = 'true';
+        button.dataset.themePersistPending = 'true';
+        button.disabled = true;
+        button.textContent = 'Waiting for image theme…';
+        button.title = 'Generate image will be enabled after the saved image theme is confirmed.';
+        return;
+    }
+
+    if (button.dataset.themePersistPending === 'true') {
+        delete button.dataset.themePersistPending;
+        delete button.dataset.apiPending;
+        button.textContent = 'Generate image';
+        button.title = '';
+    }
+    refreshApiActionButtons();
+}
+
+function beginPendingImageThemePersist(hex, expectedValue) {
+    imageThemePersistPollToken += 1;
+    if (imageThemePersistPollTimer) {
+        clearTimeout(imageThemePersistPollTimer);
+        imageThemePersistPollTimer = null;
+    }
+    pendingImageThemePersist = {
+        hex: String(hex || '').trim().toLowerCase(),
+        expectedValue: String(expectedValue || '').trim(),
+        requestId: '',
+    };
+    syncPendingImageThemeUi();
+}
+
+function clearPendingImageThemePersist(hex = null) {
+    if (hex && pendingImageThemePersist?.hex !== String(hex).trim().toLowerCase()) return;
+    imageThemePersistPollToken += 1;
+    if (imageThemePersistPollTimer) {
+        clearTimeout(imageThemePersistPollTimer);
+        imageThemePersistPollTimer = null;
+    }
+    pendingImageThemePersist = null;
+    syncPendingImageThemeUi();
+}
+
+async function pollPersistedFieldUntilSettled(requestId, options) {
+    const { hex, field, expectedValue, config, eventLabel } = options || {};
+    if (field !== 'imageTheme') return;
 
     const normalizedHex = String(hex || '').trim().toLowerCase();
-    const refreshedIndex = visibleEventEntries.findIndex(
-        (entry) => getEventHex(entry?.event).toLowerCase() === normalizedHex,
-    );
-    if (refreshedIndex < 0) return;
+    const normalizedExpectedValue = String(expectedValue || '').trim();
+    if (!pendingImageThemePersist
+        || pendingImageThemePersist.hex !== normalizedHex
+        || pendingImageThemePersist.expectedValue !== normalizedExpectedValue) {
+        beginPendingImageThemePersist(normalizedHex, normalizedExpectedValue);
+    }
+    pendingImageThemePersist.requestId = hasText(requestId) ? String(requestId).trim() : '';
+    const pollToken = imageThemePersistPollToken;
+    const deadline = Date.now() + PERSISTED_FIELD_POLL_TIMEOUT_MS;
 
-    currentEventIndex = refreshedIndex;
-    updateModalContent(refreshedIndex);
+    const check = async () => {
+        if (pollToken !== imageThemePersistPollToken) return;
+
+        let requestCompleted = !pendingImageThemePersist?.requestId;
+        if (pendingImageThemePersist?.requestId) {
+            try {
+                const activity = await pollQueueDepthSnapshots();
+                if (pollToken !== imageThemePersistPollToken) return;
+                const request = findAuthoritativeRequest(activity, pendingImageThemePersist.requestId);
+                if (request && isTerminalAuthoritativeRequest(request)) {
+                    if (String(request.state || '').trim().toLowerCase() !== 'completed') {
+                        const outcome = describeAuthoritativeRequestOutcome(request);
+                        clearPendingImageThemePersist(normalizedHex);
+                        updateModalStatus(`${config?.label || 'Image Theme'} ${outcome} for "${eventLabel}".`, 'error');
+                        return;
+                    }
+                    requestCompleted = true;
+                }
+            } catch (error) {
+                console.warn('[AdminPersist] Unable to poll image-theme persist request', error);
+            }
+        }
+
+        if (requestCompleted) {
+            try {
+                await loadEvents({ silent: true });
+                if (pollToken !== imageThemePersistPollToken) return;
+                const resolved = findEventEntryByHex(normalizedHex);
+                const durableValue = String(getImageTheme(resolved.entry?.event) || '').trim();
+                if (resolved.entry && durableValue === normalizedExpectedValue) {
+                    clearPendingImageThemePersist(normalizedHex);
+                    if (currentEventHex === normalizedHex) {
+                        if (Number.isInteger(resolved.index)) {
+                            currentEventIndex = resolved.index;
+                            updateModalContent(resolved.index);
+                        } else {
+                            refreshModalCurrentMetadata(resolved.entry.event);
+                        }
+                    }
+                    updateModalStatus(`${config?.label || 'Image Theme'} saved and confirmed for "${eventLabel}". Generate image is now available.`, 'success');
+                    return;
+                }
+            } catch (error) {
+                console.warn('[AdminPersist] Unable to verify durable image theme', error);
+            }
+        }
+
+        if (Date.now() >= deadline) {
+            imageThemePersistPollTimer = null;
+            updateModalStatus(
+                `Image theme save for "${eventLabel}" could not be confirmed within 30 seconds. Generate image remains disabled; save the theme again or reload before generating.`,
+                'error',
+            );
+            return;
+        }
+
+        imageThemePersistPollTimer = setTimeout(check, PERSISTED_FIELD_POLL_INTERVAL_MS);
+    };
+
+    await check();
 }
 
 async function pollGeneratedRequestUntilSettled(requestId, options) {
@@ -3485,6 +3653,8 @@ function closeUploadModal() {
     if (imagePromptInput) imagePromptInput.value = '';
     if (imageUrlInput) imageUrlInput.value = '';
     currentEventIndex = null;
+    currentEventHex = null;
+    syncPendingImageThemeUi();
 }
 
 // Close modal when clicking outside
@@ -3725,6 +3895,7 @@ async function persistCurrentField(field, action = 'persist', button = null) {
     const operationKey = uiOperationKey(entry, `persist:${field}`);
     if (pendingUiOperations.has(operationKey)) return;
     pendingUiOperations.set(operationKey, true);
+    if (field === 'imageTheme') beginPendingImageThemePersist(hex, nextValue);
 
     const subject = {
         hex,
@@ -3764,10 +3935,22 @@ async function persistCurrentField(field, action = 'persist', button = null) {
         refreshModalCurrentMetadata(entry.event);
 
         await pollQueueDepthSnapshots();
-        setTimeout(() => {
-            loadEvents({ silent: true });
-        }, 1500);
+        const requestId = extractBackendRequestId(result);
+        if (field === 'imageTheme') {
+            void pollPersistedFieldUntilSettled(requestId, {
+                hex,
+                field,
+                expectedValue: nextValue,
+                config,
+                eventLabel,
+            });
+        } else {
+            setTimeout(() => {
+                loadEvents({ silent: true });
+            }, 1500);
+        }
     } catch (error) {
+        if (field === 'imageTheme') clearPendingImageThemePersist(hex);
         console.error(`Error persisting ${config.label}:`, error);
         const failureMessage = `Failed to persist ${config.label.toLowerCase()}: ${error.message}`;
         updateModalStatus(failureMessage, 'error');
@@ -3813,6 +3996,11 @@ async function requestGeneratedField(field, action = 'generate', button = null, 
     const hex = getEventHex(event);
     if (!hex) {
         updateModalStatus(`Cannot queue ${config.queueLabel}: event is missing HEX.`, 'error');
+        return;
+    }
+    if (normaliseMetadataProcessingField(field) === 'imageUrl' && isImageThemePersistPending(hex)) {
+        updateModalStatus('Waiting for the saved image theme to be confirmed before generating an image.', 'info');
+        syncPendingImageThemeUi();
         return;
     }
 
