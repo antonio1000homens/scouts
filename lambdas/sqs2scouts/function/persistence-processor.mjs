@@ -968,7 +968,7 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
             apiKey: geminiApiKey,
             httpOptions: { apiVersion: GEMINI_API_VERSION },
         });
-        const { result, model, attemptedModels } = await generateGeminiTextWithFallback({
+        const { result, model, attemptedModels, providerCallCount } = await generateGeminiTextWithFallback({
             models: GEMINI_TEXT_MODEL_PREFERENCES,
             generate: async (modelName) => {
                 console.log('[Gemini] Request payload:', { model: modelName, prompt: prompt.substring(0, 200) + '...' });
@@ -997,7 +997,7 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
             requestedTextMode: mode === 'taglineTheme' ? 'combined' : mode,
             enrichmentStateStage: stage,
             model,
-            providerCallCount: 1,
+            providerCallCount,
             inputTokens: Number.isFinite(Number(usageMetadata?.promptTokenCount)) ? Number(usageMetadata.promptTokenCount) : null,
             outputTokens: Number.isFinite(Number(usageMetadata?.candidatesTokenCount)) ? Number(usageMetadata.candidatesTokenCount) : null,
             totalTokens: Number.isFinite(Number(usageMetadata?.totalTokenCount)) ? Number(usageMetadata.totalTokenCount) : null,
