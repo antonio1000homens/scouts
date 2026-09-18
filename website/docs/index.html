@@ -37,7 +37,7 @@
             <section class="docs-grid">
                 <article class="docs-card">
                     <h3>Orchestration</h3>
-                    <p><code>scouts-full-enrich</code> is the authoritative normal-path workflow for tagline, image theme, and image generation.</p>
+                    <p><code>scouts-full-enrich</code> is the authoritative normal-path workflow. When both text fields are missing it generates tagline + image theme in one Gemini call, then continues to image generation.</p>
                 </article>
                 <article class="docs-card">
                     <h3>Transport</h3>
@@ -63,14 +63,14 @@ flowchart LR
     Q1 --> B[scouts2sqs\nfull-enrich adapter]
     B -->|StartExecution| SF[Step Functions\nscouts-full-enrich]
 
-    SF -->|waitForTaskToken\ntagline / imageTheme / image| Q1
+    SF -->|waitForTaskToken\ntaglineTheme / tagline / imageTheme / image| Q1
     Q1 --> B
     B -->|translate callback stage| Q2[(SQS scoutsProcessing)]
     Q2 --> W[sqs2scouts\nfull-enrich adapter]
 
     W --> D[(DynamoDB\nscouts-enrichment-state)]
     W --> U[(DynamoDB\nusage counters)]
-    W -->|tagline + imageTheme| G[Gemini text]
+    W -->|taglineTheme: one call for both fields\nor field-specific text call| G[Gemini text]
     W -->|image, provider=cloudflare| C[Cloudflare Workers AI]
     W -->|image, provider=gemini| GI[Gemini image]
     W --> S3[(S3 events + images)]
@@ -101,7 +101,14 @@ sequenceDiagram
     S->>R: scoutsRequest new/retry
     R->>I: SQS event
     I->>SF: StartExecution(startStage, imageProvider)
-    SF->>R: stage request + taskToken
+    alt both tagline and image theme are missing
+        SF->>R: taglineTheme stage + taskToken
+        Note over SF,W: one Gemini text call; persist both fields atomically
+    else exactly one text field is missing
+        SF->>R: tagline or imageTheme stage + taskToken
+    else text is already complete
+        SF->>R: image stage + taskToken
+    end
     R->>I: callback-stage message
     I->>P: translated worker job + taskToken
     P->>W: SQS event
@@ -129,12 +136,13 @@ sequenceDiagram
                 <table class="docs-table">
                     <thead><tr><th>Stage</th><th>Provider</th><th>Persisted field</th><th>Next step</th></tr></thead>
                     <tbody>
-                        <tr><td><code>tagline</code></td><td>Gemini text</td><td><code>metadata.tagline</code></td><td><code>imageTheme</code></td></tr>
-                        <tr><td><code>imageTheme</code></td><td>Gemini text</td><td><code>metadata.image.theme</code></td><td><code>image</code></td></tr>
+                        <tr><td><code>taglineTheme</code></td><td>Gemini text</td><td><code>metadata.tagline</code> + <code>metadata.image.theme</code> in one durable write/read-back</td><td><code>image</code></td></tr>
+                        <tr><td><code>tagline</code></td><td>Gemini text</td><td><code>metadata.tagline</code> only</td><td><code>image</code> when required, otherwise Complete</td></tr>
+                        <tr><td><code>imageTheme</code></td><td>Gemini text</td><td><code>metadata.image.theme</code> only</td><td><code>image</code> when required, otherwise Complete</td></tr>
                         <tr><td><code>image</code></td><td>Cloudflare or Gemini</td><td><code>metadata.image.url</code></td><td>Complete</td></tr>
                     </tbody>
                 </table>
-                <p>The workflow determines the first missing stage when it starts, so partially enriched events do not regenerate fields that already exist.</p>
+                <p>The workflow determines the first missing stage when it starts. A new event with neither text field starts at <code>taglineTheme</code>; partial events use only the missing field. The Details-page <code>generateTagline</code> and <code>generateImageTheme</code> actions deliberately start fresh manual field-only executions and stop after the selected field, so they do not regenerate the other text field or image.</p>
             </section>
 
             <section class="docs-section">
