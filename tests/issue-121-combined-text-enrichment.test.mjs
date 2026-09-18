@@ -194,13 +194,27 @@ test('production orchestration routes direct text buttons through the state mach
 
   assert.match(stateMachine, /"GenerateTaglineAndTheme"/);
   assert.match(stateMachine, /"subject": "taglineTheme"/);
-  assert.match(stateMachine, /"taglineThemeResult\.status"[\s\S]*"Next": "SelectImageProvider"/);
-  assert.match(stateMachine, /"taglineResult\.status"[\s\S]*"BooleanEquals": false[\s\S]*"Next": "Complete"/);
-  assert.match(stateMachine, /"imageThemeResult\.status"[\s\S]*"BooleanEquals": false[\s\S]*"Next": "Complete"/);
+  assert.match(stateMachine, /"\\$\\.taglineThemeResult\\.status"[\\s\\S]*"Next": "SelectImageProvider"/);
+  assert.match(stateMachine, /"\\$\\.taglineResult\\.status"[\\s\\S]*"BooleanEquals": false[\\s\\S]*"Next": "Complete"/);
+  assert.match(stateMachine, /"\\$\\.imageThemeResult\\.status"[\\s\\S]*"BooleanEquals": false[\\s\\S]*"Next": "Complete"/);
   assert.doesNotMatch(
     stateMachine,
-    /"taglineResult\.status"\s*,?\s*\n\s*"StringEquals": "succeeded"[\s\S]{0,120}"Next": "GenerateImageTheme"/,
+    /"\\$\\.taglineResult\\.status"\\s*,?\\s*\\n\\s*"StringEquals": "succeeded"[\\s\\S]{0,120}"Next": "GenerateImageTheme"/,
   );
+});
+
+test('field saves are canonicalized before persistence and legacy aliases remain compatible', () => {
+  const requestProcessor = readFileSync('lambdas/scouts2sqs/function/request-processor.mjs', 'utf8');
+  const worker = readFileSync('lambdas/sqs2scouts/function/persistence-processor.mjs', 'utf8');
+
+  assert.match(requestProcessor, /subject:\s*\{\s*metadata:\s*\{\s*hex,/);
+  assert.match(requestProcessor, /requestedField === 'tagline' \? \{ tagline: fieldValue \}/);
+  assert.match(requestProcessor, /requestedField === 'imageTheme' \? \{ theme: fieldValue \}/);
+  assert.match(requestProcessor, /requestedField === 'imageUrl' \? \{ url: fieldValue \}/);
+  assert.match(worker, /function applyLegacyPersistFieldAliases/);
+  assert.match(worker, /target\.metadata\.tagline = patch\.tagline/);
+  assert.match(worker, /target\.metadata\.image\.theme = patch\.imageTheme/);
+  assert.match(worker, /target\.metadata\.image\.url = patch\.imageUrl/);
 });
 
 test('production worker enforces atomic read-back, manual regeneration, state satisfaction and observability', () => {
