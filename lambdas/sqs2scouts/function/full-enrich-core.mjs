@@ -90,6 +90,10 @@ function getImageMetadata(event) {
 
 function stageFieldPresent(event, stage) {
   if (!event) return false;
+  if (stage === 'taglineTheme') {
+    return Boolean(text(getMetadata(event).tagline ?? event?.tagline))
+      && Boolean(text(getImageMetadata(event).theme ?? event?.imageTheme));
+  }
   if (stage === 'tagline') return Boolean(text(getMetadata(event).tagline ?? event?.tagline));
   if (stage === 'imageTheme') return Boolean(text(getImageMetadata(event).theme ?? event?.imageTheme));
   if (stage === 'image') return Boolean(text(getImageMetadata(event).url ?? event?.imageUrl));
@@ -446,7 +450,10 @@ async function processImageProvider(message, provider) {
 async function resultAfterProcessor(message, response) {
   const stage = normaliseStage(message?.orchestrationStep ?? message?.realm);
   const hex = getHex(message);
-  const state = hex && stage ? await getEnrichmentState(hex, stage).catch(() => null) : null;
+  // Combined text enrichment deliberately reuses the tagline state row as its
+  // retry/idempotency owner while satisfying imageTheme after durable read-back.
+  const stateStage = stage === 'taglineTheme' ? 'tagline' : stage;
+  const state = hex && stateStage ? await getEnrichmentState(hex, stateStage).catch(() => null) : null;
   const event = hex ? await loadEvent(hex).catch(() => null) : null;
   const statusCode = Number(response?.statusCode || 0);
   let fallbackStatus = null;
