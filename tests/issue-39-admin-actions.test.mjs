@@ -28,6 +28,7 @@ function actionSandbox(overrides = {}) {
     uiCommandInFlight: false,
     pendingUiOperations: new Map(),
     currentEventIndex: 0,
+    currentEventHex: TEST_HEX,
     visibleEventEntries: [entry],
     uniqueEventEntries: [entry],
     eventsData: [event],
@@ -38,6 +39,11 @@ function actionSandbox(overrides = {}) {
     },
     pollQueueDepthSnapshots: async () => {},
     pollGeneratedRequestUntilSettled: async () => {},
+    pollPersistedFieldUntilSettled: async () => {},
+    beginPendingImageThemePersist: () => {},
+    clearPendingImageThemePersist: () => {},
+    isImageThemePersistPending: () => false,
+    syncPendingImageThemeUi: () => {},
     refreshApiActionButtons: () => {},
     updateApiAuthStatus: () => {},
     updateModalStatus: () => {},
@@ -51,7 +57,7 @@ function actionSandbox(overrides = {}) {
     updateModalContent: () => {},
     refreshModalCurrentMetadata: () => {},
     loadEvents: () => {},
-    getEventHex: () => TEST_HEX,
+    getEventHex: (candidate) => candidate?.metadata?.hex || '',
     isHiddenEvent: () => false,
     isEntryHidden: (candidate) => Boolean(candidate?.allHidden),
     isEntryApproved: () => false,
@@ -87,8 +93,8 @@ function actionSandbox(overrides = {}) {
 
 async function invokeAdminFunction(functionName, args, sandbox) {
   const dependencies = functionName === 'pollGeneratedRequestUntilSettled'
-    ? ['stopGeneratedRequestPolling', 'findAuthoritativeRequest', 'isTerminalAuthoritativeRequest', 'describeAuthoritativeRequestOutcome', 'refreshGeneratedEvent']
-    : ['buildVisibilityCommand', 'uiOperationKey', 'getSelectedModalEntry'];
+    ? ['stopGeneratedRequestPolling', 'findAuthoritativeRequest', 'isTerminalAuthoritativeRequest', 'describeAuthoritativeRequestOutcome', 'findEventEntryByHex', 'refreshGeneratedEvent']
+    : ['buildVisibilityCommand', 'uiOperationKey', 'findEventEntryByHex', 'getSelectedModalEntry'];
   const { functions } = loadFunctionsFromSource(adminSource, [functionName, ...dependencies], sandbox);
   return functions[functionName](...args);
 }
@@ -134,13 +140,30 @@ test('admin agenda refresh delegates to the manual agenda controller', async () 
   assert.deepEqual(calls, [['refreshAgenda']]);
 });
 
-test('admin Details actions resolve the selected modal entry from currentEventIndex', () => {
+test('admin Details actions keep selection stable by HEX when visible indexes change', () => {
   const { sandbox, entry } = actionSandbox();
-  const { functions } = loadFunctionsFromSource(adminSource, ['getSelectedModalEntry'], sandbox);
+  const otherEntry = {
+    event: { summary: 'Other Event', metadata: { hex: '6f74686572' } },
+    allHidden: false,
+  };
+  sandbox.currentEventIndex = 0;
+  sandbox.currentEventHex = TEST_HEX;
+  sandbox.visibleEventEntries = [otherEntry, entry];
+  sandbox.uniqueEventEntries = [entry, otherEntry];
+
+  const { functions } = loadFunctionsFromSource(
+    adminSource,
+    ['findEventEntryByHex', 'getSelectedModalEntry'],
+    sandbox,
+  );
   assert.equal(functions.getSelectedModalEntry(), entry);
 
-  const missingSelection = actionSandbox({ currentEventIndex: null });
-  const missing = loadFunctionsFromSource(adminSource, ['getSelectedModalEntry'], missingSelection.sandbox);
+  const missingSelection = actionSandbox({ currentEventIndex: null, currentEventHex: null });
+  const missing = loadFunctionsFromSource(
+    adminSource,
+    ['findEventEntryByHex', 'getSelectedModalEntry'],
+    missingSelection.sandbox,
+  );
   assert.equal(missing.functions.getSelectedModalEntry(), null);
 });
 
@@ -163,6 +186,22 @@ test('admin generation buttons publish field-specific actions with only the sele
   }
 });
 
+test('Generate image is blocked while an image-theme persist is awaiting durable confirmation', async () => {
+  const statuses = [];
+  const { sandbox, sent } = actionSandbox({
+    isImageThemePersistPending: () => true,
+    updateModalStatus: (message, tone) => statuses.push({ message, tone }),
+  });
+
+  await invokeAdminFunction('requestGeneratedField', ['imageUrl', 'generateImage'], sandbox);
+
+  assert.equal(sent.length, 0);
+  assert.deepEqual(statuses.at(-1), {
+    message: 'Waiting for the saved image theme to be confirmed before generating an image.',
+    tone: 'info',
+  });
+});
+
 test('admin field save buttons publish only the selected field and HEX', async () => {
   const cases = [
     ['tagline', 'persistTagline', 'saved tagline'],
@@ -182,6 +221,24 @@ test('admin field save buttons publish only the selected field and HEX', async (
       action,
     }], `${field} persist request contract changed`);
   }
+});
+
+test('image-theme save starts authoritative confirmation polling before image generation is unlocked', async () => {
+  const calls = { begin: [], poll: [] };
+  const { sandbox } = actionSandbox({
+    getModalFieldValue: () => 'new durable theme',
+    beginPendingImageThemePersist: (...args) => calls.begin.push(args),
+    pollPersistedFieldUntilSettled: (requestId, options) => calls.poll.push({ requestId, options }),
+  });
+
+  await invokeAdminFunction('persistCurrentField', ['imageTheme', 'persistImageTheme'], sandbox);
+
+  assert.deepEqual(calls.begin, [[TEST_HEX, 'new durable theme']]);
+  assert.equal(calls.poll.length, 1);
+  assert.equal(calls.poll[0].requestId, 'test-request-id');
+  assert.equal(calls.poll[0].options.hex, TEST_HEX);
+  assert.equal(calls.poll[0].options.field, 'imageTheme');
+  assert.equal(calls.poll[0].options.expectedValue, 'new durable theme');
 });
 
 test('admin generation progress stops on a matching completed request and refreshes the modal', async () => {
@@ -338,4 +395,13 @@ test('admin v2 action scoping guards card generation and pending buttons', () =>
   assert.match(adminSource, /localVisibilityOverrides\.set\(hex/);
   assert.match(adminSource, /for \(const \[hex, override\] of localVisibilityOverrides\.entries\(\)\)/);
   assert.match(adminSource, /return `\$\{getEventHex\(event\) \|\| entry\?\.occurrenceId/);
+});
+
+test('image-theme persistence uses an accelerated confirmation poll and a dedicated modal lock', () => {
+  assert.match(adminSource, /const PERSISTED_FIELD_POLL_INTERVAL_MS = 1000;/);
+  assert.match(adminSource, /async function pollPersistedFieldUntilSettled/);
+  assert.match(adminSource, /await loadEvents\(\{ silent: true \}\)/);
+  assert.match(adminSource, /durableValue === normalizedExpectedValue/);
+  assert.match(adminSource, /Generate image remains disabled/);
+  assert.match(adminHtml, /id="modal-generate-image-button"/);
 });
