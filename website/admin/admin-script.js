@@ -521,6 +521,7 @@ function isEntryPendingApproval(entry) {
 function getFilterCounts() {
     return {
         new: uniqueEventEntries.filter((entry) => !isEntryHidden(entry) && isNewEvent(entry.event)).length,
+        attention: uniqueEventEntries.filter((entry) => isEntryNeedsAttention(entry)).length,
         all: uniqueEventEntries.length,
         missing: uniqueEventEntries.filter((entry) => isEntryMissingMetadata(entry)).length,
         hidden: uniqueEventEntries.filter((entry) => isEntryHidden(entry)).length,
@@ -530,7 +531,7 @@ function getFilterCounts() {
 }
 
 function getDefaultFilterForCounts(counts) {
-    const priority = ['new', 'approval', 'missing', 'complete', 'hidden', 'all'];
+    const priority = ['attention', 'new', 'approval', 'missing', 'complete', 'hidden', 'all'];
     for (const filter of priority) {
         if ((counts?.[filter] ?? 0) > 0) {
             return filter;
@@ -544,7 +545,7 @@ function updateSidebarUi() {
     if (!hasText(activeFilter) || !(activeFilter in counts)) {
         activeFilter = getDefaultFilterForCounts(counts);
     }
-    const filters = ['new', 'approval', 'missing', 'hidden', 'complete', 'all'];
+    const filters = ['attention', 'new', 'approval', 'missing', 'hidden', 'complete', 'all'];
     filters.forEach((filter) => {
         const btn = document.getElementById(`filter-btn-${filter}`);
         if (!btn) return;
@@ -1728,6 +1729,153 @@ async function sendScoutsReadCommand(payload, options = {}) {
     });
 }
 
+function enrichmentStageLabel(stage) {
+    if (stage === 'tagline') return 'Tagline';
+    if (stage === 'imageTheme') return 'Image theme';
+    if (stage === 'image') return 'Image';
+    return String(stage || 'Enrichment');
+}
+
+function durableEnrichmentForEvent(event) {
+    return event?.enrichment && typeof event.enrichment === 'object'
+        ? event.enrichment
+        : { stages: {}, needsAttention: false, recoveries: [] };
+}
+
+function manualReviewEnrichmentStages(event) {
+    const stages = durableEnrichmentForEvent(event)?.stages || {};
+    return Object.values(stages).filter((stageState) => (
+        stageState?.state === 'manual_review'
+        && stageState?.recovery?.available === true
+    ));
+}
+
+function isEntryNeedsAttention(entry) {
+    return manualReviewEnrichmentStages(entry?.event).length > 0;
+}
+
+async function hydrateDurableEnrichmentState(entries = uniqueEventEntries) {
+    if (!apiAuthReady || !Array.isArray(entries) || entries.length === 0) return entries;
+    const hexes = [...new Set(entries.map((entry) => getEventHex(entry?.event)).filter(Boolean))];
+    if (!hexes.length) return entries;
+    try {
+        const result = await sendScoutsReadCommand({
+            realm: 'runtime',
+            subject: 'enrichment',
+            action: 'status',
+            hexes,
+        });
+        const enrichment = result?.enrichment && typeof result.enrichment === 'object'
+            ? result.enrichment
+            : {};
+        entries.forEach((entry) => {
+            if (!entry?.event) return;
+            const hex = getEventHex(entry.event);
+            entry.event.enrichment = enrichment[hex] || {
+                hex,
+                stages: {},
+                needsAttention: false,
+                recoveries: [],
+            };
+        });
+    } catch (error) {
+        console.warn('[AdminEnrichment] Unable to load durable enrichment state', error);
+    }
+    return entries;
+}
+
+function formatEnrichmentFailureTime(value) {
+    if (!hasText(value)) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    return parsed.toLocaleString('en-GB');
+}
+
+function renderDurableEnrichmentRecoveryMarkup(event, index) {
+    const stages = manualReviewEnrichmentStages(event);
+    if (!stages.length) return '';
+    return `
+        <div class="event-enrichment-recovery" role="status">
+            ${stages.map((stageState) => {
+                const stage = stageState.stage || '';
+                const failure = stageState.failure || {};
+                const failureType = hasText(failure.type) ? failure.type : 'UNKNOWN';
+                const failureMessage = hasText(failure.message)
+                    ? String(failure.message).slice(0, 260)
+                    : 'No failure detail recorded.';
+                const failedAt = formatEnrichmentFailureTime(failure.at || stageState.updatedAt);
+                return `
+                    <div class="event-enrichment-recovery-item">
+                        <div class="event-enrichment-recovery-heading">
+                            <strong>${escapeHtml(enrichmentStageLabel(stage))} — Needs attention</strong>
+                            <code>${escapeHtml(failureType)}</code>
+                        </div>
+                        ${failedAt ? `<div class="event-enrichment-recovery-time">Failed ${escapeHtml(failedAt)}</div>` : ''}
+                        <div class="event-enrichment-recovery-message">${escapeHtml(failureMessage)}</div>
+                        <button
+                            type="button"
+                            class="btn btn-primary requires-api event-retry-enrichment"
+                            onclick="retryEventEnrichment(${index}, '${escapeHtmlAttribute(stage)}', this)"
+                        >${escapeHtml(stageState.recovery?.label || `Retry ${enrichmentStageLabel(stage).toLowerCase()} enrichment`)}</button>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+}
+
+async function retryEventEnrichment(index, stage, button = null) {
+    const entry = visibleEventEntries[index];
+    const event = entry?.event;
+    const hex = getEventHex(event);
+    const stageState = manualReviewEnrichmentStages(event).find((candidate) => candidate.stage === stage);
+    if (!event || !hex || !stageState) {
+        showAdminNotification('This enrichment stage is no longer available for manual retry.', 'error', 7000);
+        return null;
+    }
+    if (!apiAuthReady) {
+        showAdminNotification('Recovery controls are not ready yet.', 'error', 7000);
+        return null;
+    }
+    if (!window.confirm(`Retry ${enrichmentStageLabel(stage)} enrichment for "${getEventDisplayTitle(event, entry, index)}"?`)) {
+        return null;
+    }
+
+    const originalLabel = button?.textContent || '';
+    if (button) {
+        button.disabled = true;
+        button.dataset.apiPending = 'true';
+        button.textContent = 'Retrying…';
+    }
+    try {
+        const result = await sendScoutsCommand({
+            realm: 'runtime',
+            subject: 'enrichment',
+            action: 'retry',
+            hex,
+            stage,
+        });
+        showAdminNotification(
+            `${enrichmentStageLabel(stage)} enrichment retry queued for "${getEventDisplayTitle(event, entry, index)}".`,
+            'success',
+            6000,
+        );
+        await hydrateDurableEnrichmentState(uniqueEventEntries);
+        updateSidebarUi();
+        renderEvents();
+        window.adminActivityController?.scheduleNearTerm?.(0);
+        return result;
+    } catch (error) {
+        showAdminNotification(`Enrichment retry failed: ${error?.message || error}`, 'error', 8000);
+        if (button) {
+            button.disabled = !apiAuthReady;
+            button.dataset.apiPending = 'false';
+            button.textContent = originalLabel;
+        }
+        return null;
+    }
+}
+
 function setApiActionState(enabled) {
     apiAuthReady = Boolean(enabled);
     refreshApiActionButtons();
@@ -1769,6 +1917,9 @@ async function checkApiAuthStatus() {
         updateApiAuthStatus(`Ready - Cloudflare API proxy authenticated${keySuffix}`, 'success');
         setApiActionState(true);
         await pollQueueDepthSnapshots();
+        await hydrateDurableEnrichmentState(uniqueEventEntries);
+        updateSidebarUi();
+        renderEvents();
     } catch (error) {
         console.error('Error checking admin API auth status:', error);
         updateApiAuthStatus(
@@ -1822,6 +1973,7 @@ async function loadEvents(options = {}) {
         agendaPayload = data;
         uniqueEventEntries = buildUniqueEventEntries(eventsData);
         applyVisibilityOverrides(uniqueEventEntries);
+        await hydrateDurableEnrichmentState(uniqueEventEntries);
         const previousAgendaEntries = agendaNotificationBaseline;
         const agendaChangeSet = previousAgendaEntries
             ? buildAgendaChangeSet(previousAgendaEntries, uniqueEventEntries)
@@ -2859,6 +3011,7 @@ function getEventActionModel(entry) {
     const hidden = isEntryHidden(entry);
     const approved = isEntryApproved(entry);
     const missingFields = getMissingMetadataFields(event);
+    const manualReviewStages = manualReviewEnrichmentStages(event);
     const actions = [{ label: 'View details', className: 'btn-primary', onclick: 'openUploadModal' }];
     if (hidden) {
         actions.push({ label: 'Unhide', className: 'btn-secondary', onclick: 'unhideEvent' });
@@ -2870,10 +3023,10 @@ function getEventActionModel(entry) {
     }
     if (missingFields.length === 1 && missingFields[0] === 'Image URL' && hasText(getImageThemeOrLegacyPrompt(event))) {
         actions.push({ label: 'Generate image', className: 'btn-secondary', onclick: 'generateImage' });
-    } else if (missingFields.length > 0) {
+    } else if (missingFields.length > 0 && manualReviewStages.length === 0) {
         actions.push({ label: 'Generate all missing metadata', className: 'btn-secondary', onclick: 'generateFull' });
     }
-    return { actions, missingFields, hidden, approved };
+    return { actions, missingFields, hidden, approved, manualReviewStages };
 }
 
 function renderEvents() {
@@ -2891,6 +3044,8 @@ function renderEvents() {
         switch (activeFilter) {
             case 'new':
                 return !isEntryHidden(entry) && isNewEvent(event);
+            case 'attention':
+                return isEntryNeedsAttention(entry);
             case 'missing':
                 return isEntryMissingMetadata(entry);
             case 'hidden':
@@ -2984,6 +3139,7 @@ function renderEvents() {
                         </div>
                     ` : ''}
 
+                    ${renderDurableEnrichmentRecoveryMarkup(event, index)}
                     ${hasMissingMetadata
                         ? `<p class="metadata-hint">Missing: ${missingFields.join(', ')}</p>`
                         : ''
