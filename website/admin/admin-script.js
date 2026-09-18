@@ -1751,6 +1751,7 @@ function manualReviewEnrichmentStages(event) {
 }
 
 function isEntryNeedsAttention(entry) {
+    if (isEntryHidden(entry)) return false;
     return manualReviewEnrichmentStages(entry?.event).length > 0;
 }
 
@@ -1791,7 +1792,9 @@ function formatEnrichmentFailureTime(value) {
     return parsed.toLocaleString('en-GB');
 }
 
-function renderDurableEnrichmentRecoveryMarkup(event, index) {
+function renderDurableEnrichmentRecoveryMarkup(entry, index) {
+    if (isEntryHidden(entry)) return '';
+    const event = entry?.event || {};
     const stages = manualReviewEnrichmentStages(event);
     if (!stages.length) return '';
     return `
@@ -1827,6 +1830,10 @@ function renderDurableEnrichmentRecoveryMarkup(event, index) {
 async function retryEventEnrichment(index, stage, button = null) {
     const entry = visibleEventEntries[index];
     const event = entry?.event;
+    if (isEntryHidden(entry)) {
+        showAdminNotification('Hidden events do not require enrichment recovery. Unhide the event before retrying.', 'info', 6000);
+        return null;
+    }
     const hex = getEventHex(event);
     const stageState = manualReviewEnrichmentStages(event).find((candidate) => candidate.stage === stage);
     if (!event || !hex || !stageState) {
@@ -3017,6 +3024,7 @@ function getEventActionModel(entry) {
         actions.push({ label: 'Unhide', className: 'btn-secondary', onclick: 'unhideEvent' });
     } else if (!approved) {
         actions.push({ label: 'Hide', className: 'btn-secondary', onclick: 'hideEvent' });
+        actions.push({ label: 'Hide & clear generated data', className: 'btn-secondary', onclick: 'hideAndClearEvent' });
     }
     if (!hidden && !approved) {
         actions.push({ label: 'Approve shown event', className: 'btn-primary', onclick: 'approveEvent' });
@@ -3139,7 +3147,7 @@ function renderEvents() {
                         </div>
                     ` : ''}
 
-                    ${renderDurableEnrichmentRecoveryMarkup(event, index)}
+                    ${renderDurableEnrichmentRecoveryMarkup(entry, index)}
                     ${hasMissingMetadata
                         ? `<p class="metadata-hint">Missing: ${missingFields.join(', ')}</p>`
                         : ''
@@ -3150,6 +3158,7 @@ function renderEvents() {
                             if (action.onclick === 'generateFull') return `<button class="btn ${action.className} requires-api" value="generateFull" onclick="requestGeneratedField('full', this.value, this, ${index})">${action.label}</button>`;
                             if (action.onclick === 'generateImage') return `<button class="btn ${action.className} requires-api" value="generateImage" onclick="requestGeneratedField('imageUrl', this.value, this, ${index})">${action.label}</button>`;
                             if (action.onclick === 'approveEvent') return `<button class="btn ${action.className} requires-api" value="approve" onclick="approveEvent(${index}, false, this.value, this)">${action.label}</button>`;
+                            if (action.onclick === 'hideAndClearEvent') return `<button class="btn ${action.className} requires-api" value="hide" onclick="hideAndClearEvent(${index}, false, this)">${action.label}</button>`;
                             const command = action.onclick === 'unhideEvent' ? 'unhideEvent' : 'hideEvent';
                             return `<button class="btn ${action.className} requires-api" value="${action.onclick === 'unhideEvent' ? 'unhide' : 'hide'}" onclick="${command}(${index}, false, this.value, this)">${action.label}</button>`;
                         }).join('')}
@@ -3237,6 +3246,7 @@ function openUploadModal(index) {
     const taglineInput = document.getElementById('modal-tagline-input');
     const imageUrlInput = document.getElementById('modal-image-url-input');
     const hideToggleButton = document.getElementById('modal-hide-toggle-button');
+    const hideClearButton = document.getElementById('modal-hide-clear-button');
     const approveButton = document.getElementById('modal-approve-button');
     if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
     if (imagePromptInput) imagePromptInput.value = currentImageTheme || '';
@@ -3248,6 +3258,7 @@ function openUploadModal(index) {
         const hidden = isEntryHidden(entry);
         hideToggleButton.textContent = hidden ? 'Unhide Event' : 'Hide Event';
         hideToggleButton.value = hidden ? 'unhide' : 'hide';
+        if (hideClearButton) hideClearButton.style.display = hidden ? 'none' : 'inline-block';
     }
     if (approveButton) {
         approveButton.style.display = isEntryHidden(entry) || isEntryApproved(entry) ? 'none' : 'inline-block';
@@ -3779,7 +3790,7 @@ function uiOperationKey(entry, action) {
     return `${getEventHex(event) || entry?.occurrenceId || event.occurrenceId || entry?.key || 'unknown'}:${action}`;
 }
 
-async function hideEvent(eventIndex, fromModal = false, action = 'hide', button = null) {
+async function hideEvent(eventIndex, fromModal = false, action = 'hide', button = null, purgeGeneratedData = false) {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -3814,7 +3825,7 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide', button 
         else updateRuntimeDetails(message, 'error');
         return;
     }
-    const operationKey = `${hex}:hide`;
+    const operationKey = `${hex}:${purgeGeneratedData ? 'hide-purge' : 'hide'}`;
     if (pendingUiOperations.has(operationKey)) return;
     pendingUiOperations.set(operationKey, true);
 
@@ -3826,16 +3837,17 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide', button 
         subject,
         action,
         hiddenAt: hiddenAtIso,
+        ...(purgeGeneratedData ? { purgeGeneratedData: true } : {}),
     };
 
-    const loadingMessage = `Hiding "${eventLabel}"...`;
+    const loadingMessage = purgeGeneratedData ? `Hiding and clearing generated data for "${eventLabel}"...` : `Hiding "${eventLabel}"...`;
     if (fromModal) updateModalStatus(loadingMessage, 'loading');
     else pinRuntimeDetails(loadingMessage, 'loading');
     const originalButtonLabel = button?.textContent;
     if (button) {
         button.dataset.apiPending = 'true';
         button.disabled = true;
-        button.textContent = 'Hiding…';
+        button.textContent = purgeGeneratedData ? 'Hiding & clearing…' : 'Hiding…';
     }
 
     refreshApiActionButtons();
@@ -3858,7 +3870,7 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide', button 
             ? ` ${result.message.trim()}`
             : '';
         const successMessage = appendBackendRequestIdMessage(
-            `Hide request queued for "${eventLabel}".${backendMessage}`,
+            `${purgeGeneratedData ? 'Hide & clear generated data' : 'Hide'} request queued for "${eventLabel}".${backendMessage}`,
             result,
         );
         if (fromModal) updateModalStatus(successMessage, 'success');
@@ -3876,6 +3888,17 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide', button 
         }
         refreshApiActionButtons();
     }
+}
+
+async function hideAndClearEvent(eventIndex, fromModal = false, button = null) {
+    const entry = visibleEventEntries[eventIndex];
+    const event = entry?.event;
+    if (!event || isEntryHidden(entry)) return null;
+    const label = event.summary || event.title || `Event ${eventIndex + 1}`;
+    if (!window.confirm(`Hide "${label}" and permanently clear its generated tagline, image theme, image files, approval, and enrichment state?`)) {
+        return null;
+    }
+    return hideEvent(eventIndex, fromModal, 'hide', button, true);
 }
 
 async function unhideEvent(eventIndex, fromModal = false, action = 'unhide', button = null) {
