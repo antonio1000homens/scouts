@@ -226,9 +226,11 @@ export async function listRequestActivity({ requestIds = [], rootRequestId = '',
     });
     filters.push(`(${predicates.join(' OR ')})`);
   }
+  const expressionAttributeNames = allowedStates.length ? { '#state': 'state' } : undefined;
   const response = await client.send(new QueryCommand({
     TableName: TABLE_NAME, IndexName: 'activity-feed', KeyConditionExpression: 'feed = :feed',
-    ...(filters.length ? { FilterExpression: filters.join(' AND '), ExpressionAttributeNames: { '#state': 'state' } } : {}),
+    ...(filters.length ? { FilterExpression: filters.join(' AND ') } : {}),
+    ...(expressionAttributeNames ? { ExpressionAttributeNames: expressionAttributeNames } : {}),
     ExpressionAttributeValues: values, ScanIndexForward: false, Limit: safeLimit,
     ...(cursor ? { ExclusiveStartKey: JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) } : {}),
   }));
