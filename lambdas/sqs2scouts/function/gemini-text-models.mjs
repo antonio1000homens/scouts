@@ -173,6 +173,7 @@ export async function generateGeminiTextWithFallback({
   const malformedRetryLimit = Math.max(0, Math.floor(Number(malformedRetriesPerModel) || 0));
   let lastError = null;
   const attemptedModels = [];
+  let providerCallCount = 0;
 
   for (const model of candidates) {
     attemptedModels.push(model);
@@ -180,11 +181,12 @@ export async function generateGeminiTextWithFallback({
 
     while (true) {
       onAttempt?.(model);
+      providerCallCount += 1;
       try {
         const result = await generate(model);
         assertGeminiStructuredTextResult(result, { model });
         onSuccess?.(model);
-        return { result, model, attemptedModels };
+        return { result, model, attemptedModels, providerCallCount };
       } catch (error) {
         lastError = error;
         onFailure?.(model, error);
@@ -202,6 +204,9 @@ export async function generateGeminiTextWithFallback({
     }
   }
 
-  if (lastError && typeof lastError === 'object') lastError.attemptedModels = attemptedModels;
+  if (lastError && typeof lastError === 'object') {
+    lastError.attemptedModels = attemptedModels;
+    lastError.providerCallCount = providerCallCount;
+  }
   throw lastError || new Error('Gemini generation failed before a model was attempted');
 }
