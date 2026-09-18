@@ -433,10 +433,10 @@ function extractBackendRequestId(result) {
         return null;
     }
     const candidates = [
-        result?.queuedMessage?.messageId,
-        result?.queuedMessage?.requestId,
         result?.requestId,
+        result?.queuedMessage?.requestId,
         result?.messageId,
+        result?.queuedMessage?.messageId,
     ];
     for (const candidate of candidates) {
         if (hasText(candidate)) return String(candidate).trim();
