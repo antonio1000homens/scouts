@@ -40,6 +40,7 @@ const approvalCoordinator = readFileSync('lambdas/shared-layer/nodejs/approval-c
 const slackProxy = readFileSync('lambdas/scouts-slack-handler/function/slack-handler-proxy.mjs', 'utf8');
 
 test('normaliseStage maps external imageUrl to logical image', () => {
+  assert.equal(normaliseStage('taglineTheme'), 'taglineTheme');
   assert.equal(normaliseStage('tagline'), 'tagline');
   assert.equal(normaliseStage('imageTheme'), 'imageTheme');
   assert.equal(normaliseStage('imageUrl'), 'image');
