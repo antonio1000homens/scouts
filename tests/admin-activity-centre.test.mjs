@@ -35,6 +35,13 @@ test('activity centre persists request IDs, stacks notices and exposes a seven-d
   assert.match(adminSource, /no longer present/);
 });
 
+test('Activity refresh returns tracked lookup completions as part of the canonical request view', () => {
+  assert.match(source, /const statusActivity = result\?\.activity \|\| null/);
+  assert.match(source, /const requests = \[\.\.\.statusRequests, \.\.\.\(lookup\?\.activity\?\.requests \|\| \[\]\)\]/);
+  assert.match(source, /latestStatusActivity = \{[\s\S]*requests,[\s\S]*\}/);
+  assert.match(source, /refreshNow: async \(\) => \{[\s\S]*const activity = await poll\(\)[\s\S]*return activity/);
+});
+
 test('Admin shell removes raw viewers and duplicate legacy request panels from the normal view', () => {
   assert.match(shellSource, /viewer-menu-shell/);
   assert.match(shellSource, /requests-sidebar/);
