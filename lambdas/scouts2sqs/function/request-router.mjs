@@ -163,7 +163,7 @@ export function translateFullEnrichStageRequest(message) {
     orchestrationType: 'fullEnrich',
     orchestrationStep: text(message?.orchestrationStep) || stage.stage,
     source: text(message?.source) || 'scouts-full-enrich',
-    requestMode: text(message?.requestMode) || 'auto',
+    requestMode: text(message?.requestMode) || (directFieldRequest ? 'manual' : 'auto'),
     approvalMode: text(message?.approvalMode) || 'auto',
     ...(text(message?.imageProvider) ? { imageProvider: normaliseImageProvider(message.imageProvider) } : {}),
   };
