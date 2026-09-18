@@ -17,7 +17,7 @@ function assertSyntax(path) {
 function recoveryClassifier() {
   const loaded = loadFunctionsFromSource(
     runtimeActivity,
-    ['text', 'enrichmentStageFromActivity', 'classifyRuntimeRecovery'],
+    ['text', 'normaliseRecoverableEnrichmentStage', 'enrichmentStageFromActivity', 'classifyRuntimeRecovery'],
     {
       TERMINAL_FAILURES: new Set(['failed', 'needs_attention', 'manual_review']),
       RECOVERABLE_ENRICHMENT_STAGES: new Set(['tagline', 'imageTheme', 'image']),
