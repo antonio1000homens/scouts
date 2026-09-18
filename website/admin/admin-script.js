@@ -3175,7 +3175,7 @@ function renderEvents() {
                 <div class="event-image-container">
                     ${imageUrl 
                         ? `<img src="${imageUrl}" alt="${title}" class="event-image" onclick="openImageViewer('${escapeHtmlAttribute(imageUrl)}', '${escapeHtmlAttribute(title)}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22300%22%3E%3Crect fill=%22%23ddd%22 width=%22400%22 height=%22300%22/%3E%3Ctext fill=%22%23999%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22%3ENo Image%3C/text%3E%3C/svg%3E'">` 
-                        : `<div class="event-image" style="background: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #999;">No Image</div>`
+                        : `<div class="event-image" style="background: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #999;">${isMetadataFieldProcessing(event, 'imageUrl') ? METADATA_PROCESSING_LABEL : 'No Image'}</div>`
                     }
                     <div class="event-badge-stack">
                         <span class="event-badge ${section}">${section}</span>
@@ -3191,7 +3191,7 @@ function renderEvents() {
                         <div class="event-identifiers-body">
                             <div class="event-identifiers-row"><span>UID:</span> <code>${eventUID}</code></div>
                             <div class="event-identifiers-row"><span>HEX:</span> <code>${getEventHex(event) || 'Missing HEX'}</code></div>
-                            <div class="event-identifiers-row"><span>Image URL:</span> <code>${imageUrl || 'Not set'}</code></div>
+                            <div class="event-identifiers-row"><span>Image URL:</span> <code>${isMetadataFieldProcessing(event, 'imageUrl') ? METADATA_PROCESSING_LABEL : (imageUrl || 'Not set')}</code></div>
                             <div class="event-identifiers-row"><span>Occurrences:</span> <code>${entry.duplicateCount}</code></div>
                             ${sourceDetailsMarkup}
                         </div>
@@ -3202,9 +3202,11 @@ function renderEvents() {
                             <div class="ai-prompt-label">Image Theme</div>
                             <div class="ai-prompt-text">${imageTheme}</div>
                         </div>
-                        <div class="ai-prompt-actions">
-                            <button class="btn btn-secondary" onclick="copyImagePromptForEvent(${index})">Copy Image Prompt</button>
-                        </div>
+                        ${isMetadataFieldProcessing(event, 'imageTheme') ? '' : `
+                            <div class="ai-prompt-actions">
+                                <button class="btn btn-secondary" onclick="copyImagePromptForEvent(${index})">Copy Image Prompt</button>
+                            </div>
+                        `}
                     ` : ''}
 
                     ${tagline ? `
@@ -3315,7 +3317,7 @@ function openUploadModal(index) {
     const hideToggleButton = document.getElementById('modal-hide-toggle-button');
     const hideClearButton = document.getElementById('modal-hide-clear-button');
     const approveButton = document.getElementById('modal-approve-button');
-    if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
+    if (imageUrlText) imageUrlText.textContent = isMetadataFieldProcessing(event, 'imageUrl') ? METADATA_PROCESSING_LABEL : (currentImage || 'Not set');
     if (imagePromptInput) imagePromptInput.value = currentImageTheme || '';
     if (taglineInput) taglineInput.value = getAIPrompt(event) || '';
     if (imageUrlInput) imageUrlInput.value = currentImage || '';
