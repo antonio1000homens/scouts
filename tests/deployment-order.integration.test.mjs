@@ -142,6 +142,14 @@ test('CI resolves one shared layer before any Lambda consumer deploys', () => {
   assert.match(workflow, /needs\.plan-and-test\.outputs\.sqs2scouts == 'true'[\s\S]*needs\.plan-and-test\.outputs\.scouts_slack_handler == 'true'/);
 });
 
+test('Scouts deployment verifies the resolved shared layer is attached', () => {
+  assert.match(workflow, /- name: Verify Scouts shared layer attachment/);
+  assert.match(workflow, /aws lambda get-function-configuration/);
+  assert.match(workflow, /--function-name scouts/);
+  assert.match(workflow, /SCOUTS_SHARED_LAYER_VERSION_ARN/);
+  assert.match(workflow, /grep -Fxq/);
+});
+
 test('shared-layer test changes run safety tests without redeploying all consumers', () => {
   assert.match(workflow, /lambdas\/shared-layer\/nodejs\/\*\.test\.mjs\|lambdas\/shared-layer\/nodejs\/\*\.integration\.test\.mjs\)\n\s*;;/);
   assert.match(workflow, /lambdas\/shared-layer\/nodejs\/\*\.mjs\|lambdas\/shared-layer\/nodejs\/package\.json\|lambdas\/shared-layer\/nodejs\/package-lock\.json\)[\s\S]*scouts_function=true[\s\S]*scouts_slack_handler=true[\s\S]*scouts2sqs=true[\s\S]*sqs2scouts=true/);
