@@ -3788,6 +3788,7 @@ export async function lambdaHandler(event = {}) {
       };
     }
 
+    const purgeGeneratedData = isHideOperation && bodyParams?.purgeGeneratedData === true;
     const queueResult = await postToScoutsRequestsQueue(
       {
         realm: 'persist',
@@ -3797,8 +3798,9 @@ export async function lambdaHandler(event = {}) {
         },
         action: 'persist',
         visibilityIntent: isHideOperation ? 'hide' : 'unhide',
+        ...(purgeGeneratedData ? { purgeGeneratedData: true } : {}),
       },
-      isHideOperation ? 'AdminHide' : 'AdminUnhide',
+      purgeGeneratedData ? 'AdminHideAndPurgeGeneratedData' : (isHideOperation ? 'AdminHide' : 'AdminUnhide'),
     );
 
     return {
@@ -3806,7 +3808,7 @@ export async function lambdaHandler(event = {}) {
       headers: corsHeaders,
       body: JSON.stringify({
         status: 'ok',
-        message: `${isHideOperation ? 'Hide' : 'Unhide'} request submitted for ${candidateHex}`,
+        message: `${isHideOperation ? (purgeGeneratedData ? 'Hide and generated-data cleanup' : 'Hide') : 'Unhide'} request submitted for ${candidateHex}`,
         queueAccepted: true,
         queuedHex: candidateHex,
         requestId: queueResult?.payload?.requestId ?? null,
