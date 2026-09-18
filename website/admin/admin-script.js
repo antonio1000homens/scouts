@@ -62,6 +62,9 @@ let scoutsConfigLoadPromise = null;
 const missingHexRetryAtByHex = new Map();
 const warnedMissingDtstartIds = new Set();
 const localVisibilityOverrides = new Map();
+const localMetadataProcessingOverrides = new Map();
+const METADATA_PROCESSING_LABEL = 'Processing, please wait';
+let metadataProcessingSequence = 0;
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
 const configuredScoutsUrl = window.SCOUTS_URL || window.SCOUTS_REFRESH_URL || '';
 // Never let a browser-side config point at the Lambda URL.  The API key is
@@ -2802,6 +2805,66 @@ function getImageGenerationPrompt(event, config = null) {
         if (trimmed) return trimmed;
     }
     return null;
+}
+
+function normaliseMetadataProcessingField(field) {
+    if (field === 'image') return 'imageUrl';
+    return ['tagline', 'imageTheme', 'imageUrl'].includes(field) ? field : null;
+}
+
+function metadataProcessingFieldsForRequest(event, field) {
+    const normalizedField = normaliseMetadataProcessingField(field);
+    if (normalizedField) return [normalizedField];
+    if (field !== 'full') return [];
+    const fields = [];
+    if (!hasText(getAIPrompt(event))) fields.push('tagline');
+    if (!hasText(getImageThemeOrLegacyPrompt(event))) fields.push('imageTheme');
+    if (!hasRelativeImageUrl(event)) fields.push('imageUrl');
+    return fields;
+}
+
+function isMetadataFieldProcessing(event, field) {
+    const hex = getEventHex(event);
+    const normalizedField = normaliseMetadataProcessingField(field);
+    if (!hex || !normalizedField) return false;
+    return localMetadataProcessingOverrides.get(hex)?.has(normalizedField) === true;
+}
+
+function markMetadataProcessing(entry, fields = []) {
+    const hex = getEventHex(entry?.event);
+    const normalizedFields = [...new Set(fields.map(normaliseMetadataProcessingField).filter(Boolean))];
+    if (!hex || normalizedFields.length === 0) return [];
+    const current = localMetadataProcessingOverrides.get(hex) || new Map();
+    const token = ++metadataProcessingSequence;
+    normalizedFields.forEach((field) => current.set(field, token));
+    localMetadataProcessingOverrides.set(hex, current);
+    setTimeout(() => {
+        const live = localMetadataProcessingOverrides.get(hex);
+        if (!live) return;
+        let changed = false;
+        normalizedFields.forEach((field) => {
+            if (live.get(field) === token) {
+                live.delete(field);
+                changed = true;
+            }
+        });
+        if (live.size === 0) localMetadataProcessingOverrides.delete(hex);
+        if (changed) void loadEvents({ silent: true });
+    }, GENERATED_REQUEST_POLL_TIMEOUT_MS + 5000);
+    return normalizedFields;
+}
+
+function clearMetadataProcessing(hex, fields = []) {
+    const normalizedHex = String(hex || '').trim().toLowerCase();
+    const current = localMetadataProcessingOverrides.get(normalizedHex);
+    if (!current) return;
+    const normalizedFields = [...new Set(fields.map(normaliseMetadataProcessingField).filter(Boolean))];
+    if (normalizedFields.length === 0) {
+        localMetadataProcessingOverrides.delete(normalizedHex);
+        return;
+    }
+    normalizedFields.forEach((field) => current.delete(field));
+    if (current.size === 0) localMetadataProcessingOverrides.delete(normalizedHex);
 }
 
 function getMissingMetadataFields(event) {
