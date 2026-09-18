@@ -62,6 +62,9 @@ let scoutsConfigLoadPromise = null;
 const missingHexRetryAtByHex = new Map();
 const warnedMissingDtstartIds = new Set();
 const localVisibilityOverrides = new Map();
+const localMetadataProcessingOverrides = new Map();
+const METADATA_PROCESSING_LABEL = 'Processing, please wait';
+let metadataProcessingSequence = 0;
 const ADMIN_API_BASE = window.ADMIN_API_BASE || '/admin-api';
 const configuredScoutsUrl = window.SCOUTS_URL || window.SCOUTS_REFRESH_URL || '';
 // Never let a browser-side config point at the Lambda URL.  The API key is
@@ -1751,6 +1754,7 @@ function manualReviewEnrichmentStages(event) {
 }
 
 function isEntryNeedsAttention(entry) {
+    if (isEntryHidden(entry)) return false;
     return manualReviewEnrichmentStages(entry?.event).length > 0;
 }
 
@@ -1791,7 +1795,9 @@ function formatEnrichmentFailureTime(value) {
     return parsed.toLocaleString('en-GB');
 }
 
-function renderDurableEnrichmentRecoveryMarkup(event, index) {
+function renderDurableEnrichmentRecoveryMarkup(entry, index) {
+    if (isEntryHidden(entry)) return '';
+    const event = entry?.event || {};
     const stages = manualReviewEnrichmentStages(event);
     if (!stages.length) return '';
     return `
@@ -1827,6 +1833,10 @@ function renderDurableEnrichmentRecoveryMarkup(event, index) {
 async function retryEventEnrichment(index, stage, button = null) {
     const entry = visibleEventEntries[index];
     const event = entry?.event;
+    if (isEntryHidden(entry)) {
+        showAdminNotification('Hidden events do not require enrichment recovery. Unhide the event before retrying.', 'info', 6000);
+        return null;
+    }
     const hex = getEventHex(event);
     const stageState = manualReviewEnrichmentStages(event).find((candidate) => candidate.stage === stage);
     if (!event || !hex || !stageState) {
@@ -1855,14 +1865,26 @@ async function retryEventEnrichment(index, stage, button = null) {
             hex,
             stage,
         });
+        const processingFields = markMetadataProcessing(entry, [stage]);
+        const eventLabel = getEventDisplayTitle(event, entry, index);
         showAdminNotification(
-            `${enrichmentStageLabel(stage)} enrichment retry queued for "${getEventDisplayTitle(event, entry, index)}".`,
+            `${enrichmentStageLabel(stage)} enrichment retry queued for "${eventLabel}".`,
             'success',
             6000,
         );
         await hydrateDurableEnrichmentState(uniqueEventEntries);
         updateSidebarUi();
         renderEvents();
+        if (getEventHex(getSelectedModalEntry()?.event) === hex) refreshModalCurrentMetadata(event);
+        const requestId = extractBackendRequestId(result);
+        if (requestId) {
+            void pollGeneratedRequestUntilSettled(requestId, {
+                hex,
+                config: getFieldOperationConfig(normaliseMetadataProcessingField(stage)),
+                eventLabel,
+                processingFields,
+            });
+        }
         window.adminActivityController?.scheduleNearTerm?.(0);
         return result;
     } catch (error) {
@@ -2706,6 +2728,7 @@ function normaliseEventRecordForUi(event) {
 }
 
 function getImageUrl(event) {
+    if (isMetadataFieldProcessing(event, 'imageUrl')) return null;
     const metadata = getMetadataData(event);
     let candidate = null;
     const image = metadata?.image ?? event?.image;
@@ -2727,12 +2750,14 @@ function hasRelativeImageUrl(event) {
 // Get tagline from event data (prioritise `tagline`, fallback to legacy `AI`)
 function getAIPrompt(event) {
     if (!event || typeof event !== 'object') return null;
+    if (isMetadataFieldProcessing(event, 'tagline')) return METADATA_PROCESSING_LABEL;
     const metadata = getMetadataData(event);
     return metadata?.tagline || event.tagline || event.AI || event.ai || event.aiPrompt || null;
 }
 
 function getImageTheme(event) {
     if (!event || typeof event !== 'object') return null;
+    if (isMetadataFieldProcessing(event, 'imageTheme')) return METADATA_PROCESSING_LABEL;
     const image = getMetadataData(event)?.image ?? event.image;
     if (image && typeof image === 'object' && typeof image.theme === 'string') {
         const trimmed = image.theme.trim();
@@ -2743,6 +2768,7 @@ function getImageTheme(event) {
 
 function getImageThemeOrLegacyPrompt(event) {
     if (!event || typeof event !== 'object') return null;
+    if (isMetadataFieldProcessing(event, 'imageTheme')) return METADATA_PROCESSING_LABEL;
     const image = getMetadataData(event)?.image ?? event.image;
     if (image && typeof image === 'object') {
         if (typeof image.theme === 'string' && image.theme.trim()) {
@@ -2797,15 +2823,75 @@ function getImageGenerationPrompt(event, config = null) {
     return null;
 }
 
+function normaliseMetadataProcessingField(field) {
+    if (field === 'image') return 'imageUrl';
+    return ['tagline', 'imageTheme', 'imageUrl'].includes(field) ? field : null;
+}
+
+function metadataProcessingFieldsForRequest(event, field) {
+    const normalizedField = normaliseMetadataProcessingField(field);
+    if (normalizedField) return [normalizedField];
+    if (field !== 'full') return [];
+    const fields = [];
+    if (!hasText(getAIPrompt(event))) fields.push('tagline');
+    if (!hasText(getImageThemeOrLegacyPrompt(event))) fields.push('imageTheme');
+    if (!hasRelativeImageUrl(event)) fields.push('imageUrl');
+    return fields;
+}
+
+function isMetadataFieldProcessing(event, field) {
+    const hex = getEventHex(event);
+    const normalizedField = normaliseMetadataProcessingField(field);
+    if (!hex || !normalizedField) return false;
+    return localMetadataProcessingOverrides.get(hex)?.has(normalizedField) === true;
+}
+
+function markMetadataProcessing(entry, fields = []) {
+    const hex = getEventHex(entry?.event);
+    const normalizedFields = [...new Set(fields.map(normaliseMetadataProcessingField).filter(Boolean))];
+    if (!hex || normalizedFields.length === 0) return [];
+    const current = localMetadataProcessingOverrides.get(hex) || new Map();
+    const token = ++metadataProcessingSequence;
+    normalizedFields.forEach((field) => current.set(field, token));
+    localMetadataProcessingOverrides.set(hex, current);
+    setTimeout(() => {
+        const live = localMetadataProcessingOverrides.get(hex);
+        if (!live) return;
+        let changed = false;
+        normalizedFields.forEach((field) => {
+            if (live.get(field) === token) {
+                live.delete(field);
+                changed = true;
+            }
+        });
+        if (live.size === 0) localMetadataProcessingOverrides.delete(hex);
+        if (changed) void loadEvents({ silent: true });
+    }, GENERATED_REQUEST_POLL_TIMEOUT_MS + 5000);
+    return normalizedFields;
+}
+
+function clearMetadataProcessing(hex, fields = []) {
+    const normalizedHex = String(hex || '').trim().toLowerCase();
+    const current = localMetadataProcessingOverrides.get(normalizedHex);
+    if (!current) return;
+    const normalizedFields = [...new Set(fields.map(normaliseMetadataProcessingField).filter(Boolean))];
+    if (normalizedFields.length === 0) {
+        localMetadataProcessingOverrides.delete(normalizedHex);
+        return;
+    }
+    normalizedFields.forEach((field) => current.delete(field));
+    if (current.size === 0) localMetadataProcessingOverrides.delete(normalizedHex);
+}
+
 function getMissingMetadataFields(event) {
     const missing = [];
-    if (!hasText(getAIPrompt(event))) {
+    if (!isMetadataFieldProcessing(event, 'tagline') && !hasText(getAIPrompt(event))) {
         missing.push('Tagline');
     }
-    if (!hasText(getImageThemeOrLegacyPrompt(event))) {
+    if (!isMetadataFieldProcessing(event, 'imageTheme') && !hasText(getImageThemeOrLegacyPrompt(event))) {
         missing.push('Image Theme');
     }
-    if (!hasRelativeImageUrl(event)) {
+    if (!isMetadataFieldProcessing(event, 'imageUrl') && !hasRelativeImageUrl(event)) {
         missing.push('Image URL');
     }
     if (!isEventApproved(event)) {
@@ -3017,13 +3103,14 @@ function getEventActionModel(entry) {
         actions.push({ label: 'Unhide', className: 'btn-secondary', onclick: 'unhideEvent' });
     } else if (!approved) {
         actions.push({ label: 'Hide', className: 'btn-secondary', onclick: 'hideEvent' });
+        actions.push({ label: 'Hide & clear generated data', className: 'btn-secondary', onclick: 'hideAndClearEvent' });
     }
     if (!hidden && !approved) {
         actions.push({ label: 'Approve shown event', className: 'btn-primary', onclick: 'approveEvent' });
     }
-    if (missingFields.length === 1 && missingFields[0] === 'Image URL' && hasText(getImageThemeOrLegacyPrompt(event))) {
+    if (!hidden && missingFields.length === 1 && missingFields[0] === 'Image URL' && hasText(getImageThemeOrLegacyPrompt(event))) {
         actions.push({ label: 'Generate image', className: 'btn-secondary', onclick: 'generateImage' });
-    } else if (missingFields.length > 0 && manualReviewStages.length === 0) {
+    } else if (!hidden && missingFields.length > 0 && manualReviewStages.length === 0) {
         actions.push({ label: 'Generate all missing metadata', className: 'btn-secondary', onclick: 'generateFull' });
     }
     return { actions, missingFields, hidden, approved, manualReviewStages };
@@ -3100,7 +3187,7 @@ function renderEvents() {
                 <div class="event-image-container">
                     ${imageUrl 
                         ? `<img src="${imageUrl}" alt="${title}" class="event-image" onclick="openImageViewer('${escapeHtmlAttribute(imageUrl)}', '${escapeHtmlAttribute(title)}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22300%22%3E%3Crect fill=%22%23ddd%22 width=%22400%22 height=%22300%22/%3E%3Ctext fill=%22%23999%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22%3ENo Image%3C/text%3E%3C/svg%3E'">` 
-                        : `<div class="event-image" style="background: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #999;">No Image</div>`
+                        : `<div class="event-image" style="background: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #999;">${isMetadataFieldProcessing(event, 'imageUrl') ? METADATA_PROCESSING_LABEL : 'No Image'}</div>`
                     }
                     <div class="event-badge-stack">
                         <span class="event-badge ${section}">${section}</span>
@@ -3116,7 +3203,7 @@ function renderEvents() {
                         <div class="event-identifiers-body">
                             <div class="event-identifiers-row"><span>UID:</span> <code>${eventUID}</code></div>
                             <div class="event-identifiers-row"><span>HEX:</span> <code>${getEventHex(event) || 'Missing HEX'}</code></div>
-                            <div class="event-identifiers-row"><span>Image URL:</span> <code>${imageUrl || 'Not set'}</code></div>
+                            <div class="event-identifiers-row"><span>Image URL:</span> <code>${isMetadataFieldProcessing(event, 'imageUrl') ? METADATA_PROCESSING_LABEL : (imageUrl || 'Not set')}</code></div>
                             <div class="event-identifiers-row"><span>Occurrences:</span> <code>${entry.duplicateCount}</code></div>
                             ${sourceDetailsMarkup}
                         </div>
@@ -3127,9 +3214,11 @@ function renderEvents() {
                             <div class="ai-prompt-label">Image Theme</div>
                             <div class="ai-prompt-text">${imageTheme}</div>
                         </div>
-                        <div class="ai-prompt-actions">
-                            <button class="btn btn-secondary" onclick="copyImagePromptForEvent(${index})">Copy Image Prompt</button>
-                        </div>
+                        ${isMetadataFieldProcessing(event, 'imageTheme') ? '' : `
+                            <div class="ai-prompt-actions">
+                                <button class="btn btn-secondary" onclick="copyImagePromptForEvent(${index})">Copy Image Prompt</button>
+                            </div>
+                        `}
                     ` : ''}
 
                     ${tagline ? `
@@ -3139,7 +3228,7 @@ function renderEvents() {
                         </div>
                     ` : ''}
 
-                    ${renderDurableEnrichmentRecoveryMarkup(event, index)}
+                    ${renderDurableEnrichmentRecoveryMarkup(entry, index)}
                     ${hasMissingMetadata
                         ? `<p class="metadata-hint">Missing: ${missingFields.join(', ')}</p>`
                         : ''
@@ -3150,6 +3239,7 @@ function renderEvents() {
                             if (action.onclick === 'generateFull') return `<button class="btn ${action.className} requires-api" value="generateFull" onclick="requestGeneratedField('full', this.value, this, ${index})">${action.label}</button>`;
                             if (action.onclick === 'generateImage') return `<button class="btn ${action.className} requires-api" value="generateImage" onclick="requestGeneratedField('imageUrl', this.value, this, ${index})">${action.label}</button>`;
                             if (action.onclick === 'approveEvent') return `<button class="btn ${action.className} requires-api" value="approve" onclick="approveEvent(${index}, false, this.value, this)">${action.label}</button>`;
+                            if (action.onclick === 'hideAndClearEvent') return `<button class="btn ${action.className} requires-api" value="hide" onclick="hideAndClearEvent(${index}, false, this)">${action.label}</button>`;
                             const command = action.onclick === 'unhideEvent' ? 'unhideEvent' : 'hideEvent';
                             return `<button class="btn ${action.className} requires-api" value="${action.onclick === 'unhideEvent' ? 'unhide' : 'hide'}" onclick="${command}(${index}, false, this.value, this)">${action.label}</button>`;
                         }).join('')}
@@ -3237,8 +3327,9 @@ function openUploadModal(index) {
     const taglineInput = document.getElementById('modal-tagline-input');
     const imageUrlInput = document.getElementById('modal-image-url-input');
     const hideToggleButton = document.getElementById('modal-hide-toggle-button');
+    const hideClearButton = document.getElementById('modal-hide-clear-button');
     const approveButton = document.getElementById('modal-approve-button');
-    if (imageUrlText) imageUrlText.textContent = currentImage || 'Not set';
+    if (imageUrlText) imageUrlText.textContent = isMetadataFieldProcessing(event, 'imageUrl') ? METADATA_PROCESSING_LABEL : (currentImage || 'Not set');
     if (imagePromptInput) imagePromptInput.value = currentImageTheme || '';
     if (taglineInput) taglineInput.value = getAIPrompt(event) || '';
     if (imageUrlInput) imageUrlInput.value = currentImage || '';
@@ -3248,6 +3339,7 @@ function openUploadModal(index) {
         const hidden = isEntryHidden(entry);
         hideToggleButton.textContent = hidden ? 'Unhide Event' : 'Hide Event';
         hideToggleButton.value = hidden ? 'unhide' : 'hide';
+        if (hideClearButton) hideClearButton.style.display = hidden ? 'none' : 'inline-block';
     }
     if (approveButton) {
         approveButton.style.display = isEntryHidden(entry) || isEntryApproved(entry) ? 'none' : 'inline-block';
@@ -3329,7 +3421,7 @@ async function refreshGeneratedEvent(hex) {
 }
 
 async function pollGeneratedRequestUntilSettled(requestId, options) {
-    const { hex, config, eventLabel } = options || {};
+    const { hex, config, eventLabel, processingFields = [] } = options || {};
     stopGeneratedRequestPolling();
     const pollToken = generatedRequestPollToken;
     const deadline = Date.now() + GENERATED_REQUEST_POLL_TIMEOUT_MS;
@@ -3341,6 +3433,8 @@ async function pollGeneratedRequestUntilSettled(requestId, options) {
         try {
             activity = await pollQueueDepthSnapshots();
         } catch (error) {
+            clearMetadataProcessing(hex, processingFields);
+            await refreshGeneratedEvent(hex);
             updateModalStatus(`Unable to check ${config?.queueLabel || 'AI generation'} progress: ${error.message}`, 'error');
             generatedRequestPollTimer = null;
             return;
@@ -3349,6 +3443,7 @@ async function pollGeneratedRequestUntilSettled(requestId, options) {
         if (pollToken !== generatedRequestPollToken) return;
         const request = findAuthoritativeRequest(activity, requestId);
         if (request && isTerminalAuthoritativeRequest(request)) {
+            clearMetadataProcessing(hex, processingFields);
             await refreshGeneratedEvent(hex);
             if (pollToken !== generatedRequestPollToken) return;
             const outcome = describeAuthoritativeRequestOutcome(request);
@@ -3359,6 +3454,8 @@ async function pollGeneratedRequestUntilSettled(requestId, options) {
         }
 
         if (Date.now() >= deadline) {
+            clearMetadataProcessing(hex, processingFields);
+            await refreshGeneratedEvent(hex);
             updateModalStatus(`No ${config?.queueLabel || 'AI generation'} update received for "${eventLabel}" within 30 seconds.`, 'error');
             generatedRequestPollTimer = null;
             return;
@@ -3595,6 +3692,10 @@ async function persistCurrentField(field, action = 'persist', button = null) {
 
     const entry = getSelectedModalEntry();
     if (!entry) return;
+    if (isMetadataFieldProcessing(entry.event, field)) {
+        updateModalStatus('This metadata field is still processing. Please wait for the current request to finish.', 'info');
+        return;
+    }
 
     const config = getFieldOperationConfig(field);
     const nextValue = getModalFieldValue(field);
@@ -3695,6 +3796,12 @@ async function requestGeneratedField(field, action = 'generate', button = null, 
 
     const config = getFieldOperationConfig(field);
     const event = entry.event;
+    const requestedFields = field === 'full' ? ['tagline', 'imageTheme', 'imageUrl'] : [normaliseMetadataProcessingField(field)];
+    if (requestedFields.filter(Boolean).some((candidate) => isMetadataFieldProcessing(event, candidate))) {
+        updateModalStatus('Metadata generation is already processing for this event. Please wait for the current request to finish.', 'info');
+        return;
+    }
+    const processingFields = metadataProcessingFieldsForRequest(event, field);
     const displayIndex = Number.isInteger(eventIndex) ? eventIndex : currentEventIndex;
     const eventLabel = event.summary || event.title || `Event ${(displayIndex ?? 0) + 1}`;
     const hex = getEventHex(event);
@@ -3739,6 +3846,9 @@ async function requestGeneratedField(field, action = 'generate', button = null, 
         );
         updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
+        markMetadataProcessing(entry, processingFields);
+        renderEvents();
+        refreshModalCurrentMetadata(event);
         await pollQueueDepthSnapshots();
         const requestId = extractBackendRequestId(result);
         if (requestId) {
@@ -3746,11 +3856,14 @@ async function requestGeneratedField(field, action = 'generate', button = null, 
                 hex,
                 config,
                 eventLabel,
+                processingFields,
             });
+        } else {
+            setTimeout(() => {
+                clearMetadataProcessing(hex, processingFields);
+                loadEvents({ silent: true });
+            }, 2000);
         }
-        setTimeout(() => {
-            loadEvents({ silent: true });
-        }, 2000);
     } catch (error) {
         console.error(`Error queueing ${config.queueLabel}:`, error);
         const failureMessage = `Failed to queue ${config.queueLabel}: ${error.message}`;
@@ -3779,7 +3892,7 @@ function uiOperationKey(entry, action) {
     return `${getEventHex(event) || entry?.occurrenceId || event.occurrenceId || entry?.key || 'unknown'}:${action}`;
 }
 
-async function hideEvent(eventIndex, fromModal = false, action = 'hide', button = null) {
+async function hideEvent(eventIndex, fromModal = false, action = 'hide', button = null, purgeGeneratedData = false) {
     if (!apiAuthReady) {
         updateApiAuthStatus(
             'Cannot send requests: Cloudflare API auth is not ready. Re-login or debug Worker settings.',
@@ -3814,7 +3927,7 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide', button 
         else updateRuntimeDetails(message, 'error');
         return;
     }
-    const operationKey = `${hex}:hide`;
+    const operationKey = `${hex}:${purgeGeneratedData ? 'hide-purge' : 'hide'}`;
     if (pendingUiOperations.has(operationKey)) return;
     pendingUiOperations.set(operationKey, true);
 
@@ -3826,16 +3939,17 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide', button 
         subject,
         action,
         hiddenAt: hiddenAtIso,
+        ...(purgeGeneratedData ? { purgeGeneratedData: true } : {}),
     };
 
-    const loadingMessage = `Hiding "${eventLabel}"...`;
+    const loadingMessage = purgeGeneratedData ? `Hiding and clearing generated data for "${eventLabel}"...` : `Hiding "${eventLabel}"...`;
     if (fromModal) updateModalStatus(loadingMessage, 'loading');
     else pinRuntimeDetails(loadingMessage, 'loading');
     const originalButtonLabel = button?.textContent;
     if (button) {
         button.dataset.apiPending = 'true';
         button.disabled = true;
-        button.textContent = 'Hiding…';
+        button.textContent = purgeGeneratedData ? 'Hiding & clearing…' : 'Hiding…';
     }
 
     refreshApiActionButtons();
@@ -3858,7 +3972,7 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide', button 
             ? ` ${result.message.trim()}`
             : '';
         const successMessage = appendBackendRequestIdMessage(
-            `Hide request queued for "${eventLabel}".${backendMessage}`,
+            `${purgeGeneratedData ? 'Hide & clear generated data' : 'Hide'} request queued for "${eventLabel}".${backendMessage}`,
             result,
         );
         if (fromModal) updateModalStatus(successMessage, 'success');
@@ -3876,6 +3990,17 @@ async function hideEvent(eventIndex, fromModal = false, action = 'hide', button 
         }
         refreshApiActionButtons();
     }
+}
+
+async function hideAndClearEvent(eventIndex, fromModal = false, button = null) {
+    const entry = visibleEventEntries[eventIndex];
+    const event = entry?.event;
+    if (!event || isEntryHidden(entry)) return null;
+    const label = event.summary || event.title || `Event ${eventIndex + 1}`;
+    if (!window.confirm(`Hide "${label}" and permanently clear its generated tagline, image theme, image files, approval, and enrichment state?`)) {
+        return null;
+    }
+    return hideEvent(eventIndex, fromModal, 'hide', button, true);
 }
 
 async function unhideEvent(eventIndex, fromModal = false, action = 'unhide', button = null) {

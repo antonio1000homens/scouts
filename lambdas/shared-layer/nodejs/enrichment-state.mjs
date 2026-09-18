@@ -316,4 +316,40 @@ export async function resetEnrichmentState(hex, stage, now = new Date()) {
   }, { '#state': 'state', '#attemptCount': 'attemptCount', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt', '#nextRetryAt': 'nextRetryAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#geminiSucceeded': 'geminiSucceeded', '#generatedValue': 'generatedValue', '#generationId': 'generationId' }, now);
 }
 
+export async function clearEnrichmentState(hex, stage, now = new Date()) {
+  return updateState(
+    hex,
+    stage,
+    'SET #state = :state, #attemptCount = :zero, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #nextRetryAt, #inProgressExpiresAt, #geminiSucceeded, #generatedValue, #generationId, #lastErrorType, #lastErrorMessage, #lastRequestId, #lastAttemptAt, #firstAttemptAt, #manualReviewRetryCount, #manualReviewRetriedAt, #manualReviewRetriedBy, #previousManualReviewErrorType, #previousManualReviewErrorMessage, #previousManualReviewUpdatedAt, #escalatedAt',
+    {
+      ':state': asString('pending'),
+      ':zero': asNumber(0),
+    },
+    {
+      '#state': 'state',
+      '#attemptCount': 'attemptCount',
+      '#updatedAt': 'updatedAt',
+      '#expiresAt': 'expiresAt',
+      '#nextRetryAt': 'nextRetryAt',
+      '#inProgressExpiresAt': 'inProgressExpiresAt',
+      '#geminiSucceeded': 'geminiSucceeded',
+      '#generatedValue': 'generatedValue',
+      '#generationId': 'generationId',
+      '#lastErrorType': 'lastErrorType',
+      '#lastErrorMessage': 'lastErrorMessage',
+      '#lastRequestId': 'lastRequestId',
+      '#lastAttemptAt': 'lastAttemptAt',
+      '#firstAttemptAt': 'firstAttemptAt',
+      '#manualReviewRetryCount': 'manualReviewRetryCount',
+      '#manualReviewRetriedAt': 'manualReviewRetriedAt',
+      '#manualReviewRetriedBy': 'manualReviewRetriedBy',
+      '#previousManualReviewErrorType': 'previousManualReviewErrorType',
+      '#previousManualReviewErrorMessage': 'previousManualReviewErrorMessage',
+      '#previousManualReviewUpdatedAt': 'previousManualReviewUpdatedAt',
+      '#escalatedAt': 'escalatedAt',
+    },
+    now,
+  );
+}
+
 export const enrichmentStateConfig = Object.freeze({ TABLE_NAME, MAX_ATTEMPTS, RETRY_DELAY_ATTEMPT_2_SECONDS, RETRY_DELAY_ATTEMPT_3_SECONDS, LEASE_SECONDS });

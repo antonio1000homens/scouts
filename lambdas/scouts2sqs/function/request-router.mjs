@@ -184,6 +184,7 @@ export function translateCompactPersistRequest(message) {
 
   const isHidden = bool(metadataStatus.isHidden ?? subject.isHidden ?? subject.hidden ?? null);
   const isApproved = bool(metadataStatus.isApproved ?? subject.isApproved ?? subject.approved ?? null);
+  const purgeGeneratedData = message?.purgeGeneratedData === true || subject.purgeGeneratedData === true;
   if (isHidden !== null || isApproved !== null) {
     canonicalMetadata.status = {};
     if (isHidden !== null) canonicalMetadata.status.isHidden = isHidden;
@@ -204,6 +205,7 @@ export function translateCompactPersistRequest(message) {
     rootRequestId: rootRequestIdOf(message, requestId),
     source: text(message?.source) || 'scouts2sqs',
     ...(text(message?.visibilityIntent) ? { visibilityIntent: text(message.visibilityIntent) } : {}),
+    ...(purgeGeneratedData ? { purgeGeneratedData: true } : {}),
     ...(occurrenceId ? { occurrenceId } : {}),
     ...(text(message?.decisionSource) ? { decisionSource: text(message.decisionSource) } : {}),
     ...(message?.slackMetadata && typeof message.slackMetadata === 'object'
@@ -224,6 +226,7 @@ export function buildDownstreamPersistMessage(message) {
     action: JSON.stringify(translated.subject),
     operation: 'persist',
     ...(translated.visibilityIntent ? { visibilityIntent: translated.visibilityIntent } : {}),
+    ...(translated.purgeGeneratedData ? { purgeGeneratedData: true } : {}),
     ...(translated.occurrenceId ? { occurrenceId: translated.occurrenceId } : {}),
   };
 }

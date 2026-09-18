@@ -74,7 +74,7 @@ async function loadPersistenceModule(store, sentMessages) {
   const linker = async (specifier) => {
     if (modules.has(specifier)) return modules.get(specifier);
     if (specifier === 'node:async_hooks') return synthetic(specifier, { AsyncLocalStorage });
-    if (specifier === '@aws-sdk/client-s3') return synthetic(specifier, { S3Client, GetObjectCommand: command('GetObjectCommand'), PutObjectCommand: command('PutObjectCommand') });
+    if (specifier === '@aws-sdk/client-s3') return synthetic(specifier, { S3Client, DeleteObjectCommand: command('DeleteObjectCommand'), GetObjectCommand: command('GetObjectCommand'), ListObjectsV2Command: command('ListObjectsV2Command'), PutObjectCommand: command('PutObjectCommand') });
     if (specifier === '@aws-sdk/client-sqs') return synthetic(specifier, { SQSClient: class {}, SendMessageCommand: command('SendMessageCommand'), GetQueueAttributesCommand: command('GetQueueAttributesCommand') });
     if (specifier === '@aws-sdk/client-sfn') return synthetic(specifier, { SFNClient: class {}, SendTaskFailureCommand: command('SendTaskFailureCommand'), SendTaskSuccessCommand: command('SendTaskSuccessCommand') });
     if (specifier === 'crypto') return synthetic(specifier, { default: { randomUUID: () => 'fixture-request', randomBytes: () => Buffer.from('fixture') } });
@@ -93,7 +93,7 @@ async function loadPersistenceModule(store, sentMessages) {
         reserveEnrichmentAttempt: async () => ({}), markGeminiSucceeded: async () => ({}),
         markEnrichmentSucceeded: async () => ({}), markEnrichmentFailure: async () => ({}),
         loadReusableGeneration: async () => null, evaluateEnrichmentEligibility: async () => ({ eligible: true }),
-        claimEnrichmentEscalation: async () => ({}), enrichmentStateConfig: {},
+        claimEnrichmentEscalation: async () => ({}), clearEnrichmentState: async () => ({}), enrichmentStateConfig: {},
       });
     }
     if (specifier.endsWith('/agenda-publisher.mjs')) {

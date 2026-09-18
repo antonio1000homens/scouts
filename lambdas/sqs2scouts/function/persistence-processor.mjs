@@ -2,7 +2,7 @@ import https from 'https';
 import crypto from 'crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { readFileSync } from 'fs';
-import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3';
 import { SQSClient, SendMessageCommand, GetQueueAttributesCommand } from '@aws-sdk/client-sqs';
 import { SFNClient, SendTaskFailureCommand, SendTaskSuccessCommand } from '@aws-sdk/client-sfn';
 import { resolveCanonicalImageDimensions, normaliseGeneratedJpeg } from '/opt/nodejs/image-output-contract.mjs';
@@ -22,6 +22,7 @@ import {
     loadReusableGeneration,
     evaluateEnrichmentEligibility,
     claimEnrichmentEscalation,
+    clearEnrichmentState,
     enrichmentStateConfig,
 } from '/opt/nodejs/enrichment-state.mjs';
 
@@ -1320,6 +1321,62 @@ function sanitizeRequestIdForImageKey(requestId) {
     const trimmed = requestId.trim().toLowerCase();
     if (!trimmed) return '';
     return trimmed.replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function clearGeneratedEventDataForHide(event, hexValue) {
+    if (!event || typeof event !== 'object') return event;
+    delete event.AI;
+    delete event.tagline;
+    delete event.sourceImg;
+    event.image = { theme: null, url: null };
+    event.metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+    event.metadata.hex = hexValue;
+    event.metadata.tagline = null;
+    event.metadata.image = { theme: null, url: null };
+    const status = event.metadata.status && typeof event.metadata.status === 'object'
+        ? event.metadata.status
+        : {};
+    event.metadata.status = {
+        ...status,
+        isApproved: false,
+        isHidden: true,
+    };
+    ensureRuntimeMetadata(event, hexValue);
+    return event;
+}
+
+async function deleteGeneratedImageArtifactsForHex(hexValue) {
+    const sanitizedHex = sanitizeHexForImageKey(hexValue);
+    if (!sanitizedHex) return [];
+    const prefix = `${EVENT_IMAGE_PREFIX}${sanitizedHex}`;
+    const removed = [];
+    let continuationToken;
+    do {
+        const response = await s3Client.send(new ListObjectsV2Command({
+            Bucket: TARGET_BUCKET,
+            Prefix: prefix,
+            ...(continuationToken ? { ContinuationToken: continuationToken } : {}),
+        }));
+        for (const object of response?.Contents || []) {
+            const key = object?.Key;
+            if (typeof key !== 'string' || !key.startsWith(prefix)) continue;
+            const suffix = key.slice(prefix.length);
+            // Generated keys are exactly <hex>.<ext> or <hex>-<request>.<ext>.
+            // This guard prevents a HEX that is a prefix of another HEX from
+            // deleting the other event's image.
+            if (!/^(?:\.|-)/.test(suffix)) continue;
+            await s3Client.send(new DeleteObjectCommand({ Bucket: TARGET_BUCKET, Key: key }));
+            removed.push(key);
+        }
+        continuationToken = response?.IsTruncated ? response?.NextContinuationToken : undefined;
+    } while (continuationToken);
+    return removed;
+}
+
+async function clearDurableEnrichmentForHiddenEvent(hexValue) {
+    const stages = ['tagline', 'imageTheme', 'image'];
+    await Promise.all(stages.map((stage) => clearEnrichmentState(hexValue, stage)));
+    return stages;
 }
 
 function normalizeImageExtension(extension) {
@@ -3592,12 +3649,16 @@ async function lambdaHandlerWithDependencies(event) {
             const actionIsHidden = normalizedAction === 'hidden'
                 || normalizedAction === 'hide'
                 || visibility?.isHidden === true;
+            const purgeGeneratedData = messageBody?.purgeGeneratedData === true && visibility?.isHidden === true;
             event.metadata.status = {
                 isApproved: metadataStatus.isApproved === true,
                 isHidden: typeof visibility?.isHidden === 'boolean'
                     ? visibility.isHidden
                     : ((actionIsHidden || statusIsHidden) ? true : metadataStatus.isHidden === true),
             };
+            if (purgeGeneratedData) {
+                clearGeneratedEventDataForHide(event, hexValue);
+            }
             ensureRuntimeMetadata(event, hexValue);
 
             if (actionIsHidden || statusIsHidden) {
@@ -3657,6 +3718,16 @@ async function lambdaHandlerWithDependencies(event) {
             // every current agenda instance sharing the HEX.
             await saveHexEventToS3(hexValue, event);
             await publishHexEventToAgenda(hexValue, event);
+
+            if (purgeGeneratedData) {
+                const removedImageKeys = await deleteGeneratedImageArtifactsForHex(hexValue);
+                await clearDurableEnrichmentForHiddenEvent(hexValue);
+                console.log('[Persist] Destructive hide cleared generated data.', {
+                    hex: hexValue,
+                    removedImageKeys,
+                    enrichmentStages: ['tagline', 'imageTheme', 'image'],
+                });
+            }
             
             // Reconcile the existing review card with canonical persisted state.
             // This is deliberately best-effort: Slack failures must never roll back a successful event write.
