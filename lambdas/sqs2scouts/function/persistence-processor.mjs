@@ -3913,6 +3913,12 @@ async function lambdaHandlerWithDependencies(event) {
                 typeof rawSubject === 'string' ? rawSubject.trim().toLowerCase() : null
             ) || (
                 typeof subjectObject.hex === 'string' ? subjectObject.hex.trim().toLowerCase() : null
+            ) || (
+                typeof subjectObject.metadata?.hex === 'string' ? subjectObject.metadata.hex.trim().toLowerCase() : null
+            ) || (
+                typeof messageBody.hex === 'string' ? messageBody.hex.trim().toLowerCase() : null
+            ) || (
+                typeof requestContext.hex === 'string' ? requestContext.hex.trim().toLowerCase() : null
             );
             
             if (!hexValue) {
