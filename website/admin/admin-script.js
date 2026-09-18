@@ -2716,6 +2716,7 @@ function normaliseEventRecordForUi(event) {
 }
 
 function getImageUrl(event) {
+    if (isMetadataFieldProcessing(event, 'imageUrl')) return null;
     const metadata = getMetadataData(event);
     let candidate = null;
     const image = metadata?.image ?? event?.image;
@@ -2737,12 +2738,14 @@ function hasRelativeImageUrl(event) {
 // Get tagline from event data (prioritise `tagline`, fallback to legacy `AI`)
 function getAIPrompt(event) {
     if (!event || typeof event !== 'object') return null;
+    if (isMetadataFieldProcessing(event, 'tagline')) return METADATA_PROCESSING_LABEL;
     const metadata = getMetadataData(event);
     return metadata?.tagline || event.tagline || event.AI || event.ai || event.aiPrompt || null;
 }
 
 function getImageTheme(event) {
     if (!event || typeof event !== 'object') return null;
+    if (isMetadataFieldProcessing(event, 'imageTheme')) return METADATA_PROCESSING_LABEL;
     const image = getMetadataData(event)?.image ?? event.image;
     if (image && typeof image === 'object' && typeof image.theme === 'string') {
         const trimmed = image.theme.trim();
@@ -2753,6 +2756,7 @@ function getImageTheme(event) {
 
 function getImageThemeOrLegacyPrompt(event) {
     if (!event || typeof event !== 'object') return null;
+    if (isMetadataFieldProcessing(event, 'imageTheme')) return METADATA_PROCESSING_LABEL;
     const image = getMetadataData(event)?.image ?? event.image;
     if (image && typeof image === 'object') {
         if (typeof image.theme === 'string' && image.theme.trim()) {
@@ -2869,13 +2873,13 @@ function clearMetadataProcessing(hex, fields = []) {
 
 function getMissingMetadataFields(event) {
     const missing = [];
-    if (!hasText(getAIPrompt(event))) {
+    if (!isMetadataFieldProcessing(event, 'tagline') && !hasText(getAIPrompt(event))) {
         missing.push('Tagline');
     }
-    if (!hasText(getImageThemeOrLegacyPrompt(event))) {
+    if (!isMetadataFieldProcessing(event, 'imageTheme') && !hasText(getImageThemeOrLegacyPrompt(event))) {
         missing.push('Image Theme');
     }
-    if (!hasRelativeImageUrl(event)) {
+    if (!isMetadataFieldProcessing(event, 'imageUrl') && !hasRelativeImageUrl(event)) {
         missing.push('Image URL');
     }
     if (!isEventApproved(event)) {
