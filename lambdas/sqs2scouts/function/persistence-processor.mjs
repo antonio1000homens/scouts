@@ -2528,6 +2528,11 @@ export function buildPersistEventPayload(existingEvent, rawSubject, action) {
             ? cloneJsonValue(existingEvent)
             : {};
     const persistPatch = parsePersistPatch(action);
+    // ensureObjectSubject canonicalizes its input in place, so preserve any
+    // legacy top-level field aliases before normalization can erase them.
+    const legacySubjectPatch = rawSubject && typeof rawSubject === 'object' && !Array.isArray(rawSubject)
+        ? cloneJsonValue(rawSubject)
+        : parsePersistPatch(rawSubject);
     const subjectObject = ensureObjectSubject(rawSubject);
 
     if (persistPatch) {
@@ -2536,7 +2541,7 @@ export function buildPersistEventPayload(existingEvent, rawSubject, action) {
     }
     if (subjectObject && Object.keys(subjectObject).length > 0) {
         mergePersistPatch(baseEvent, subjectObject);
-        applyLegacyPersistFieldAliases(baseEvent, subjectObject);
+        applyLegacyPersistFieldAliases(baseEvent, legacySubjectPatch ?? subjectObject);
     }
 
     ensureRuntimeMetadata(baseEvent);
