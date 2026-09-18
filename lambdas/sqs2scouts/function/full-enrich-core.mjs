@@ -149,10 +149,20 @@ async function loadScoutsConfig(force = false) {
   return cachedScoutsConfig;
 }
 
-function providerGenerationId(hex, _provider, event) {
-  // Provider is intentionally excluded so a successfully cached image can be
-  // reused across provider migrations instead of triggering another paid call.
-  return buildGenerationId(hex, 'image', event, GEMINI_PROMPT_VERSION);
+function providerGenerationId(hex, _provider, event, message = {}) {
+  // Provider is intentionally excluded so a successfully cached automatic image
+  // can be reused across provider migrations instead of triggering another paid
+  // call. Manual regeneration is a distinct user request and must not reuse the
+  // previous successful generation.
+  const requestMode = text(message?.requestMode).toLowerCase();
+  const requestId = text(message?.requestId);
+  if (requestMode === 'manual' && !requestId) {
+    throw new Error('Manual image regeneration requires a request ID');
+  }
+  const generationVersion = requestMode === 'manual'
+    ? `${GEMINI_PROMPT_VERSION}:manual:${requestId}`
+    : GEMINI_PROMPT_VERSION;
+  return buildGenerationId(hex, 'image', event, generationVersion);
 }
 
 function emitImageMetric(provider, outcome) {
@@ -367,7 +377,7 @@ async function processImageProvider(message, provider) {
   const imageTheme = text(getImageMetadata(event).theme ?? event?.imageTheme);
   const prompt = buildImageGenerationPrompt(imageTheme, await loadScoutsConfig());
   if (!prompt) throw new Error(`HEX ${hex} is missing a valid image theme/prompt configuration`);
-  const generationId = providerGenerationId(hex, provider, event);
+  const generationId = providerGenerationId(hex, provider, event, message);
 
   const reusable = await loadReusableGeneration({ hex, stage: 'image', generationId }).catch(() => null);
   if (reusable?.generatedValue?.relativeUrl) {

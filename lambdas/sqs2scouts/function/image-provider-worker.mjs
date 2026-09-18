@@ -770,7 +770,15 @@ async function processCloudflareImage(message) {
   const imageTheme = text(getImageMetadata(event).theme ?? event?.imageTheme);
   const prompt = buildImageGenerationPrompt(imageTheme, await loadScoutsConfig());
   if (!prompt) throw new Error(`HEX ${hex} is missing a valid image theme/prompt configuration`);
-  const generationId = buildGenerationId(hex, 'image', event, PROMPT_VERSION);
+  const requestMode = text(message?.requestMode).toLowerCase();
+  const requestId = text(message?.requestId);
+  if (requestMode === 'manual' && !requestId) {
+    throw new Error('Manual image regeneration requires a request ID');
+  }
+  const generationVersion = requestMode === 'manual'
+    ? `${PROMPT_VERSION}:manual:${requestId}`
+    : PROMPT_VERSION;
+  const generationId = buildGenerationId(hex, 'image', event, generationVersion);
 
   const reusable = await loadReusableGeneration({ hex, stage: 'image', generationId }).catch(() => null);
   if (reusable?.generatedValue?.relativeUrl && reusable?.generatedValue?.imageBase64) {
