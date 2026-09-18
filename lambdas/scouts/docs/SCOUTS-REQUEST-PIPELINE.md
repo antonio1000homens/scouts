@@ -19,43 +19,28 @@ The current source of truth is the Lambda code, not the older flow notes.
 
 ```mermaid
 flowchart LR
-    A["Caller -> scouts lambda"] --> B{"Request type in scouts"}
+    A["Caller / scheduler / Admin"] --> S["scouts"]
+    S --> Q["scoutsRequests"]
 
-    B -->|"scheduled/admin run finds new or stale HEX"| Q1["scoutsRequests\n{ realm: scoutsRequest, action: new, subject: full event object }"]
-    B -->|"admin persist metadata"| Q4["scoutsRequests\n{ realm: persist, action: persist, subject: full event object }"]
-    B -->|"admin hide"| Q5["scoutsRequests\n{ realm: persist, action: hidden, subject: full event object }"]
-    B -->|"admin unhide"| Q6["scoutsRequests\n{ realm: persist, action: persist, subject: full event object }"]
-    B -->|"admin generate tagline"| Q7["scoutsRequests\n{ realm: scoutsRequest, action: request, subject: tagline, hex: <hex> }"]
-    B -->|"admin generate image theme"| Q8["scoutsRequests\n{ realm: scoutsRequest, action: request, subject: imageTheme, hex: <hex> }"]
-    B -->|"admin persist tagline"| Q12["scoutsRequests\n{ realm: scoutsRequest, action: persist, subject: tagline, hex: <hex>, tagline: <value> }"]
-    B -->|"admin persist image theme"| Q13["scoutsRequests\n{ realm: scoutsRequest, action: persist, subject: imageTheme, hex: <hex>, imageTheme: <value> }"]
-    B -->|"admin generate image URL"| Q9["scoutsRequests\n{ realm: scoutsRequest, action: request, subject: imageUrl, hex: <hex> }"]
-    B -->|"admin persist image URL"| Q14["scoutsRequests\n{ realm: scoutsRequest, action: persist, subject: imageUrl, hex: <hex>, imageUrl: <value> }"]
-    B -->|"reset removed events"| Q10["scoutsRequests\n{ realm: scouts, subject: reset, action: removed-events summary }"]
+    Q --> R{"request-router"}
+    R -->|"new/retry/full enrichment"| SF["scouts-full-enrich Step Function"]
+    R -->|"manual generate tagline/theme/image"| SF
+    R -->|"persist patch"| P["scoutsProcessing: persist"]
 
-    C["sqs2scouts callback path\nno direct SQS trigger into scouts"] -->|"HEX still incomplete"| Q11["no requeue from callback path"]
+    SF -->|"both text fields missing"| CT["taglineTheme task\none Gemini text call"]
+    SF -->|"one text field missing"| FT["tagline or imageTheme task"]
+    SF -->|"text complete"| I["image task"]
 
-    subgraph D["scouts2sqs consuming scoutsRequests"]
-        Q1 --> E{"subject completeness"}
-        Q11 --> E
+    CT --> W["sqs2scouts worker"]
+    FT --> W
+    I --> W
+    P --> W
 
-        E -->|"tagline missing"| P1["scoutsProcessing\n{ realm: tagline, action: request, subject: hex }"]
-        E -->|"image.theme missing"| P2["scoutsProcessing\n{ realm: imageTheme, action: request, subject: hex }"]
-        E -->|"image.url missing"| P3["scoutsProcessing\n{ realm: image, action: request, subject: hex }"]
-        E -->|"complete already"| X1["no publish"]
-
-        Q4 --> P4["scoutsProcessing\n{ realm: persist, action: persist, subject: full event object }"]
-        Q5 --> P5["scoutsProcessing\n{ realm: persist, action: hidden, subject: full event object }"]
-        Q6 --> P4
-        Q7 --> P1
-        Q8 --> P2
-        Q12 --> P4
-        Q13 --> P4
-        Q9 --> P6["scoutsProcessing\n{ realm: image, action: request, subject: hex }"]
-        Q14 --> P4
-        Q10 --> X2["dropped by scouts2sqs\nunsupported realm=scouts"]
-    end
+    W --> C["canonical HEX write + agenda publication"]
+    C -->|"automatic enrichment"| SF
 ```
+
+The router, rather than a legacy completeness loop inside `scouts2sqs`, owns generation orchestration. A new event with both text fields missing starts at the combined `taglineTheme` stage; manual Details actions start only the selected field stage. Persist actions are sparse canonical patches and do not enter the generation state machine.
 
 ## Scouts input to scoutsRequests mapping
 
