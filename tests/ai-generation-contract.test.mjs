@@ -7,24 +7,28 @@ const config = JSON.parse(readFileSync('lambdas/sqs2scouts/scouts.conf', 'utf8')
 
 test('text generation uses JSON schemas and deterministic output limits', () => {
   assert.match(worker, /responseMimeType:\s*'application\/json'/);
-  assert.match(worker, /responseJsonSchema:\s*GEMINI_TEXT_RESPONSE_SCHEMAS\[stage\]/);
+  assert.match(worker, /responseJsonSchema:\s*GEMINI_TEXT_RESPONSE_SCHEMAS\[mode\]/);
   assert.match(worker, /import\('@google\/genai'\)/);
   assert.doesNotMatch(worker, /@google\/generative-ai/);
   assert.match(worker, /temperature:\s*0\.3/);
   assert.match(worker, /maxOutputTokens:\s*2048/);
-  assert.match(worker, /validateGeminiTextResponse\(parsed, stage\)/);
+  assert.match(worker, /validateGeminiTextResponse\(parsed, mode\)/);
 });
 
 test('prompts state semantic constraints for both generation modes', () => {
   assert.match(config.taglineThemePromptTemplate, /energetic sentence/i);
   assert.match(config.taglineThemePromptTemplate, /at most 80 characters/i);
+  assert.match(config.taglinePromptTemplate, /energetic sentence/i);
+  assert.match(config.taglinePromptTemplate, /at most 80 characters/i);
+  assert.equal(config.taglinePromptTemplate.includes('\n\nEvent details:\n'), true);
+  assert.equal(config.taglinePromptTemplate.includes('\\n'), false, 'prompt must contain real newlines, not literal backslash-n text');
   assert.match(config.taglineThemePromptTemplate, /two to four lowercase descriptive words/i);
   assert.match(config.imageThemePromptTemplate, /no proper nouns, punctuation, or hyphens/i);
   assert.match(config.imageThemePromptTemplate, /no Markdown, code fences, labels, explanation, or extra content/i);
 });
 
 test('blocked generation has no success fallback in the worker lifecycle', () => {
-  assert.match(worker, /runtimeOutcome = \{ status: result\.state === 'retry_wait' \? 'waiting_for_retry' : 'manual_review'/);
+  assert.match(worker, /status: result\.state === 'retry_wait' \? 'waiting_for_retry' : 'manual_review'/);
   assert.match(worker, /const succeeded = runtimeOutcome\.status === 'completed'/);
   assert.match(worker, /publication: succeeded \? 'published' : null/);
 });

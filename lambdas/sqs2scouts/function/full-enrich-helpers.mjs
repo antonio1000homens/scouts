@@ -186,7 +186,7 @@ export function verifyVisibilityPersistReadback(guard, agendaSnapshot, eventSnap
 export function normaliseStage(value) {
   const stage = text(value);
   if (stage === 'imageUrl') return 'image';
-  return ['tagline', 'imageTheme', 'image'].includes(stage) ? stage : null;
+  return ['taglineTheme', 'tagline', 'imageTheme', 'image'].includes(stage) ? stage : null;
 }
 
 export function isFullEnrichMessage(message) {

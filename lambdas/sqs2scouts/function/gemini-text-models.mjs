@@ -9,13 +9,20 @@ export const DEFAULT_GEMINI_TEXT_MODELS = Object.freeze([
 ]);
 
 export const GEMINI_TEXT_RESPONSE_SCHEMAS = Object.freeze({
-  tagline: {
+  taglineTheme: {
     type: 'object',
     properties: {
       tagline: { type: 'string', description: 'One energetic sentence, no more than 80 characters.' },
       imageTag: { type: 'string', description: 'Two to four lowercase descriptive words separated by spaces.' },
     },
     required: ['tagline', 'imageTag'],
+  },
+  tagline: {
+    type: 'object',
+    properties: {
+      tagline: { type: 'string', description: 'One energetic sentence, no more than 80 characters.' },
+    },
+    required: ['tagline'],
   },
   imageTheme: {
     type: 'object',
@@ -28,14 +35,23 @@ export const GEMINI_TEXT_RESPONSE_SCHEMAS = Object.freeze({
 
 export function validateGeminiTextResponse(value, mode = 'tagline') {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { valid: false, reason: 'response_not_object' };
-  if (mode === 'tagline') {
+  if (mode === 'tagline' || mode === 'taglineTheme') {
     if (typeof value.tagline !== 'string' || !value.tagline.trim()) return { valid: false, reason: 'missing_tagline' };
     if (value.tagline.trim().length > 80) return { valid: false, reason: 'tagline_too_long' };
     if (/["`]|(^|\s)[#*_>-]|\[[^\]]+\]\(/.test(value.tagline)) return { valid: false, reason: 'tagline_not_plain_text' };
   }
-  if (typeof value.imageTag !== 'string' || !value.imageTag.trim()) return { valid: false, reason: 'missing_image_tag' };
-  if (!/^[a-z0-9]+(?: [a-z0-9]+){1,3}$/.test(value.imageTag.trim())) return { valid: false, reason: 'invalid_image_tag' };
-  return { valid: true, value: { ...value, ...(typeof value.tagline === 'string' ? { tagline: value.tagline.trim() } : {}), imageTag: value.imageTag.trim() } };
+  if (mode === 'imageTheme' || mode === 'taglineTheme') {
+    if (typeof value.imageTag !== 'string' || !value.imageTag.trim()) return { valid: false, reason: 'missing_image_tag' };
+    if (!/^[a-z0-9]+(?: [a-z0-9]+){1,3}$/.test(value.imageTag.trim())) return { valid: false, reason: 'invalid_image_tag' };
+  }
+  return {
+    valid: true,
+    value: {
+      ...value,
+      ...(typeof value.tagline === 'string' ? { tagline: value.tagline.trim() } : {}),
+      ...(typeof value.imageTag === 'string' ? { imageTag: value.imageTag.trim() } : {}),
+    },
+  };
 }
 
 function text(value) { return value === undefined || value === null ? '' : String(value).trim(); }
@@ -157,6 +173,7 @@ export async function generateGeminiTextWithFallback({
   const malformedRetryLimit = Math.max(0, Math.floor(Number(malformedRetriesPerModel) || 0));
   let lastError = null;
   const attemptedModels = [];
+  let providerCallCount = 0;
 
   for (const model of candidates) {
     attemptedModels.push(model);
@@ -164,11 +181,12 @@ export async function generateGeminiTextWithFallback({
 
     while (true) {
       onAttempt?.(model);
+      providerCallCount += 1;
       try {
         const result = await generate(model);
         assertGeminiStructuredTextResult(result, { model });
         onSuccess?.(model);
-        return { result, model, attemptedModels };
+        return { result, model, attemptedModels, providerCallCount };
       } catch (error) {
         lastError = error;
         onFailure?.(model, error);
@@ -186,6 +204,9 @@ export async function generateGeminiTextWithFallback({
     }
   }
 
-  if (lastError && typeof lastError === 'object') lastError.attemptedModels = attemptedModels;
+  if (lastError && typeof lastError === 'object') {
+    lastError.attemptedModels = attemptedModels;
+    lastError.providerCallCount = providerCallCount;
+  }
   throw lastError || new Error('Gemini generation failed before a model was attempted');
 }

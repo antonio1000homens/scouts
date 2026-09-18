@@ -17,7 +17,7 @@ function assertSyntax(path) {
 function recoveryClassifier() {
   const loaded = loadFunctionsFromSource(
     runtimeActivity,
-    ['text', 'enrichmentStageFromActivity', 'classifyRuntimeRecovery'],
+    ['text', 'normaliseRecoverableEnrichmentStage', 'enrichmentStageFromActivity', 'classifyRuntimeRecovery'],
     {
       TERMINAL_FAILURES: new Set(['failed', 'needs_attention', 'manual_review']),
       RECOVERABLE_ENRICHMENT_STAGES: new Set(['tagline', 'imageTheme', 'image']),
@@ -53,6 +53,23 @@ test('backend classifies manual_review from the underlying enrichment timeline s
     stage: 'tagline',
     message: 'Retry the tagline enrichment from its durable manual-review state.',
   });
+});
+
+test('backend maps legacy combined text activity to the tagline retry owner', () => {
+  const classifyRuntimeRecovery = recoveryClassifier();
+  const recovery = classifyRuntimeRecovery({
+    requestId: 'root-combined',
+    state: 'manual_review',
+    stage: 'manual_review',
+    hex: 'abcd',
+    timeline: [
+      { state: 'processing', stage: 'taglineTheme', at: '2026-09-18T18:00:00Z' },
+      { state: 'manual_review', stage: 'manual_review', at: '2026-09-18T18:01:00Z' },
+    ],
+  });
+
+  assert.equal(recovery.type, 'enrichment_retry');
+  assert.equal(recovery.stage, 'tagline');
 });
 
 test('backend classifies DLQ and unsupported terminal failures without exposing replay data', () => {

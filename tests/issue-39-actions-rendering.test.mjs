@@ -22,7 +22,7 @@ test('unknown/tampered action tokens are not silently translated into an allowed
   const { functions } = loadFunctionsFromSource(processorSource, ['mapActionId']);
   const tampered = 'scouts_request_approve<script>';
   assert.equal(functions.mapActionId(tampered), tampered);
-  assert.match(processorSource, /const allowedRealms = new Set\(\['tagline', 'imageTheme', 'image', 'persist'\]\)/);
+  assert.match(processorSource, /const allowedRealms = new Set\(\['taglineTheme', 'tagline', 'imageTheme', 'image', 'persist'\]\)/);
   assert.match(processorSource, /Dropped unsupported realm|Dropping unsupported realm/);
 });
 

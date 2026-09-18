@@ -22,6 +22,7 @@ import {
     loadReusableGeneration,
     evaluateEnrichmentEligibility,
     claimEnrichmentEscalation,
+    retryManualReviewEnrichment,
     clearEnrichmentState,
     enrichmentStateConfig,
 } from '/opt/nodejs/enrichment-state.mjs';
@@ -553,6 +554,7 @@ function cloneDefaultScoutsConfig() {
         taglineThemePromptTemplate: toNonEmptyString(
             bundled.taglineThemePromptTemplate ?? bundled.aiPromptTemplate
         ),
+        taglinePromptTemplate: toNonEmptyString(bundled.taglinePromptTemplate),
         imageThemePromptTemplate: toNonEmptyString(
             bundled.imageThemePromptTemplate ?? bundled.imagePromptTemplate
         ),
@@ -664,9 +666,13 @@ function sanitiseScoutsConfig(raw) {
         return config;
     }
 
-    const taglineTemplate = raw.taglineThemePromptTemplate ?? raw.aiPromptTemplate;
-    if (typeof taglineTemplate === 'string' && taglineTemplate.trim()) {
-        config.taglineThemePromptTemplate = taglineTemplate;
+    const taglineThemeTemplate = raw.taglineThemePromptTemplate ?? raw.aiPromptTemplate;
+    if (typeof taglineThemeTemplate === 'string' && taglineThemeTemplate.trim()) {
+        config.taglineThemePromptTemplate = taglineThemeTemplate;
+    }
+
+    if (typeof raw.taglinePromptTemplate === 'string' && raw.taglinePromptTemplate.trim()) {
+        config.taglinePromptTemplate = raw.taglinePromptTemplate;
     }
 
     const imageThemeTemplate = raw.imageThemePromptTemplate ?? raw.imagePromptTemplate;
@@ -834,14 +840,14 @@ async function buildGeminiTextRequestPrompt(event, mode, configOverride = null) 
     
     let template;
     if (mode === 'tagline') {
-        template = typeof config.taglineThemePromptTemplate === 'string' && config.taglineThemePromptTemplate.trim()
-            ? config.taglineThemePromptTemplate
+        template = typeof config.taglinePromptTemplate === 'string' && config.taglinePromptTemplate.trim()
+            ? config.taglinePromptTemplate
             : null;
     } else if (mode === 'imageTheme') {
         template = typeof config.imageThemePromptTemplate === 'string' && config.imageThemePromptTemplate.trim()
             ? config.imageThemePromptTemplate
             : null;
-    } else {
+    } else if (mode === 'taglineTheme') {
         template = typeof config.taglineThemePromptTemplate === 'string' && config.taglineThemePromptTemplate.trim()
             ? config.taglineThemePromptTemplate
             : null;
@@ -878,7 +884,16 @@ function normaliseGeminiTextResponse(result) {
 }
 
 function blockedEnrichmentResult(reason, state = null, failure = null) {
-    return { enrichmentBlocked: true, reason, state: state || reason, failureCategory: failure?.type || reason, failureMessage: failure?.message || reason };
+    return {
+        enrichmentBlocked: true,
+        reason,
+        state: state || reason,
+        failureCategory: failure?.type || reason,
+        failureMessage: failure?.message || reason,
+        ...(Number.isFinite(Number(failure?.providerCallCount))
+            ? { providerCallCount: Number(failure.providerCallCount) }
+            : {}),
+    };
 }
 
 async function generateGeminiTextSuggestion(event, mode, configOverride = null, options = {}) {
@@ -932,9 +947,9 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
         return null;
     });
     if (reusable) {
-        console.log(JSON.stringify({ hex: hexValue, stage, generationId, requestId: options.requestId || null, attemptCount: reusable.state?.attemptCount || 0, stateBefore: reusable.state?.state || 'succeeded', stateAfter: 'succeeded', geminiRequestAttempted: false, geminiResultReused: true, failureCategory: null }));
+        console.log(JSON.stringify({ hex: hexValue, stage, requestedTextMode: mode === 'taglineTheme' ? 'combined' : mode, generationId, requestId: options.requestId || null, attemptCount: reusable.state?.attemptCount || 0, stateBefore: reusable.state?.state || 'succeeded', stateAfter: 'succeeded', geminiRequestAttempted: false, geminiResultReused: true, providerCallCount: 0, failureCategory: null }));
         emitEnrichmentMetric('GeminiResultReused', stage, 'reused');
-        const reusableValidation = validateGeminiTextResponse(reusable.generatedValue, stage);
+        const reusableValidation = validateGeminiTextResponse(reusable.generatedValue, mode);
         return reusableValidation.valid ? normaliseGeminiTextResponse(reusableValidation.value) : blockedEnrichmentResult('invalid_cached_generation', 'manual_review');
     }
 
@@ -963,7 +978,7 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
             apiKey: geminiApiKey,
             httpOptions: { apiVersion: GEMINI_API_VERSION },
         });
-        const { result, model, attemptedModels } = await generateGeminiTextWithFallback({
+        const { result, model, attemptedModels, providerCallCount } = await generateGeminiTextWithFallback({
             models: GEMINI_TEXT_MODEL_PREFERENCES,
             generate: async (modelName) => {
                 console.log('[Gemini] Request payload:', { model: modelName, prompt: prompt.substring(0, 200) + '...' });
@@ -976,7 +991,7 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
                         responseMimeType: 'application/json',
                         // These schemas are JSON Schema-shaped (lowercase type names),
                         // so use responseJsonSchema rather than the SDK Type enum form.
-                        responseJsonSchema: GEMINI_TEXT_RESPONSE_SCHEMAS[stage],
+                        responseJsonSchema: GEMINI_TEXT_RESPONSE_SCHEMAS[mode],
                     },
                 });
             },
@@ -986,6 +1001,17 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
         });
         console.log('[Gemini] Text suggestion generated', { model, attemptedModels });
         const responseObj = result?.response ?? result;
+        const usageMetadata = responseObj?.usageMetadata ?? result?.usageMetadata ?? null;
+        console.log(JSON.stringify({
+            event: 'gemini_text_provider_call',
+            requestedTextMode: mode === 'taglineTheme' ? 'combined' : mode,
+            enrichmentStateStage: stage,
+            model,
+            providerCallCount,
+            inputTokens: Number.isFinite(Number(usageMetadata?.promptTokenCount)) ? Number(usageMetadata.promptTokenCount) : null,
+            outputTokens: Number.isFinite(Number(usageMetadata?.candidatesTokenCount)) ? Number(usageMetadata.candidatesTokenCount) : null,
+            totalTokens: Number.isFinite(Number(usageMetadata?.totalTokenCount)) ? Number(usageMetadata.totalTokenCount) : null,
+        }));
         const responseText = typeof responseObj?.text === 'function'
             ? responseObj.text().trim()
             : typeof responseObj?.text === 'string'
@@ -1013,7 +1039,7 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
             return blockedEnrichmentResult('invalid_json', 'manual_review', { type: 'INVALID_EVENT_DATA', message: 'Model returned invalid JSON' });
         }
 
-        const validation = validateGeminiTextResponse(parsed, stage);
+        const validation = validateGeminiTextResponse(parsed, mode);
         if (!validation.valid) {
             const failedState = await markEnrichmentFailure({
                 hex: hexValue, stage,
@@ -1043,13 +1069,37 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
         await notifyEnrichmentTransition(stage, failedState, { hex: hexValue, generationId, requestId: options.requestId }).catch((notifyError) => {
             console.warn('[Enrichment] Failed to send transition alert:', notifyError?.message || notifyError);
         });
+        const providerCallCount = Number.isFinite(Number(error?.providerCallCount))
+            ? Number(error.providerCallCount)
+            : 0;
+        console.log(JSON.stringify({
+            event: 'gemini_text_provider_call',
+            requestedTextMode: mode === 'taglineTheme' ? 'combined' : mode,
+            enrichmentStateStage: stage,
+            model: null,
+            attemptedModels: Array.isArray(error?.attemptedModels) ? error.attemptedModels : [],
+            providerCallCount,
+            inputTokens: null,
+            outputTokens: null,
+            totalTokens: null,
+            status: 'failed',
+            failureCategory: failedState?.lastErrorType || 'GENERATION_FAILED',
+        }));
         console.warn(`[Gemini] Failed to generate ${mode} suggestion:`, error?.message || error);
         if (error && error.stack) console.debug(error.stack);
         if (isGeminiBillingRestrictionError(error)) {
             geminiTextRuntimeDisabled = true;
             console.warn('[Gemini] Disabling AI suggestions for the remainder of this runtime due to billing restrictions.');
         }
-        return blockedEnrichmentResult(failedState?.state || 'generation_failed', failedState?.state, { type: failedState?.lastErrorType || 'GENERATION_FAILED', message: error?.message || String(error) });
+        return blockedEnrichmentResult(
+            failedState?.state || 'generation_failed',
+            failedState?.state,
+            {
+                type: failedState?.lastErrorType || 'GENERATION_FAILED',
+                message: error?.message || String(error),
+                providerCallCount,
+            },
+        );
     }
 }
 
@@ -2506,24 +2556,83 @@ function extractOccurrenceVisibility(message, rawSubject, action) {
     return { isHidden: hidden };
 }
 
+function parseSparsePersistSubject(subject) {
+    if (!subject) return {};
+
+    if (typeof subject === 'object' && !Array.isArray(subject)) {
+        return cloneJsonValue(subject);
+    }
+
+    if (typeof subject !== 'string') return {};
+    const trimmed = subject.trim();
+    if (!trimmed) return {};
+
+    if (trimmed.startsWith('{')) {
+        try {
+            const parsed = JSON.parse(trimmed);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                ? parsed
+                : {};
+        } catch (error) {
+            console.warn('[Persist] Failed to parse sparse subject JSON:', error.message);
+        }
+    }
+
+    if (/^[0-9a-f]+$/i.test(trimmed) && trimmed.length % 2 === 0) {
+        return { hex: trimmed };
+    }
+
+    return { value: trimmed };
+}
+
 export function buildPersistEventPayload(existingEvent, rawSubject, action) {
     const baseEvent =
         existingEvent && typeof existingEvent === 'object' && !Array.isArray(existingEvent)
             ? cloneJsonValue(existingEvent)
             : {};
     const persistPatch = parsePersistPatch(action);
-    const subjectObject = ensureObjectSubject(rawSubject);
+    // Persist messages are patches, not complete event documents. Do not call
+    // ensureObjectSubject() here: its canonicalizer fills absent fields with
+    // null/defaults, which would overwrite unrelated persisted metadata.
+    const subjectObject = parseSparsePersistSubject(rawSubject);
 
     if (persistPatch) {
         mergePersistPatch(baseEvent, persistPatch);
+        applyLegacyPersistFieldAliases(baseEvent, persistPatch);
     }
     if (subjectObject && Object.keys(subjectObject).length > 0) {
         mergePersistPatch(baseEvent, subjectObject);
+        applyLegacyPersistFieldAliases(baseEvent, subjectObject);
     }
 
     ensureRuntimeMetadata(baseEvent);
     applySanitizedUidToEvent(baseEvent);
     return baseEvent;
+}
+
+function applyLegacyPersistFieldAliases(target, patch) {
+    if (!target || typeof target !== 'object' || Array.isArray(target)) return target;
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return target;
+
+    const hasTagline = Object.prototype.hasOwnProperty.call(patch, 'tagline');
+    const hasImageTheme = Object.prototype.hasOwnProperty.call(patch, 'imageTheme');
+    const hasImageUrl = Object.prototype.hasOwnProperty.call(patch, 'imageUrl');
+    if (!hasTagline && !hasImageTheme && !hasImageUrl) return target;
+
+    target.metadata = target.metadata && typeof target.metadata === 'object' && !Array.isArray(target.metadata)
+        ? target.metadata
+        : {};
+    if (hasTagline) {
+        target.metadata.tagline = patch.tagline;
+    }
+    if (hasImageTheme || hasImageUrl) {
+        target.metadata.image = target.metadata.image && typeof target.metadata.image === 'object' && !Array.isArray(target.metadata.image)
+            ? target.metadata.image
+            : {};
+        if (hasImageTheme) target.metadata.image.theme = patch.imageTheme;
+        if (hasImageUrl) target.metadata.image.url = patch.imageUrl;
+    }
+    return target;
 }
 
 function mergePersistPatch(target, patch) {
@@ -3317,11 +3426,15 @@ async function lambdaHandlerWithDependencies(event) {
         action = mapActionId(action);
         
         const rawSubject = messageBody.subject;
-        const subject = ensureObjectSubject(rawSubject);
+        // Persist messages are sparse patches. Do not normalize them before the
+        // canonical merge or absent fields become null/defaults and erase stored data.
+        const subject = realm === 'persist'
+            ? parseSparsePersistSubject(rawSubject)
+            : ensureObjectSubject(rawSubject);
 
         console.log(`Processing scouts message - Realm: ${realm}, Action: ${action}`);
 
-        const enrichmentRealms = new Set(['tagline', 'imageTheme', 'image']);
+        const enrichmentRealms = new Set(['taglineTheme', 'tagline', 'imageTheme', 'image']);
         let scoutsConfig = null;
         if (enrichmentRealms.has(realm)) {
             scoutsConfig = await loadScoutsConfig().catch((error) => {
@@ -3332,10 +3445,10 @@ async function lambdaHandlerWithDependencies(event) {
 
         // Only accept a small set of realms in this lambda.
         // Supported realms:
-        // - 'tagline', 'imageTheme', 'image': enrichment tasks triggered by scouts2sqs
+        // - 'taglineTheme', 'tagline', 'imageTheme', 'image': enrichment tasks triggered by scouts2sqs
         // - 'persist': finalisation tasks routed internally
         // Anything else is dropped and shunted to the DLQ to avoid noisy retries.
-        const allowedRealms = new Set(['tagline', 'imageTheme', 'image', 'persist']);
+        const allowedRealms = new Set(['taglineTheme', 'tagline', 'imageTheme', 'image', 'persist']);
         if (!allowedRealms.has(realm)) {
             console.error(`[SQS2Scouts] Dropping unsupported realm=${realm} action=${action} subject=${(rawSubject && (rawSubject.title || rawSubject.hex)) || 'unknown'}`);
             // Send unsupported realm to DLQ
@@ -3347,85 +3460,222 @@ async function lambdaHandlerWithDependencies(event) {
             return { statusCode: 200, body: JSON.stringify({ message: 'Dropped unsupported realm' }) };
         }
 
-        // Handle tagline realm - generate tagline and image prompt
-        if (realm === 'tagline') {
+        // Handle combined automatic text enrichment and independent tagline regeneration.
+        // The combined realm uses the tagline enrichment-state record as the retry/idempotency
+        // owner and marks imageTheme satisfied only after both fields are durably read back.
+        if (realm === 'taglineTheme' || realm === 'tagline') {
             const hexValue = typeof rawSubject === 'string' ? rawSubject.trim() : null;
             if (!hexValue) {
-                throw new Error('tagline request missing hex identifier');
+                throw new Error(`${realm} request missing hex identifier`);
             }
-            
+
             const hexData = await loadHexEventFromS3(hexValue);
             if (!hexData) {
                 throw new Error(`HEX ${hexValue} not found`);
             }
-            
-            const generationId = buildGenerationId(hexValue, 'tagline', hexData, GEMINI_PROMPT_VERSION);
-            const result = await generateGeminiTextSuggestion(hexData, 'tagline', scoutsConfig, { hexValue, generationId, requestId: requestContext.requestId });
+
+            const existingTagline = getTagline(hexData);
+            const existingImageTheme = getImageThemeValue(hexData);
+            let textMode = realm;
+
+            // Re-evaluate persisted state at worker time so replay/race conditions cannot
+            // overwrite a field that became durable after the Step Function was started.
+            if (realm === 'taglineTheme') {
+                if (existingTagline && existingImageTheme) {
+                    const taglineGenerationId = buildGenerationId(hexValue, 'tagline', hexData, GEMINI_PROMPT_VERSION);
+                    const imageThemeGenerationId = buildGenerationId(hexValue, 'imageTheme', hexData, GEMINI_PROMPT_VERSION);
+                    const [taglineState, imageThemeState] = await Promise.all([
+                        getEnrichmentState(hexValue, 'tagline').catch(() => null),
+                        getEnrichmentState(hexValue, 'imageTheme').catch(() => null),
+                    ]);
+                    const repairs = [];
+                    if (taglineState?.state !== 'in_progress') {
+                        repairs.push(markEnrichmentSucceeded({ hex: hexValue, stage: 'tagline', generationId: taglineGenerationId }));
+                    }
+                    if (imageThemeState?.state !== 'in_progress') {
+                        repairs.push(markEnrichmentSucceeded({ hex: hexValue, stage: 'imageTheme', generationId: imageThemeGenerationId }));
+                    }
+                    await Promise.all(repairs);
+                    console.log(JSON.stringify({
+                        event: 'gemini_text_stage_skipped',
+                        requestedTextMode: 'combined',
+                        hex: hexValue,
+                        reason: 'both_fields_already_present',
+                        providerCallCount: 0,
+                        repairedStateRows: repairs.length,
+                    }));
+                    await completeImageEnrichTask(messageBody, {
+                        status: 'succeeded',
+                        hex: hexValue,
+                        requestId: requestContext.requestId,
+                        orchestrationStep: 'taglineTheme',
+                        skipped: 'both_fields_already_present',
+                        imageTheme: existingImageTheme,
+                    });
+                    runtimeOutcome = { status: 'completed', enrichmentStage: 'tagline', providerCallCount: 0 };
+                    return {
+                        statusCode: 200,
+                        body: JSON.stringify({
+                            message: `Combined text enrichment already satisfied for HEX ${hexValue}`,
+                            effectiveStage: 'tagline',
+                            generationId: taglineGenerationId,
+                            providerCallCount: 0,
+                        }),
+                    };
+                }
+                if (existingTagline) textMode = 'imageTheme';
+                else if (existingImageTheme) textMode = 'tagline';
+            }
+
+            const stateStage = textMode === 'imageTheme' ? 'imageTheme' : 'tagline';
+            const baseGenerationId = buildGenerationId(hexValue, stateStage, hexData, GEMINI_PROMPT_VERSION);
+            const manualRegeneration = messageBody.requestMode === 'manual' && Boolean(requestContext.requestId);
+            const generationId = manualRegeneration
+                ? crypto.createHash('sha256').update(`${baseGenerationId}\nmanual:${requestContext.requestId}`).digest('hex')
+                : baseGenerationId;
+            const imageThemeGenerationId = buildGenerationId(hexValue, 'imageTheme', hexData, GEMINI_PROMPT_VERSION);
+            activityContext = { ...activityContext, stage: stateStage };
+            if (manualRegeneration) {
+                const existingState = await getEnrichmentState(hexValue, stateStage).catch(() => null);
+                let manualReviewReset = null;
+                if (existingState?.state === 'manual_review') {
+                    manualReviewReset = await retryManualReviewEnrichment({
+                        hex: hexValue,
+                        stage: stateStage,
+                        requestedBy: requestContext.requestId,
+                    });
+                }
+                console.log(JSON.stringify({
+                    event: 'gemini_text_manual_regeneration',
+                    requestedTextMode: textMode,
+                    enrichmentStateStage: stateStage,
+                    hex: hexValue,
+                    requestId: requestContext.requestId,
+                    generationId,
+                    existingState: existingState?.state || null,
+                    manualReviewReset: manualReviewReset?.reset === true,
+                }));
+            }
+            const result = await generateGeminiTextSuggestion(hexData, textMode, scoutsConfig, {
+                hexValue,
+                generationId,
+                requestId: requestContext.requestId,
+            });
+
             if (result?.enrichmentBlocked) {
                 await completeImageEnrichTask(messageBody, {
                     status: result.state || 'manual_review',
                     hex: hexValue,
                     requestId: requestContext.requestId,
-                    orchestrationStep: 'imageTheme',
+                    orchestrationStep: realm,
                     skipped: result.reason || 'enrichment_unavailable',
                 });
-                runtimeOutcome = { status: result.state === 'retry_wait' ? 'waiting_for_retry' : 'manual_review', failure: { type: result.failureCategory || 'ENRICHMENT_BLOCKED', message: result.failureMessage || result.reason } };
+                runtimeOutcome = {
+                    status: result.state === 'retry_wait' ? 'waiting_for_retry' : 'manual_review',
+                    enrichmentStage: stateStage,
+                    providerCallCount: result.providerCallCount ?? 0,
+                    failure: {
+                        type: result.failureCategory || 'ENRICHMENT_BLOCKED',
+                        message: result.failureMessage || result.reason,
+                    },
+                };
                 return {
                     statusCode: 202,
-                    body: JSON.stringify({ message: 'Tagline enrichment is currently deferred' }),
+                    body: JSON.stringify({
+                        message: `${realm === 'taglineTheme' ? 'Combined text' : 'Tagline'} enrichment is currently deferred`,
+                        effectiveStage: stateStage,
+                        generationId,
+                        providerCallCount: result.providerCallCount ?? 0,
+                    }),
                 };
             }
-            if (!result?.tagline || !result?.imageTheme) throw Object.assign(new Error('Validated tagline response did not contain required event data'), { name: 'INVALID_EVENT_DATA' });
-            setTagline(hexData, result.tagline);
-            if (result?.imageTheme && !getImageThemeValue(hexData)) setImageTheme(hexData, result.imageTheme);
+
+            if ((textMode === 'tagline' || textMode === 'taglineTheme') && !result?.tagline) {
+                throw Object.assign(new Error('Validated text response did not contain tagline'), { name: 'INVALID_EVENT_DATA' });
+            }
+            if ((textMode === 'imageTheme' || textMode === 'taglineTheme') && !result?.imageTheme) {
+                throw Object.assign(new Error('Validated text response did not contain imageTheme'), { name: 'INVALID_EVENT_DATA' });
+            }
+
+            if (textMode === 'tagline' || textMode === 'taglineTheme') {
+                setTagline(hexData, result.tagline);
+            }
+            if (textMode === 'imageTheme' || textMode === 'taglineTheme') {
+                setImageTheme(hexData, result.imageTheme);
+                setImageApprovalState(hexData, false);
+            }
 
             try {
                 await saveHexEventToS3(hexValue, hexData);
                 const persisted = await loadHexEventFromS3(hexValue);
                 const persistedTagline = getTagline(persisted);
                 const persistedImageTheme = getImageThemeValue(persisted);
-                // A tagline request may receive an image theme from Gemini,
-                // but must preserve an existing theme. Compare read-back with
-                // the effective value on the event, not the unused suggestion.
-                const expectedImageTheme = getImageThemeValue(hexData);
-                if (persistedTagline !== result.tagline || persistedImageTheme !== expectedImageTheme) {
-                    throw new Error('Tagline enrichment read-back did not contain the generated fields');
+
+                if ((textMode === 'tagline' || textMode === 'taglineTheme') && persistedTagline !== result.tagline) {
+                    throw new Error('Text enrichment read-back did not contain the generated tagline');
                 }
+                if ((textMode === 'imageTheme' || textMode === 'taglineTheme') && persistedImageTheme !== result.imageTheme) {
+                    throw new Error('Text enrichment read-back did not contain the generated image theme');
+                }
+                if (textMode === 'tagline' && persistedImageTheme !== existingImageTheme) {
+                    throw new Error('Tagline-only enrichment modified the existing image theme');
+                }
+                if (textMode === 'imageTheme' && persistedTagline !== existingTagline) {
+                    throw new Error('Image-theme-only enrichment modified the existing tagline');
+                }
+
                 await publishHexEventToAgenda(hexValue, hexData);
             } catch (error) {
-                emitEnrichmentMetric('PersistenceRetry', 'tagline', 'publication_failed');
+                emitEnrichmentMetric('PersistenceRetry', stateStage, 'publication_failed');
                 throw error;
             }
-            if (result) {
-                await markEnrichmentSucceeded({ hex: hexValue, stage: 'tagline', generationId });
+
+            if (textMode === 'taglineTheme') {
+                await Promise.all([
+                    markEnrichmentSucceeded({ hex: hexValue, stage: 'tagline', generationId }),
+                    markEnrichmentSucceeded({ hex: hexValue, stage: 'imageTheme', generationId: imageThemeGenerationId }),
+                ]);
+            } else {
+                await markEnrichmentSucceeded({ hex: hexValue, stage: stateStage, generationId });
             }
+
             await completeImageEnrichTask(messageBody, {
                 status: 'succeeded',
                 hex: hexValue,
                 requestId: requestContext.requestId,
-                orchestrationStep: 'tagline',
+                orchestrationStep: realm,
                 imageTheme: getImageThemeValue(hexData),
             });
-            runtimeOutcome = { status: 'completed' };
+            runtimeOutcome = { status: 'completed', enrichmentStage: stateStage, providerCallCount: result.providerCallCount ?? 0 };
 
             const requiresApproval = hasCompleteApprovalData(hexData);
             if (!requiresApproval || autoApproval) {
                 return {
                     statusCode: 200,
-                    body: JSON.stringify({ message: `Tagline enrichment persisted for HEX ${hexValue}` })
+                    body: JSON.stringify({
+                        message: `${realm === 'taglineTheme' ? 'Combined text enrichment' : 'Tagline enrichment'} persisted for HEX ${hexValue}`,
+                        effectiveStage: stateStage,
+                        generationId,
+                        providerCallCount: result.providerCallCount ?? 0,
+                    }),
                 };
             }
 
             const message = await prepareEnrichmentReview('approval', hexData, scoutsConfig);
             const slackResponse = await postSlackMessage(message);
             await storeApprovalMessageReference(hexData, 'approval', slackResponse);
-            
+
             return {
                 statusCode: 200,
-                body: JSON.stringify({ message: `Tagline enrichment review generated for HEX ${hexValue}` })
+                body: JSON.stringify({
+                    message: `${realm === 'taglineTheme' ? 'Combined text enrichment' : 'Tagline enrichment'} review generated for HEX ${hexValue}`,
+                    effectiveStage: stateStage,
+                    generationId,
+                    providerCallCount: result.providerCallCount ?? 0,
+                }),
             };
         }
-        
+
         // Handle imageTheme realm - generate only the persisted image theme
         if (realm === 'imageTheme') {
             const hexValue = typeof rawSubject === 'string' ? rawSubject.trim() : null;
@@ -3438,7 +3688,33 @@ async function lambdaHandlerWithDependencies(event) {
                 throw new Error(`HEX ${hexValue} not found`);
             }
             
-            const generationId = buildGenerationId(hexValue, 'imageTheme', hexData, GEMINI_PROMPT_VERSION);
+            const baseGenerationId = buildGenerationId(hexValue, 'imageTheme', hexData, GEMINI_PROMPT_VERSION);
+            const manualRegeneration = messageBody.requestMode === 'manual' && Boolean(requestContext.requestId);
+            const generationId = manualRegeneration
+                ? crypto.createHash('sha256').update(`${baseGenerationId}\nmanual:${requestContext.requestId}`).digest('hex')
+                : baseGenerationId;
+            activityContext = { ...activityContext, stage: 'imageTheme' };
+            if (manualRegeneration) {
+                const existingState = await getEnrichmentState(hexValue, 'imageTheme').catch(() => null);
+                let manualReviewReset = null;
+                if (existingState?.state === 'manual_review') {
+                    manualReviewReset = await retryManualReviewEnrichment({
+                        hex: hexValue,
+                        stage: 'imageTheme',
+                        requestedBy: requestContext.requestId,
+                    });
+                }
+                console.log(JSON.stringify({
+                    event: 'gemini_text_manual_regeneration',
+                    requestedTextMode: 'imageTheme',
+                    enrichmentStateStage: 'imageTheme',
+                    hex: hexValue,
+                    requestId: requestContext.requestId,
+                    generationId,
+                    existingState: existingState?.state || null,
+                    manualReviewReset: manualReviewReset?.reset === true,
+                }));
+            }
             const result = await generateGeminiTextSuggestion(hexData, 'imageTheme', scoutsConfig, { hexValue, generationId, requestId: requestContext.requestId });
             if (result?.enrichmentBlocked) {
                 await completeImageEnrichTask(messageBody, {
@@ -3448,10 +3724,20 @@ async function lambdaHandlerWithDependencies(event) {
                     orchestrationStep: 'imageTheme',
                     skipped: result.reason || 'enrichment_unavailable',
                 });
-                runtimeOutcome = { status: result.state === 'retry_wait' ? 'waiting_for_retry' : 'manual_review', failure: { type: result.failureCategory || 'ENRICHMENT_BLOCKED', message: result.failureMessage || result.reason } };
+                runtimeOutcome = {
+                    status: result.state === 'retry_wait' ? 'waiting_for_retry' : 'manual_review',
+                    enrichmentStage: 'imageTheme',
+                    providerCallCount: result.providerCallCount ?? 0,
+                    failure: { type: result.failureCategory || 'ENRICHMENT_BLOCKED', message: result.failureMessage || result.reason },
+                };
                 return {
                     statusCode: 202,
-                    body: JSON.stringify({ message: 'Image theme enrichment is currently deferred' }),
+                    body: JSON.stringify({
+                        message: 'Image theme enrichment is currently deferred',
+                        effectiveStage: 'imageTheme',
+                        generationId,
+                        providerCallCount: result.providerCallCount ?? 0,
+                    }),
                 };
             }
             if (!result?.imageTheme) throw Object.assign(new Error('Validated image theme response did not contain imageTheme'), { name: 'INVALID_EVENT_DATA' });
@@ -3485,7 +3771,12 @@ async function lambdaHandlerWithDependencies(event) {
             if (!requiresApproval || autoApproval) {
                 return {
                     statusCode: 200,
-                    body: JSON.stringify({ message: `Image theme persisted for HEX ${hexValue}` })
+                    body: JSON.stringify({
+                        message: `Image theme persisted for HEX ${hexValue}`,
+                        effectiveStage: 'imageTheme',
+                        generationId,
+                        providerCallCount: result.providerCallCount ?? 0,
+                    })
                 };
             }
 
@@ -3495,7 +3786,12 @@ async function lambdaHandlerWithDependencies(event) {
             
             return {
                 statusCode: 200,
-                body: JSON.stringify({ message: `Image theme review generated for HEX ${hexValue}` })
+                body: JSON.stringify({
+                    message: `Image theme review generated for HEX ${hexValue}`,
+                    effectiveStage: 'imageTheme',
+                    generationId,
+                    providerCallCount: result.providerCallCount ?? 0,
+                })
             };
         }
 
@@ -3612,11 +3908,17 @@ async function lambdaHandlerWithDependencies(event) {
         if (realm === 'persist') {
             console.log(`[persist] Processing persist action for subject:`, JSON.stringify(rawSubject));
             
-            const subjectObject = ensureObjectSubject(rawSubject);
+            const subjectObject = subject;
             const hexValue = (
                 typeof rawSubject === 'string' ? rawSubject.trim().toLowerCase() : null
             ) || (
                 typeof subjectObject.hex === 'string' ? subjectObject.hex.trim().toLowerCase() : null
+            ) || (
+                typeof subjectObject.metadata?.hex === 'string' ? subjectObject.metadata.hex.trim().toLowerCase() : null
+            ) || (
+                typeof messageBody.hex === 'string' ? messageBody.hex.trim().toLowerCase() : null
+            ) || (
+                typeof requestContext.hex === 'string' ? requestContext.hex.trim().toLowerCase() : null
             );
             
             if (!hexValue) {
@@ -3819,9 +4121,13 @@ async function lambdaHandlerWithDependencies(event) {
             await recordRequestActivity({
                 ...activityContext,
                 state,
-                stage: succeeded ? (isWorkflowStage ? 'published' : 'agenda_published') : state,
+                stage: runtimeOutcome.enrichmentStage
+                    || (succeeded ? (isWorkflowStage ? 'published' : 'agenda_published') : state),
                 publication: succeeded ? 'published' : null,
                 failure: runtimeOutcome.failure || null,
+                ...(Number.isFinite(Number(runtimeOutcome.providerCallCount))
+                    ? { providerCallCount: Number(runtimeOutcome.providerCallCount) }
+                    : {}),
             }).catch((activityError) => console.warn('[Activity] Unable to record worker outcome:', activityError?.message || activityError));
         }
     }

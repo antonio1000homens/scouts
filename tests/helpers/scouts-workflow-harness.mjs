@@ -28,8 +28,11 @@ export function getSyntheticHex(event) {
 }
 
 export function determineSyntheticStage(event) {
-  if (!String(event?.metadata?.tagline ?? '').trim()) return 'tagline';
-  if (!String(event?.metadata?.image?.theme ?? '').trim()) return 'imageTheme';
+  const hasTagline = Boolean(String(event?.metadata?.tagline ?? '').trim());
+  const hasImageTheme = Boolean(String(event?.metadata?.image?.theme ?? '').trim());
+  if (!hasTagline && !hasImageTheme) return 'taglineTheme';
+  if (!hasTagline) return 'tagline';
+  if (!hasImageTheme) return 'imageTheme';
   if (!String(event?.metadata?.image?.url ?? '').trim()) return 'image';
   return 'complete';
 }
@@ -60,7 +63,7 @@ export function translateQueueStage(queueMessage, event) {
   if (queueMessage?.hex !== hex) throw new Error('queue boundary: HEX mismatch');
   const requested = queueMessage?.subject === 'all' ? determineSyntheticStage(event) : queueMessage?.subject;
   if (requested === 'imageUrl') return { realm: 'image', action: 'request', subject: hex, stage: 'image' };
-  if (requested === 'tagline' || requested === 'imageTheme') {
+  if (requested === 'taglineTheme' || requested === 'tagline' || requested === 'imageTheme') {
     return { realm: requested, action: 'request', subject: hex, stage: requested };
   }
   if (queueMessage?.action === 'fullEnrich') {
@@ -110,8 +113,18 @@ export async function enrichSyntheticEvent(eventInput, provider, state = {}) {
     if (stage === 'complete') break;
     trace.push({ boundary: 'orchestration', stage, status: 'started' });
 
-    if (stage === 'tagline') {
-      metadata(event).tagline = await provider.generateTagline(clone(event));
+    if (stage === 'taglineTheme') {
+      const generated = await provider.generateTaglineTheme(clone(event));
+      const tagline = String(generated?.tagline ?? '').trim();
+      const imageTheme = String(generated?.imageTheme ?? '').trim();
+      if (!tagline || !imageTheme) throw new Error('combined provider returned incomplete text enrichment');
+      metadata(event).tagline = tagline;
+      imageMetadata(event).theme = imageTheme;
+      trace.push({ boundary: 'provider', stage, status: 'generated' });
+    } else if (stage === 'tagline') {
+      const tagline = String(await provider.generateTagline(clone(event)) ?? '').trim();
+      if (!tagline) throw new Error('tagline provider returned an empty value');
+      metadata(event).tagline = tagline;
       trace.push({ boundary: 'provider', stage, status: 'generated' });
     } else if (stage === 'imageTheme') {
       imageMetadata(event).theme = await provider.generateImageTheme(clone(event));

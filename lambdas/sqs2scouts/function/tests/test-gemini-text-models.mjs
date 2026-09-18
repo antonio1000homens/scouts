@@ -36,6 +36,7 @@ test('429 retries the next configured model and returns its result', async () =>
   assert.deepEqual(attempted, ['primary', 'fallback']);
   assert.equal(result.model, 'fallback');
   assert.equal(result.result, 'generated tagline');
+  assert.equal(result.providerCallCount, 2);
 });
 
 test('non-retryable Gemini errors do not fan out to other models', async () => {
@@ -58,12 +59,14 @@ test('retryability recognises provider quota and transient availability errors',
   assert.equal(isRetryableGeminiTextError({ name: 'MALFORMED_MODEL_RESPONSE' }), true);
 });
 
-test('structured response schemas and semantic validation reject malformed event data', () => {
-  assert.deepEqual(GEMINI_TEXT_RESPONSE_SCHEMAS.tagline.required, ['tagline', 'imageTag']);
+test('structured response schemas distinguish combined and field-specific generation', () => {
+  assert.deepEqual(GEMINI_TEXT_RESPONSE_SCHEMAS.taglineTheme.required, ['tagline', 'imageTag']);
+  assert.deepEqual(GEMINI_TEXT_RESPONSE_SCHEMAS.tagline.required, ['tagline']);
   assert.deepEqual(GEMINI_TEXT_RESPONSE_SCHEMAS.imageTheme.required, ['imageTag']);
-  assert.equal(validateGeminiTextResponse({ tagline: 'Adventure awaits!', imageTag: 'forest ropes course' }, 'tagline').valid, true);
-  assert.equal(validateGeminiTextResponse({ tagline: '', imageTag: 'forest ropes course' }, 'tagline').reason, 'missing_tagline');
-  assert.equal(validateGeminiTextResponse({ tagline: 'x'.repeat(81), imageTag: 'forest ropes course' }, 'tagline').reason, 'tagline_too_long');
+  assert.equal(validateGeminiTextResponse({ tagline: 'Adventure awaits!', imageTag: 'forest ropes course' }, 'taglineTheme').valid, true);
+  assert.equal(validateGeminiTextResponse({ tagline: 'Adventure awaits!' }, 'tagline').valid, true);
+  assert.equal(validateGeminiTextResponse({ tagline: '', imageTag: 'forest ropes course' }, 'taglineTheme').reason, 'missing_tagline');
+  assert.equal(validateGeminiTextResponse({ tagline: 'x'.repeat(81) }, 'tagline').reason, 'tagline_too_long');
   assert.equal(validateGeminiTextResponse({ imageTag: 'Laser Tag!' }, 'imageTheme').reason, 'invalid_image_tag');
 });
 
@@ -119,6 +122,7 @@ test('malformed structured output retries the same model once before succeeding'
 
   assert.deepEqual(attempts, ['primary', 'primary']);
   assert.equal(result.model, 'primary');
+  assert.equal(result.providerCallCount, 2);
 });
 
 test('repeated malformed output falls back to the next configured model', async () => {
@@ -146,4 +150,5 @@ test('repeated malformed output falls back to the next configured model', async 
 
   assert.deepEqual(attempts, ['primary', 'primary', 'fallback']);
   assert.equal(result.model, 'fallback');
+  assert.equal(result.providerCallCount, 3);
 });

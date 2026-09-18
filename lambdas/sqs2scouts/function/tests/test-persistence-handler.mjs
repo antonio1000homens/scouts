@@ -93,7 +93,8 @@ async function loadPersistenceModule(store, sentMessages) {
         reserveEnrichmentAttempt: async () => ({}), markGeminiSucceeded: async () => ({}),
         markEnrichmentSucceeded: async () => ({}), markEnrichmentFailure: async () => ({}),
         loadReusableGeneration: async () => null, evaluateEnrichmentEligibility: async () => ({ eligible: true }),
-        claimEnrichmentEscalation: async () => ({}), clearEnrichmentState: async () => ({}), enrichmentStateConfig: {},
+        claimEnrichmentEscalation: async () => ({}), retryManualReviewEnrichment: async () => ({ reset: true }),
+        clearEnrichmentState: async () => ({}), enrichmentStateConfig: {},
       });
     }
     if (specifier.endsWith('/agenda-publisher.mjs')) {
@@ -117,6 +118,7 @@ async function loadPersistenceModule(store, sentMessages) {
   await module.evaluate();
   return {
     createPersistenceHandler: module.namespace.createPersistenceHandler,
+    buildPersistEventPayload: module.namespace.buildPersistEventPayload,
   };
 }
 
@@ -142,6 +144,81 @@ function fixtureStore() {
     'scouts.conf': {},
   };
 }
+
+test('field-level persist aliases update canonical metadata instead of being overwritten by normalization', async () => {
+  const store = fixtureStore();
+  const { buildPersistEventPayload } = await loadPersistenceModule(store, []);
+
+  const tagline = buildPersistEventPayload(
+    store[`events/${HEX}.json`],
+    { hex: HEX, tagline: 'Updated tagline' },
+    'persist',
+  );
+  assert.equal(tagline.metadata.tagline, 'Updated tagline');
+  assert.equal(tagline.metadata.image.theme, 'calendar');
+
+  const theme = buildPersistEventPayload(
+    store[`events/${HEX}.json`],
+    { hex: HEX, imageTheme: 'updated theme' },
+    'persist',
+  );
+  assert.equal(theme.metadata.tagline, 'School holiday');
+  assert.equal(theme.metadata.image.theme, 'updated theme');
+  assert.equal(theme.metadata.image.url, '/website/eventImages/holiday.webp');
+
+  const imageUrl = buildPersistEventPayload(
+    store[`events/${HEX}.json`],
+    { hex: HEX, imageUrl: 'https://example.test/new.jpg' },
+    'persist',
+  );
+  assert.equal(imageUrl.metadata.image.theme, 'calendar');
+  assert.equal(imageUrl.metadata.image.url, 'https://example.test/new.jpg');
+});
+
+test('real persistence handler merges canonical sparse field saves without clearing unrelated metadata', async () => {
+  const store = fixtureStore();
+  const sentMessages = [];
+  const { createPersistenceHandler } = await loadPersistenceModule(store, sentMessages);
+  const handler = createPersistenceHandler({
+    recordRequestActivity: async () => null,
+    s3Client: { send: async (request) => {
+      const { Key } = request.input;
+      if (request.name === 'GetObjectCommand') {
+        if (!(Key in store)) { const error = new Error('Missing'); error.name = 'NoSuchKey'; throw error; }
+        return { Body: body(store[Key]), ETag: '"fixture"' };
+      }
+      if (request.name === 'PutObjectCommand') {
+        store[Key] = JSON.parse(Buffer.from(request.input.Body).toString('utf8'));
+        return { ETag: '"fixture-after"' };
+      }
+      throw new Error(`Unexpected S3 command ${request.name}`);
+    } },
+    sqsClient: { send: async (request) => { sentMessages.push(request.input); return {}; } },
+    publishCanonicalEventToAgenda: async ({ loadAgenda, writeAgenda, hex, event }) => {
+      const agenda = await loadAgenda();
+      agenda.events = agenda.events.map((entry) => entry.metadata.hex === hex
+        ? { ...entry, metadata: clone(event.metadata) }
+        : entry);
+      await writeAgenda(agenda);
+      return { matched: 2 };
+    },
+  });
+
+  const result = await handler({ Records: [{ eventSource: 'aws:sqs', messageId: 'message-save-tagline', body: JSON.stringify({
+    realm: 'persist',
+    action: 'persist',
+    requestId: 'save-tagline',
+    hex: HEX,
+    subject: { metadata: { hex: HEX, tagline: 'Updated through handler' } },
+    subjectLabel: 'tagline',
+  }) }] });
+
+  assert.equal(result.statusCode, 200, result.body);
+  const persisted = store[`events/${HEX}.json`];
+  assert.equal(persisted.metadata.tagline, 'Updated through handler');
+  assert.equal(persisted.metadata.image.theme, 'calendar');
+  assert.equal(persisted.metadata.image.url, '/website/eventImages/holiday.webp');
+});
 
 test('real persistence handler treats legacy occurrence selectors as HEX-wide visibility', async () => {
   const store = fixtureStore();

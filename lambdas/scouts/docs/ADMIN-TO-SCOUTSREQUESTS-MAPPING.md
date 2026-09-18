@@ -32,14 +32,14 @@ flowchart LR
 | Admin page action | Admin payload sent to `scouts` | Message published to `scoutsRequests` | `scouts2sqs` result | Notes |
 | --- | --- | --- | --- | --- |
 | Runtime status poll | `realm: 'scouts'`, `subject: 'status'`, `action: 'runtime'` | None | None | Returns runtime state only. |
-| Agenda refresh | `realm: 'scouts'`, `subject: 'agenda'`, `action: <number>`, `maxEvents` | Indirect only: `realm: 'scoutsRequest'`, `action: 'new'`, `subject: <merged event object>` | Derives next stage from completeness: `tagline/request`, `imageTheme/request`, `image/request`, or no publish | Queue work is created by enrichment logic, not by a 1:1 admin command translation. |
+| Agenda refresh | `realm: 'scouts'`, `subject: 'agenda'`, `action: <number>`, `maxEvents` | Indirect only: `realm: 'scoutsRequest'`, `action: 'new'`, `subject: <merged event object>` | Starts the canonical full-enrich workflow at `taglineTheme` when both text fields are missing, otherwise at the single missing field or image stage | New events use one combined Gemini text request rather than separate tagline and image-theme calls. |
 | Auto heartbeat | `realm: 'scouts'`, `subject: 'agenda'`, `action: 0`, `maxEvents: 0` | Same as agenda refresh | Same as agenda refresh | Same enrichment path as manual agenda refresh. |
-| Calendar refresh | `realm: 'scouts'`, `subject: '<calendar token>'` or `'calendars'`, `action: 'refreshCalendars'` or another refresh token | Indirect only: `realm: 'scoutsRequest'`, `action: 'new'`, `subject: <merged event object>` | Derives next stage from completeness: `tagline/request`, `imageTheme/request`, `image/request`, or no publish | Selected feed token comes from the admin button value and subject token. |
-| Persist tagline | `realm: 'scouts'`, `subject: { hex, tagline }`, `action: 'persistTagline'` or targeted `persist` | `realm: 'scoutsRequest'`, `action: 'persist'`, `subject: 'tagline'`, `hex`, `tagline` | Translated by `scouts2sqs` to `persist/persist` with object subject | `scoutsQueued` keeps the field-level external contract; downstream queues keep the translated internal contract. |
-| Persist image theme | `realm: 'scouts'`, `subject: { hex, imageTheme }`, `action: 'persistImageTheme'` or targeted `persist` | `realm: 'scoutsRequest'`, `action: 'persist'`, `subject: 'imageTheme'`, `hex`, `imageTheme` | Translated by `scouts2sqs` to `persist/persist` with object subject | `imageTheme` remains the stored field name throughout the active flow. |
-| Persist image URL | `realm: 'scouts'`, `subject: { hex, imageUrl }`, `action: 'persistImageUrl'` or targeted `persist` | `realm: 'scoutsRequest'`, `action: 'persist'`, `subject: 'imageUrl'`, `hex`, `imageUrl` | Translated by `scouts2sqs` to `persist/persist` with object subject | URL validation still happens in `scouts` before queueing. |
-| Generate tagline | `realm: 'scouts'`, `subject: { hex }`, `action: 'generateTagline'` | `realm: 'scoutsRequest'`, `action: 'request'`, `subject: 'tagline'`, `hex` | Translated by `scouts2sqs` to `tagline/request` with hex subject | The admin button still passes the field-specific action token; the queue boundary now uses the field-level contract. |
-| Generate image theme | `realm: 'scouts'`, `subject: { hex }`, `action: 'generateImageTheme'` | `realm: 'scoutsRequest'`, `action: 'request'`, `subject: 'imageTheme'`, `hex` | Translated by `scouts2sqs` to `imageTheme/request` with hex subject | `imageTheme` is the canonical stored field. |
+| Calendar refresh | `realm: 'scouts'`, `subject: '<calendar token>'` or `'calendars'`, `action: 'refreshCalendars'` or another refresh token | Indirect only: `realm: 'scoutsRequest'`, `action: 'new'`, `subject: <merged event object>` | Starts the canonical full-enrich workflow at the first required stage | Selected feed token comes from the admin button value and subject token. |
+| Persist tagline | `realm: 'scouts'`, `subject: { hex, tagline }`, `action: 'persistTagline'` or targeted `persist` | `realm: 'scoutsRequest'`, `action: 'persist'`, `subject: 'tagline'`, `hex`, `tagline` | Translated to `persist/persist` with `subject.metadata.hex` + `subject.metadata.tagline` | Canonical nesting prevents normalization from restoring the previous tagline. Legacy top-level queued patches remain supported. |
+| Persist image theme | `realm: 'scouts'`, `subject: { hex, imageTheme }`, `action: 'persistImageTheme'` or targeted `persist` | `realm: 'scoutsRequest'`, `action: 'persist'`, `subject: 'imageTheme'`, `hex`, `imageTheme` | Translated to `persist/persist` with `subject.metadata.image.theme` | The queue-facing field name stays `imageTheme`; the persistence boundary uses the canonical metadata shape. |
+| Persist image URL | `realm: 'scouts'`, `subject: { hex, imageUrl }`, `action: 'persistImageUrl'` or targeted `persist` | `realm: 'scoutsRequest'`, `action: 'persist'`, `subject: 'imageUrl'`, `hex`, `imageUrl` | Translated to `persist/persist` with `subject.metadata.image.url` | URL validation still happens in `scouts` before queueing. |
+| Generate tagline | `realm: 'scouts'`, `subject: { hex }`, `action: 'generateTagline'` | `realm: 'scoutsRequest'`, `action: 'request'`, `subject: 'tagline'`, `hex` | Intercepted into a fresh manual full-enrich execution at `tagline`; the stage callback becomes `tagline/request` | Stops after tagline and preserves image theme/image. |
+| Generate image theme | `realm: 'scouts'`, `subject: { hex }`, `action: 'generateImageTheme'` | `realm: 'scoutsRequest'`, `action: 'request'`, `subject: 'imageTheme'`, `hex` | Intercepted into a fresh manual full-enrich execution at `imageTheme`; the stage callback becomes `imageTheme/request` | Stops after image theme and preserves tagline/image. |
 | Generate image | `realm: 'scouts'`, `subject: { hex }`, `action: 'generateImage'` | `realm: 'scoutsRequest'`, `action: 'request'`, `subject: 'imageUrl'`, `hex` | Translated by `scouts2sqs` to `image/request` with hex subject | The external contract uses `imageUrl` while the internal processing realm remains `image`. |
 | Hide event | `realm: 'scouts'`, `subject: { hex, isHidden: true }`, `action: 'hide'` | `realm: 'persist'`, `action: 'persist'`, `subject: { hex, isHidden: true }` | Forwarded to `scoutsProcessing` as `persist/persist` | Current admin hide no longer publishes `persist/hidden`. |
 | Unhide event | `realm: 'scouts'`, `subject: { hex, isHidden: false }`, `action: 'unhide'` | `realm: 'persist'`, `action: 'persist'`, `subject: { hex, isHidden: false }` | Forwarded to `scoutsProcessing` as `persist/persist` | Same queue shape as hide, with `isHidden: false`. |
@@ -50,7 +50,7 @@ These are not sent directly by the admin page, but they affect the real pipeline
 
 | Producer | Message published to `scoutsRequests` | `scouts2sqs` result | Notes |
 | --- | --- | --- | --- |
-| Enrichment run finds new or stale work | `realm: 'scoutsRequest'`, `action: 'new'`, `subject: <merged event object>` | Derives `tagline/request`, `imageTheme/request`, `image/request`, or no publish | Used by agenda/calendar processing and retry handling. |
+| Enrichment run finds new or stale work | `realm: 'scoutsRequest'`, `action: 'new'`, `subject: <merged event object>` | Starts the canonical full-enrich workflow at `taglineTheme` when both text fields are absent, otherwise at the single missing text field or image stage | Used by agenda/calendar processing and retry handling. |
 | Reset cleanup notification | `realm: 'scouts'`, `subject: 'reset'`, `action: <removed-events summary>` | Dropped by `scouts2sqs` | `scouts2sqs` does not support the `scouts` realm on the SQS path. |
 | `sqs2scouts` callback for incomplete persisted HEX | No outbound queue message | No downstream queue work is emitted from this callback path | Persisted-but-incomplete HEX is logged and left in place. |
 
@@ -81,24 +81,26 @@ Current hide and unhide requests are both translated to:
 
 That is a meaningful change from the older `persist/hidden` hide path.
 
-### 3. Current queue stage names are `tagline`, `imageTheme`, and `image`
+### 3. Current queue stage names include the combined `taglineTheme` stage
 
 For the current admin and `scoutsRequest` flows, the active downstream stages are:
 
-- `tagline`
-- `imageTheme`
+- `taglineTheme` — automatic combined tagline + image-theme generation
+- `tagline` — field-specific generation
+- `imageTheme` — field-specific generation
 - `image`
 
 The active admin flow emits `tagline`, `imageTheme`, `imageUrl`, and `hex`.
 
 ### 4. `scouts2sqs` derives the next stage from subject completeness
 
-For `realm: 'scoutsRequest'` with `action: 'new' | 'retry'`, `scouts2sqs` checks the subject in this order:
+For `realm: 'scoutsRequest'` with `action: 'new' | 'retry'`, the router starts the canonical state machine from persisted completeness:
 
-1. missing tagline -> publish `tagline / request / <hex>`
-2. missing `image.theme` -> publish `imageTheme / request / <hex>`
-3. missing `image.url` -> publish `image / request / <hex>`
-4. fully populated -> do not publish another processing request
+1. tagline and `image.theme` both missing -> `taglineTheme` (one Gemini call for both)
+2. only tagline missing -> `tagline`
+3. only `image.theme` missing -> `imageTheme`
+4. text complete but `image.url` missing -> `image`
+5. fully populated -> no provider work
 
 ### 5. `persist` is a pass-through realm in `scouts2sqs`
 
