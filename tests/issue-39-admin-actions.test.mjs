@@ -167,6 +167,20 @@ test('admin Details actions keep selection stable by HEX when visible indexes ch
   assert.equal(missing.functions.getSelectedModalEntry(), null);
 });
 
+test('admin lifecycle polling prefers the logical request ID over the SQS message ID', () => {
+  const sandbox = {
+    hasText: (value) => value !== null && value !== undefined && String(value).trim().length > 0,
+  };
+  const { functions } = loadFunctionsFromSource(adminSource, ['extractBackendRequestId'], sandbox);
+  assert.equal(functions.extractBackendRequestId({
+    requestId: 'logical-request-id',
+    queuedMessage: {
+      requestId: 'logical-request-id',
+      messageId: 'sqs-message-id',
+    },
+  }), 'logical-request-id');
+});
+
 test('admin generation buttons publish field-specific actions with only the selected HEX', async () => {
   const cases = [
     ['tagline', 'generateTagline'],

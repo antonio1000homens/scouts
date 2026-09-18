@@ -301,13 +301,17 @@
         pollPromise = (async () => {
             try {
                 const result = await activityCommand('status');
-                latestStatusActivity = result?.activity || null;
-                const statusRequests = Array.isArray(latestStatusActivity?.requests) ? latestStatusActivity.requests : [];
+                const statusActivity = result?.activity || null;
+                const statusRequests = Array.isArray(statusActivity?.requests) ? statusActivity.requests : [];
                 const lookup = tracked.size
                     ? await activityCommand('lookup', { requestIds: [...tracked] })
                     : { activity: { requests: [] } };
                 const requests = [...statusRequests, ...(lookup?.activity?.requests || [])]
                     .filter((request, index, list) => list.findIndex((candidate) => candidate.requestId === request.requestId) === index);
+                latestStatusActivity = {
+                    ...(statusActivity && typeof statusActivity === 'object' ? statusActivity : {}),
+                    requests,
+                };
                 const changed = [];
                 for (const request of requests) {
                     const fingerprint = `${request.state}|${request.stage}|${request.displayMessage || ''}|${request.publication || ''}|${request.updatedAt}|${request.failure?.message || ''}|${request.recovery?.type || ''}`;
