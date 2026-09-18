@@ -66,8 +66,11 @@ function getImageUrl(event) {
 }
 
 export function determineStartStage(event) {
-  if (!getTagline(event)) return 'tagline';
-  if (!getImageTheme(event)) return 'imageTheme';
+  const hasTagline = Boolean(getTagline(event));
+  const hasImageTheme = Boolean(getImageTheme(event));
+  if (!hasTagline && !hasImageTheme) return 'taglineTheme';
+  if (!hasTagline) return 'tagline';
+  if (!hasImageTheme) return 'imageTheme';
   if (!getImageUrl(event)) return 'image';
   return 'complete';
 }
@@ -94,6 +97,7 @@ function requestedField(message) {
 
 function requestedStartStage(message) {
   const field = requestedField(message);
+  if (field === 'taglineTheme') return 'taglineTheme';
   if (field === 'tagline') return 'tagline';
   if (field === 'imageTheme') return 'imageTheme';
   if (field === 'imageUrl' || field === 'image') return 'image';
@@ -106,11 +110,15 @@ export function isFullEnrichStageRequest(message) {
     && text(message?.orchestrationType) === 'fullEnrich';
 }
 
-export function isDirectImageEnrichRequest(message) {
+export function isDirectFieldEnrichRequest(message) {
   return text(message?.realm) === 'scoutsRequest'
     && text(message?.action) === 'request'
     && !text(message?.orchestrationType)
-    && requestedStartStage(message) === 'image';
+    && ['tagline', 'imageTheme', 'image'].includes(requestedStartStage(message));
+}
+
+export function isDirectImageEnrichRequest(message) {
+  return isDirectFieldEnrichRequest(message) && requestedStartStage(message) === 'image';
 }
 
 export function isFullEnrichStartRequest(message) {
@@ -128,6 +136,7 @@ export function isCompactPersistRequest(message) {
 
 function requestedStage(message) {
   const logical = requestedField(message);
+  if (logical === 'taglineTheme') return { realm: 'taglineTheme', subjectLabel: 'taglineTheme', stage: 'taglineTheme' };
   if (logical === 'tagline') return { realm: 'tagline', subjectLabel: 'tagline', stage: 'tagline' };
   if (logical === 'imageTheme') return { realm: 'imageTheme', subjectLabel: 'imageTheme', stage: 'imageTheme' };
   if (logical === 'imageUrl' || logical === 'image') return { realm: 'image', subjectLabel: 'imageUrl', stage: 'image' };
@@ -264,16 +273,17 @@ function executionName(prefix) {
 }
 
 export function shouldReuseActiveExecution(message) {
-  // A manual image request represents a separate user action with its own
+  // Every manual field request represents a separate user action with its own
   // lifecycle/request ID. Reusing an older execution would make callbacks keep
   // the original request ID and leave this new request permanently queued.
-  return !isDirectImageEnrichRequest(message);
+  return !isDirectFieldEnrichRequest(message);
 }
 
 export function buildFullEnrichExecutionInput(message, event, name = null) {
   const hex = getHexFromMessage(message) || getHexFromSubject(event);
   if (!hex) throw new Error('fullEnrich request missing HEX');
-  const explicitStart = isDirectImageEnrichRequest(message) ? requestedStartStage(message) : null;
+  const directFieldRequest = isDirectFieldEnrichRequest(message);
+  const explicitStart = directFieldRequest ? requestedStartStage(message) : null;
   const startStage = explicitStart || determineStartStage(event);
   const imageProvider = normaliseImageProvider(message?.imageProvider || DEFAULT_IMAGE_PROVIDER);
   const prefix = executionPrefix(hex, event);
@@ -288,6 +298,7 @@ export function buildFullEnrichExecutionInput(message, event, name = null) {
     approvalMode: text(message?.approvalMode) || 'auto',
     imageProvider,
     startStage,
+    continueAfterStage: !directFieldRequest,
     generationKey: eventGenerationKey(hex, event),
   };
   return {
@@ -453,7 +464,7 @@ async function handleMessage(message) {
     await forwardStageRequest(message);
     return { intercepted: true, result: { status: 'forwarded', requestId: text(message?.requestId), rootRequestId: rootRequestIdOf(message) } };
   }
-  if (isDirectImageEnrichRequest(message) || isFullEnrichStartRequest(message)) {
+  if (isDirectFieldEnrichRequest(message) || isFullEnrichStartRequest(message)) {
     return { intercepted: true, result: await startFullEnrich(message) };
   }
   return { intercepted: false, result: null };
@@ -491,7 +502,7 @@ export async function lambdaHandler(event) {
   if (body && (
     isCompactPersistRequest(body)
     || isFullEnrichStageRequest(body)
-    || isDirectImageEnrichRequest(body)
+    || isDirectFieldEnrichRequest(body)
     || isFullEnrichStartRequest(body)
   )) {
     try {
