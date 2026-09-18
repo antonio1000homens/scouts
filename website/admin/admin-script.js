@@ -3029,9 +3029,9 @@ function getEventActionModel(entry) {
     if (!hidden && !approved) {
         actions.push({ label: 'Approve shown event', className: 'btn-primary', onclick: 'approveEvent' });
     }
-    if (missingFields.length === 1 && missingFields[0] === 'Image URL' && hasText(getImageThemeOrLegacyPrompt(event))) {
+    if (!hidden && missingFields.length === 1 && missingFields[0] === 'Image URL' && hasText(getImageThemeOrLegacyPrompt(event))) {
         actions.push({ label: 'Generate image', className: 'btn-secondary', onclick: 'generateImage' });
-    } else if (missingFields.length > 0 && manualReviewStages.length === 0) {
+    } else if (!hidden && missingFields.length > 0 && manualReviewStages.length === 0) {
         actions.push({ label: 'Generate all missing metadata', className: 'btn-secondary', onclick: 'generateFull' });
     }
     return { actions, missingFields, hidden, approved, manualReviewStages };
