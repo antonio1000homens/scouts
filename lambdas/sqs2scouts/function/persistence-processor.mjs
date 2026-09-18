@@ -553,6 +553,7 @@ function cloneDefaultScoutsConfig() {
         taglineThemePromptTemplate: toNonEmptyString(
             bundled.taglineThemePromptTemplate ?? bundled.aiPromptTemplate
         ),
+        taglinePromptTemplate: toNonEmptyString(bundled.taglinePromptTemplate),
         imageThemePromptTemplate: toNonEmptyString(
             bundled.imageThemePromptTemplate ?? bundled.imagePromptTemplate
         ),
@@ -664,9 +665,13 @@ function sanitiseScoutsConfig(raw) {
         return config;
     }
 
-    const taglineTemplate = raw.taglineThemePromptTemplate ?? raw.aiPromptTemplate;
-    if (typeof taglineTemplate === 'string' && taglineTemplate.trim()) {
-        config.taglineThemePromptTemplate = taglineTemplate;
+    const taglineThemeTemplate = raw.taglineThemePromptTemplate ?? raw.aiPromptTemplate;
+    if (typeof taglineThemeTemplate === 'string' && taglineThemeTemplate.trim()) {
+        config.taglineThemePromptTemplate = taglineThemeTemplate;
+    }
+
+    if (typeof raw.taglinePromptTemplate === 'string' && raw.taglinePromptTemplate.trim()) {
+        config.taglinePromptTemplate = raw.taglinePromptTemplate;
     }
 
     const imageThemeTemplate = raw.imageThemePromptTemplate ?? raw.imagePromptTemplate;
@@ -834,14 +839,14 @@ async function buildGeminiTextRequestPrompt(event, mode, configOverride = null) 
     
     let template;
     if (mode === 'tagline') {
-        template = typeof config.taglineThemePromptTemplate === 'string' && config.taglineThemePromptTemplate.trim()
-            ? config.taglineThemePromptTemplate
+        template = typeof config.taglinePromptTemplate === 'string' && config.taglinePromptTemplate.trim()
+            ? config.taglinePromptTemplate
             : null;
     } else if (mode === 'imageTheme') {
         template = typeof config.imageThemePromptTemplate === 'string' && config.imageThemePromptTemplate.trim()
             ? config.imageThemePromptTemplate
             : null;
-    } else {
+    } else if (mode === 'taglineTheme') {
         template = typeof config.taglineThemePromptTemplate === 'string' && config.taglineThemePromptTemplate.trim()
             ? config.taglineThemePromptTemplate
             : null;
@@ -932,9 +937,9 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
         return null;
     });
     if (reusable) {
-        console.log(JSON.stringify({ hex: hexValue, stage, generationId, requestId: options.requestId || null, attemptCount: reusable.state?.attemptCount || 0, stateBefore: reusable.state?.state || 'succeeded', stateAfter: 'succeeded', geminiRequestAttempted: false, geminiResultReused: true, failureCategory: null }));
+        console.log(JSON.stringify({ hex: hexValue, stage, requestedTextMode: mode === 'taglineTheme' ? 'combined' : mode, generationId, requestId: options.requestId || null, attemptCount: reusable.state?.attemptCount || 0, stateBefore: reusable.state?.state || 'succeeded', stateAfter: 'succeeded', geminiRequestAttempted: false, geminiResultReused: true, providerCallCount: 0, failureCategory: null }));
         emitEnrichmentMetric('GeminiResultReused', stage, 'reused');
-        const reusableValidation = validateGeminiTextResponse(reusable.generatedValue, stage);
+        const reusableValidation = validateGeminiTextResponse(reusable.generatedValue, mode);
         return reusableValidation.valid ? normaliseGeminiTextResponse(reusableValidation.value) : blockedEnrichmentResult('invalid_cached_generation', 'manual_review');
     }
 
@@ -976,7 +981,7 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
                         responseMimeType: 'application/json',
                         // These schemas are JSON Schema-shaped (lowercase type names),
                         // so use responseJsonSchema rather than the SDK Type enum form.
-                        responseJsonSchema: GEMINI_TEXT_RESPONSE_SCHEMAS[stage],
+                        responseJsonSchema: GEMINI_TEXT_RESPONSE_SCHEMAS[mode],
                     },
                 });
             },
@@ -986,6 +991,17 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
         });
         console.log('[Gemini] Text suggestion generated', { model, attemptedModels });
         const responseObj = result?.response ?? result;
+        const usageMetadata = responseObj?.usageMetadata ?? result?.usageMetadata ?? null;
+        console.log(JSON.stringify({
+            event: 'gemini_text_provider_call',
+            requestedTextMode: mode === 'taglineTheme' ? 'combined' : mode,
+            enrichmentStateStage: stage,
+            model,
+            providerCallCount: 1,
+            inputTokens: Number.isFinite(Number(usageMetadata?.promptTokenCount)) ? Number(usageMetadata.promptTokenCount) : null,
+            outputTokens: Number.isFinite(Number(usageMetadata?.candidatesTokenCount)) ? Number(usageMetadata.candidatesTokenCount) : null,
+            totalTokens: Number.isFinite(Number(usageMetadata?.totalTokenCount)) ? Number(usageMetadata.totalTokenCount) : null,
+        }));
         const responseText = typeof responseObj?.text === 'function'
             ? responseObj.text().trim()
             : typeof responseObj?.text === 'string'
@@ -1013,7 +1029,7 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
             return blockedEnrichmentResult('invalid_json', 'manual_review', { type: 'INVALID_EVENT_DATA', message: 'Model returned invalid JSON' });
         }
 
-        const validation = validateGeminiTextResponse(parsed, stage);
+        const validation = validateGeminiTextResponse(parsed, mode);
         if (!validation.valid) {
             const failedState = await markEnrichmentFailure({
                 hex: hexValue, stage,
@@ -3321,7 +3337,7 @@ async function lambdaHandlerWithDependencies(event) {
 
         console.log(`Processing scouts message - Realm: ${realm}, Action: ${action}`);
 
-        const enrichmentRealms = new Set(['tagline', 'imageTheme', 'image']);
+        const enrichmentRealms = new Set(['taglineTheme', 'tagline', 'imageTheme', 'image']);
         let scoutsConfig = null;
         if (enrichmentRealms.has(realm)) {
             scoutsConfig = await loadScoutsConfig().catch((error) => {
@@ -3332,10 +3348,10 @@ async function lambdaHandlerWithDependencies(event) {
 
         // Only accept a small set of realms in this lambda.
         // Supported realms:
-        // - 'tagline', 'imageTheme', 'image': enrichment tasks triggered by scouts2sqs
+        // - 'taglineTheme', 'tagline', 'imageTheme', 'image': enrichment tasks triggered by scouts2sqs
         // - 'persist': finalisation tasks routed internally
         // Anything else is dropped and shunted to the DLQ to avoid noisy retries.
-        const allowedRealms = new Set(['tagline', 'imageTheme', 'image', 'persist']);
+        const allowedRealms = new Set(['taglineTheme', 'tagline', 'imageTheme', 'image', 'persist']);
         if (!allowedRealms.has(realm)) {
             console.error(`[SQS2Scouts] Dropping unsupported realm=${realm} action=${action} subject=${(rawSubject && (rawSubject.title || rawSubject.hex)) || 'unknown'}`);
             // Send unsupported realm to DLQ
