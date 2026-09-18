@@ -3411,8 +3411,22 @@ async function lambdaHandlerWithDependencies(event) {
             }
 
             const stateStage = textMode === 'imageTheme' ? 'imageTheme' : 'tagline';
-            const generationId = buildGenerationId(hexValue, stateStage, hexData, GEMINI_PROMPT_VERSION);
+            const baseGenerationId = buildGenerationId(hexValue, stateStage, hexData, GEMINI_PROMPT_VERSION);
+            const manualRegeneration = messageBody.requestMode === 'manual' && Boolean(requestContext.requestId);
+            const generationId = manualRegeneration
+                ? crypto.createHash('sha256').update(`${baseGenerationId}\nmanual:${requestContext.requestId}`).digest('hex')
+                : baseGenerationId;
             const imageThemeGenerationId = buildGenerationId(hexValue, 'imageTheme', hexData, GEMINI_PROMPT_VERSION);
+            if (manualRegeneration) {
+                console.log(JSON.stringify({
+                    event: 'gemini_text_manual_regeneration',
+                    requestedTextMode: textMode,
+                    enrichmentStateStage: stateStage,
+                    hex: hexValue,
+                    requestId: requestContext.requestId,
+                    generationId,
+                }));
+            }
             const result = await generateGeminiTextSuggestion(hexData, textMode, scoutsConfig, {
                 hexValue,
                 generationId,
