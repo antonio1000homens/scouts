@@ -1759,3 +1759,37 @@ body {
     color: #dc3545;
     font-weight: 600;
 }
+
+
+.event-enrichment-recovery {
+    margin-top: 0.85rem;
+    display: grid;
+    gap: 0.65rem;
+}
+
+.event-enrichment-recovery-item {
+    border: 1px solid #f2b8b5;
+    border-radius: 0.6rem;
+    padding: 0.75rem;
+    background: #fff4f3;
+    display: grid;
+    gap: 0.45rem;
+}
+
+.event-enrichment-recovery-heading {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+.event-enrichment-recovery-time {
+    font-size: 0.82rem;
+    color: #6b7280;
+}
+
+.event-enrichment-recovery-message {
+    font-size: 0.9rem;
+    overflow-wrap: anywhere;
+}

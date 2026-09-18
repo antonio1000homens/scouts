@@ -88,11 +88,12 @@
         updateEventScopeUi();
     }
 
-    function replaceAdminEventDataset(rawEvents) {
+    async function replaceAdminEventDataset(rawEvents) {
         const sourceEvents = Array.isArray(rawEvents) ? rawEvents : [];
         eventsData = sourceEvents.map((event) => normaliseEventTaglineFields(cloneEventRecord(event)));
         uniqueEventEntries = buildUniqueEventEntries(eventsData);
         applyVisibilityOverrides(uniqueEventEntries);
+        await hydrateDurableEnrichmentState(uniqueEventEntries);
         updateEventsCount(
             uniqueEventEntries.length,
             eventsData.length,
@@ -112,7 +113,7 @@
         if (!Array.isArray(result?.events)) {
             throw new Error('Stored event list was not returned by the Admin API.');
         }
-        replaceAdminEventDataset(result.events);
+        await replaceAdminEventDataset(result.events);
         return result.events;
     }
 

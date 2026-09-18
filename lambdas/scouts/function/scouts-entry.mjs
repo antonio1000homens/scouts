@@ -1,9 +1,9 @@
 import crypto from 'crypto';
-import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { BatchGetItemCommand, DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
-import { withRequestActivityContext } from '/opt/nodejs/request-activity.mjs';
+import { recordRequestActivity, withRequestActivityContext } from '/opt/nodejs/request-activity.mjs';
 import { coordinateEventApproval } from '/opt/nodejs/approval-coordinator.mjs';
 import { buildEventReviewSnapshot } from '/opt/nodejs/event-review.mjs';
 import { normaliseEnrichmentStage, retryManualReviewEnrichment } from '/opt/nodejs/enrichment-state.mjs';
@@ -25,6 +25,7 @@ const TARGET_BUCKET = process.env.TARGET_BUCKET || '';
 const SCOUTS_REQUESTS_QUEUE_URL = process.env.SCOUTS_REQUESTS_QUEUE_URL || '';
 const ENRICHMENT_STATE_TABLE_NAME = String(process.env.GEMINI_ENRICHMENT_STATE_TABLE_NAME || '').trim();
 const REQUEST_ACTIVITY_TABLE_NAME = String(process.env.SCOUTS_REQUEST_ACTIVITY_TABLE_NAME || '').trim();
+const ENRICHMENT_STAGES = Object.freeze(['tagline', 'imageTheme', 'image']);
 const PRIVATE_RUNTIME_SNAPSHOT_KEYS = Object.freeze({
   queued: 'runtime/scoutsQueued.json',
   processing: 'runtime/scoutsProcessing.json',
@@ -148,6 +149,100 @@ function normalizePrivateEventHex(value) {
     return '';
   }
   return hex;
+}
+
+function unmarshallDurableEnrichmentItem(item = {}) {
+  const result = {};
+  for (const [key, value] of Object.entries(item || {})) {
+    if (value?.S !== undefined) result[key] = value.S;
+    else if (value?.N !== undefined) result[key] = Number(value.N);
+    else if (value?.BOOL !== undefined) result[key] = value.BOOL;
+    else if (value?.NULL) result[key] = null;
+  }
+  return result;
+}
+
+function presentDurableEnrichmentState(item) {
+  if (!item || typeof item !== 'object') return null;
+  const stage = normaliseEnrichmentStage(item.stage);
+  const state = text(item.state).toLowerCase();
+  if (!stage || !state) return null;
+  const failureType = text(item.lastErrorType) || null;
+  const failureMessage = text(item.lastErrorMessage) || null;
+  const updatedAt = text(item.updatedAt) || null;
+  return {
+    stage,
+    state,
+    attemptCount: Number(item.attemptCount || 0),
+    updatedAt,
+    nextRetryAt: text(item.nextRetryAt) || null,
+    failure: failureType || failureMessage
+      ? { type: failureType, message: failureMessage, at: updatedAt }
+      : null,
+    recovery: state === 'manual_review'
+      ? {
+          type: 'enrichment_retry',
+          available: true,
+          action: 'retry',
+          stage,
+          label: `Retry ${stage} enrichment`,
+          message: `Retry the ${stage} enrichment from durable manual-review state.`,
+        }
+      : null,
+  };
+}
+
+async function loadDurableEnrichmentStatus(hexValues = []) {
+  const hexes = [...new Set((Array.isArray(hexValues) ? hexValues : [hexValues])
+    .map(normalizePrivateEventHex)
+    .filter(Boolean))];
+  const result = Object.fromEntries(hexes.map((hex) => [hex, {
+    hex,
+    stages: {},
+    needsAttention: false,
+    recoveries: [],
+  }]));
+  if (!ENRICHMENT_STATE_TABLE_NAME || hexes.length === 0) return result;
+
+  const allKeys = hexes.flatMap((hex) => ENRICHMENT_STAGES.map((stage) => ({
+    hex: dynamoString(hex),
+    stage: dynamoString(stage),
+  })));
+
+  for (let offset = 0; offset < allKeys.length; offset += 100) {
+    let pendingKeys = allKeys.slice(offset, offset + 100);
+    for (let attempt = 0; pendingKeys.length && attempt < 4; attempt += 1) {
+      const response = await dynamodb.send(new BatchGetItemCommand({
+        RequestItems: {
+          [ENRICHMENT_STATE_TABLE_NAME]: {
+            Keys: pendingKeys,
+            ConsistentRead: true,
+          },
+        },
+      }));
+      for (const rawItem of response?.Responses?.[ENRICHMENT_STATE_TABLE_NAME] || []) {
+        const item = unmarshallDurableEnrichmentItem(rawItem);
+        const hex = normalizePrivateEventHex(item.hex);
+        const stageState = presentDurableEnrichmentState(item);
+        if (!hex || !stageState || !result[hex]) continue;
+        result[hex].stages[stageState.stage] = stageState;
+      }
+      pendingKeys = response?.UnprocessedKeys?.[ENRICHMENT_STATE_TABLE_NAME]?.Keys || [];
+    }
+    if (pendingKeys.length) {
+      const error = new Error('Unable to read all enrichment-state rows');
+      error.statusCode = 503;
+      throw error;
+    }
+  }
+
+  for (const entry of Object.values(result)) {
+    entry.recoveries = Object.values(entry.stages)
+      .filter((stageState) => stageState?.recovery?.available === true)
+      .map((stageState) => stageState.recovery);
+    entry.needsAttention = entry.recoveries.length > 0;
+  }
+  return result;
 }
 
 function runtimeCommand(body) {
@@ -326,7 +421,7 @@ function isInterceptedRuntimeCommand(command) {
   if (command.subject === 'activity' && ['status', 'history', 'lookup'].includes(command.action)) return true;
   if (command.subject === 'snapshot' && command.action === 'get') return true;
   if (command.subject === 'event' && ['get', 'review', 'list'].includes(command.action)) return true;
-  if (command.subject === 'enrichment' && command.action === 'retry') return true;
+  if (command.subject === 'enrichment' && ['status', 'retry'].includes(command.action)) return true;
   if (command.subject === 'dlq' && ['inspect', 'redrive'].includes(command.action)) return true;
   return command.subject === 'schedule' && ['status', 'enable', 'disable'].includes(command.action);
 }
@@ -360,6 +455,13 @@ function enrichmentRetrySubject(stage) {
 
 function recoveryActivityId(body) {
   return text(body?.activityId || body?.requestId || body?.operationId);
+}
+
+function activityRecoveryCoordinates(request, recovery, activityId) {
+  const hex = normalizePrivateEventHex(request.hex);
+  const stage = normaliseEnrichmentStage(recovery.stage);
+  const rootRequestId = text(request.rootRequestId || request.requestId || activityId);
+  return { hex, stage, rootRequestId };
 }
 
 function activityMatchesId(request, activityId) {
@@ -606,6 +708,14 @@ export async function handler(event = {}) {
       return response(200, { status: 'ok', snapshot });
     }
 
+    if (command.subject === 'enrichment' && command.action === 'status') {
+      const requestedHexes = Array.isArray(command.body?.hexes)
+        ? command.body.hexes
+        : [command.body?.hex];
+      const enrichment = await loadDurableEnrichmentStatus(requestedHexes);
+      return response(200, { status: 'ok', enrichment });
+    }
+
     if (command.subject === 'event') {
       if (command.action === 'list') {
         const events = await listPrivateEventObjects();
@@ -634,32 +744,43 @@ export async function handler(event = {}) {
 
     if (command.subject === 'enrichment' && command.action === 'retry') {
       const activityId = recoveryActivityId(command.body);
-      if (!activityId) {
-        return response(400, { status: 'error', error: 'A valid activity/request ID is required' });
+      let request = null;
+      let hex = '';
+      let stage = '';
+      let rootRequestId = '';
+
+      if (activityId) {
+        request = await loadRecoveryActivity(activityId);
+        if (!request) {
+          return response(404, { status: 'error', error: 'Activity record not found' });
+        }
+
+        const recovery = request.recovery;
+        if (recovery?.type !== 'enrichment_retry' || recovery.available !== true) {
+          return response(409, {
+            status: 'error',
+            error: recovery?.type === 'dlq_recovery'
+              ? 'This failure must be recovered through Operations DLQ controls'
+              : 'Manual recovery is not supported for this terminal failure',
+            recovery: recovery || { type: 'unsupported', available: false, action: 'none' },
+          });
+        }
+
+        ({ hex, stage, rootRequestId } = activityRecoveryCoordinates(request, recovery, activityId));
+      } else {
+        hex = normalizePrivateEventHex(command.body?.hex);
+        stage = normaliseEnrichmentStage(command.body?.stage);
+        rootRequestId = crypto.randomUUID();
       }
 
-      const request = await loadRecoveryActivity(activityId);
-      if (!request) {
-        return response(404, { status: 'error', error: 'Activity record not found' });
-      }
-
-      const recovery = request.recovery;
-      if (recovery?.type !== 'enrichment_retry' || recovery.available !== true) {
-        return response(409, {
-          status: 'error',
-          error: recovery?.type === 'dlq_recovery'
-            ? 'This failure must be recovered through Operations DLQ controls'
-            : 'Manual recovery is not supported for this terminal failure',
-          recovery: recovery || { type: 'unsupported', available: false, action: 'none' },
-        });
-      }
-
-      const hex = normalizePrivateEventHex(request.hex);
-      const stage = normaliseEnrichmentStage(recovery.stage);
       const retrySubject = enrichmentRetrySubject(stage);
-      const rootRequestId = text(request.rootRequestId || request.requestId || activityId);
       if (!hex || !stage || !retrySubject || !rootRequestId) {
-        return response(409, { status: 'error', error: 'Activity recovery metadata is no longer valid' });
+        return response(activityId ? 409 : 400, {
+          status: 'error',
+          error: activityId
+            ? 'Activity recovery metadata is no longer valid'
+            : 'A valid HEX and enrichment stage are required',
+        });
       }
 
       // Re-read and conditionally reset the durable enrichment row. This remains
@@ -705,12 +826,24 @@ export async function handler(event = {}) {
       }
 
       try {
-        await reopenManualRecoveryActivity({ requestId: rootRequestId, stage });
+        if (request) {
+          await reopenManualRecoveryActivity({ requestId: rootRequestId, stage });
+        } else {
+          await recordRequestActivity({
+            requestId: rootRequestId,
+            rootRequestId,
+            hex,
+            action: 'request',
+            state: 'queued',
+            stage: 'scoutsRequests',
+            at: new Date(),
+          });
+        }
       } catch (activityError) {
         // The queue submission is authoritative. If Activity persistence is
         // temporarily unavailable, downstream success/failure on the same root
         // request ID will still reconcile the operation later.
-        console.warn('[ManualRecovery] Retry queued but Activity could not be reopened immediately.', activityError?.message || activityError);
+        console.warn('[ManualRecovery] Retry queued but Activity could not be recorded immediately.', activityError?.message || activityError);
       }
 
       return response(200, {
@@ -722,7 +855,7 @@ export async function handler(event = {}) {
         queuedMessageId: queued.messageId,
         retry: {
           reset: true,
-          activityId,
+          activityId: activityId || null,
           stage,
           retryCount: Number(reset.state?.manualReviewRetryCount || 1),
         },
