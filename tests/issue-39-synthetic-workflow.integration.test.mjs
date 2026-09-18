@@ -181,21 +181,17 @@ test('dummy event starts clean, crosses every enrichment/action boundary, and is
 
   const firstStage = translateQueueStage(queued, original);
   assert.deepEqual(firstStage, {
-    realm: 'tagline',
+    realm: 'taglineTheme',
     action: 'request',
     subject: TEST_HEX,
-    stage: 'tagline',
+    stage: 'taglineTheme',
   });
 
   const enriched = await enrichSyntheticEvent(original, provider);
-  assert.deepEqual(enriched.snapshots.map(({ stage }) => stage), ['tagline', 'imageTheme', 'image']);
+  assert.deepEqual(enriched.snapshots.map(({ stage }) => stage), ['taglineTheme', 'image']);
   for (const { stage, event } of enriched.snapshots) {
     assertCanonicalEventDocument(event, { expectedHex: TEST_HEX });
-    if (stage === 'tagline') {
-      assert.equal(typeof event.metadata.tagline, 'string');
-      assert.equal(event.metadata.image.theme, null);
-      assert.equal(event.metadata.image.url, null);
-    } else if (stage === 'imageTheme') {
+    if (stage === 'taglineTheme') {
       assert.equal(typeof event.metadata.tagline, 'string');
       assert.equal(typeof event.metadata.image.theme, 'string');
       assert.equal(event.metadata.image.url, null);
@@ -208,10 +204,10 @@ test('dummy event starts clean, crosses every enrichment/action boundary, and is
   assert.equal(enriched.event.metadata.image.theme, 'friendly scouts outdoors illustration');
   assert.match(enriched.event.metadata.image.url, new RegExp(`^website/eventImages/test/${TEST_HEX}-`));
   assert.equal(isValidPng(enriched.artifacts.image.buffer), true);
-  assert.deepEqual(provider.calls, { tagline: 1, imageTheme: 1, image: 1 });
+  assert.deepEqual(provider.calls, { taglineTheme: 1, tagline: 0, imageTheme: 0, image: 1 });
   assert.deepEqual(
     enriched.trace.filter((entry) => entry.boundary === 'persistence').map((entry) => entry.stage),
-    ['tagline', 'imageTheme', 'image'],
+    ['taglineTheme', 'image'],
   );
   assert.equal(enriched.state.persisted.has(TEST_HEX), true);
 
