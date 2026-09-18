@@ -49,6 +49,20 @@ test('tracked text does not contain developer home-directory paths', () => {
   assert.deepEqual(offenders, [], `Developer home-directory paths found in:\n${offenders.join('\n')}`);
 });
 
+test('deployment targets come from GitHub Actions variables rather than public workflow literals', () => {
+  const workflows = [
+    readFileSync('.github/workflows/deploy-to-s3.yml', 'utf8'),
+    readFileSync('.github/workflows/live-regression-canary.yml', 'utf8'),
+  ];
+
+  for (const workflow of workflows) {
+    assert.match(workflow, /EXPECTED_AWS_ACCOUNT: \$\{\{ vars\.EXPECTED_AWS_ACCOUNT \}\}/);
+    assert.match(workflow, /WEBSITE_BUCKET: \$\{\{ vars\.WEBSITE_BUCKET \}\}/);
+    assert.doesNotMatch(workflow, /553490163883/);
+    assert.doesNotMatch(workflow, /scouts-2ndtolworth-prod-553490163883/);
+  }
+});
+
 test('workflow actions are pinned to immutable commit SHAs', () => {
   const offenders = [];
 
