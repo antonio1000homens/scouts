@@ -3409,7 +3409,7 @@ async function refreshGeneratedEvent(hex) {
 }
 
 async function pollGeneratedRequestUntilSettled(requestId, options) {
-    const { hex, config, eventLabel } = options || {};
+    const { hex, config, eventLabel, processingFields = [] } = options || {};
     stopGeneratedRequestPolling();
     const pollToken = generatedRequestPollToken;
     const deadline = Date.now() + GENERATED_REQUEST_POLL_TIMEOUT_MS;
@@ -3421,6 +3421,8 @@ async function pollGeneratedRequestUntilSettled(requestId, options) {
         try {
             activity = await pollQueueDepthSnapshots();
         } catch (error) {
+            clearMetadataProcessing(hex, processingFields);
+            await refreshGeneratedEvent(hex);
             updateModalStatus(`Unable to check ${config?.queueLabel || 'AI generation'} progress: ${error.message}`, 'error');
             generatedRequestPollTimer = null;
             return;
@@ -3429,6 +3431,7 @@ async function pollGeneratedRequestUntilSettled(requestId, options) {
         if (pollToken !== generatedRequestPollToken) return;
         const request = findAuthoritativeRequest(activity, requestId);
         if (request && isTerminalAuthoritativeRequest(request)) {
+            clearMetadataProcessing(hex, processingFields);
             await refreshGeneratedEvent(hex);
             if (pollToken !== generatedRequestPollToken) return;
             const outcome = describeAuthoritativeRequestOutcome(request);
@@ -3439,6 +3442,8 @@ async function pollGeneratedRequestUntilSettled(requestId, options) {
         }
 
         if (Date.now() >= deadline) {
+            clearMetadataProcessing(hex, processingFields);
+            await refreshGeneratedEvent(hex);
             updateModalStatus(`No ${config?.queueLabel || 'AI generation'} update received for "${eventLabel}" within 30 seconds.`, 'error');
             generatedRequestPollTimer = null;
             return;
