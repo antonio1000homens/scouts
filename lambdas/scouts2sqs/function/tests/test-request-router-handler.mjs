@@ -13,11 +13,11 @@ function command(name) {
   };
 }
 
-async function loadRouter() {
+async function loadRouter(eventOverride = null) {
   const executions = [];
   const activity = [];
   const sentMessages = [];
-  const completeEvent = { title: 'Rewards Trip', metadata: { hex: HEX, tagline: 'Join us', image: { theme: 'trip', url: '/website/eventImages/rewards.jpg' }, status: { isHidden: false, isApproved: true } } };
+  const completeEvent = eventOverride ?? { title: 'Rewards Trip', metadata: { hex: HEX, tagline: 'Join us', image: { theme: 'trip', url: '/website/eventImages/rewards.jpg' }, status: { isHidden: false, isApproved: true } } };
   const S3Client = class { async send(request) { return { Body: { transformToString: async () => JSON.stringify(completeEvent) } }; } };
   const SQSClient = class { async send(request) { sentMessages.push(request.input); return { MessageId: 'downstream-message' }; } };
   const SFNClient = class { async send(request) { executions.push(request.input); return { executionArn: 'arn:fixture' }; } };
@@ -87,4 +87,68 @@ test('real request router forwards a persist mutation with occurrence and root i
   assert.equal(forwarded.occurrenceId, 'occ_0123456789abcdef01234567');
   assert.equal(forwarded.visibilityIntent, 'hide');
   assert.deepEqual(JSON.parse(forwarded.action).metadata.status, { isHidden: true });
+});
+
+
+test('new event starts at one combined text stage before image generation', async () => {
+  const previousArn = process.env.FULL_ENRICH_STATE_MACHINE_ARN;
+  process.env.FULL_ENRICH_STATE_MACHINE_ARN = 'arn:aws:states:eu-west-2:553490163883:stateMachine:fixture';
+  try {
+    const router = await loadRouter({
+      title: 'New Event',
+      metadata: {
+        hex: HEX,
+        tagline: null,
+        image: { theme: null, url: null },
+        status: { isHidden: false, isApproved: false },
+      },
+    });
+    const response = await router.handler({ Records: [{ eventSource: 'aws:sqs', body: JSON.stringify({
+      realm: 'scoutsRequest',
+      action: 'new',
+      requestId: 'combined-request',
+      subject: { hex: HEX },
+    }) }] });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(router.executions.length, 1);
+    const execution = JSON.parse(router.executions[0].input);
+    assert.equal(execution.startStage, 'taglineTheme');
+    assert.equal(execution.requestMode, 'auto');
+    assert.equal(execution.continueAfterStage, true);
+    assert.equal(execution.continueToImage, true);
+  } finally {
+    if (previousArn === undefined) delete process.env.FULL_ENRICH_STATE_MACHINE_ARN;
+    else process.env.FULL_ENRICH_STATE_MACHINE_ARN = previousArn;
+  }
+});
+
+test('Details tagline and image-theme requests start fresh manual field-only executions', async () => {
+  const previousArn = process.env.FULL_ENRICH_STATE_MACHINE_ARN;
+  process.env.FULL_ENRICH_STATE_MACHINE_ARN = 'arn:aws:states:eu-west-2:553490163883:stateMachine:fixture';
+  try {
+    for (const [subject, expectedStage] of [['tagline', 'tagline'], ['imageTheme', 'imageTheme']]) {
+      const router = await loadRouter();
+      const response = await router.handler({ Records: [{ eventSource: 'aws:sqs', body: JSON.stringify({
+        realm: 'scoutsRequest',
+        action: 'request',
+        subject,
+        subjectLabel: subject,
+        hex: HEX,
+        requestId: `manual-${subject}`,
+      }) }] });
+
+      assert.equal(response.statusCode, 200);
+      assert.equal(router.executions.length, 1, `${subject} should start the full-enrich state machine`);
+      const execution = JSON.parse(router.executions[0].input);
+      assert.equal(execution.startStage, expectedStage);
+      assert.equal(execution.requestMode, 'manual');
+      assert.equal(execution.continueAfterStage, false);
+      assert.equal(execution.continueToImage, false);
+      assert.equal(execution.requestId, `manual-${subject}`);
+    }
+  } finally {
+    if (previousArn === undefined) delete process.env.FULL_ENRICH_STATE_MACHINE_ARN;
+    else process.env.FULL_ENRICH_STATE_MACHINE_ARN = previousArn;
+  }
 });
