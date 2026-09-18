@@ -2532,14 +2532,41 @@ export function buildPersistEventPayload(existingEvent, rawSubject, action) {
 
     if (persistPatch) {
         mergePersistPatch(baseEvent, persistPatch);
+        applyLegacyPersistFieldAliases(baseEvent, persistPatch);
     }
     if (subjectObject && Object.keys(subjectObject).length > 0) {
         mergePersistPatch(baseEvent, subjectObject);
+        applyLegacyPersistFieldAliases(baseEvent, subjectObject);
     }
 
     ensureRuntimeMetadata(baseEvent);
     applySanitizedUidToEvent(baseEvent);
     return baseEvent;
+}
+
+function applyLegacyPersistFieldAliases(target, patch) {
+    if (!target || typeof target !== 'object' || Array.isArray(target)) return target;
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return target;
+
+    const hasTagline = Object.prototype.hasOwnProperty.call(patch, 'tagline');
+    const hasImageTheme = Object.prototype.hasOwnProperty.call(patch, 'imageTheme');
+    const hasImageUrl = Object.prototype.hasOwnProperty.call(patch, 'imageUrl');
+    if (!hasTagline && !hasImageTheme && !hasImageUrl) return target;
+
+    target.metadata = target.metadata && typeof target.metadata === 'object' && !Array.isArray(target.metadata)
+        ? target.metadata
+        : {};
+    if (hasTagline) {
+        target.metadata.tagline = patch.tagline;
+    }
+    if (hasImageTheme || hasImageUrl) {
+        target.metadata.image = target.metadata.image && typeof target.metadata.image === 'object' && !Array.isArray(target.metadata.image)
+            ? target.metadata.image
+            : {};
+        if (hasImageTheme) target.metadata.image.theme = patch.imageTheme;
+        if (hasImageUrl) target.metadata.image.url = patch.imageUrl;
+    }
+    return target;
 }
 
 function mergePersistPatch(target, patch) {
