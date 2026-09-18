@@ -93,7 +93,8 @@ async function loadPersistenceModule(store, sentMessages) {
         reserveEnrichmentAttempt: async () => ({}), markGeminiSucceeded: async () => ({}),
         markEnrichmentSucceeded: async () => ({}), markEnrichmentFailure: async () => ({}),
         loadReusableGeneration: async () => null, evaluateEnrichmentEligibility: async () => ({ eligible: true }),
-        claimEnrichmentEscalation: async () => ({}), clearEnrichmentState: async () => ({}), enrichmentStateConfig: {},
+        claimEnrichmentEscalation: async () => ({}), retryManualReviewEnrichment: async () => ({ reset: true }),
+        clearEnrichmentState: async () => ({}), enrichmentStateConfig: {},
       });
     }
     if (specifier.endsWith('/agenda-publisher.mjs')) {
