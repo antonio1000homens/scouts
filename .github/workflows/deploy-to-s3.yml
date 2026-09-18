@@ -655,6 +655,26 @@ jobs:
           # the preceding actions. Missing variables deliberately disable feeds.
         run: cd lambdas/scouts && bash ./deploy.sh
 
+      - name: Verify Scouts shared layer attachment
+        if: needs.plan-and-test.outputs.scouts_function == 'true'
+        run: |
+          if [ -z "${SCOUTS_SHARED_LAYER_VERSION_ARN:-}" ]; then
+            echo "SCOUTS_SHARED_LAYER_VERSION_ARN was not resolved before Scouts deployment" >&2
+            exit 1
+          fi
+          DEPLOYED_LAYERS="$(aws lambda get-function-configuration \
+            --function-name scouts \
+            --region "${AWS_REGION}" \
+            --query 'Layers[].Arn' \
+            --output text)"
+          if ! printf '%s\n' "${DEPLOYED_LAYERS}" | tr '\t' '\n' | grep -Fxq "${SCOUTS_SHARED_LAYER_VERSION_ARN}"; then
+            echo "Scouts Lambda is not attached to the resolved shared layer." >&2
+            echo "Expected: ${SCOUTS_SHARED_LAYER_VERSION_ARN}" >&2
+            echo "Deployed: ${DEPLOYED_LAYERS}" >&2
+            exit 1
+          fi
+          echo "Verified Scouts shared layer: ${SCOUTS_SHARED_LAYER_VERSION_ARN}"
+
       - name: Deploy Scouts Slack handler
         if: needs.plan-and-test.outputs.scouts_slack_handler == 'true'
         env:
