@@ -1206,10 +1206,18 @@ function buildQueuePayload(payload) {
                 realm: 'persist',
                 action: 'persist',
                 subject: {
-                    hex,
-                    ...(requestedField === 'tagline' ? { tagline: fieldValue } : {}),
-                    ...(requestedField === 'imageTheme' ? { imageTheme: fieldValue } : {}),
-                    ...(requestedField === 'imageUrl' ? { imageUrl: fieldValue } : {}),
+                    metadata: {
+                        hex,
+                        ...(requestedField === 'tagline' ? { tagline: fieldValue } : {}),
+                        ...((requestedField === 'imageTheme' || requestedField === 'imageUrl')
+                            ? {
+                                image: {
+                                    ...(requestedField === 'imageTheme' ? { theme: fieldValue } : {}),
+                                    ...(requestedField === 'imageUrl' ? { url: fieldValue } : {}),
+                                },
+                            }
+                            : {}),
+                    },
                     ...(title ? { title } : {}),
                 },
                 subjectLabel: requestedField,
