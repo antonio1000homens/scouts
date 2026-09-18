@@ -270,6 +270,37 @@ test('manual-review retry is guarded, auditable, and reopens normal reservation 
   assert.equal(next.state.attemptCount, 1);
 });
 
+test('manual-review retry command references every DynamoDB expression name alias', async () => {
+  const now = new Date('2026-09-07T10:00:00Z');
+  const first = await reserveEnrichmentAttempt({ hex: 'abcd', stage: 'tagline', generationId: 'g1', requestId: 'r1', now });
+  await markEnrichmentFailure({
+    hex: 'abcd',
+    stage: 'tagline',
+    error: { status: 401, message: 'invalid API key' },
+    attemptCount: first.state.attemptCount,
+    now,
+  });
+
+  const retried = await retryManualReviewEnrichment({
+    hex: 'abcd',
+    stage: 'tagline',
+    requestedBy: 'admin',
+    now: new Date('2026-09-07T10:05:00Z'),
+  });
+  assert.equal(retried.reset, true);
+
+  const retryCommand = db.commands.find((command) => command.input?.ExpressionAttributeValues?.[':manualReview']);
+  assert.ok(retryCommand, 'expected guarded manual-review UpdateItem command');
+
+  const input = retryCommand.input;
+  const expressions = [input.UpdateExpression, input.ConditionExpression].filter(Boolean).join(' ');
+  for (const alias of Object.keys(input.ExpressionAttributeNames || {})) {
+    assert.ok(expressions.includes(alias), `unused ExpressionAttributeNames alias: ${alias}`);
+  }
+  assert.match(input.UpdateExpression, /SET #state = :pending/);
+  assert.equal(input.ConditionExpression, '#state = :manualReview');
+});
+
 test('provider success is cached before persistence completion and reused without another generation', async () => {
   const now = new Date('2026-09-07T10:00:00Z');
   await reserveEnrichmentAttempt({ hex: 'abcd', stage: 'image', generationId: 'image-g1', requestId: 'r1', now });
