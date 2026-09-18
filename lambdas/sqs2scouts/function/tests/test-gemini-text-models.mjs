@@ -36,6 +36,7 @@ test('429 retries the next configured model and returns its result', async () =>
   assert.deepEqual(attempted, ['primary', 'fallback']);
   assert.equal(result.model, 'fallback');
   assert.equal(result.result, 'generated tagline');
+  assert.equal(result.providerCallCount, 2);
 });
 
 test('non-retryable Gemini errors do not fan out to other models', async () => {
@@ -121,6 +122,7 @@ test('malformed structured output retries the same model once before succeeding'
 
   assert.deepEqual(attempts, ['primary', 'primary']);
   assert.equal(result.model, 'primary');
+  assert.equal(result.providerCallCount, 2);
 });
 
 test('repeated malformed output falls back to the next configured model', async () => {
@@ -148,4 +150,5 @@ test('repeated malformed output falls back to the next configured model', async 
 
   assert.deepEqual(attempts, ['primary', 'primary', 'fallback']);
   assert.equal(result.model, 'fallback');
+  assert.equal(result.providerCallCount, 3);
 });
