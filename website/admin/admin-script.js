@@ -3780,6 +3780,7 @@ async function requestGeneratedField(field, action = 'generate', button = null, 
 
     const config = getFieldOperationConfig(field);
     const event = entry.event;
+    const processingFields = metadataProcessingFieldsForRequest(event, field);
     const displayIndex = Number.isInteger(eventIndex) ? eventIndex : currentEventIndex;
     const eventLabel = event.summary || event.title || `Event ${(displayIndex ?? 0) + 1}`;
     const hex = getEventHex(event);
@@ -3824,6 +3825,9 @@ async function requestGeneratedField(field, action = 'generate', button = null, 
         );
         updateModalStatus(successMessage, 'success');
         pinRuntimeDetails(successMessage, 'success');
+        markMetadataProcessing(entry, processingFields);
+        renderEvents();
+        refreshModalCurrentMetadata(event);
         await pollQueueDepthSnapshots();
         const requestId = extractBackendRequestId(result);
         if (requestId) {
@@ -3831,11 +3835,14 @@ async function requestGeneratedField(field, action = 'generate', button = null, 
                 hex,
                 config,
                 eventLabel,
+                processingFields,
             });
+        } else {
+            setTimeout(() => {
+                clearMetadataProcessing(hex, processingFields);
+                loadEvents({ silent: true });
+            }, 2000);
         }
-        setTimeout(() => {
-            loadEvents({ silent: true });
-        }, 2000);
     } catch (error) {
         console.error(`Error queueing ${config.queueLabel}:`, error);
         const failureMessage = `Failed to queue ${config.queueLabel}: ${error.message}`;
