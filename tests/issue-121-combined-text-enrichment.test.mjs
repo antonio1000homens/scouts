@@ -250,3 +250,19 @@ test('production worker enforces atomic read-back, manual regeneration, state sa
   assert.match(worker, /markEnrichmentSucceeded\(\{ hex: hexValue, stage: 'tagline'/);
   assert.match(worker, /markEnrichmentSucceeded\(\{ hex: hexValue, stage: 'imageTheme'/);
 });
+
+
+test('manual image regeneration gets a request-specific generation identity while automatic runs remain reusable', () => {
+  const cloudflareWorker = readFileSync('lambdas/sqs2scouts/function/image-provider-worker.mjs', 'utf8');
+  const providerCore = readFileSync('lambdas/sqs2scouts/function/full-enrich-core.mjs', 'utf8');
+
+  for (const source of [cloudflareWorker, providerCore]) {
+    assert.match(source, /requestMode = text\(message\?\.requestMode\)\.toLowerCase\(\)/);
+    assert.match(source, /requestId = text\(message\?\.requestId\)/);
+    assert.match(source, /requestMode === 'manual'[\s\S]{0,250}manual:\$\{requestId\}/);
+    assert.match(source, /requestMode === 'manual'[\s\S]{0,300}: PROMPT_VERSION|requestMode === 'manual'[\s\S]{0,300}: GEMINI_PROMPT_VERSION/);
+    assert.match(source, /buildGenerationId\(hex, 'image', event, generationVersion\)/);
+  }
+
+  assert.match(providerCore, /providerGenerationId\(hex, provider, event, message\)/);
+});
