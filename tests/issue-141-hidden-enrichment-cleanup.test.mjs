@@ -9,6 +9,8 @@ const scouts = readFileSync('lambdas/scouts/function/scouts-service.mjs', 'utf8'
 const router = readFileSync('lambdas/scouts2sqs/function/request-router.mjs', 'utf8');
 const processor = readFileSync('lambdas/sqs2scouts/function/persistence-processor.mjs', 'utf8');
 const enrichment = readFileSync('lambdas/shared-layer/nodejs/enrichment-state.mjs', 'utf8');
+const sqsConfig = JSON.parse(readFileSync('lambdas/sqs2scouts/scouts.conf', 'utf8'));
+const scoutsConfig = JSON.parse(readFileSync('lambdas/scouts/scouts.conf', 'utf8'));
 
 function assertSyntax(path) {
   const result = spawnSync(process.execPath, ['--check', path], { encoding: 'utf8' });
@@ -78,6 +80,26 @@ test('destructive hide resets all durable enrichment stages and stale manual-rev
     'previousManualReviewErrorType',
   ]) {
     assert.match(enrichment, new RegExp(`#${field}`));
+  }
+});
+
+test('metadata regeneration and manual retry replace the displayed value with a processing placeholder', () => {
+  assert.match(admin, /METADATA_PROCESSING_LABEL = 'Processing, please wait'/);
+  assert.match(admin, /function markMetadataProcessing/);
+  assert.match(admin, /markMetadataProcessing\(entry, processingFields\)/);
+  assert.match(admin, /markMetadataProcessing\(entry, \[stage\]\)/);
+  assert.match(admin, /clearMetadataProcessing\(hex, processingFields\)/);
+  assert.match(admin, /processingFields,/);
+  assert.match(admin, /isMetadataFieldProcessing\(event, 'imageUrl'\) \? METADATA_PROCESSING_LABEL/);
+});
+
+test('image generation boilerplate explicitly requests diverse Cubs and Scouts from different heritages', () => {
+  for (const config of [sqsConfig, scoutsConfig]) {
+    const specifications = config.imageGenerationPromptSpecifications.join(' ').toLowerCase();
+    assert.match(specifications, /diverse/);
+    assert.match(specifications, /cubs/);
+    assert.match(specifications, /scouts/);
+    assert.match(specifications, /different ethnic and cultural heritages/);
   }
 });
 
