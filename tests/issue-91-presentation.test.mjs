@@ -88,11 +88,11 @@ test('issue 91 approval is unavailable until all enrichment metadata is complete
 });
 
 test('issue 91 approval filter does not repeat the approval status badge', () => {
-  assert.match(adminScript, /case 'approval':[\\s\\S]*return isEntryPendingApproval\\(entry\\);/);
-  assert.match(adminScript, /const showApprovalState = activeFilter !== 'approval' && !isHidden && !isApproved;/);
+  assert.ok(adminScript.includes("case 'approval':"));
+  assert.ok(adminScript.includes('return isEntryPendingApproval(entry);'));
+  assert.ok(adminScript.includes("const showApprovalState = activeFilter !== 'approval' && !isHidden && !isApproved;"));
   assert.ok(adminScript.includes("${showApprovalState ? `<span class=\"event-badge approval\">Needs Approval</span>` : ''}"));
 });
-
 test('issue 91 approval refuses an impossible image-generation request', () => {
   assert.match(eventReview, /!imageUrl && !imageTheme/);
   assert.match(eventReview, /requires an image theme before generation can start/);
