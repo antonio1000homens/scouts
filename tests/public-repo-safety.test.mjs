@@ -295,6 +295,7 @@ test('Scouts Lambda log groups have bounded retention enforced and verified by d
   assert.match(githubDeployRole, /Sid: LogsRetentionWrite/);
   assert.match(githubDeployRole, /logs:PutRetentionPolicy/);
   assert.match(githubDeployRole, /arn:aws:logs:eu-west-2:\$\{AWS::AccountId\}:log-group:\/aws\/lambda\/scouts\*/);
+  assert.match(githubDeployRole, /arn:aws:logs:eu-west-2:\$\{AWS::AccountId\}:log-group:\/aws\/lambda\/sqs2scouts\*/);
   assert.match(githubDeployRole, /Sid: LogsRetentionRead/);
   assert.match(githubDeployRole, /logs:DescribeLogGroups/);
   assert.match(
