@@ -569,7 +569,12 @@ async function handleFullRecord(record, message) {
     return;
   }
 
-  console.log('[FullEnrich] Stage result', JSON.stringify(result));
+  console.log('[FullEnrich] Stage completed', {
+    hex: getHex(message),
+    stage,
+    provider,
+    status: result?.status || null,
+  });
   if (result?.status === 'duplicate_in_progress') {
     console.log('[FullEnrich] Duplicate delivery acknowledged without callback; reservation owner retains task token', {
       hex: getHex(message),

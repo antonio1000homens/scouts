@@ -67,8 +67,6 @@ function summarizeMessageBody(messageBody) {
         action: typeof messageBody?.action === 'string' ? messageBody.action : null,
         requestId: normaliseRuntimeText(messageBody?.requestId ?? null),
         hex: getHexHintFromMessageBody(messageBody),
-        subject: getSubjectHintFromMessageBody(messageBody),
-        title: getTitleHintFromMessageBody(messageBody),
         orchestrationType: normaliseRuntimeText(messageBody?.orchestrationType ?? null),
         orchestrationStep: normaliseRuntimeText(messageBody?.orchestrationStep ?? null),
     };
@@ -1277,7 +1275,13 @@ function isSqsPublishEnabled() {
 // Send a message to SQS with DLQ fallback
 async function sendToSQS(payload, retryCount = 0) {
     const normalisedPayload = buildQueuePayload(payload);
-    console.log("[SQS] Payload to be sent:", JSON.stringify(normalisedPayload, null, 2));
+    console.log('[SQS] Queue publish requested', {
+        realm: normalisedPayload?.realm ?? null,
+        action: normalisedPayload?.action ?? null,
+        requestId: normalisedPayload?.requestId ?? null,
+        hex: getHexHintFromMessageBody(normalisedPayload),
+        hasSubject: normalisedPayload?.subject !== undefined && normalisedPayload?.subject !== null,
+    });
     
     const enabled = isSqsPublishEnabled();
     if (!enabled) {
@@ -1354,7 +1358,11 @@ export async function lambdaHandler(event) {
                     const rawSubject = messageBody.subject;
 
                     if (!rawRealm || !rawAction || rawSubject === undefined || rawSubject === null) {
-                        console.error('SQS message missing required fields:', { rawRealm, rawAction, rawSubject });
+                        console.error('SQS message missing required fields', {
+                            realmPresent: Boolean(rawRealm),
+                            actionPresent: Boolean(rawAction),
+                            subjectPresent: rawSubject !== undefined && rawSubject !== null,
+                        });
                         continue;
                     }
 
@@ -1372,7 +1380,11 @@ export async function lambdaHandler(event) {
                     if (rawRealm === 'scoutsRequest' && (rawAction === 'request' || rawAction === 'persist')) {
                         try {
                             const translatedPayload = withRequestContext(messageBody, requestContext);
-                            console.log(`[${rawRealm}] Translating field-level request:`, JSON.stringify(translatedPayload));
+                            console.log(`[${rawRealm}] Translating field-level request`, {
+                                action: rawAction,
+                                requestId: requestContext?.requestId || null,
+                                hex: getHexHintFromMessageBody(translatedPayload),
+                            });
                             await sendToSQS(translatedPayload);
                             console.log(`[${rawRealm}] ${rawAction} field request forwarded successfully`);
                         } catch (error) {
@@ -1383,7 +1395,10 @@ export async function lambdaHandler(event) {
 
                     // Process scoutsRequest messages
                     if (rawRealm === 'scoutsRequest' && (rawAction === 'retry' || rawAction === 'new')) {
-                        console.log(`[scoutsRequest] Processing ${rawAction} action for:`, rawSubject.title || 'unknown');
+                        console.log(`[scoutsRequest] Processing ${rawAction} action`, {
+                            requestId: requestContext?.requestId || null,
+                            hex: getHexHintFromMessageBody(messageBody),
+                        });
                         ensureRuntimeMetadata(rawSubject);
                         
                         const hexValue = rawSubject.hex;
@@ -1442,7 +1457,12 @@ export async function lambdaHandler(event) {
                                     action: targetAction ?? 'request'
                                 };
                                 const finalScoutsPayload = withRequestContext(scoutsPayload, requestContext);
-                                console.log(`[scoutsRequest] Sending to scoutsProcessing queue:`, JSON.stringify(finalScoutsPayload));
+                                console.log('[scoutsRequest] Sending to scoutsProcessing queue', {
+                                    realm: finalScoutsPayload?.realm ?? null,
+                                    action: finalScoutsPayload?.action ?? null,
+                                    requestId: finalScoutsPayload?.requestId ?? null,
+                                    hex: getHexHintFromMessageBody(finalScoutsPayload),
+                                });
                                 await sendToSQS(finalScoutsPayload);
                                 console.log(`[scoutsRequest] ${rawAction} processed - sent ${targetRealm} request`);
                             }
@@ -1451,7 +1471,7 @@ export async function lambdaHandler(event) {
                         // Only allow tagline, imageTheme, image and persist realms through from SQS
                         const allowed = new Set(['tagline', 'imageTheme', 'image', 'persist']);
                         if (!allowed.has(rawRealm)) {
-                            console.error(`[SQS] Dropping unsupported realm=${rawRealm} action=${rawAction} subject=${(rawSubject && rawSubject.title) || 'unknown'}`);
+                            console.error(`[SQS] Dropping unsupported realm=${rawRealm} action=${rawAction}`);
                             // drop the message (don't throw) so SQS won't retry
                             continue;
                         }

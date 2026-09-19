@@ -79,12 +79,6 @@ function jsonResponse(statusCode, payload) {
     };
 }
 
-function keySuffix(value) {
-    const trimmed = typeof value === 'string' ? value.trim() : '';
-    if (!trimmed) return '';
-    return trimmed.length <= 4 ? trimmed : trimmed.slice(-4);
-}
-
 function parseRawQueryString(rawQueryString) {
     if (!rawQueryString || typeof rawQueryString !== 'string') {
         return {};
@@ -205,10 +199,6 @@ async function handleAdminRequest(event, headers, rawBody) {
         console.warn('[Auth] Invalid admin API key', {
             source: requestApiKey.source,
             requestApiKeyPresent: Boolean(requestApiKey.value),
-            requestApiKeyLength: requestApiKey.value.length,
-            requestApiKeyLast4: keySuffix(requestApiKey.value),
-            requiredApiKeyLength: requiredApiKey.length,
-            requiredApiKeyLast4: keySuffix(requiredApiKey),
         });
         return jsonResponse(403, { error: 'Forbidden: Invalid API Key' });
     }
@@ -235,8 +225,11 @@ async function handleAdminRequest(event, headers, rawBody) {
 }
 
 async function sendToScoutsRequestQueue(payload) {
-    console.log('[SQS] Attempting to send message to queue:', SCOUTS_REQUEST_QUEUE_URL);
-    console.log('[SQS] Payload:', JSON.stringify(payload, null, 2));
+    console.log('[SQS] Enqueueing scouts request', {
+        realm: payload?.realm ?? null,
+        action: payload?.action ?? null,
+        hasSubject: payload?.subject !== undefined && payload?.subject !== null,
+    });
     
     try {
         const command = new SendMessageCommand({
@@ -250,14 +243,16 @@ async function sendToScoutsRequestQueue(payload) {
         return { statusCode: 200, messageId: result.MessageId };
     } catch (error) {
         console.error('[SQS] ERROR - Failed to send message to scoutsRequests queue:', error.message);
-        console.error('[SQS] ERROR - Full error:', error);
         throw error;
     }
 }
 
 async function sendToNfcQueue(payload) {
-    console.log('[SQS] Attempting to send message to NFC queue:', NFC_QUEUE_URL);
-    console.log('[SQS] Payload:', JSON.stringify(payload, null, 2));
+    console.log('[SQS] Enqueueing NFC request', {
+        realm: payload?.realm ?? null,
+        action: payload?.action ?? null,
+        hasSubject: payload?.subject !== undefined && payload?.subject !== null,
+    });
     
     try {
         const command = new SendMessageCommand({
@@ -271,7 +266,6 @@ async function sendToNfcQueue(payload) {
         return { statusCode: 200, messageId: result.MessageId };
     } catch (error) {
         console.error('[SQS] ERROR - Failed to send message to NFC queue:', error.message);
-        console.error('[SQS] ERROR - Full error:', error);
         throw error;
     }
 }
@@ -283,8 +277,10 @@ async function sendSlackResponse(responseUrl, text, blocks = null) {
     };
     if (blocks) payload.blocks = blocks;
     
-    console.log('[Slack] Sending response to:', responseUrl);
-    console.log('[Slack] Response payload:', JSON.stringify(payload, null, 2));
+    console.log('[Slack] Sending response', {
+        hasBlocks: Boolean(blocks),
+        textLength: String(text ?? '').length,
+    });
     
     return new Promise((resolve, reject) => {
         const url = new URL(responseUrl);
@@ -302,13 +298,12 @@ async function sendSlackResponse(responseUrl, text, blocks = null) {
             res.on('data', (chunk) => responseData += chunk);
             res.on('end', () => {
                 console.log('[Slack] Response status:', res.statusCode);
-                console.log('[Slack] Response data:', responseData);
                 resolve({ statusCode: res.statusCode, body: responseData });
             });
         });
 
         req.on('error', (error) => {
-            console.error('[Slack] Request error:', error);
+            console.error('[Slack] Request error:', error?.message || String(error));
             reject(error);
         });
         req.write(JSON.stringify(payload));
@@ -793,7 +788,7 @@ async function openSlackModal(triggerId, view) {
                 try {
                     const parsed = JSON.parse(responseData || '{}');
                     if (!parsed.ok) {
-                        console.error('[Slack] Failed to open modal:', parsed);
+                        console.error('[Slack] Failed to open modal:', parsed?.error || 'unknown_error');
                         reject(new Error(parsed.error || 'Failed to open Slack modal'));
                     } else {
                         resolve(parsed);
@@ -862,12 +857,12 @@ async function handleEditModalSubmission(parsedPayload) {
         };
     }
 
-    console.log('[Slack] Submitting modal edits to SQS:', {
+    console.log('[Slack] Submitting modal edits to SQS', {
         realm,
         action,
         hasResponseUrl: Boolean(responseUrl),
-        channel,
-        ts,
+        hasChannel: Boolean(channel),
+        hasMessageTs: Boolean(ts),
     });
 
     try {
@@ -889,16 +884,17 @@ async function handleEditModalClosed(parsedPayload) {
 }
 
 export async function lambdaHandler(event) {
-    console.log('Slack handler invoked:', JSON.stringify(event));
-    
     try {
         const headers = event.headers || {};
         const rawBody = event.isBase64Encoded
             ? Buffer.from(event.body || '', 'base64').toString('utf8')
             : event.body || '';
 
-        console.log('[Debug] Raw body (first 500 chars):', rawBody.substring(0, 500));
-        console.log('[Debug] Is base64 encoded:', event.isBase64Encoded);
+        console.log('[Slack] Request received', {
+            method: event?.requestContext?.http?.method || event?.httpMethod || 'POST',
+            isBase64Encoded: Boolean(event.isBase64Encoded),
+            bodyLength: rawBody.length,
+        });
 
         if (isAdminRequest(headers)) {
             return handleAdminRequest(event, headers, rawBody);
@@ -914,10 +910,12 @@ export async function lambdaHandler(event) {
         let parsedPayload;
         try {
             parsedPayload = parseSlackPayload(rawBody);
-            console.log('[Debug] Parsed payload type:', parsedPayload.type);
-            console.log('[Debug] Parsed payload keys:', Object.keys(parsedPayload).sort());
-            console.log('[Debug] Response URL:', parsedPayload.response_url);
-            console.log('[Debug] Full parsed payload:', JSON.stringify(parsedPayload, null, 2));
+            console.log('[Slack] Payload parsed', {
+                type: parsedPayload?.type || null,
+                actionId: parsedPayload?.actions?.[0]?.action_id || null,
+                hasResponseUrl: Boolean(parsedPayload?.response_url),
+                hasTriggerId: Boolean(parsedPayload?.trigger_id),
+            });
         } catch (error) {
             console.error('[Slack] Invalid payload:', error.message);
             return { statusCode: 400, body: JSON.stringify({ error: 'Invalid Slack payload' }) };
@@ -925,16 +923,15 @@ export async function lambdaHandler(event) {
 
         // Handle block actions directly
         if (parsedPayload.type === 'block_actions') {
-            console.log('[Debug] Block actions payload detected');
-            console.log('[Debug] Actions array:', JSON.stringify(parsedPayload.actions, null, 2));
-            console.log('[Debug] Response URL from payload:', parsedPayload.response_url);
-            console.log('[Debug] Container:', JSON.stringify(parsedPayload.container, null, 2));
-            console.log('[Debug] Channel:', JSON.stringify(parsedPayload.channel, null, 2));
+            console.log('[Slack] Block action payload accepted', {
+                actionCount: Array.isArray(parsedPayload.actions) ? parsedPayload.actions.length : 0,
+                hasResponseUrl: Boolean(parsedPayload.response_url),
+                hasContainer: Boolean(parsedPayload.container),
+                hasChannel: Boolean(parsedPayload.channel?.id || parsedPayload.container?.channel_id),
+            });
             
             const action = parsedPayload.actions?.[0];
             if (action) {
-                console.log('[Debug] First action:', JSON.stringify(action, null, 2));
-                
                 // Extract action_id from the Slack action
                 const actionId = action.action_id || '';
                 console.log('[Debug] Action ID from Slack:', actionId);
@@ -943,9 +940,6 @@ export async function lambdaHandler(event) {
                 const { event: parsedEvent, meta: actionMeta } = parseActionValue(action.value);
                 const eventData = ensureEditableEvent(parsedEvent);
                 ensureEditableMetadata(eventData);
-                console.log('[Debug] Parsed event data keys:', Object.keys(eventData).sort());
-                console.log('[Debug] Parsed event data (first 1000 chars):', JSON.stringify(eventData).substring(0, 1000));
-                
                 const eventTitle = eventData.title ?? eventData.uid ?? 'event';
                 const responseUrl = parsedPayload.response_url;
                 const channel = parsedPayload.container?.channel_id ?? parsedPayload.channel?.id ?? null;
@@ -960,14 +954,13 @@ export async function lambdaHandler(event) {
                     ?? null;
                 const correlationId = createInteractionCorrelationId(parsedPayload, actionId);
                 
-                console.log('[Debug] Extracted values:');
-                console.log('[Debug]   eventTitle:', eventTitle);
-                console.log('[Debug]   actionId:', actionId);
-                console.log('[Debug]   responseUrl:', responseUrl);
-                console.log('[Debug]   channel:', channel);
-                console.log('[Debug]   ts:', ts);
-                console.log('[Debug]   realm:', realm);
-                console.log('[Slack] Block action received:', { actionId, eventTitle });
+                console.log('[Slack] Block action received', {
+                    actionId,
+                    correlationId,
+                    hasResponseUrl: Boolean(responseUrl),
+                    hasChannel: Boolean(channel),
+                    hasMessageTs: Boolean(ts),
+                });
                 
                 if (actionId === 'scouts_request_edit') {
                     console.log('[Slack] Opening edit modal for persist action');
@@ -1013,7 +1006,7 @@ export async function lambdaHandler(event) {
                             previewText,
                         },
                     };
-                    console.log('[Debug] Persist payload to send to SQS:', JSON.stringify(persistPayload, null, 2));
+                    console.log('[Slack] Persist request accepted', { correlationId });
                     
                     try {
                         await sendToScoutsRequestQueue(persistPayload);
@@ -1084,7 +1077,7 @@ export async function lambdaHandler(event) {
                             previewText,
                         },
                     };
-                    console.log('[Debug] Hide payload to send to SQS:', JSON.stringify(hidePayload, null, 2));
+                    console.log('[Slack] Hide request accepted', { correlationId, hasOccurrenceId: Boolean(occurrenceId) });
 
                     try {
                         await sendToScoutsRequestQueue(hidePayload);
@@ -1158,7 +1151,7 @@ export async function lambdaHandler(event) {
                     deviceName = parsedPayload.state?.values?.device_name_input_section?.device_name?.value;
                     
                     if (deviceName && deviceName.length > 3) {
-                        console.log(`[Slack] SubmitDeviceName action detected with device name: ${deviceName}`);
+                        console.log('[Slack] SubmitDeviceName action detected', { deviceNameLength: String(deviceName ?? '').length });
                         
                         if (responseUrl) {
                             await sendSlackResponse(responseUrl, `Processing ${deviceName} for ID ${deviceId}`);
@@ -1178,7 +1171,7 @@ export async function lambdaHandler(event) {
                         
                         return { statusCode: 200, body: JSON.stringify({ message: 'Device name submitted' }) };
                     } else {
-                        console.log(`[Slack] Device name '${deviceName}' is too short.`);
+                        console.log('[Slack] Device name is too short', { deviceNameLength: String(deviceName ?? '').length });
                         
                         if (responseUrl) {
                             await sendSlackResponse(responseUrl, `Device name requires at least three characters`);

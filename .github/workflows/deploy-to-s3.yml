@@ -32,7 +32,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 env:
   AWS_REGION: eu-west-2
@@ -234,8 +233,53 @@ jobs:
         if: steps.plan.outputs.retry_safety == 'true'
         run: node scripts/run-hermetic-tests.mjs
 
+  enforce-log-retention:
+    needs: plan-and-test
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: github-actions-scouts-log-retention
+
+      - name: Verify AWS account and enforce Lambda log retention
+        run: |
+          set -euo pipefail
+          actual_account="$(aws sts get-caller-identity --query Account --output text)"
+          test "${actual_account}" = "${EXPECTED_AWS_ACCOUNT}" || {
+            echo "Unexpected AWS account: ${actual_account}" >&2
+            exit 1
+          }
+
+          retention_days=30
+          log_groups=(
+            /aws/lambda/scouts
+            /aws/lambda/scouts-dlq-activity
+            /aws/lambda/scouts2sqs
+            /aws/lambda/sqs2scouts
+          )
+
+          for log_group in "${log_groups[@]}"; do
+            aws logs put-retention-policy               --log-group-name "${log_group}"               --retention-in-days "${retention_days}"
+
+            actual_retention="$(aws logs describe-log-groups               --log-group-name-prefix "${log_group}"               --query "logGroups[?logGroupName=='${log_group}'].retentionInDays | [0]"               --output text)"
+            test "${actual_retention}" = "${retention_days}" || {
+              echo "Retention verification failed for ${log_group}: ${actual_retention}" >&2
+              exit 1
+            }
+          done
+
   deploy-web:
     needs: plan-and-test
+    permissions:
+      contents: read
+      id-token: write
     if: github.event_name != 'pull_request' && (needs.plan-and-test.outputs.website == 'true' || needs.plan-and-test.outputs.cloudflare == 'true')
     runs-on: ubuntu-latest
     concurrency:
@@ -387,6 +431,9 @@ jobs:
 
   deploy-aws:
     needs: plan-and-test
+    permissions:
+      contents: read
+      id-token: write
     if: >-
       github.event_name != 'pull_request' &&
       (needs.plan-and-test.outputs.aws_bootstrap == 'true' ||
