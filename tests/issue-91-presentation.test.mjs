@@ -87,6 +87,12 @@ test('issue 91 approval is unavailable until all enrichment metadata is complete
   assert.match(approvalWorkflow, /Cannot approve until enrichment completes\. Missing:/);
 });
 
+test('issue 91 approval filter does not repeat the approval status badge', () => {
+  assert.match(adminScript, /case 'approval':[\\s\\S]*return isEntryPendingApproval\\(entry\\);/);
+  assert.match(adminScript, /const showApprovalState = activeFilter !== 'approval' && !isHidden && !isApproved;/);
+  assert.match(adminScript, /showApprovalState \\? \`<span class="event-badge approval">Needs Approval<\\/span>\` : ''/);
+});
+
 test('issue 91 approval refuses an impossible image-generation request', () => {
   assert.match(eventReview, /!imageUrl && !imageTheme/);
   assert.match(eventReview, /requires an image theme before generation can start/);
