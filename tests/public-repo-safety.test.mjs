@@ -57,6 +57,7 @@ test('deployment targets come from environment configuration rather than public 
   const deploymentFiles = [
     '.github/workflows/deploy-to-s3.yml',
     '.github/workflows/live-regression-canary.yml',
+    'aws/bootstrap/deploy.sh',
     'lambdas/shared-layer/deploy.sh',
     'lambdas/scouts-queues/deploy.sh',
     'lambdas/scouts-full-enrich/deploy.sh',
