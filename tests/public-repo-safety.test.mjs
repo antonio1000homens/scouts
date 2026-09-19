@@ -259,3 +259,92 @@ test('private prefixes stay protected and normal deployment owns cache invalidat
   assert.doesNotMatch(workflow, /PUBLIC_SITE_BASE_URL/);
   assert.match(workflow, /configure-aws-credentials@[0-9a-f]{40}/i);
 });
+
+
+test('AWS OIDC permission is scoped to jobs that actually assume an AWS role', () => {
+  const workflow = readFileSync('.github/workflows/deploy-to-s3.yml', 'utf8');
+  const workflowPermissions = workflow.match(/permissions:\n([\s\S]*?)\nenv:/)?.[1] || '';
+  const planJob = workflow.match(/  plan-and-test:[\s\S]*?\n  enforce-log-retention:/)?.[0] || '';
+  const retentionJob = workflow.match(/  enforce-log-retention:[\s\S]*?\n  deploy-web:/)?.[0] || '';
+  const webJob = workflow.match(/  deploy-web:[\s\S]*?\n  deploy-aws:/)?.[0] || '';
+  const awsJob = workflow.match(/  deploy-aws:[\s\S]*$/)?.[0] || '';
+
+  assert.match(workflowPermissions, /contents: read/);
+  assert.doesNotMatch(workflowPermissions, /id-token:\s*write/);
+  assert.doesNotMatch(planJob, /id-token:\s*write/);
+  assert.match(retentionJob, /permissions:\n\s+contents: read\n\s+id-token: write/);
+  assert.match(webJob, /permissions:\n\s+contents: read\n\s+id-token: write/);
+  assert.match(awsJob, /permissions:\n\s+contents: read\n\s+id-token: write/);
+});
+
+test('Scouts Lambda log groups have bounded retention enforced and verified by deployment', () => {
+  const workflow = readFileSync('.github/workflows/deploy-to-s3.yml', 'utf8');
+  const bootstrap = readFileSync('aws/bootstrap/scouts-account-bootstrap.yaml', 'utf8');
+  const expectedLogGroups = [
+    '/aws/lambda/scouts',
+    '/aws/lambda/scouts-dlq-activity',
+    '/aws/lambda/scouts2sqs',
+    '/aws/lambda/sqs2scouts',
+  ];
+
+  assert.match(bootstrap, /logs:PutRetentionPolicy/);
+  assert.match(workflow, /retention_days=30/);
+  assert.match(workflow, /aws logs put-retention-policy/);
+  assert.match(workflow, /aws logs describe-log-groups/);
+  assert.match(workflow, /Retention verification failed/);
+  for (const logGroup of expectedLogGroups) {
+    assert.ok(workflow.includes(logGroup), `Missing retention enforcement for ${logGroup}`);
+  }
+});
+
+test('production operational logging avoids raw Slack, SQS, prompt and response payloads', () => {
+  const slackHandler = readFileSync('lambdas/scouts-slack-handler/function/slack-handler.mjs', 'utf8');
+  const persistence = readFileSync('lambdas/sqs2scouts/function/persistence-processor.mjs', 'utf8');
+  const requestProcessor = readFileSync('lambdas/scouts2sqs/function/request-processor.mjs', 'utf8');
+  const fullEnrich = readFileSync('lambdas/sqs2scouts/function/full-enrich-core.mjs', 'utf8');
+
+  for (const pattern of [
+    /Slack handler invoked:/,
+    /Raw body \(first/,
+    /Full parsed payload:/,
+    /Response URL:/,
+    /Response payload:/,
+    /Parsed event data/,
+    /\[SQS\] Payload:/,
+    /requestApiKeyLast4/,
+    /requiredApiKeyLast4/,
+  ]) {
+    assert.doesNotMatch(slackHandler, pattern);
+  }
+
+  for (const pattern of [
+    /\[Gemini\] Request payload:/,
+    /Raw response snippet:/,
+    /Cleaned response was:/,
+    /Generating image with model .*prompt/,
+    /Downloading image from:/,
+    /\[Slack\] Request payload:/,
+    /Message that would have been sent:/,
+    /Failed to parse SQS message body:",\s*sqsMessage\.body/,
+    /Processing persist action for subject:/,
+    /Sending notification to scoutsDecision queue:/,
+  ]) {
+    assert.doesNotMatch(persistence, pattern);
+  }
+
+  for (const pattern of [
+    /Payload to be sent:/,
+    /JSON\.stringify\(translatedPayload\)/,
+    /JSON\.stringify\(finalScoutsPayload\)/,
+    /SQS message missing required fields:', \{ rawRealm, rawAction, rawSubject \}/,
+  ]) {
+    assert.doesNotMatch(requestProcessor, pattern);
+  }
+
+  assert.doesNotMatch(fullEnrich, /Stage result', JSON\.stringify\(result\)/);
+
+  const persistenceSummary = persistence.match(/function summarizeMessageBody\(messageBody\) \{[\s\S]*?\n\}/)?.[0] || '';
+  const requestSummary = requestProcessor.match(/function summarizeMessageBody\(messageBody\) \{[\s\S]*?\n\}/)?.[0] || '';
+  assert.doesNotMatch(persistenceSummary, /\b(?:title|subject):/);
+  assert.doesNotMatch(requestSummary, /\b(?:title|subject):/);
+});
