@@ -266,45 +266,6 @@ function getHexHintFromMessageBody(messageBody) {
     return getHexHintFromSubject(messageBody?.subject);
 }
 
-function getTitleHintFromMessageBody(messageBody) {
-    if (!messageBody || typeof messageBody !== 'object') {
-        return null;
-    }
-
-    const directTitle = normaliseRuntimeText(messageBody.title ?? null);
-    if (directTitle) {
-        return directTitle;
-    }
-
-    const subject = messageBody.subject;
-    if (subject && typeof subject === 'object') {
-        return normaliseRuntimeText(subject.title ?? null);
-    }
-
-    return null;
-}
-
-function getSubjectHintFromMessageBody(messageBody) {
-    if (!messageBody || typeof messageBody !== 'object') {
-        return null;
-    }
-
-    const explicitSubject = normaliseRuntimeText(messageBody.subjectLabel ?? null);
-    if (explicitSubject) {
-        return explicitSubject;
-    }
-
-    if (typeof messageBody.subject === 'string') {
-        return normaliseRuntimeText(messageBody.subject);
-    }
-
-    if (messageBody.subject && typeof messageBody.subject === 'object') {
-        return normaliseRuntimeText(messageBody.subject.value ?? null);
-    }
-
-    return null;
-}
-
 function normaliseActionHint(value) {
     if (value === undefined || value === null) return null;
     const normalized = String(value).trim();
