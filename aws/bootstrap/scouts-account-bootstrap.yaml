@@ -519,6 +519,17 @@ Resources:
                   - lambda:DeleteEventSourceMapping
                 Resource:
                   - !Sub arn:aws:lambda:eu-west-2:${AWS::AccountId}:event-source-mapping:*
+              - Sid: LogsRetentionWrite
+                Effect: Allow
+                Action:
+                  - logs:PutRetentionPolicy
+                Resource:
+                  - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/scouts*
+              - Sid: LogsRetentionRead
+                Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                Resource: '*'
               - Sid: CallerIdentity
                 Effect: Allow
                 Action: sts:GetCallerIdentity
