@@ -981,7 +981,7 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
         const { result, model, attemptedModels, providerCallCount } = await generateGeminiTextWithFallback({
             models: GEMINI_TEXT_MODEL_PREFERENCES,
             generate: async (modelName) => {
-                console.log('[Gemini] Request payload:', { model: modelName, prompt: prompt.substring(0, 200) + '...' });
+                console.log('[Gemini] Request prepared', { model: modelName, promptLength: String(prompt).length });
                 return genAI.models.generateContent({
                     model: modelName,
                     contents: prompt,
@@ -1018,7 +1018,6 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
                 ? responseObj.text.trim()
                 : String(responseObj || '').trim();
 
-        console.log('[Gemini] Raw response snippet:', responseText.slice(0, 200).replace(/\n/g, ' '));
 
         const cleaned = responseText.replace(/```json|```/gi, '').trim();
         let parsed = null;
@@ -1035,7 +1034,6 @@ async function generateGeminiTextSuggestion(event, mode, configOverride = null, 
             emitEnrichmentMetric(failedState?.state === 'manual_review' ? 'EnrichmentQuarantined' : 'EnrichmentRetry', stage, 'INVALID_EVENT_DATA');
             await notifyEnrichmentTransition(stage, failedState, { hex: hexValue, generationId, requestId: options.requestId }).catch(() => {});
             console.warn('[Gemini] Failed to parse JSON from model response:', jsonErr.message);
-            console.warn('[Gemini] Cleaned response was:', cleaned.slice(0, 1000));
             return blockedEnrichmentResult('invalid_json', 'manual_review', { type: 'INVALID_EVENT_DATA', message: 'Model returned invalid JSON' });
         }
 
@@ -1732,7 +1730,7 @@ async function generateGeminiImageAsset(promptText, { hexValue, eventTitle, requ
 
     for (const modelName of GEMINI_IMAGE_MODEL_PREFERENCES) {
         if (!modelName) continue;
-        console.log(`[GeminiImage] Generating image with model ${modelName} and prompt:`, requestPrompt);
+        console.log('[GeminiImage] Generating image', { model: modelName, promptLength: String(requestPrompt).length });
         try {
             const isImagenModel = /^imagen-/i.test(modelName);
             const response = isImagenModel
@@ -1924,7 +1922,7 @@ async function downloadImageToWebsiteS3(imageUrl, hexValue, eventTitle, requestI
     const sanitizedTitle = sanitizeTitleForImageKey(eventTitle);
 
     try {
-        console.log(`[Image Download] Downloading image from: ${trimmedUrl}`);
+        console.log('[Image Download] Downloading external image');
         
         const response = await fetch(trimmedUrl);
         if (!response.ok) {
@@ -1982,7 +1980,7 @@ async function downloadImageToWebsiteS3(imageUrl, hexValue, eventTitle, requestI
             reused: false,
         };
     } catch (error) {
-        console.error(`[Image Download] Error downloading image from ${trimmedUrl}:`, error.message);
+        console.error('[Image Download] Error downloading image:', error.message);
         return failureResponse(error.message || 'Unexpected error');
     }
 }
@@ -2845,7 +2843,7 @@ function buildApprovalBlocks(event, actionLabel, options = {}) {
                     alt_text: `Image for ${eventTitle}`,
                 });
             } catch (urlError) {
-                console.warn(`[Slack] Invalid image URL format: ${displayUrl}`);
+                console.warn('[Slack] Invalid image URL format');
                 blocks.push({
                     type: 'section',
                     text: {
@@ -2855,7 +2853,7 @@ function buildApprovalBlocks(event, actionLabel, options = {}) {
                 });
             }
         } else {
-            console.warn(`[Slack] Invalid URL format: ${displayUrl}`);
+            console.warn('[Slack] Invalid URL format');
             blocks.push({
                 type: 'section',
                 text: {
@@ -3101,7 +3099,10 @@ async function postSlackMessage(message) {
     const slackBotToken = await getRequiredSecret('SLACK_BOT_TOKEN_PARAMETER');
     if (!SLACK_FEATURE_ENABLED) {
         console.log('[Slack] Slack notifications disabled by feature flag; skipping message');
-        console.log('[Slack] Message that would have been sent:', JSON.stringify(message, null, 2));
+        console.log('[Slack] Notification suppressed by feature flag', {
+            hasBlocks: Array.isArray(message?.blocks) && message.blocks.length > 0,
+            textLength: String(message?.text ?? '').length,
+        });
         return { ok: true, channel: SLACK_CHANNEL, ts: Date.now().toString() };
     }
     
@@ -3119,7 +3120,11 @@ async function postSlackMessage(message) {
         'Content-Type': 'application/json',
     };
     
-    console.log('[Slack] Request payload:', JSON.stringify(slackMessage, null, 2));
+    console.log('[Slack] Sending notification', {
+        hasChannel: Boolean(slackMessage?.channel),
+        hasBlocks: Array.isArray(slackMessage?.blocks) && slackMessage.blocks.length > 0,
+        textLength: String(slackMessage?.text ?? '').length,
+    });
     
     const actualHeaders = {
         Authorization: `Bearer ${slackBotToken}`,
@@ -3141,7 +3146,7 @@ async function postSlackMessage(message) {
                     try {
                         const response = JSON.parse(responseData);
                         if (!response.ok) {
-                            console.error('Slack API error:', response);
+                            console.error('Slack API error:', response?.error || 'unknown_error');
                             
                             // If it's an image download error, try sending without image blocks
                             if (response.error === 'invalid_blocks' && 
@@ -3338,8 +3343,6 @@ function summarizeMessageBody(messageBody) {
         action: typeof messageBody?.action === 'string' ? messageBody.action : null,
         requestId: normaliseRuntimeText(messageBody?.requestId ?? null),
         hex: getHexHintFromMessageBody(messageBody),
-        title: getTitleHintFromMessageBody(messageBody),
-        subject: getSubjectHintFromMessageBody(messageBody),
         orchestrationType: normaliseRuntimeText(messageBody?.orchestrationType ?? null),
         orchestrationStep: normaliseRuntimeText(messageBody?.orchestrationStep ?? null),
     };
@@ -3402,7 +3405,7 @@ async function lambdaHandlerWithDependencies(event) {
                 messageBody = sqsMessage.body;
             }
         } catch (error) {
-            console.error("Failed to parse SQS message body:", sqsMessage.body);
+            console.error('Failed to parse SQS message body');
             // Send malformed message to DLQ
             try {
                 await sendToDLQ({ body: sqsMessage.body }, error);
@@ -3906,7 +3909,10 @@ async function lambdaHandlerWithDependencies(event) {
         
         // Handle persist realm - merge a persisted patch or accept a legacy full-event subject
         if (realm === 'persist') {
-            console.log(`[persist] Processing persist action for subject:`, JSON.stringify(rawSubject));
+            console.log('[persist] Processing persist action', {
+                hex: getHexHintFromMessageBody(messageBody),
+                requestId: requestContext?.requestId || null,
+            });
             
             const subjectObject = subject;
             const hexValue = (
@@ -3988,7 +3994,7 @@ async function lambdaHandlerWithDependencies(event) {
                     );
 
                     if (downloadResult?.success && downloadResult.relativeUrl) {
-                        console.log(`[Persist] Downloaded image and updated URL from ${originalImageUrl} to ${downloadResult.relativeUrl}`);
+                        console.log('[Persist] Downloaded image and stored a local website reference');
                         event.image.url = downloadResult.relativeUrl;
                         event.metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
                         event.metadata.image = event.metadata.image && typeof event.metadata.image === 'object'
@@ -4001,7 +4007,7 @@ async function lambdaHandlerWithDependencies(event) {
                         }
                     } else {
                         const reason = downloadResult?.reason || 'Unknown failure';
-                        console.warn(`[Persist] Failed to download image (${reason}), keeping original URL: ${originalImageUrl}`);
+                        console.warn(`[Persist] Failed to download image (${reason}); keeping the existing image reference`);
                         await notifyImageIssue(event, {
                             type: 'download-failed',
                             url: downloadResult?.sourceUrl ?? originalImageUrl,
@@ -4065,7 +4071,10 @@ async function lambdaHandlerWithDependencies(event) {
                     requestId: requestContext.requestId,
                     requestHex: requestContext.hex ?? hexValue,
                 };
-                console.log('[Persist] Sending notification to scoutsDecision queue:', JSON.stringify(decisionPayload));
+                console.log('[Persist] Sending decision notification', {
+                    action: decisionPayload?.action ?? null,
+                    hasSubject: decisionPayload?.subject !== undefined && decisionPayload?.subject !== null,
+                });
                 await sendToScoutsDecisionQueue(decisionPayload);
             } catch (queueErr) {
                 console.warn('[Persist] Failed to notify scoutsDecision queue:', queueErr?.message || queueErr);
