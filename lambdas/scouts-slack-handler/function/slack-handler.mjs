@@ -79,12 +79,6 @@ function jsonResponse(statusCode, payload) {
     };
 }
 
-function keySuffix(value) {
-    const trimmed = typeof value === 'string' ? value.trim() : '';
-    if (!trimmed) return '';
-    return trimmed.length <= 4 ? trimmed : trimmed.slice(-4);
-}
-
 function parseRawQueryString(rawQueryString) {
     if (!rawQueryString || typeof rawQueryString !== 'string') {
         return {};
