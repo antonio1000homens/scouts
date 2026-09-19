@@ -301,6 +301,7 @@ Resources:
                   - logs:UntagResource
                 Resource:
                   - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/scouts*
+                  - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/sqs2scouts*
               - Sid: GeminiUsageTableCreate
                 Effect: Allow
                 Action:
@@ -525,6 +526,7 @@ Resources:
                   - logs:PutRetentionPolicy
                 Resource:
                   - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/scouts*
+                  - !Sub arn:aws:logs:eu-west-2:${AWS::AccountId}:log-group:/aws/lambda/sqs2scouts*
               - Sid: LogsRetentionRead
                 Effect: Allow
                 Action:
