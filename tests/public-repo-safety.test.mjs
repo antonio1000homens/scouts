@@ -291,7 +291,12 @@ test('Scouts Lambda log groups have bounded retention enforced and verified by d
     '/aws/lambda/sqs2scouts',
   ];
 
-  assert.match(bootstrap, /logs:PutRetentionPolicy/);
+  const githubDeployRole = bootstrap.match(/  GitHubActionsScoutsDeployRole:[\s\S]*?\nOutputs:/)?.[0] || '';
+  assert.match(githubDeployRole, /Sid: LogsRetentionWrite/);
+  assert.match(githubDeployRole, /logs:PutRetentionPolicy/);
+  assert.match(githubDeployRole, /arn:aws:logs:eu-west-2:\$\{AWS::AccountId\}:log-group:\/aws\/lambda\/scouts\*/);
+  assert.match(githubDeployRole, /Sid: LogsRetentionRead/);
+  assert.match(githubDeployRole, /logs:DescribeLogGroups/);
   assert.match(
     workflow,
     /case "\$\{file\}" in aws\/bootstrap\/\*\|\.github\/workflows\/deploy-to-s3\.yml\) aws_bootstrap=true/,
