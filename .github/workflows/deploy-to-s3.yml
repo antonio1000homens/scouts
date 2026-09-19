@@ -123,7 +123,7 @@ jobs:
 
           while IFS= read -r file; do
             [ -n "${file}" ] || continue
-            case "${file}" in aws/bootstrap/*) aws_bootstrap=true ;; esac
+            case "${file}" in aws/bootstrap/*|.github/workflows/deploy-to-s3.yml) aws_bootstrap=true ;; esac
             case "${file}" in index.html|deploy.sh|deploy-manual.sh|lambdas/sqs2scouts/scouts.conf|website/*) website=true ;; esac
             case "${file}" in cloudflare/*) cloudflare=true ;; esac
             case "${file}" in lambdas/scouts-queues/*|lambdas/cloudformation/templates/scouts-queues.yaml) scouts_queues=true ;; esac
@@ -234,8 +234,12 @@ jobs:
         run: node scripts/run-hermetic-tests.mjs
 
   enforce-log-retention:
-    needs: plan-and-test
-    if: github.event_name != 'pull_request'
+    needs: [plan-and-test, deploy-aws]
+    if: >-
+      always() &&
+      github.event_name != 'pull_request' &&
+      needs.plan-and-test.result == 'success' &&
+      (needs.deploy-aws.result == 'success' || needs.deploy-aws.result == 'skipped')
     permissions:
       contents: read
       id-token: write

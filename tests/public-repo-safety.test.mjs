@@ -272,6 +272,10 @@ test('AWS OIDC permission is scoped to jobs that actually assume an AWS role', (
   assert.match(workflowPermissions, /contents: read/);
   assert.doesNotMatch(workflowPermissions, /id-token:\s*write/);
   assert.doesNotMatch(planJob, /id-token:\s*write/);
+  assert.match(retentionJob, /needs: \[plan-and-test, deploy-aws\]/);
+  assert.match(retentionJob, /always\(\)/);
+  assert.match(retentionJob, /needs\.deploy-aws\.result == 'success'/);
+  assert.match(retentionJob, /needs\.deploy-aws\.result == 'skipped'/);
   assert.match(retentionJob, /permissions:\n\s+contents: read\n\s+id-token: write/);
   assert.match(webJob, /permissions:\n\s+contents: read\n\s+id-token: write/);
   assert.match(awsJob, /permissions:\n\s+contents: read\n\s+id-token: write/);
@@ -288,6 +292,11 @@ test('Scouts Lambda log groups have bounded retention enforced and verified by d
   ];
 
   assert.match(bootstrap, /logs:PutRetentionPolicy/);
+  assert.match(
+    workflow,
+    /case "\$\{file\}" in aws\/bootstrap\/\*\|\.github\/workflows\/deploy-to-s3\.yml\) aws_bootstrap=true/,
+    'deployment workflow security changes must redeploy bootstrap IAM before retention enforcement',
+  );
   assert.match(workflow, /retention_days=30/);
   assert.match(workflow, /aws logs put-retention-policy/);
   assert.match(workflow, /aws logs describe-log-groups/);
