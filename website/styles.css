@@ -212,7 +212,7 @@ body {
     padding-top: calc(6.5rem + 132px);
     background:
         linear-gradient(rgba(12, 16, 28, 0.58), rgba(12, 16, 28, 0.58)),
-        url('images/photos/kingston-night.jpg') center 35%/cover no-repeat;
+        url('images/photos/kingston-night.jpg') right bottom/cover no-repeat;
     color: #ffffff;
 }
 
@@ -919,7 +919,7 @@ header h1 {
 }
 
 .about-section-button--squirrels::before {
-    background: linear-gradient(135deg, #ed3f23 0%, #ff6b4a 100%);
+    background: linear-gradient(135deg, #5c10b3 0%, #7413dc 100%);
 }
 
 .about-section-button--squirrels img {
