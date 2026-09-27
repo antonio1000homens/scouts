@@ -111,6 +111,20 @@
         gap: 0.5rem;
     }
 
+    .home-page .past-events .event-card {
+        padding: 0.5rem;
+    }
+
+    .home-page .past-events .event-card-image-frame {
+        max-height: 88px;
+        margin-bottom: 0.5rem;
+    }
+
+    .home-page .past-events .event-card .ai-text {
+        margin-top: 0.5rem;
+        line-height: 1.25;
+    }
+
     .home-page .event-carousel .carousel-track {
         gap: 0.75rem;
     }
