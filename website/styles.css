@@ -217,6 +217,20 @@ body {
     color: #ffffff;
 }
 
+@keyframes homepage-background-reveal {
+    from {
+        background-position: center, right top;
+    }
+
+    to {
+        background-position: center, right bottom;
+    }
+}
+
+.home-page .about.about-detail {
+    animation: homepage-background-reveal 7s ease-in-out both;
+}
+
 .den-page .about.about-detail {
     background:
         linear-gradient(rgba(12, 16, 28, 0.58), rgba(12, 16, 28, 0.58)),
@@ -263,6 +277,7 @@ body {
         min-height: 70vh;
         margin-top: -107px;
         padding-top: calc(5.75rem + 107px);
+        background-size: auto, auto 112%;
     }
 }
 
@@ -710,6 +725,11 @@ header h1 {
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .home-page .about.about-detail {
+        animation: none;
+        background-position: center, right bottom;
+    }
+
     .squirrels-coming-soon {
         animation: none;
     }
