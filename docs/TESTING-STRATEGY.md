@@ -138,6 +138,8 @@ Tests executed for pull requests must:
 - use synthetic identifiers only;
 - avoid printing environment variables or secret-like values.
 
+The `Public repository safety / repository-hygiene` check is the pre-merge privacy/secret gate for every pull request. It runs the repository privacy/hygiene contracts and Gitleaks before the change is merged. The same check runs again on pushes to `master`/`main` as a defence-in-depth backstop; post-merge success is not a replacement for a green PR safety run.
+
 The CI job intentionally runs the issue #39 suite before any deployment lane. PR events skip `deploy-web` and `deploy-aws` entirely.
 
 ## Running locally

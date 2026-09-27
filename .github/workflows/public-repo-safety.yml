@@ -1,5 +1,8 @@
 name: Public repository safety
 
+# Pull-request runs are the primary pre-merge safety gate.
+# Push runs on the protected/default branches are a defence-in-depth backstop for
+# merges, direct pushes, or an administrative bypass. Keep both triggers.
 on:
   pull_request:
   push:
@@ -17,6 +20,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Identify safety role
+        shell: bash
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            pull_request)
+              echo "Running the pre-merge pull-request safety gate."
+              ;;
+            push)
+              echo "Running the post-merge/direct-push safety backstop."
+              ;;
+            workflow_dispatch)
+              echo "Running a manual repository safety verification."
+              ;;
+          esac
+
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:

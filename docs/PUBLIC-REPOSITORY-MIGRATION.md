@@ -41,6 +41,8 @@ gitleaks git --redact
 
 Investigate every genuine secret finding. Rotate/revoke a real credential before relying on repository cleanup.
 
+In CI, the `Public repository safety / repository-hygiene` check is primarily a pull-request gate: a failing privacy/hygiene contract or secret scan should stop the change before merge. The same workflow also runs after pushes to `master`/`main` as defence in depth for merges, direct pushes, or administrative bypasses; that post-merge run is a backstop, not a substitute for the PR gate.
+
 ## 4. Rewrite history for confirmed private data
 
 The cleanup identified historical files that contained genuine personal/private data. Removing them in a normal commit does not remove older blobs from Git history.
@@ -117,4 +119,4 @@ Immediately before changing visibility:
 5. **Delete issue #66 rather than merely closing it.**
 6. Change repository visibility to public.
 
-After publication, keep the `Public repository safety` workflow enabled so future pull requests and pushes are checked for regressions.
+After publication, keep the `Public repository safety` workflow enabled. Treat its pull-request run as the primary merge gate and its `master`/`main` push run as a post-merge safety backstop.
