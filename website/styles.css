@@ -213,6 +213,7 @@ body {
     background:
         linear-gradient(rgba(12, 16, 28, 0.58), rgba(12, 16, 28, 0.58)),
         url('images/photos/kingston-night.jpg') right bottom/cover no-repeat;
+    background-color: #0c101c;
     color: #ffffff;
 }
 
@@ -919,7 +920,7 @@ header h1 {
 }
 
 .about-section-button--squirrels::before {
-    background: linear-gradient(135deg, #5c10b3 0%, #7413dc 100%);
+    background: linear-gradient(135deg, #ed3f23 0%, #ff6b4a 100%);
 }
 
 .about-section-button--squirrels img {
@@ -929,6 +930,7 @@ header h1 {
     object-position: center;
     border-radius: 0;
     border: 0;
+    filter: grayscale(1) brightness(0) invert(1) drop-shadow(0 10px 18px rgba(0, 0, 0, 0.22));
 }
 
 .squirrels-coming-soon {
