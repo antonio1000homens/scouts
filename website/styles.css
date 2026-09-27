@@ -709,6 +709,10 @@ header h1 {
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .squirrels-coming-soon {
+        animation: none;
+    }
+
     .hero-sections .section-card .card-inner {
         transition: none;
     }
@@ -912,6 +916,68 @@ header h1 {
     line-height: 1.4;
     opacity: 0.9;
     max-width: 17ch;
+}
+
+.about-section-button--squirrels::before {
+    background: linear-gradient(135deg, #ed3f23 0%, #ff6b4a 100%);
+}
+
+.about-section-button--squirrels img {
+    aspect-ratio: 1;
+    object-fit: cover;
+    object-position: 76% 70%;
+    border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, 0.9);
+}
+
+.squirrels-coming-soon {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 1.65rem;
+    padding: 0.24rem 0.7rem;
+    border-radius: 999px;
+    background: #ed3f23;
+    color: #ffffff;
+    font-size: 0.72rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    text-transform: uppercase;
+    box-shadow: 0 0 0 0 rgba(237, 63, 35, 0.45);
+    animation: squirrels-coming-soon-pulse 2.4s ease-in-out infinite;
+}
+
+.squirrels-waiting-list {
+    position: relative;
+    z-index: 1;
+    color: #ffffff;
+    font-size: 0.82rem;
+    font-weight: 800;
+    line-height: 1.2;
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 0.2em;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+.squirrels-waiting-list:hover,
+.squirrels-waiting-list:focus-visible {
+    color: #ffe627;
+}
+
+@keyframes squirrels-coming-soon-pulse {
+    0%, 100% {
+        transform: translateY(0);
+        box-shadow: 0 0 0 0 rgba(237, 63, 35, 0.42);
+    }
+
+    50% {
+        transform: translateY(-2px);
+        box-shadow: 0 0 0 7px rgba(237, 63, 35, 0);
+    }
 }
 
 .about-section-button--beavers::before {
