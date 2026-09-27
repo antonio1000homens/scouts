@@ -59,6 +59,12 @@
         margin-top: 8px;
     }
 
+    .home-page .about-section-button--squirrels img {
+        width: 88px;
+        height: 88px;
+        margin-top: 8px;
+    }
+
     .home-page .events-section {
         padding: 1rem 1.25rem 2rem;
     }
