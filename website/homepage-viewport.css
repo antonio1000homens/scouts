@@ -1,7 +1,7 @@
 /* Homepage-only desktop compaction. Keep the existing mobile layout untouched. */
 @media (min-width: 901px) {
     .home-page {
-        --homepage-event-card-height: clamp(300px, 25vw, 360px);
+        --homepage-event-card-height: clamp(260px, 20vw, 300px);
     }
 
     .home-page header {
