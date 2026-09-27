@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const workflow = readFileSync('.github/workflows/deploy-to-s3.yml', 'utf8');
 const scoutsDeploy = readFileSync('lambdas/scouts/deploy.sh', 'utf8');
@@ -64,6 +64,14 @@ test('manual scouts2sqs target preserves prerequisite semantics without forcing 
 test('PRs validate but never enter deployment lanes', () => {
   assert.match(workflow, /deploy-web:[\s\S]*if: github\.event_name != 'pull_request'/);
   assert.match(workflow, /deploy-aws:[\s\S]*github\.event_name != 'pull_request'/);
+});
+
+test('GitHub Actions is the only repository-managed Cloudflare production deploy path', () => {
+  assert.equal(existsSync('cloudflare/wrangler.toml'), false, 'legacy Workers Builds compatibility manifest must stay removed');
+  assert.match(workflow, /case "\$\{file\}" in cloudflare\/\*\) cloudflare=true ;;/);
+  assert.match(workflow, /deploy-web:[\s\S]*github\.event_name != 'pull_request'/);
+  assert.match(workflow, /- name: Deploy admin proxy worker[\s\S]*cloudflare\/scouts-admin-proxy\/deploy-ci\.sh/);
+  assert.match(workflow, /- name: Deploy Slack handler worker[\s\S]*cloudflare\/scouts-slack-handler\/deploy-ci\.sh/);
 });
 
 test('workflow-only changes run validation without triggering application deployments', () => {
