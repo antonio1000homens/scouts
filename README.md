@@ -120,8 +120,12 @@ The live website documentation at `/website/docs/index.html` contains a more det
 - Multi-column footer
 
 ## Deployment
-- Website, Scouts queues, Scouts Lambdas, and the Scouts-specific Slack handler now deploy from this repo.
-- GitHub Actions workflow: `.github/workflows/deploy-to-s3.yml`
+- Website, Scouts queues, Scouts Lambdas, and the Scouts-specific Cloudflare Workers deploy from this repo.
+- **GitHub Actions is the sole production deployment authority**: `.github/workflows/deploy-to-s3.yml`.
+- Pull requests validate and plan changes only; production deployment lanes are blocked for `pull_request` events.
+- Cloudflare Workers Builds / Git integration must remain disconnected so it cannot deploy independently of the repository planner.
+- Worker changes under `cloudflare/*` are deployed after merge/push to `master` through the repository's `deploy-ci.sh` scripts.
+- See `docs/CLOUDFLARE-DEPLOYMENT.md` for the deployment contract and migration notes.
 - Lambda deployment code and CloudFormation templates live under `lambdas/`.
 - Local deployment entrypoint: `./deploy.sh`
 - Examples:
