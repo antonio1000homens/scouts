@@ -138,6 +138,8 @@ Tests executed for pull requests must:
 - use synthetic identifiers only;
 - avoid printing environment variables or secret-like values.
 
+The `Public repository safety / repository-hygiene` check is the pre-merge privacy/secret gate for every pull request. It runs the repository privacy/hygiene contracts and Gitleaks before the change is merged. The same check runs again on pushes to `master`/`main` as a defence-in-depth backstop; post-merge success is not a replacement for a green PR safety run.
+
 The CI job intentionally runs the issue #39 suite before any deployment lane. PR events skip `deploy-web` and `deploy-aws` entirely.
 
 ## Running locally
@@ -178,31 +180,3 @@ node --test lambdas/sqs2scouts/function/tests/test-cloudflare-image-client.mjs
 | Image request | yes | yes | future |
 | Provider response/schema | existing + fake | yes | fake by default |
 | Image cache/reuse | existing + fake | yes | future |
-| Persistence boundary | existing contracts | real handler with injected adapters | future |
-| Approve | yes | yes | future |
-| Hide/unhide | yes | yes | future |
-| Invalid/tampered action | yes | yes | future |
-| Hidden public filtering | yes | yes | future |
-| Approved image rendering | yes | visibility contract | future |
-
-## What these tests do not prove
-
-Hermetic tests cannot prove that production SQS event-source mappings are enabled, deployed Lambda environment variables are correct, or AWS permissions currently allow a message to flow. Those are specifically the purpose of the future isolated deployed smoke layer.
-
-When an incident occurs before that layer exists, use the issue #39 tests to first rule out browser/message-contract regressions, then inspect deployed queue depth/event-source mappings/Step Functions/runtime state.
-
-## Regression policy
-
-Every confirmed production defect must add or strengthen an automated
-regression at the lowest production boundary that would have prevented the
-escape, and that regression must be selected by `scripts/run-hermetic-tests.mjs`.
-The change description records:
-
-```text
-Why existing tests missed it:
-New regression:
-Would the regression fail on the previous commit: yes/no
-CI command/job that executes it:
-```
-
-If the CI command is not explicit, the regression is not complete.
