@@ -70,6 +70,18 @@ The Worker returns:
 - `502 { ok: false, code: "NOTIFICATION_FAILED" }` if the IFTTT call fails
 - `500 { ok: false, code: "MISSING_CONFIG" }` if secrets are not configured
 
+## Deployment ownership
+
+Production Worker deployment is owned by GitHub Actions in `.github/workflows/deploy-to-s3.yml`.
+
+- Pull requests run validation/planning but do **not** deploy Workers.
+- Changes under `cloudflare/*` select the Cloudflare deployment target.
+- After merge/push to `master`, GitHub Actions invokes the Worker `deploy-ci.sh` scripts.
+- Cloudflare Workers Builds / Git integration must remain disconnected for this repository. It is intentionally not a second deployment path.
+- The old root `cloudflare/wrangler.toml` compatibility manifest for Workers Builds has been removed; this directory's `wrangler.toml` is the canonical admin-proxy configuration.
+
+See `../../docs/CLOUDFLARE-DEPLOYMENT.md` for the full deployment contract.
+
 ## Deploy steps (run locally)
 
 1. Install Wrangler if needed:
