@@ -25,13 +25,9 @@ Cloudflare Workers Builds must not be connected to this repository while GitHub 
 
 A connected Cloudflare Git integration can build or deploy independently of the repository's change planner. PR #157 demonstrated this: a website-only change correctly skipped the GitHub Actions Cloudflare deployment lane, while the Cloudflare GitHub App still ran a `Workers Builds: scouts-admin-proxy` build.
 
-Before merging the migration that removes the legacy compatibility manifest:
+The Cloudflare Git integration was disconnected on 27 September 2026. A subsequent merge/push to `master` was verified to start only the repository's GitHub Actions workflows, with no `Workers Builds: ...` check from the Cloudflare GitHub App.
 
-1. Open Cloudflare Dashboard -> Workers & Pages -> `scouts-admin-proxy`.
-2. Open Settings -> Builds.
-3. Disconnect the connected Git repository.
-4. Repeat for `scouts-slack-handler` if it has its own Git connection.
-5. Confirm new pull-request commits no longer receive a `Workers Builds: ...` check from the Cloudflare GitHub App.
+If Workers Builds is ever reconnected, disconnect it again under Cloudflare Dashboard -> Workers & Pages -> Worker -> Settings -> Builds. GitHub Actions must remain the only automatic production deployment path.
 
 The removed `cloudflare/wrangler.toml` existed only to support the legacy Workers Builds project. The canonical Worker configurations remain inside their Worker directories.
 
