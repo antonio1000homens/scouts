@@ -3202,7 +3202,7 @@ function renderEvents() {
         const section = getEventSection(event);
         const isHidden = isEntryHidden(entry);
         const isApproved = isEntryApproved(entry);
-        const showApprovalState = !isHidden && !isApproved;
+        const showApprovalState = activeFilter !== 'approval' && !isHidden && !isApproved;
         const title = getEventDisplayTitle(event, entry, index);
         const eventUID = getEntryIdentifier(entry);
         const sourceDetailsMarkup = entry.sourceDetails?.length
