@@ -88,7 +88,9 @@
     }
 
     .home-page .past-events .event-card-image-frame {
-        width: 92%;
+        width: min(92%, 220px);
+        max-height: none;
+        aspect-ratio: 4 / 3;
         margin-left: auto;
         margin-right: auto;
     }
@@ -116,7 +118,6 @@
     }
 
     .home-page .past-events .event-card-image-frame {
-        max-height: 88px;
         margin-bottom: 0.5rem;
     }
 
