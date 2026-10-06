@@ -40,4 +40,12 @@ test('issue 126 uses matching 4:3 non-distorting presentation frames', () => {
   assert.match(adminStyles, /\.event-image\s*\{[\s\S]*object-fit:\s*cover/);
   assert.match(adminStyles, /\.modal-image-frame img\s*\{[\s\S]*object-fit:\s*cover/);
   assert.doesNotMatch(viewportStyles, /\.home-page \.event-card img\s*\{/);
+  assert.doesNotMatch(
+    viewportStyles,
+    /\.home-page \.past-events \.event-card-image-frame\s*\{[^}]*max-height:\s*88px/
+  );
+  assert.match(
+    viewportStyles,
+    /\.home-page \.past-events \.event-card-image-frame\s*\{[^}]*aspect-ratio:\s*4 \/ 3/
+  );
 });
