@@ -185,7 +185,7 @@ test('sqs2scouts uses the canonical enrichment-state environment variable name',
 test('sqs2scouts deploys an ordered Gemini text fallback list', () => {
   assert.match(sqs2scoutsTemplate, /GeminiTextModels:/);
   assert.match(sqs2scoutsTemplate, /GEMINI_TEXT_MODELS:\s*!Ref GeminiTextModels/);
-  assert.match(sqs2scoutsDeploy, /GEMINI_TEXT_MODELS=.*gemini-3\.5-flash,gemini-3\.1-flash-lite,gemini-2\.5-flash,gemini-2\.5-flash-lite/);
+  assert.match(sqs2scoutsDeploy, /GEMINI_TEXT_MODELS=.*gemini-3\.6-flash,gemini-3\.1-flash-lite,gemini-2\.5-flash,gemini-2\.5-flash-lite/);
   assert.match(sqs2scoutsDeploy, /GeminiTextModels="\$\{GEMINI_TEXT_MODELS\}"/);
 });
 

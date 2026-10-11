@@ -70,7 +70,7 @@ GEMINI_IMAGE_MODEL="${GEMINI_IMAGE_MODEL:-gemini-3.1-flash-image}"
 # exposes on the Gemini free tier. GEMINI_TEXT_MODEL remains a compatibility
 # primary override; GEMINI_TEXT_MODELS is the authoritative ordered list.
 GEMINI_TEXT_MODEL="${GEMINI_TEXT_MODEL:-}"
-GEMINI_TEXT_MODELS="${GEMINI_TEXT_MODELS:-gemini-3.5-flash,gemini-3.1-flash-lite,gemini-2.5-flash,gemini-2.5-flash-lite}"
+GEMINI_TEXT_MODELS="${GEMINI_TEXT_MODELS:-gemini-3.6-flash,gemini-3.1-flash-lite,gemini-2.5-flash,gemini-2.5-flash-lite}"
 GEMINI_ENABLED="${GEMINI_ENABLED:-}"
 GEMINI_IMAGES_ENABLED="${GEMINI_IMAGES_ENABLED:-}"
 GEMINI_USAGE_TABLE_NAME="${GEMINI_USAGE_TABLE_NAME:-scouts-gemini-usage}"
