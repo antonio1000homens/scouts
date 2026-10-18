@@ -237,6 +237,23 @@ test('admin field save buttons publish only the selected field and HEX', async (
   }
 });
 
+test('website title save and reset use original HEX and a nullable editorial override', async () => {
+  for (const value of ['New Website Title', '']) {
+    const { sandbox, sent } = actionSandbox({
+      getModalFieldValue: () => value,
+      setTimeout: () => 0,
+    });
+    await invokeAdminFunction('persistCurrentField', ['displayTitle', 'persistDisplayTitle'], sandbox);
+    assert.deepEqual(sent, [{
+      realm: 'scouts',
+      subject: { hex: TEST_HEX, metadata: { displayTitle: value || null } },
+      action: 'persistDisplayTitle',
+    }]);
+  }
+  assert.match(adminHtml, /modal-display-title-input/);
+  assert.match(adminHtml, /resetWebsiteTitle/);
+});
+
 test('image-theme save starts authoritative confirmation polling before image generation is unlocked', async () => {
   const calls = { begin: [], poll: [] };
   const { sandbox } = actionSandbox({
