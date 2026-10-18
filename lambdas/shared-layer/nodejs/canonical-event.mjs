@@ -128,7 +128,7 @@ export function assertCanonicalMetadata(input, { expectedHex = null, requireComp
   return {
     hex,
     ...(displayTitle !== undefined ? { displayTitle } : {}),
-    tagline:
+    tagline,
     image: { theme: imageTheme, url: imageUrl },
     status: {
       isHidden: input.status.isHidden,
