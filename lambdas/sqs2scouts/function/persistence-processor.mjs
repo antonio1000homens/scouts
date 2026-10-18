@@ -2544,6 +2544,13 @@ function parseSparsePersistSubject(subject) {
     return { value: trimmed };
 }
 
+function persistPatchContainsDisplayTitle(rawSubject, action) {
+    const actionPatch = parsePersistPatch(action);
+    const subjectPatch = parseSparsePersistSubject(rawSubject);
+    return Object.prototype.hasOwnProperty.call(actionPatch?.metadata || {}, 'displayTitle')
+        || Object.prototype.hasOwnProperty.call(subjectPatch?.metadata || {}, 'displayTitle');
+}
+
 export function buildPersistEventPayload(existingEvent, rawSubject, action) {
     const baseEvent =
         existingEvent && typeof existingEvent === 'object' && !Array.isArray(existingEvent)
@@ -2566,8 +2573,7 @@ export function buildPersistEventPayload(existingEvent, rawSubject, action) {
 
     // An editorial rename never modifies the source title or HEX. It does
     // invalidate approval only when the durable website title actually changes.
-    const hasDisplayTitlePatch = Object.prototype.hasOwnProperty.call(persistPatch?.metadata || {}, 'displayTitle')
-        || Object.prototype.hasOwnProperty.call(subjectObject?.metadata || {}, 'displayTitle');
+    const hasDisplayTitlePatch = persistPatchContainsDisplayTitle(rawSubject, action);
     if (hasDisplayTitlePatch) {
         const oldTitle = normalizeLegacyText(existingEvent?.metadata?.displayTitle);
         const newTitle = normalizeLegacyText(baseEvent?.metadata?.displayTitle);
@@ -3993,7 +3999,11 @@ async function lambdaHandlerWithDependencies(event) {
                 }
             }
 
-            if (!visibility && !actionIsHidden && !statusIsHidden) {
+            // A website-title edit/reset is an editorial review change, not an
+            // approval action. The sparse merge invalidates approval only when
+            // the value changed; an unchanged title preserves its prior state.
+            if (!visibility && !actionIsHidden && !statusIsHidden
+                && !persistPatchContainsDisplayTitle(rawSubject, action)) {
                 setImageApprovalState(event, true);
             }
 
