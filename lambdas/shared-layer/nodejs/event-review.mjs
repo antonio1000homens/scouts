@@ -42,6 +42,7 @@ function canonicalReviewValues(event) {
 
   return {
     hex,
+    displayTitle: text(metadata.displayTitle),
     tagline: text(metadata.tagline ?? event?.tagline ?? null),
     imageTheme: text(image.theme ?? event?.imageTheme ?? null),
     imageUrl: text(image.url ?? event?.imageUrl ?? null),
@@ -54,6 +55,7 @@ export function eventReviewRevision(input) {
   const values = input?.hex && Object.prototype.hasOwnProperty.call(input, 'isHidden')
     ? {
         hex: normaliseHex(input.hex),
+        displayTitle: text(input.displayTitle),
         tagline: text(input.tagline),
         imageTheme: text(input.imageTheme),
         imageUrl: text(input.imageUrl),
@@ -105,6 +107,7 @@ export function buildApprovedSnapshotPatch(snapshot) {
   return {
     metadata: {
       hex,
+      displayTitle: text(snapshot.displayTitle),
       tagline: text(snapshot.tagline),
       image: {
         theme: imageTheme,
