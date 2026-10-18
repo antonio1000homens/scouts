@@ -138,6 +138,11 @@ function withImageWidthParam(imageUrl, width = 400) {
     return `${trimmed}${separator}w=${width}`;
 }
 
+function escapeEventTitle(value) {
+    return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function getWebsiteEventTitle(event) {
     return getMetadataData(event)?.displayTitle || event?.title || event?.summary || 'Scout event';
 }
@@ -147,7 +152,7 @@ function createEventImageMarkup(event, width = 400) {
     if (!rawUrl) return '';
     const sizedUrl = withImageWidthParam(rawUrl, width) || rawUrl;
     const altText = getWebsiteEventTitle(event);
-    return `<div class="event-card-image-frame"><img src="${sizedUrl}" alt="${altText}" loading="lazy" /></div>`;
+    return `<div class="event-card-image-frame"><img src="${sizedUrl}" alt="${escapeEventTitle(altText)}" loading="lazy" /></div>`;
 }
 
 const SECTION_BADGE_CONFIG = {
@@ -188,7 +193,7 @@ function createEventBadgeMarkup(event) {
 function createEventHeading(tagName, event) {
     const badge = createEventBadgeMarkup(event);
     const title = getWebsiteEventTitle(event);
-    return `<${tagName} class="event-card-title">${badge}<span class="event-card-title-text">${title}</span></${tagName}>`;
+    return `<${tagName} class="event-card-title">${badge}<span class="event-card-title-text">${escapeEventTitle(title)}</span></${tagName}>`;
 }
 
 function getTagline(event) {
