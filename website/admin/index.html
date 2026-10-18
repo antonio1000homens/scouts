@@ -216,6 +216,7 @@
                         <p><strong>Image URL:</strong> <span id="modal-image-url"></span></p>
                         <p><strong>Image Theme:</strong> <span id="modal-image-theme"></span></p>
                         <p><strong>Tagline:</strong> <span id="modal-tagline"></span></p>
+                        <p><strong>Website title:</strong> <span id="modal-display-title"></span></p>
                     </div>
 
                     <div class="operation-group">
@@ -234,6 +235,25 @@
                                 value="hide"
                                 onclick="hideAndClearEvent(currentEventIndex, true, this)"
                             >Hide &amp; clear generated data</button>
+                        </div>
+                    </div>
+
+                    <div class="field-editor">
+                        <label for="modal-display-title-input">Website title (optional)</label>
+                        <input
+                            type="text"
+                            id="modal-display-title-input"
+                            maxlength="200"
+                            placeholder="Leave blank to use the original calendar title"
+                            autocomplete="off"
+                            spellcheck="false"
+                        >
+                        <p class="modal-input-help">The calendar title and HEX identity remain unchanged. This title is shared by all events with the same HEX; changing it requires re-approval.</p>
+                        <div class="field-actions">
+                            <button class="btn btn-primary requires-api"
+                                onclick="persistCurrentField('displayTitle', 'persistDisplayTitle', this)">Save website title</button>
+                            <button class="btn btn-secondary requires-api"
+                                onclick="resetWebsiteTitle(this)">Reset to calendar title</button>
                         </div>
                     </div>
 
