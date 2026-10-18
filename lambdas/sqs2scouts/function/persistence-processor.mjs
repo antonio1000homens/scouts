@@ -2564,6 +2564,20 @@ export function buildPersistEventPayload(existingEvent, rawSubject, action) {
         applyLegacyPersistFieldAliases(baseEvent, subjectObject);
     }
 
+    // An editorial rename never modifies the source title or HEX. It does
+    // invalidate approval only when the durable website title actually changes.
+    const hasDisplayTitlePatch = Object.prototype.hasOwnProperty.call(persistPatch?.metadata || {}, 'displayTitle')
+        || Object.prototype.hasOwnProperty.call(subjectObject?.metadata || {}, 'displayTitle');
+    if (hasDisplayTitlePatch) {
+        const oldTitle = normalizeLegacyText(existingEvent?.metadata?.displayTitle);
+        const newTitle = normalizeLegacyText(baseEvent?.metadata?.displayTitle);
+        if (oldTitle !== newTitle) {
+            baseEvent.metadata = baseEvent.metadata && typeof baseEvent.metadata === 'object' ? baseEvent.metadata : {};
+            baseEvent.metadata.status = baseEvent.metadata.status && typeof baseEvent.metadata.status === 'object'
+                ? baseEvent.metadata.status : {};
+            baseEvent.metadata.status.isApproved = false;
+        }
+    }
     ensureRuntimeMetadata(baseEvent);
     applySanitizedUidToEvent(baseEvent);
     return baseEvent;
