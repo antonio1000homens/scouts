@@ -62,7 +62,7 @@ function metadataForAgenda(event, expectedHex) {
   return {
     hex,
     ...(displayTitle !== undefined ? { displayTitle } : {}),
-    tagline:
+    tagline,
     image: { theme, url },
     status: {
       isHidden: source.status.isHidden,
