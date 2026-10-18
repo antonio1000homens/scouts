@@ -101,6 +101,34 @@ test('real request router forwards a persist mutation with occurrence and root i
 });
 
 
+test('active router forwards website title saves and explicit-null resets as sparse HEX patches', async () => {
+  for (const [displayTitle, requestId] of [
+    ['Cubs Reward Adventure', 'website-title-save'],
+    [null, 'website-title-reset'],
+  ]) {
+    const router = await loadRouter();
+    const response = await router.handler({ Records: [{
+      eventSource: 'aws:sqs',
+      body: JSON.stringify({
+        realm: 'persist', action: 'persist', requestId,
+        rootRequestId: 'website-title-operation',
+        subject: { metadata: { hex: HEX, displayTitle } },
+      }),
+    }] });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(router.sentMessages.length, 1);
+    const forwarded = JSON.parse(router.sentMessages[0].MessageBody);
+    assert.equal(forwarded.subject, HEX);
+    assert.equal(forwarded.hex, HEX);
+    assert.equal(forwarded.requestId, requestId);
+    assert.equal(forwarded.rootRequestId, 'website-title-operation');
+    const sparse = JSON.parse(forwarded.action);
+    assert.deepEqual(JSON.parse(JSON.stringify(sparse)), {
+      metadata: { hex: HEX, displayTitle },
+    });
+  }
+});
+
 test('new event starts at one combined text stage before image generation', async () => {
   const previousArn = process.env.FULL_ENRICH_STATE_MACHINE_ARN;
   process.env.FULL_ENRICH_STATE_MACHINE_ARN = 'arn:aws:states:eu-west-2:553490163883:stateMachine:fixture';
