@@ -32,6 +32,7 @@ test('review snapshot normalises reviewable fields and generates a stable revisi
   const snapshot = buildEventReviewSnapshot(event());
   assert.deepEqual(snapshot, {
     hex: 'abcd',
+    displayTitle: null,
     tagline: 'Join us by the fire',
     imageTheme: 'campfire at dusk',
     imageUrl: null,
@@ -48,6 +49,16 @@ test('non-review display fields do not change the revision', () => {
   const first = buildEventReviewSnapshot(event());
   const second = buildEventReviewSnapshot(event({ title: 'Renamed only for display' }));
   assert.equal(first.revision, second.revision);
+});
+
+test('website title changes invalidate an existing review without changing source HEX', () => {
+  const original = buildEventReviewSnapshot(event());
+  const edited = buildEventReviewSnapshot(event({
+    metadata: { ...event().metadata, displayTitle: 'Cubs Bonfire Adventure' },
+  }));
+  assert.notEqual(original.revision, edited.revision);
+  assert.equal(original.hex, edited.hex);
+  assert.equal(edited.displayTitle, 'Cubs Bonfire Adventure');
 });
 
 test('every reviewable field changes the revision', () => {
@@ -86,6 +97,7 @@ test('approving snapshot without an image persists metadata but requires image g
   const patch = buildApprovedSnapshotPatch(snapshot);
   assert.deepEqual(patch.metadata, {
     hex: 'abcd',
+    displayTitle: null,
     tagline: 'Join us by the fire',
     image: {
       theme: 'campfire at dusk',
