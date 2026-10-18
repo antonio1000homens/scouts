@@ -21,6 +21,7 @@
             : (event?.status && typeof event.status === 'object' ? event.status : {});
         return {
             hex: String(hex || metadata.hex || event?.hex || '').trim().toLowerCase(),
+            displayTitle: optionalText(metadata.displayTitle),
             tagline: optionalText(metadata.tagline ?? event?.tagline ?? event?.AI ?? event?.ai),
             imageTheme: optionalText(image.theme ?? event?.imageTheme),
             imageUrl: optionalText(image.url ?? image.src ?? event?.imageUrl),
@@ -66,6 +67,7 @@
     function sameReviewableValues(left, right) {
         if (!left || !right) return false;
         return String(left.hex || '').toLowerCase() === String(right.hex || '').toLowerCase()
+            && optionalText(left.displayTitle) === optionalText(right.displayTitle)
             && optionalText(left.tagline) === optionalText(right.tagline)
             && optionalText(left.imageTheme) === optionalText(right.imageTheme)
             && optionalText(left.imageUrl) === optionalText(right.imageUrl)
