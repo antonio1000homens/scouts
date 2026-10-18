@@ -180,6 +180,14 @@ export function translateCompactPersistRequest(message) {
   const occurrenceId = text(metadata.occurrenceId ?? subject.occurrenceId ?? message?.occurrenceId);
 
   const canonicalMetadata = { hex };
+  // An explicit null is the reset-to-calendar action, not an omitted patch.
+  // The source title remains unchanged: the override lives under this HEX.
+  if (Object.prototype.hasOwnProperty.call(metadata, 'displayTitle')
+    || Object.prototype.hasOwnProperty.call(subject, 'displayTitle')) {
+    const value = Object.prototype.hasOwnProperty.call(metadata, 'displayTitle')
+      ? metadata.displayTitle : subject.displayTitle;
+    canonicalMetadata.displayTitle = text(value);
+  }
   const tagline = text(metadata.tagline ?? subject.tagline ?? null);
   if (tagline !== null) canonicalMetadata.tagline = tagline;
 

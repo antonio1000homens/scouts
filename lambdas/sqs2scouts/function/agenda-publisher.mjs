@@ -34,11 +34,16 @@ function eventHex(event) {
 function metadataForAgenda(event, expectedHex) {
   if (!isObject(event?.metadata)) throw new Error('Canonical event is missing metadata');
   const source = event.metadata;
-  assertExactKeys(source, ['hex', 'tagline', 'image', 'status'], 'metadata');
+  assertExactKeys(source, ['hex', 'displayTitle', 'tagline', 'image', 'status'], 'metadata');
 
   const hex = canonicalHex(source.hex);
   if (hex !== expectedHex) throw new Error(`Canonical event HEX ${hex} does not match ${expectedHex}`);
 
+  const displayTitle = source.displayTitle === undefined ? undefined
+    : source.displayTitle === null ? null : text(source.displayTitle);
+  if (source.displayTitle !== undefined && source.displayTitle !== null && !displayTitle) {
+    throw new Error('metadata.displayTitle must be a non-empty string or null');
+  }
   const tagline = source.tagline === null ? null : text(source.tagline);
   if (source.tagline !== null && !tagline) throw new Error('metadata.tagline must be a non-empty string or null');
 
@@ -56,6 +61,7 @@ function metadataForAgenda(event, expectedHex) {
 
   return {
     hex,
+    ...(displayTitle !== undefined ? { displayTitle } : {}),
     tagline,
     image: { theme, url },
     status: {

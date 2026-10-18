@@ -157,6 +157,7 @@ function buildEventChangeKey(event, index = 0) {
 function buildEventChangeSnapshot(event) {
   const image = event?.image && typeof event.image === 'object' ? event.image : {};
   return {
+    displayTitle: getEventMetadata(event)?.displayTitle ?? null,
     tagline: getEventTagline(event),
     imageTheme: image.theme ?? null,
     imageUrl: image.url ?? null,
@@ -201,7 +202,7 @@ function listModifiedEvents(beforeEvents = [], afterEvents = []) {
     const beforeSnapshot = buildEventChangeSnapshot(previous || {});
     const afterSnapshot = buildEventChangeSnapshot(current || {});
 
-    const fields = ['tagline', 'imageTheme', 'imageUrl', 'status', 'hiddenAt'];
+    const fields = ['displayTitle', 'tagline', 'imageTheme', 'imageUrl', 'status', 'hiddenAt'];
     const changes = [];
     for (const field of fields) {
       if (!areChangeValuesEqual(beforeSnapshot[field], afterSnapshot[field])) {
@@ -317,6 +318,9 @@ function buildAgendaMetadata(event) {
     ? JSON.parse(JSON.stringify(sourceMetadata))
     : {};
   metadata.hex = trimOptionalText(metadata.hex)?.toLowerCase() ?? null;
+  if (Object.prototype.hasOwnProperty.call(metadata, 'displayTitle')) {
+    metadata.displayTitle = trimOptionalText(metadata.displayTitle);
+  }
   metadata.tagline = trimOptionalText(metadata.tagline);
   metadata.image = {
     theme: getEventImageTheme(event),
@@ -786,6 +790,7 @@ function removeTopLevelFieldsDuplicatedByMetadata(event) {
 
 function buildHexMetadata({
   hex = null,
+  displayTitle = undefined,
   tagline = null,
   imageTheme = null,
   imageUrl = null,
@@ -794,6 +799,7 @@ function buildHexMetadata({
 } = {}) {
   return {
     hex: trimOptionalText(hex)?.toLowerCase() ?? null,
+    ...(displayTitle !== undefined ? { displayTitle: trimOptionalText(displayTitle) } : {}),
     tagline: trimOptionalText(tagline),
     image: {
       theme: trimOptionalText(imageTheme),
@@ -2732,6 +2738,9 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
             ? baseEvent.metadata
             : {};
           baseEvent.metadata.hex = canonicalHex;
+          if (Object.prototype.hasOwnProperty.call(existingHexFile.metadata || {}, 'displayTitle')) {
+            baseEvent.metadata.displayTitle = trimOptionalText(existingHexFile.metadata.displayTitle);
+          }
           baseEvent.metadata.tagline = existingTagline;
           baseEvent.metadata.image = {
             theme: existingHexTheme,
@@ -2831,6 +2840,7 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
         title: eventTitle,
         metadata: buildHexMetadata({
           hex: titleHex,
+          displayTitle: existingHexFile?.metadata?.displayTitle,
           tagline: mergedTagline,
           imageTheme: getEventImageTheme(existingHexFile) || baseEvent.image.theme || null,
           imageUrl: getEventImageUrl(existingHexFile) || baseEvent.image.url || null,
@@ -3499,6 +3509,7 @@ export async function lambdaHandler(event = {}) {
     if (!token) return null;
     const normalized = String(token).trim().toLowerCase();
     if (!normalized) return null;
+    if (normalized === 'displaytitle') return 'displayTitle';
     if (normalized === 'tagline') return 'tagline';
     if (normalized === 'imagetheme') return 'imageTheme';
     if (normalized === 'imageurl') return 'imageUrl';
@@ -3641,6 +3652,17 @@ export async function lambdaHandler(event = {}) {
       ),
     );
 
+    const displayTitleRequest = commandActionToken === 'persistdisplaytitle';
+    const displayTitleFieldPresent = Object.prototype.hasOwnProperty.call(subjectObject?.metadata || {}, 'displayTitle')
+      || Object.prototype.hasOwnProperty.call(subjectObject || {}, 'displayTitle');
+    const candidateDisplayTitle = normalizeNullableText(firstDefinedValue(
+      subjectObject?.metadata?.displayTitle,
+      subjectObject?.displayTitle,
+    ));
+    if (displayTitleRequest && !displayTitleFieldPresent) {
+      return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: 'Missing displayTitle field' }) };
+    }
+
     const requiredPersistField = requestedMetadataField === 'all'
       ? null
       : requestedMetadataField === 'eventImage'
@@ -3651,6 +3673,10 @@ export async function lambdaHandler(event = {}) {
       ...(candidateTitle ? { title: candidateTitle } : {}),
     };
     const persistedFields = [];
+    if (displayTitleRequest && displayTitleFieldPresent) {
+      subject.metadata = { hex: candidateHex, displayTitle: candidateDisplayTitle };
+      persistedFields.push('displayTitle');
+    }
 
     if ((requiredPersistField === null || requiredPersistField === 'tagline') && candidateTagline) {
       subject.tagline = candidateTagline;

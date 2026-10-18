@@ -220,6 +220,77 @@ test('real persistence handler merges canonical sparse field saves without clear
   assert.equal(persisted.metadata.image.url, '/website/eventImages/holiday.webp');
 });
 
+test('handler preserves title and media, invalidates approval only when website title changes, and publishes every occurrence', async () => {
+  const store = fixtureStore();
+  const original = store[`events/${HEX}.json`];
+  original.metadata.status.isApproved = true;
+  store['agenda.json'].events.forEach((entry) => { entry.metadata.status.isApproved = true; });
+  const messages = [];
+  const { createPersistenceHandler } = await loadPersistenceModule(store, messages);
+  const handler = createPersistenceHandler({
+    recordRequestActivity: async () => null,
+    s3Client: { send: async (request) => {
+      const { Key } = request.input;
+      if (request.name === 'GetObjectCommand') {
+        if (!(Key in store)) { const error = new Error('Missing'); error.name = 'NoSuchKey'; throw error; }
+        return { Body: body(store[Key]), ETag: '"fixture"' };
+      }
+      if (request.name === 'PutObjectCommand') {
+        store[Key] = JSON.parse(Buffer.from(request.input.Body).toString('utf8'));
+        return { ETag: '"fixture-after"' };
+      }
+      throw new Error(`Unexpected S3 command ${request.name}`);
+    } },
+    sqsClient: { send: async (request) => { messages.push(request.input); return {}; } },
+    publishCanonicalEventToAgenda: async ({ loadAgenda, writeAgenda, event, hex }) => {
+      const agenda = await loadAgenda();
+      agenda.events = agenda.events.map((entry) => entry.metadata.hex === hex
+        ? { ...entry, metadata: clone(event.metadata) }
+        : entry);
+      await writeAgenda(agenda);
+      return { matched: 2 };
+    },
+  });
+  const persist = async (displayTitle, requestId) => handler({ Records: [{
+    eventSource: 'aws:sqs',
+    messageId: requestId,
+    body: JSON.stringify({
+      realm: 'persist', operation: 'persist', requestId, hex: HEX, subject: HEX,
+      action: JSON.stringify({ metadata: { hex: HEX, displayTitle } }),
+    }),
+  }] });
+
+  const check = (expectedTitle, approved) => {
+    const event = store[`events/${HEX}.json`];
+    assert.equal(event.title, 'Holiday');
+    assert.equal(event.metadata.hex, HEX);
+    assert.equal(event.metadata.displayTitle, expectedTitle);
+    assert.equal(event.metadata.status.isApproved, approved);
+    assert.equal(event.metadata.tagline, 'School holiday');
+    assert.equal(event.metadata.image.theme, 'calendar');
+    assert.equal(event.metadata.image.url, '/website/eventImages/holiday.webp');
+    assert.equal(store['agenda.json'].events.length, 2);
+    for (const occurrence of store['agenda.json'].events) {
+      assert.equal(occurrence.metadata.hex, HEX);
+      assert.equal(occurrence.metadata.displayTitle, expectedTitle);
+      assert.equal(occurrence.metadata.status.isApproved, approved);
+    }
+  };
+
+  const save = await persist('Holiday Celebrations', 'save-title');
+  assert.equal(save.statusCode, 200, save.body);
+  check('Holiday Celebrations', false);
+  // An approved identical edit must not revoke or grant approval.
+  original.metadata.status.isApproved = true;
+  store[`events/${HEX}.json`].metadata.status.isApproved = true;
+  const same = await persist('Holiday Celebrations', 'save-same-title');
+  assert.equal(same.statusCode, 200, same.body);
+  check('Holiday Celebrations', true);
+  const reset = await persist(null, 'reset-title');
+  assert.equal(reset.statusCode, 200, reset.body);
+  check(null, false);
+});
+
 test('real persistence handler treats legacy occurrence selectors as HEX-wide visibility', async () => {
   const store = fixtureStore();
   const sentMessages = [];

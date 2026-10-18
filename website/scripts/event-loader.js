@@ -9,7 +9,7 @@ const LOCAL_WEBSITE_BASE_URL = new URL('..', EVENT_LOADER_SCRIPT_URL);
 const LOCAL_AGENDA_URL = new URL('../agenda.json', LOCAL_WEBSITE_BASE_URL).href;
 const CONTACT_PAGE_URL = new URL('contact/index.html', LOCAL_WEBSITE_BASE_URL).href;
 
-const CANONICAL_METADATA_KEYS = ['hex', 'tagline', 'image', 'status'];
+const CANONICAL_METADATA_KEYS = ['hex', 'displayTitle', 'tagline', 'image', 'status'];
 const CANONICAL_IMAGE_KEYS = ['theme', 'url'];
 const CANONICAL_STATUS_KEYS = ['isHidden', 'isApproved'];
 const REGRESSION_UID_PREFIX = 'scouts-regression-';
@@ -62,6 +62,7 @@ function assertCanonicalAgendaEvent(event) {
     assertExactKeys(metadata, CANONICAL_METADATA_KEYS, 'metadata');
     const hex = canonicalText(metadata.hex, 'metadata.hex', { nullable: false }).toLowerCase();
     if (!/^[0-9a-f]+$/.test(hex)) throw new Error('metadata.hex must be lowercase hexadecimal');
+    if (metadata.displayTitle !== undefined && metadata.displayTitle !== null) canonicalText(metadata.displayTitle, 'metadata.displayTitle');
     if (metadata.tagline !== null) canonicalText(metadata.tagline, 'metadata.tagline');
 
     if (!isObject(metadata.image)) throw new Error('metadata.image must be an object');
@@ -137,12 +138,21 @@ function withImageWidthParam(imageUrl, width = 400) {
     return `${trimmed}${separator}w=${width}`;
 }
 
+function escapeEventTitle(value) {
+    return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function getWebsiteEventTitle(event) {
+    return getMetadataData(event)?.displayTitle || event?.title || event?.summary || 'Scout event';
+}
+
 function createEventImageMarkup(event, width = 400) {
     const rawUrl = resolveImageUrl(event);
     if (!rawUrl) return '';
     const sizedUrl = withImageWidthParam(rawUrl, width) || rawUrl;
-    const altText = event?.title || event?.summary || 'Scout event image';
-    return `<div class="event-card-image-frame"><img src="${sizedUrl}" alt="${altText}" loading="lazy" /></div>`;
+    const altText = getWebsiteEventTitle(event);
+    return `<div class="event-card-image-frame"><img src="${sizedUrl}" alt="${escapeEventTitle(altText)}" loading="lazy" /></div>`;
 }
 
 const SECTION_BADGE_CONFIG = {
@@ -182,8 +192,8 @@ function createEventBadgeMarkup(event) {
 
 function createEventHeading(tagName, event) {
     const badge = createEventBadgeMarkup(event);
-    const title = event?.title || event?.summary || 'Scout event';
-    return `<${tagName} class="event-card-title">${badge}<span class="event-card-title-text">${title}</span></${tagName}>`;
+    const title = getWebsiteEventTitle(event);
+    return `<${tagName} class="event-card-title">${badge}<span class="event-card-title-text">${escapeEventTitle(title)}</span></${tagName}>`;
 }
 
 function getTagline(event) {

@@ -237,6 +237,57 @@ test('admin field save buttons publish only the selected field and HEX', async (
   }
 });
 
+test('website title save and reset use original HEX and a nullable editorial override', async () => {
+  for (const value of ['New Website Title', '']) {
+    const { sandbox, sent } = actionSandbox({
+      getModalFieldValue: () => value,
+      setTimeout: () => 0,
+    });
+    await invokeAdminFunction('persistCurrentField', ['displayTitle', 'persistDisplayTitle'], sandbox);
+    assert.deepEqual(sent, [{
+      realm: 'scouts',
+      subject: { hex: TEST_HEX, metadata: { displayTitle: value || null } },
+      action: 'persistDisplayTitle',
+    }]);
+  }
+  assert.match(adminHtml, /modal-display-title-input/);
+  assert.match(adminHtml, /resetWebsiteTitle/);
+});
+
+test('editorial title edits immediately invalidate all local approval aliases on every shared-HEX card', () => {
+  const { sandbox, entry, event } = actionSandbox();
+  const second = {
+    event: structuredClone(event),
+    allHidden: false,
+  };
+  const unrelated = {
+    event: { summary: 'Unrelated', metadata: { hex: '756e72656c61746564', status: { isApproved: true } }, approved: true },
+  };
+  sandbox.uniqueEventEntries = [entry, second, unrelated];
+  for (const candidate of [event, second.event]) {
+    candidate.approved = true;
+    candidate.isApproved = true;
+    candidate.status = { isApproved: true };
+    candidate.metadata.status.isApproved = true;
+  }
+
+  const { functions } = loadFunctionsFromSource(
+    adminSource, ['hexScopedEntries', 'applyLocalPersistedField', 'isEventApproved'], sandbox,
+  );
+  functions.applyLocalPersistedField(entry, 'displayTitle', 'Revised for website');
+
+  for (const candidate of [event, second.event]) {
+    assert.equal(candidate.metadata.displayTitle, 'Revised for website');
+    assert.equal(candidate.approved, false);
+    assert.equal(candidate.isApproved, false);
+    assert.equal(candidate.status.isApproved, false);
+    assert.equal(candidate.metadata.status.isApproved, false);
+    assert.equal(functions.isEventApproved(candidate), false);
+  }
+  assert.equal(unrelated.event.approved, true);
+  assert.equal(unrelated.event.metadata.displayTitle, undefined);
+});
+
 test('image-theme save starts authoritative confirmation polling before image generation is unlocked', async () => {
   const calls = { begin: [], poll: [] };
   const { sandbox } = actionSandbox({

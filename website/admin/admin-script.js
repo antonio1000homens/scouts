@@ -3093,6 +3093,7 @@ function getEntryIdentifier(entry) {
 }
 
 function getEventDisplayTitle(event, entry, index) {
+    if (hasText(getMetadataData(event)?.displayTitle)) return getMetadataData(event).displayTitle.trim();
     if (hasText(event?.summary)) return event.summary.trim();
     if (hasText(event?.title)) return event.title.trim();
     const identifier = getEntryIdentifier(entry);
@@ -3225,7 +3226,7 @@ function renderEvents() {
             >
                 <div class="event-image-container">
                     ${imageUrl 
-                        ? `<img src="${imageUrl}" alt="${title}" class="event-image" onclick="openImageViewer('${escapeHtmlAttribute(imageUrl)}', '${escapeHtmlAttribute(title)}')" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22300%22%3E%3Crect fill=%22%23ddd%22 width=%22400%22 height=%22300%22/%3E%3Ctext fill=%22%23999%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22%3ENo Image%3C/text%3E%3C/svg%3E'">` 
+                        ? `<img src="${imageUrl}" alt="${escapeHtmlAttribute(title)}" class="event-image" onclick="openImageViewer(this.src, this.alt)" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22300%22%3E%3Crect fill=%22%23ddd%22 width=%22400%22 height=%22300%22/%3E%3Ctext fill=%22%23999%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22%3ENo Image%3C/text%3E%3C/svg%3E'">` 
                         : `<div class="event-image" style="background: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #999;">${isMetadataFieldProcessing(event, 'imageUrl') ? METADATA_PROCESSING_LABEL : 'No Image'}</div>`
                     }
                     <div class="event-badge-stack">
@@ -3236,7 +3237,7 @@ function renderEvents() {
                     </div>
                 </div>
                 <div class="event-details">
-                    <h3 class="event-title">${title}</h3>
+                    <h3 class="event-title">${escapeHtml(title)}</h3>
                     <details class="event-identifiers">
                         <summary>Advanced</summary>
                         <div class="event-identifiers-body">
@@ -3343,6 +3344,8 @@ function openUploadModal(index) {
     const modal = document.getElementById('upload-modal');
     
     document.getElementById('modal-event-name').textContent = event.summary || event.title || 'Event ' + index;
+    document.getElementById('modal-display-title-input').value = getMetadataData(event)?.displayTitle || '';
+    document.getElementById('modal-display-title').textContent = getEventDisplayTitle(event, entry, index);
     document.getElementById('modal-event-hex').textContent = getEventHex(event) || 'Missing HEX';
     document.getElementById('modal-event-uid').textContent = getEntryIdentifier(entry) || 'Missing UID';
     document.getElementById('modal-event-date-section').textContent = `${normaliseEventDateString(event.dtstart || event.start || 'Not set')} · ${getEventSection(event) || 'Unsectioned'}`;
@@ -3650,6 +3653,8 @@ function closeUploadModal() {
     const imagePromptInput = document.getElementById('modal-image-prompt-input');
     const imageUrlInput = document.getElementById('modal-image-url-input');
     if (taglineInput) taglineInput.value = '';
+    const displayTitleInput = document.getElementById('modal-display-title-input');
+    if (displayTitleInput) displayTitleInput.value = '';
     if (imagePromptInput) imagePromptInput.value = '';
     if (imageUrlInput) imageUrlInput.value = '';
     currentEventIndex = null;
@@ -3676,6 +3681,9 @@ async function refreshLambda(...args) {
 }
 
 function getFieldOperationConfig(field) {
+    if (field === 'displayTitle') {
+        return { subjectKey: 'displayTitle', label: 'Website title', queueLabel: 'website title' };
+    }
     if (field === 'full') {
         return {
             subjectKey: 'full',
@@ -3711,6 +3719,9 @@ function getFieldOperationConfig(field) {
 }
 
 function getModalFieldValue(field) {
+    if (field === 'displayTitle') {
+        return document.getElementById('modal-display-title-input')?.value.trim() || '';
+    }
     if (field === 'tagline') {
         const input = document.getElementById('modal-tagline-input');
         return hasText(input?.value) ? input.value.trim() : '';
@@ -3724,6 +3735,8 @@ function getModalFieldValue(field) {
 }
 
 function refreshModalCurrentMetadata(event) {
+    const displayTitleText = document.getElementById('modal-display-title');
+    if (displayTitleText) displayTitleText.textContent = getMetadataData(event)?.displayTitle || event?.summary || event?.title || 'Not set';
     const imageUrlText = document.getElementById('modal-image-url');
     const imageThemeText = document.getElementById('modal-image-theme');
     const taglineText = document.getElementById('modal-tagline');
@@ -3785,6 +3798,21 @@ function applyLocalPersistedField(entry, field, value) {
     hexScopedEntries(entry).forEach((candidate) => {
         const event = candidate.event;
         event.metadata = event.metadata && typeof event.metadata === 'object' ? event.metadata : {};
+        if (field === 'displayTitle') {
+            const previous = event.metadata.displayTitle || null;
+            event.metadata.displayTitle = value || null;
+            if (previous !== event.metadata.displayTitle) {
+                // Admin records carry several historical approval aliases. All
+                // must agree immediately, before the next server refresh.
+                event.approved = false;
+                event.isApproved = false;
+                event.status = event.status && typeof event.status === 'object' ? event.status : {};
+                event.status.isApproved = false;
+                event.metadata.status = event.metadata.status && typeof event.metadata.status === 'object' ? event.metadata.status : {};
+                event.metadata.status.isApproved = false;
+            }
+            return;
+        }
         if (field === 'tagline') {
             event.tagline = value;
             event.metadata.tagline = value;
@@ -3856,6 +3884,12 @@ function applyVisibilityOverrides(entries, options = {}) {
     return changed;
 }
 
+function resetWebsiteTitle(button = null) {
+    const input = document.getElementById('modal-display-title-input');
+    if (input) input.value = '';
+    return persistCurrentField('displayTitle', 'persistDisplayTitle', button);
+}
+
 async function persistCurrentField(field, action = 'persist', button = null) {
     if (!apiAuthReady) {
         updateApiAuthStatus(
@@ -3875,7 +3909,7 @@ async function persistCurrentField(field, action = 'persist', button = null) {
 
     const config = getFieldOperationConfig(field);
     const nextValue = getModalFieldValue(field);
-    if (!nextValue) {
+    if (!nextValue && field !== 'displayTitle') {
         updateModalStatus(`Enter a ${config.label.toLowerCase()} value to persist.`, 'error');
         return;
     }
@@ -3899,7 +3933,9 @@ async function persistCurrentField(field, action = 'persist', button = null) {
 
     const subject = {
         hex,
-        [config.subjectKey]: nextValue,
+        ...(field === 'displayTitle'
+            ? { metadata: { displayTitle: nextValue || null } }
+            : { [config.subjectKey]: nextValue }),
     };
 
     const payload = {

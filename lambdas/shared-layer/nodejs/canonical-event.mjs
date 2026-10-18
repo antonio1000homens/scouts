@@ -1,7 +1,7 @@
 const HEX_PATTERN = /^[0-9a-f]+$/;
 
 export const CANONICAL_EVENT_TOP_LEVEL_KEYS = Object.freeze(['title', 'metadata', 'requests']);
-export const CANONICAL_METADATA_KEYS = Object.freeze(['hex', 'tagline', 'image', 'status']);
+export const CANONICAL_METADATA_KEYS = Object.freeze(['hex', 'displayTitle', 'tagline', 'image', 'status']);
 export const CANONICAL_IMAGE_KEYS = Object.freeze(['theme', 'url']);
 export const CANONICAL_STATUS_KEYS = Object.freeze(['isHidden', 'isApproved']);
 
@@ -45,6 +45,7 @@ export function titleToHex(title) {
 
 export function buildCanonicalMetadata({
   hex,
+  displayTitle = undefined,
   tagline = null,
   imageTheme = null,
   imageUrl = null,
@@ -53,6 +54,7 @@ export function buildCanonicalMetadata({
 } = {}) {
   return {
     hex: normalizeCanonicalHex(hex),
+    ...(displayTitle !== undefined ? { displayTitle: nullableText(displayTitle, 'metadata.displayTitle') } : {}),
     tagline: tagline == null ? null : nullableText(tagline, 'metadata.tagline'),
     image: {
       theme: imageTheme == null ? null : nullableText(imageTheme, 'metadata.image.theme'),
@@ -68,6 +70,7 @@ export function buildCanonicalMetadata({
 export function buildCanonicalEventDocument({
   title,
   hex,
+  displayTitle = undefined,
   tagline = null,
   imageTheme = null,
   imageUrl = null,
@@ -81,6 +84,7 @@ export function buildCanonicalEventDocument({
     title: title.trim(),
     metadata: buildCanonicalMetadata({
       hex,
+      displayTitle,
       tagline,
       imageTheme,
       imageUrl,
@@ -96,6 +100,9 @@ export function assertCanonicalMetadata(input, { expectedHex = null, requireComp
   assertExactKeys(input, CANONICAL_METADATA_KEYS, 'metadata');
 
   const hex = normalizeCanonicalHex(input.hex);
+  const displayTitle = Object.prototype.hasOwnProperty.call(input, 'displayTitle')
+    ? nullableText(input.displayTitle, 'metadata.displayTitle')
+    : undefined;
   if (expectedHex && hex !== normalizeCanonicalHex(expectedHex, 'expectedHex')) {
     throw new Error(`metadata.hex ${hex} does not match expected HEX ${String(expectedHex).trim().toLowerCase()}`);
   }
@@ -120,6 +127,7 @@ export function assertCanonicalMetadata(input, { expectedHex = null, requireComp
 
   return {
     hex,
+    ...(displayTitle !== undefined ? { displayTitle } : {}),
     tagline,
     image: { theme: imageTheme, url: imageUrl },
     status: {

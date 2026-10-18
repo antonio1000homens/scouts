@@ -1017,6 +1017,11 @@ function buildPersistPatchForProcessing(rawSubject) {
     const patch = {};
     ensureRuntimeMetadata(compactSubject, hexValue);
 
+    if (Object.prototype.hasOwnProperty.call(compactSubject.metadata ?? {}, 'displayTitle')) {
+        patch.metadata = patch.metadata && typeof patch.metadata === 'object' ? patch.metadata : {};
+        patch.metadata.displayTitle = normalizeNullableText(compactSubject.metadata.displayTitle);
+    }
+
     if (Object.prototype.hasOwnProperty.call(compactSubject.metadata ?? {}, 'tagline')) {
         patch.metadata = patch.metadata && typeof patch.metadata === 'object' ? patch.metadata : {};
         patch.metadata.tagline = normalizeNullableText(compactSubject.metadata?.tagline);

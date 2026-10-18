@@ -2544,6 +2544,13 @@ function parseSparsePersistSubject(subject) {
     return { value: trimmed };
 }
 
+function persistPatchContainsDisplayTitle(rawSubject, action) {
+    const actionPatch = parsePersistPatch(action);
+    const subjectPatch = parseSparsePersistSubject(rawSubject);
+    return Object.prototype.hasOwnProperty.call(actionPatch?.metadata || {}, 'displayTitle')
+        || Object.prototype.hasOwnProperty.call(subjectPatch?.metadata || {}, 'displayTitle');
+}
+
 export function buildPersistEventPayload(existingEvent, rawSubject, action) {
     const baseEvent =
         existingEvent && typeof existingEvent === 'object' && !Array.isArray(existingEvent)
@@ -2564,6 +2571,19 @@ export function buildPersistEventPayload(existingEvent, rawSubject, action) {
         applyLegacyPersistFieldAliases(baseEvent, subjectObject);
     }
 
+    // An editorial rename never modifies the source title or HEX. It does
+    // invalidate approval only when the durable website title actually changes.
+    const hasDisplayTitlePatch = persistPatchContainsDisplayTitle(rawSubject, action);
+    if (hasDisplayTitlePatch) {
+        const oldTitle = normalizeLegacyText(existingEvent?.metadata?.displayTitle);
+        const newTitle = normalizeLegacyText(baseEvent?.metadata?.displayTitle);
+        if (oldTitle !== newTitle) {
+            baseEvent.metadata = baseEvent.metadata && typeof baseEvent.metadata === 'object' ? baseEvent.metadata : {};
+            baseEvent.metadata.status = baseEvent.metadata.status && typeof baseEvent.metadata.status === 'object'
+                ? baseEvent.metadata.status : {};
+            baseEvent.metadata.status.isApproved = false;
+        }
+    }
     ensureRuntimeMetadata(baseEvent);
     applySanitizedUidToEvent(baseEvent);
     return baseEvent;
@@ -3979,7 +3999,11 @@ async function lambdaHandlerWithDependencies(event) {
                 }
             }
 
-            if (!visibility && !actionIsHidden && !statusIsHidden) {
+            // A website-title edit/reset is an editorial review change, not an
+            // approval action. The sparse merge invalidates approval only when
+            // the value changed; an unchanged title preserves its prior state.
+            if (!visibility && !actionIsHidden && !statusIsHidden
+                && !persistPatchContainsDisplayTitle(rawSubject, action)) {
                 setImageApprovalState(event, true);
             }
 
