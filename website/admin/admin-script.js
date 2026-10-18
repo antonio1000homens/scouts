@@ -3802,6 +3802,12 @@ function applyLocalPersistedField(entry, field, value) {
             const previous = event.metadata.displayTitle || null;
             event.metadata.displayTitle = value || null;
             if (previous !== event.metadata.displayTitle) {
+                // Admin records carry several historical approval aliases. All
+                // must agree immediately, before the next server refresh.
+                event.approved = false;
+                event.isApproved = false;
+                event.status = event.status && typeof event.status === 'object' ? event.status : {};
+                event.status.isApproved = false;
                 event.metadata.status = event.metadata.status && typeof event.metadata.status === 'object' ? event.metadata.status : {};
                 event.metadata.status.isApproved = false;
             }
