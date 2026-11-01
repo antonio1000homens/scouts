@@ -10,6 +10,7 @@ const {
   ENRICHMENT_STAGES,
   ENRICHMENT_STATES,
   buildGenerationId,
+  getEnrichmentState,
   normaliseEnrichmentStage,
   evaluateEnrichmentEligibility,
   classifyGeminiError,
@@ -127,6 +128,26 @@ test('actionable enrichment states do not receive TTL expiry timestamps', async 
       assert.match(command.input.UpdateExpression, /REMOVE[^]*#expiresAt/);
       assert.equal(command.input.ExpressionAttributeValues[':expiresAt'], undefined);
     }
+  } finally {
+    resetEnrichmentStateClientForTests();
+  }
+});
+
+test('an expired-but-present DynamoDB row is still read until TTL physically removes it', async () => {
+  setEnrichmentStateClientForTests({
+    async send() {
+      return { Item: {
+        hex: { S: 'abc' },
+        stage: { S: 'tagline' },
+        state: { S: 'manual_review' },
+        expiresAt: { N: '1' },
+      } };
+    },
+  });
+  try {
+    const state = await getEnrichmentState('abc', 'tagline');
+    assert.equal(state.state, 'manual_review');
+    assert.equal(state.expiresAt, 1);
   } finally {
     resetEnrichmentStateClientForTests();
   }

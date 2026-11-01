@@ -77,8 +77,8 @@ for (const item of candidates) {
         'dynamodb', 'update-item', '--table-name', TABLE_NAME,
         '--key', JSON.stringify({ hex: item.hex, stage: item.stage }),
         '--update-expression', 'REMOVE expiresAt',
-        '--condition-expression', '#state = :state AND expiresAt = :expiresAt',
-        '--expression-attribute-names', '{"#state":"state"}',
+        '--condition-expression', '#state = :state AND #expiresAt = :expiresAt',
+        '--expression-attribute-names', '{"#state":"state","#expiresAt":"expiresAt"}',
         '--expression-attribute-values', JSON.stringify({ ':state': item.state, ':expiresAt': item.expiresAt }),
       ]);
       summary.updated += 1;
