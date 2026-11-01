@@ -198,20 +198,30 @@ async function loadScoutsConfig() {
 }
 
 function emitImageMetric(metricName, provider = 'cloudflare', outcome = null) {
-  console.log(JSON.stringify({
-    _aws: {
-      Timestamp: Date.now(),
-      CloudWatchMetrics: [{
-        Namespace: 'Scouts/ImageGeneration',
-        Dimensions: [[]],
-        Metrics: [{ Name: metricName, Unit: 'Count' }],
-      }],
-    },
-    Provider: provider,
-    Model: provider === 'cloudflare' ? CLOUDFLARE_MODEL : null,
-    Outcome: outcome || metricName,
-    [metricName]: 1,
-  }));
+  const event = {
+    event: 'image_generation',
+    metric: metricName,
+    provider,
+    outcome: outcome || metricName,
+    model: provider === 'cloudflare' ? CLOUDFLARE_MODEL : null,
+    timestamp: Date.now(),
+  };
+  // Only these two metrics have active CloudWatch alarms. Keep one
+  // dimensionless series for each alarm; log every other outcome as JSON.
+  if (metricName === 'Failure' || metricName === 'ProviderQuotaExhausted') {
+    Object.assign(event, {
+      _aws: {
+        Timestamp: event.timestamp,
+        CloudWatchMetrics: [{
+          Namespace: 'Scouts/ImageGeneration',
+          Dimensions: [[]],
+          Metrics: [{ Name: metricName, Unit: 'Count' }],
+        }],
+      },
+      [metricName]: 1,
+    });
+  }
+  console.log(JSON.stringify(event));
 }
 
 function logImageEvent({

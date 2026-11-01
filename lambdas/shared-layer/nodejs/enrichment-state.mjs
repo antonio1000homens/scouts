@@ -143,7 +143,7 @@ export async function reserveEnrichmentAttempt({ hex, stage, generationId, reque
     ':inProgress': asString('in_progress'), ':manual': asString('manual_review'), ':max': asNumber(MAX_ATTEMPTS),
     ':zero': asNumber(0), ':one': asNumber(1), ':now': asString(nowIso), ':nowMs': asNumber(nowMs),
     ':lease': asNumber(nowMs + LEASE_SECONDS * 1000), ':generationId': asString(generationId || ''),
-    ':requestId': asString(requestId || ''), ':expiresAt': asNumber(Math.floor(nowMs / 1000) + TTL_DAYS * 86400),
+    ':requestId': asString(requestId || ''),
   };
   const existing = await getEnrichmentState(normalisedHex, normalisedStage).catch(() => null);
   if (existing?.state === 'succeeded' && existing.generationId && existing.generationId !== generationId) {
@@ -151,9 +151,9 @@ export async function reserveEnrichmentAttempt({ hex, stage, generationId, reque
       await client.send(new UpdateItemCommand({
         TableName: TABLE_NAME,
         Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
-        UpdateExpression: 'SET #state = :pending, #attemptCount = :zero, #generationId = :generationId, #updatedAt = :now REMOVE #geminiSucceeded, #generatedValue, #nextRetryAt, #inProgressExpiresAt',
+        UpdateExpression: 'SET #state = :pending, #attemptCount = :zero, #generationId = :generationId, #updatedAt = :now REMOVE #geminiSucceeded, #generatedValue, #nextRetryAt, #inProgressExpiresAt, #expiresAt',
         ConditionExpression: '#state = :succeeded AND #generationId = :previousGenerationId',
-        ExpressionAttributeNames: { '#state': 'state', '#attemptCount': 'attemptCount', '#generationId': 'generationId', '#updatedAt': 'updatedAt', '#geminiSucceeded': 'geminiSucceeded', '#generatedValue': 'generatedValue', '#nextRetryAt': 'nextRetryAt', '#inProgressExpiresAt': 'inProgressExpiresAt' },
+        ExpressionAttributeNames: { '#state': 'state', '#attemptCount': 'attemptCount', '#generationId': 'generationId', '#updatedAt': 'updatedAt', '#geminiSucceeded': 'geminiSucceeded', '#generatedValue': 'generatedValue', '#nextRetryAt': 'nextRetryAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#expiresAt': 'expiresAt' },
         ExpressionAttributeValues: { ':pending': asString('pending'), ':zero': asNumber(0), ':generationId': asString(generationId || ''), ':now': asString(nowIso), ':succeeded': asString('succeeded'), ':previousGenerationId': asString(existing.generationId) },
       }));
     } catch (error) {
@@ -164,7 +164,7 @@ export async function reserveEnrichmentAttempt({ hex, stage, generationId, reque
     const response = await client.send(new UpdateItemCommand({
       TableName: TABLE_NAME,
       Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
-      UpdateExpression: 'SET #state = :inProgress, #attemptCount = if_not_exists(#attemptCount, :zero) + :one, #firstAttemptAt = if_not_exists(#firstAttemptAt, :now), #lastAttemptAt = :now, #inProgressExpiresAt = :lease, #generationId = :generationId, #lastRequestId = :requestId, #updatedAt = :now, #expiresAt = :expiresAt REMOVE #nextRetryAt',
+      UpdateExpression: 'SET #state = :inProgress, #attemptCount = if_not_exists(#attemptCount, :zero) + :one, #firstAttemptAt = if_not_exists(#firstAttemptAt, :now), #lastAttemptAt = :now, #inProgressExpiresAt = :lease, #generationId = :generationId, #lastRequestId = :requestId, #updatedAt = :now REMOVE #nextRetryAt, #expiresAt',
       ConditionExpression: '(attribute_not_exists(#state) OR (#state <> :inProgress OR attribute_not_exists(#inProgressExpiresAt) OR #inProgressExpiresAt <= :nowMs)) AND (attribute_not_exists(#state) OR #state <> :manual) AND (attribute_not_exists(#attemptCount) OR #attemptCount < :max) AND (attribute_not_exists(#nextRetryAt) OR #nextRetryAt <= :now)',
       ExpressionAttributeNames: { '#state': 'state', '#attemptCount': 'attemptCount', '#firstAttemptAt': 'firstAttemptAt', '#lastAttemptAt': 'lastAttemptAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#generationId': 'generationId', '#lastRequestId': 'lastRequestId', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt', '#nextRetryAt': 'nextRetryAt' },
       ExpressionAttributeValues: values,
@@ -181,7 +181,7 @@ export async function reserveEnrichmentAttempt({ hex, stage, generationId, reque
   }
 }
 
-async function updateState(hex, stage, updateExpression, values, names, now = new Date()) {
+async function updateState(hex, stage, updateExpression, values, names, now = new Date(), { preserveWhileActionable = false } = {}) {
   const normalisedHex = normalise(hex).toLowerCase();
   const normalisedStage = normaliseEnrichmentStage(stage);
   if (!TABLE_NAME || !normalisedHex || !normalisedStage) return null;
@@ -190,16 +190,20 @@ async function updateState(hex, stage, updateExpression, values, names, now = ne
     Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
     UpdateExpression: updateExpression,
     ExpressionAttributeNames: names,
-    ExpressionAttributeValues: { ...values, ':updatedAt': asString(now.toISOString()), ':expiresAt': asNumber(Math.floor(now.getTime() / 1000) + TTL_DAYS * 86400) },
+    ExpressionAttributeValues: {
+      ...values,
+      ':updatedAt': asString(now.toISOString()),
+      ...(preserveWhileActionable ? {} : { ':expiresAt': asNumber(Math.floor(now.getTime() / 1000) + TTL_DAYS * 86400) }),
+    },
     ReturnValues: 'ALL_NEW',
   }));
   return unmarshallItem(response?.Attributes);
 }
 
 export async function markGeminiSucceeded({ hex, stage, generationId, generatedValue, now = new Date() }) {
-  return updateState(hex, stage, 'SET #state = :state, #geminiSucceeded = :true, #generatedValue = :generatedValue, #generationId = :generationId, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #inProgressExpiresAt, #nextRetryAt, #lastErrorType, #lastErrorMessage', {
+  return updateState(hex, stage, 'SET #state = :state, #geminiSucceeded = :true, #generatedValue = :generatedValue, #generationId = :generationId, #updatedAt = :updatedAt REMOVE #inProgressExpiresAt, #nextRetryAt, #lastErrorType, #lastErrorMessage, #expiresAt', {
     ':state': asString('persist_pending'), ':true': { BOOL: true }, ':generatedValue': asString(JSON.stringify(generatedValue)), ':generationId': asString(generationId),
-  }, { '#state': 'state', '#geminiSucceeded': 'geminiSucceeded', '#generatedValue': 'generatedValue', '#generationId': 'generationId', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#nextRetryAt': 'nextRetryAt', '#lastErrorType': 'lastErrorType', '#lastErrorMessage': 'lastErrorMessage' }, now);
+  }, { '#state': 'state', '#geminiSucceeded': 'geminiSucceeded', '#generatedValue': 'generatedValue', '#generationId': 'generationId', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#nextRetryAt': 'nextRetryAt', '#lastErrorType': 'lastErrorType', '#lastErrorMessage': 'lastErrorMessage' }, now, { preserveWhileActionable: true });
 }
 
 export async function markEnrichmentSucceeded({ hex, stage, generationId, now = new Date() }) {
@@ -214,10 +218,10 @@ export async function markEnrichmentFailure({ hex, stage, error, attemptCount, n
   const state = terminal ? 'manual_review' : 'retry_wait';
   const nextRetryAt = terminal ? null : new Date(now.getTime() + retryDelaySeconds(Number(attemptCount) || 1) * 1000).toISOString();
   return updateState(hex, stage, terminal
-    ? 'SET #state = :state, #lastErrorType = :errorType, #lastErrorMessage = :errorMessage, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #inProgressExpiresAt, #nextRetryAt'
-    : 'SET #state = :state, #lastErrorType = :errorType, #lastErrorMessage = :errorMessage, #nextRetryAt = :nextRetryAt, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #inProgressExpiresAt', {
+    ? 'SET #state = :state, #lastErrorType = :errorType, #lastErrorMessage = :errorMessage, #updatedAt = :updatedAt REMOVE #inProgressExpiresAt, #nextRetryAt, #expiresAt'
+    : 'SET #state = :state, #lastErrorType = :errorType, #lastErrorMessage = :errorMessage, #nextRetryAt = :nextRetryAt, #updatedAt = :updatedAt REMOVE #inProgressExpiresAt, #expiresAt', {
       ':state': asString(state), ':errorType': asString(category), ':errorMessage': asString(String(error?.message || error || '').slice(0, 500)), ...(nextRetryAt ? { ':nextRetryAt': asString(nextRetryAt) } : {}),
-    }, { '#state': 'state', '#lastErrorType': 'lastErrorType', '#lastErrorMessage': 'lastErrorMessage', '#nextRetryAt': 'nextRetryAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt' }, now);
+    }, { '#state': 'state', '#lastErrorType': 'lastErrorType', '#lastErrorMessage': 'lastErrorMessage', '#nextRetryAt': 'nextRetryAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt' }, now, { preserveWhileActionable: true });
 }
 
 export async function claimEnrichmentEscalation({ hex, stage, now = new Date() }) {
@@ -228,10 +232,10 @@ export async function claimEnrichmentEscalation({ hex, stage, now = new Date() }
     await client.send(new UpdateItemCommand({
       TableName: TABLE_NAME,
       Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
-      UpdateExpression: 'SET #escalatedAt = :escalatedAt, #updatedAt = :updatedAt, #expiresAt = :expiresAt',
+      UpdateExpression: 'SET #escalatedAt = :escalatedAt, #updatedAt = :updatedAt REMOVE #expiresAt',
       ConditionExpression: 'attribute_not_exists(#escalatedAt)',
       ExpressionAttributeNames: { '#escalatedAt': 'escalatedAt', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt' },
-      ExpressionAttributeValues: { ':escalatedAt': asString(now.toISOString()), ':updatedAt': asString(now.toISOString()), ':expiresAt': asNumber(Math.floor(now.getTime() / 1000) + TTL_DAYS * 86400) },
+      ExpressionAttributeValues: { ':escalatedAt': asString(now.toISOString()), ':updatedAt': asString(now.toISOString()) },
     }));
     return true;
   } catch (error) {
@@ -251,7 +255,7 @@ function buildManualReviewRetryUpdateInput({ normalisedHex, normalisedStage, req
   return {
     TableName: TABLE_NAME,
     Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
-    UpdateExpression: 'SET #state = :pending, #attemptCount = :zero, #manualReviewRetryCount = if_not_exists(#manualReviewRetryCount, :zero) + :one, #manualReviewRetriedAt = :now, #manualReviewRetriedBy = :requestedBy, #previousManualReviewErrorType = :previousErrorType, #previousManualReviewErrorMessage = :previousErrorMessage, #previousManualReviewUpdatedAt = :previousUpdatedAt, #updatedAt = :now, #expiresAt = :expiresAt REMOVE #nextRetryAt, #inProgressExpiresAt, #geminiSucceeded, #generatedValue, #generationId, #lastErrorType, #lastErrorMessage, #escalatedAt, #firstAttemptAt, #lastAttemptAt, #lastRequestId',
+    UpdateExpression: 'SET #state = :pending, #attemptCount = :zero, #manualReviewRetryCount = if_not_exists(#manualReviewRetryCount, :zero) + :one, #manualReviewRetriedAt = :now, #manualReviewRetriedBy = :requestedBy, #previousManualReviewErrorType = :previousErrorType, #previousManualReviewErrorMessage = :previousErrorMessage, #previousManualReviewUpdatedAt = :previousUpdatedAt, #updatedAt = :now REMOVE #expiresAt, #nextRetryAt, #inProgressExpiresAt, #geminiSucceeded, #generatedValue, #generationId, #lastErrorType, #lastErrorMessage, #escalatedAt, #firstAttemptAt, #lastAttemptAt, #lastRequestId',
     ConditionExpression: '#state = :manualReview',
     ExpressionAttributeNames: {
       '#state': 'state', '#attemptCount': 'attemptCount', '#manualReviewRetryCount': 'manualReviewRetryCount',
@@ -268,7 +272,6 @@ function buildManualReviewRetryUpdateInput({ normalisedHex, normalisedStage, req
       ':now': asString(nowIso), ':requestedBy': asString(normalise(requestedBy) || 'admin'),
       ':previousErrorType': asString(previousFailure.type), ':previousErrorMessage': asString(previousFailure.message || ''),
       ':previousUpdatedAt': asString(previousFailure.updatedAt || ''),
-      ':expiresAt': asNumber(Math.floor(now.getTime() / 1000) + TTL_DAYS * 86400),
     },
     ReturnValues: 'ALL_NEW',
   };
@@ -311,16 +314,16 @@ export async function retryManualReviewEnrichment({ hex, stage, requestedBy = 'a
 }
 
 export async function resetEnrichmentState(hex, stage, now = new Date()) {
-  return updateState(hex, stage, 'SET #state = :state, #attemptCount = :zero, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #nextRetryAt, #inProgressExpiresAt, #geminiSucceeded, #generatedValue, #generationId', {
+  return updateState(hex, stage, 'SET #state = :state, #attemptCount = :zero, #updatedAt = :updatedAt REMOVE #expiresAt, #nextRetryAt, #inProgressExpiresAt, #geminiSucceeded, #generatedValue, #generationId', {
     ':state': asString('pending'), ':zero': asNumber(0),
-  }, { '#state': 'state', '#attemptCount': 'attemptCount', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt', '#nextRetryAt': 'nextRetryAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#geminiSucceeded': 'geminiSucceeded', '#generatedValue': 'generatedValue', '#generationId': 'generationId' }, now);
+  }, { '#state': 'state', '#attemptCount': 'attemptCount', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt', '#nextRetryAt': 'nextRetryAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#geminiSucceeded': 'geminiSucceeded', '#generatedValue': 'generatedValue', '#generationId': 'generationId' }, now, { preserveWhileActionable: true });
 }
 
 export async function clearEnrichmentState(hex, stage, now = new Date()) {
   return updateState(
     hex,
     stage,
-    'SET #state = :state, #attemptCount = :zero, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #nextRetryAt, #inProgressExpiresAt, #geminiSucceeded, #generatedValue, #generationId, #lastErrorType, #lastErrorMessage, #lastRequestId, #lastAttemptAt, #firstAttemptAt, #manualReviewRetryCount, #manualReviewRetriedAt, #manualReviewRetriedBy, #previousManualReviewErrorType, #previousManualReviewErrorMessage, #previousManualReviewUpdatedAt, #escalatedAt',
+    'SET #state = :state, #attemptCount = :zero, #updatedAt = :updatedAt REMOVE #expiresAt, #nextRetryAt, #inProgressExpiresAt, #geminiSucceeded, #generatedValue, #generationId, #lastErrorType, #lastErrorMessage, #lastRequestId, #lastAttemptAt, #firstAttemptAt, #manualReviewRetryCount, #manualReviewRetriedAt, #manualReviewRetriedBy, #previousManualReviewErrorType, #previousManualReviewErrorMessage, #previousManualReviewUpdatedAt, #escalatedAt',
     {
       ':state': asString('pending'),
       ':zero': asNumber(0),
@@ -349,6 +352,7 @@ export async function clearEnrichmentState(hex, stage, now = new Date()) {
       '#escalatedAt': 'escalatedAt',
     },
     now,
+    { preserveWhileActionable: true },
   );
 }
 

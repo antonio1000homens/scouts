@@ -557,36 +557,49 @@ function isFeatureFlagEnabled(value, defaultValue = false) {
 }
 
 function emitGeminiMetric(kind, outcome) {
-    const timestamp = Date.now();
-    console.log(JSON.stringify({
+    const event = {
+        event: 'gemini_request',
+        kind,
+        outcome,
+        timestamp: Date.now(),
+    };
+    // Only failed external requests feed an active alarm. Keep its single
+    // Outcome=failure series; successes and Kind breakdowns remain in logs.
+    if (outcome === 'failure') {
+        Object.assign(event, {
+        Outcome: outcome,
         _aws: {
-            Timestamp: timestamp,
+            Timestamp: event.timestamp,
             CloudWatchMetrics: [{
                 Namespace: 'Scouts/Gemini',
-                Dimensions: [['Outcome'], ['Kind', 'Outcome']],
+                Dimensions: [['Outcome']],
                 Metrics: [{ Name: 'Requests', Unit: 'Count' }],
             }],
         },
-        Kind: kind,
-        Outcome: outcome,
         Requests: 1,
-    }));
+        });
+    }
+    console.log(JSON.stringify(event));
 }
 
 function emitEnrichmentMetric(name, stage, outcome = 'count') {
-    console.log(JSON.stringify({
-        _aws: {
-            Timestamp: Date.now(),
-            CloudWatchMetrics: [{
-                Namespace: 'Scouts/Gemini',
-                Dimensions: [['Stage', 'Outcome']],
-                Metrics: [{ Name: name, Unit: 'Count' }],
-            }],
-        },
-        Stage: stage,
-        Outcome: outcome,
-        [name]: 1,
-    }));
+    const event = { event: 'enrichment', metric: name, stage, outcome, timestamp: Date.now() };
+    // These are the only application metrics consumed by the existing alarms.
+    // Dimensionless series match the CloudFormation alarm definitions exactly.
+    if (name === 'EnrichmentRetry' || name === 'EnrichmentQuarantined') {
+        Object.assign(event, {
+            _aws: {
+                Timestamp: event.timestamp,
+                CloudWatchMetrics: [{
+                    Namespace: 'Scouts/Gemini',
+                    Dimensions: [[]],
+                    Metrics: [{ Name: name, Unit: 'Count' }],
+                }],
+            },
+            [name]: 1,
+        });
+    }
+    console.log(JSON.stringify(event));
 }
 
 async function notifyEnrichmentTransition(stage, state, details = {}) {

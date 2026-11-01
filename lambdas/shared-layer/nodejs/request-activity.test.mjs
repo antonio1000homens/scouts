@@ -5,9 +5,30 @@ import { readFileSync } from 'node:fs';
 process.env.SCOUTS_REQUEST_ACTIVITY_TABLE_NAME = 'test-request-activity';
 const {
   buildRequestActivityUpdate,
+  listRequestActivity,
+  resetRequestActivityClientForTests,
+  setRequestActivityClientForTests,
   trackReconciliationPublication,
   withRequestActivityContext,
 } = await import('./request-activity.mjs');
+
+test('request ID lookups use a point GetItem read on the table key', async () => {
+  let command;
+  setRequestActivityClientForTests({
+    async send(nextCommand) {
+      command = nextCommand;
+      return { Item: { requestId: { S: 'request-123' }, state: { S: 'completed' } } };
+    },
+  });
+  try {
+    const result = await listRequestActivity({ requestIds: ['request-123'] });
+    assert.equal(command.constructor.name, 'GetItemCommand');
+    assert.deepEqual(command.input.Key, { requestId: { S: 'request-123' } });
+    assert.equal(result.requests[0].state, 'completed');
+  } finally {
+    resetRequestActivityClientForTests();
+  }
+});
 
 test('activity ledger update only supplies DynamoDB placeholders used by the expression', () => {
   const update = buildRequestActivityUpdate({

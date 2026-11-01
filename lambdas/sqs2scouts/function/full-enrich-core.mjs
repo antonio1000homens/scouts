@@ -166,19 +166,23 @@ function providerGenerationId(hex, _provider, event, message = {}) {
 }
 
 function emitImageMetric(provider, outcome) {
-  console.log(JSON.stringify({
-    _aws: {
-      Timestamp: Date.now(),
-      CloudWatchMetrics: [{
-        Namespace: 'Scouts/ImageGeneration',
-        Dimensions: [['Provider', 'Outcome']],
-        Metrics: [{ Name: 'Requests', Unit: 'Count' }],
-      }],
-    },
-    Provider: provider,
-    Outcome: outcome,
-    Requests: 1,
-  }));
+  const event = { event: 'image_generation', provider, outcome, timestamp: Date.now() };
+  // The active failure alarm is dimensionless. Keep success/reuse detail in
+  // structured logs so provider/outcome permutations do not create series.
+  if (outcome === 'failure') {
+    Object.assign(event, {
+      _aws: {
+        Timestamp: event.timestamp,
+        CloudWatchMetrics: [{
+          Namespace: 'Scouts/ImageGeneration',
+          Dimensions: [[]],
+          Metrics: [{ Name: 'Failure', Unit: 'Count' }],
+        }],
+      },
+      Failure: 1,
+    });
+  }
+  console.log(JSON.stringify(event));
 }
 
 async function markQuotaDeferralWithoutAttempt({
