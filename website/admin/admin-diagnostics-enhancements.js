@@ -197,6 +197,8 @@
             renderDefinition(panel, 'Oldest message age', queue.oldestMessageAgeSeconds === null || queue.oldestMessageAgeSeconds === undefined
                 ? 'n/a'
                 : `${queue.oldestMessageAgeSeconds} seconds`);
+            if (queue.oldestMessageAgeAt) renderDefinition(panel, 'Age metric sample', formatDateTime(queue.oldestMessageAgeAt));
+            if (queue.oldestMessageAgeStatus === 'unavailable') renderDefinition(panel, 'Age metric error', queue.oldestMessageAgeError || 'unavailable');
             target.appendChild(panel);
         }
         if (latestQueueStatus.note) {

@@ -4,6 +4,7 @@ import {
   SQSClient,
   StartMessageMoveTaskCommand,
 } from '@aws-sdk/client-sqs';
+import { CloudWatchClient, GetMetricDataCommand } from '@aws-sdk/client-cloudwatch';
 
 const REGION = process.env.AWS_REGION || 'eu-west-2';
 const REQUESTS_QUEUE_URL = process.env.SCOUTS_REQUESTS_QUEUE_URL || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests';
@@ -14,7 +15,8 @@ const MAX_SAMPLE_MESSAGES = 10;
 const MAX_BODY_PREVIEW_CHARS = 12_000;
 const REDRIVE_RATE_PER_SECOND = 1;
 
-const sqs = new SQSClient({ region: REGION });
+let sqs = new SQSClient({ region: REGION });
+let cloudwatch = new CloudWatchClient({ region: REGION });
 
 const DLQS = Object.freeze({
   scoutsRequestsDLQ: {
@@ -143,6 +145,69 @@ function bodyPreview(body) {
   return `${raw.slice(0, MAX_BODY_PREVIEW_CHARS)}\n… [truncated]`;
 }
 
+export function setRuntimeDlqClientsForTests({ sqs: nextSqs, cloudwatch: nextCloudWatch } = {}) {
+  if (nextSqs && typeof nextSqs.send !== 'function') throw new TypeError('SQS test client must expose send(command)');
+  if (nextCloudWatch && typeof nextCloudWatch.send !== 'function') throw new TypeError('CloudWatch test client must expose send(command)');
+  if (nextSqs) sqs = nextSqs;
+  if (nextCloudWatch) cloudwatch = nextCloudWatch;
+}
+
+export function resetRuntimeDlqClientsForTests() {
+  sqs = new SQSClient({ region: REGION });
+  cloudwatch = new CloudWatchClient({ region: REGION });
+}
+
+async function queueAgeMetrics(targets) {
+  const sampledAt = new Date();
+  const response = await cloudwatch.send(new GetMetricDataCommand({
+    MetricDataQueries: targets.map(({ name }, index) => ({
+      Id: `age${index}`,
+      Label: name,
+      MetricStat: {
+        Metric: {
+          Namespace: 'AWS/SQS',
+          MetricName: 'ApproximateAgeOfOldestMessage',
+          Dimensions: [{ Name: 'QueueName', Value: name }],
+        },
+        Period: 60,
+        Stat: 'Maximum',
+      },
+      ReturnData: true,
+    })),
+    StartTime: new Date(sampledAt.getTime() - 15 * 60 * 1000),
+    EndTime: sampledAt,
+    ScanBy: 'TimestampDescending',
+    MaxDatapoints: Math.max(1, targets.length * 15),
+  }));
+  const byQueue = new Map();
+  for (const result of response?.MetricDataResults || []) {
+    const index = Number(String(result?.Id || '').replace(/^age/, ''));
+    const target = Number.isInteger(index) ? targets[index] : null;
+    if (!target) continue;
+    const samples = (result.Timestamps || []).map((timestamp, sampleIndex) => ({
+      timestamp: new Date(timestamp).getTime(),
+      value: Number(result.Values?.[sampleIndex]),
+    })).filter((sample) => Number.isFinite(sample.timestamp) && Number.isFinite(sample.value) && sample.value >= 0)
+      .sort((left, right) => right.timestamp - left.timestamp);
+    if (samples.length) {
+      byQueue.set(target.name, {
+        seconds: samples[0].value,
+        sampledAt: new Date(samples[0].timestamp).toISOString(),
+      });
+    }
+  }
+  return { sampledAt: sampledAt.toISOString(), byQueue };
+}
+
+function oldestMessageAgeFields(measurement, error = null) {
+  return {
+    oldestMessageAgeSeconds: measurement?.seconds ?? null,
+    oldestMessageAgeAt: measurement?.sampledAt ?? null,
+    oldestMessageAgeStatus: measurement ? 'available' : error ? 'unavailable' : 'no_datapoint',
+    ...(error ? { oldestMessageAgeError: error?.name || 'CloudWatchUnavailable' } : {}),
+  };
+}
+
 async function queueAttributes(queueUrl) {
   const response = await sqs.send(new GetQueueAttributesCommand({
     QueueUrl: queueUrl,
@@ -151,7 +216,6 @@ async function queueAttributes(queueUrl) {
       'ApproximateNumberOfMessages',
       'ApproximateNumberOfMessagesNotVisible',
       'ApproximateNumberOfMessagesDelayed',
-      'ApproximateAgeOfOldestMessage',
     ],
   }));
   const attrs = response?.Attributes || {};
@@ -160,42 +224,44 @@ async function queueAttributes(queueUrl) {
     visible: Number(attrs.ApproximateNumberOfMessages || 0),
     inFlight: Number(attrs.ApproximateNumberOfMessagesNotVisible || 0),
     delayed: Number(attrs.ApproximateNumberOfMessagesDelayed || 0),
-    oldestMessageAgeSeconds: attrs.ApproximateAgeOfOldestMessage === undefined
-      ? null
-      : Number(attrs.ApproximateAgeOfOldestMessage),
   };
 }
 
-/** Read approximate SQS queue depth on demand without sampling or changing messages. */
+/** Read SQS queue depth and CloudWatch oldest-message age on demand without sampling messages. */
 export async function getRuntimeQueueStatus() {
-  const queues = await Promise.all(QUEUE_STATUS_TARGETS.map(async ({ name, queueUrl }) => {
-    try {
-      const attributes = await queueAttributes(queueUrl);
-      return {
-        name,
-        visible: attributes.visible,
-        inFlight: attributes.inFlight,
-        delayed: attributes.delayed,
-        oldestMessageAgeSeconds: attributes.oldestMessageAgeSeconds,
-        ok: true,
-      };
-    } catch (error) {
-      return {
-        name,
-        visible: null,
-        inFlight: null,
-        delayed: null,
-        oldestMessageAgeSeconds: null,
-        ok: false,
-        error: error?.name || 'QueueStatusUnavailable',
-      };
-    }
+  const [ageSnapshot, queues] = await Promise.all([
+    queueAgeMetrics(QUEUE_STATUS_TARGETS).catch((error) => ({ byQueue: new Map(), error })),
+    Promise.all(QUEUE_STATUS_TARGETS.map(async ({ name, queueUrl }) => {
+      try {
+        const attributes = await queueAttributes(queueUrl);
+        return {
+          name,
+          visible: attributes.visible,
+          inFlight: attributes.inFlight,
+          delayed: attributes.delayed,
+          ok: true,
+        };
+      } catch (error) {
+        return {
+          name,
+          visible: null,
+          inFlight: null,
+          delayed: null,
+          ok: false,
+          error: error?.name || 'QueueStatusUnavailable',
+        };
+      }
+    })),
+  ]);
+  const withAge = queues.map((queue) => ({
+    ...queue,
+    ...oldestMessageAgeFields(ageSnapshot.byQueue.get(queue.name), ageSnapshot.error),
   }));
   return {
     sampledAt: new Date().toISOString(),
-    source: 'sqs:GetQueueAttributes',
-    queues,
-    note: 'SQS queue counts and oldest-message age are approximate. No messages are sampled or changed.',
+    source: 'sqs:GetQueueAttributes+cloudwatch:GetMetricData',
+    queues: withAge,
+    note: 'SQS queue counts are approximate. Oldest-message age is an AWS/SQS CloudWatch sample and may have no datapoint when there are no active messages. No messages are sampled or changed.',
   };
 }
 
@@ -206,7 +272,7 @@ export async function inspectRuntimeDlq(queueName, maxMessages = 5) {
     ? Math.max(1, Math.min(MAX_SAMPLE_MESSAGES, Math.floor(requestedMax)))
     : 5;
 
-  const [attrs, response] = await Promise.all([
+  const [attrs, response, ageSnapshot] = await Promise.all([
     queueAttributes(config.queueUrl),
     sqs.send(new ReceiveMessageCommand({
       QueueUrl: config.queueUrl,
@@ -216,6 +282,7 @@ export async function inspectRuntimeDlq(queueName, maxMessages = 5) {
       AttributeNames: ['All'],
       MessageAttributeNames: ['All'],
     })),
+    queueAgeMetrics([config]).catch((error) => ({ byQueue: new Map(), error })),
   ]);
 
   const messages = (response?.Messages || []).map((message) => {
@@ -237,7 +304,7 @@ export async function inspectRuntimeDlq(queueName, maxMessages = 5) {
     visible: attrs.visible,
     inFlight: attrs.inFlight,
     delayed: attrs.delayed,
-    oldestMessageAgeSeconds: attrs.oldestMessageAgeSeconds,
+    ...oldestMessageAgeFields(ageSnapshot.byQueue.get(config.name), ageSnapshot.error),
     sampleCount: messages.length,
     messages,
     note: 'SQS has no peek API. Sampling uses visibility timeout 0 and does not delete messages, but ApproximateReceiveCount can increase.',

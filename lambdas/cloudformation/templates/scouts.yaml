@@ -259,6 +259,12 @@ Resources:
                   - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsProcessing
                   - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsRequestsDLQ
                   - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsProcessingDLQ
+              # CloudWatch metric reads use the SQS QueueName dimension and
+              # cannot be scoped to the underlying queue ARN.
+              - Effect: Allow
+                Action:
+                  - cloudwatch:GetMetricData
+                Resource: '*'
               # StartMessageMoveTask requires Receive/Delete/GetAttributes on the
               # DLQ plus SendMessage on its destination queue. These permissions
               # are for explicit admin redrive, not normal application publishing.

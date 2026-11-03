@@ -126,10 +126,14 @@ test('calendar refresh never reads or republishes legacy runtime snapshots', () 
   assert.match(adminOperations, /subject: 'queues', action: 'status'/);
   assert.match(adminOperations, /Live queue depth/);
   assert.match(adminOperations, /Oldest message age/);
+  assert.match(adminOperations, /Age metric sample/);
   const queueStatus = source('../lambdas/scouts/function/runtime-dlq.mjs');
   assert.match(queueStatus, /export async function getRuntimeQueueStatus/);
   assert.match(queueStatus, /sqs:GetQueueAttributes/);
-  assert.match(queueStatus, /ApproximateAgeOfOldestMessage/);
+  assert.match(queueStatus, /cloudwatch:GetMetricData/);
+  assert.match(queueStatus, /Namespace: 'AWS\/SQS'/);
+  assert.match(queueStatus, /MetricName: 'ApproximateAgeOfOldestMessage'/);
+  assert.doesNotMatch(queueStatus, /AttributeNames:[^\]]*ApproximateAgeOfOldestMessage/);
   assert.doesNotMatch(queueStatus.slice(queueStatus.indexOf('export async function getRuntimeQueueStatus'), queueStatus.indexOf('export async function inspectRuntimeDlq')), /ReceiveMessageCommand/);
   for (const path of [
     '../lambdas/scouts/function/agenda-hex-repair.mjs',
