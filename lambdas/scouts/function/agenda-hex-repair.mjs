@@ -1,5 +1,5 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { sendS3Command } from './s3-request-metrics.mjs';
+import { sendS3Command, s3ObjectCategory } from './s3-request-metrics.mjs';
 
 const REGION = process.env.AWS_REGION || 'eu-west-2';
 const TARGET_BUCKET = process.env.TARGET_BUCKET || 'scouts-2ndtolworth-prod-553490163883';
@@ -348,7 +348,7 @@ async function loadFreshCalendarSnapshot(now = Date.now()) {
       const response = await sendS3Command(s3, new GetObjectCommand({
         Bucket: TARGET_BUCKET,
         Key: feed.key,
-      }));
+      }), 'calendar-cache');
       const modifiedAt = response?.LastModified ? new Date(response.LastModified).getTime() : NaN;
       const fresh = Number.isFinite(modifiedAt) && (now - modifiedAt) <= CALENDAR_CACHE_FRESHNESS_MS;
       if (!fresh) {
@@ -388,7 +388,7 @@ async function resetContaminatedRenamedHexDocuments(resets = []) {
 
     const key = `events/${hex}.json`;
     try {
-      const response = await sendS3Command(s3, new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: key }));
+      const response = await sendS3Command(s3, new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: key }), 'canonical-event');
       const raw = await response.Body.transformToString();
       const current = JSON.parse(raw);
 
@@ -415,7 +415,7 @@ async function resetContaminatedRenamedHexDocuments(resets = []) {
         Body: JSON.stringify(cleaned, null, 2),
         ContentType: 'application/json',
         CacheControl: 'no-store',
-      }));
+      }), 'canonical-event');
       resetCount += 1;
     } catch (error) {
       if (error?.name === 'NoSuchKey' || error?.name === 'NotFound' || error?.Code === 'NoSuchKey') {
@@ -435,7 +435,7 @@ export async function repairAgendaHexMetadata({
   const response = await sendS3Command(s3, new GetObjectCommand({
     Bucket: TARGET_BUCKET,
     Key: AGENDA_KEY,
-  }));
+  }), s3ObjectCategory(AGENDA_KEY));
   const raw = await response.Body.transformToString();
   const agenda = JSON.parse(raw);
   const calendarSnapshot = await loadFreshCalendarSnapshot();
@@ -475,7 +475,7 @@ export async function repairAgendaHexMetadata({
     Body: JSON.stringify(repair.agenda, null, 2),
     ContentType: 'application/json',
     CacheControl: 'no-store',
-  }));
+  }), s3ObjectCategory(AGENDA_KEY));
 
   console.log('[AgendaReconciliation] Reconciled agenda against fresh calendar caches.', {
     repairedCount: repair.repairedCount,
