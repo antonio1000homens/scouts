@@ -3,7 +3,7 @@ import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3
 const REGION = process.env.AWS_REGION || 'eu-west-2';
 const TARGET_BUCKET = process.env.TARGET_BUCKET || 'scouts-2ndtolworth-prod-553490163883';
 const CONFIG_KEY = process.env.SCOUTS_SCHEDULED_REFRESH_CONFIG_KEY || 'runtime/scheduledRefresh.json';
-const SCHEDULE_EXPRESSION = process.env.SCOUTS_SCHEDULE_EXPRESSION || 'rate(30 minutes)';
+const SCHEDULE_EXPRESSION = process.env.SCOUTS_SCHEDULE_EXPRESSION || 'rate(6 hours)';
 const MAX_QUEUE_PUBLISHES = Math.max(0, Number.parseInt(process.env.SCOUTS_SCHEDULED_REFRESH_MAX_EVENTS || '0', 10) || 0);
 const DEFAULT_ENABLED = !['false', '0', 'no', 'off'].includes(
   String(process.env.SCOUTS_SCHEDULED_REFRESH_DEFAULT_ENABLED || 'true').trim().toLowerCase(),
