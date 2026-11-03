@@ -105,3 +105,40 @@ test('audit returns bounded aggregate logs without exposing Lambda request IDs',
   assert.equal(calls.filter((call) => call.args[0] === 'logs').length, 3);
   assert.equal(calls.some((call) => call.args.includes('--next-token') && call.args.includes('next-log-page')), true);
 });
+
+test('aggregate log collection partitions multi-hour windows before bounded pagination', () => {
+  const calls = [];
+  const run = (args, profile) => {
+    calls.push({ args, profile });
+    if (args[0] === 'sts') return { Account: '553490163883' };
+    if (args[0] === 's3api') return { MetricsConfiguration: { Id: 'CodexRequestCostAudit' } };
+    if (args[0] === 'cloudwatch') return { MetricDataResults: [] };
+    if (args[0] === 'logs') {
+      const pattern = args[args.indexOf('--filter-pattern') + 1];
+      const phrase = pattern.includes('SDK calls') ? 'SDK calls by operation' : 'Per-refresh avoided requests';
+      const start = Number(args[args.indexOf('--start-time') + 1]);
+      return { events: [{ timestamp: start, message: `[S3 Request Reduction] ${phrase} { source: scheduled-refresh }` }] };
+    }
+    throw new Error(`Unexpected AWS command: ${args[0]}`);
+  };
+
+  const result = collectAttribution({
+    profile: 'scouts', start: START, end: '2026-11-03T20:00:00Z', run, now: new Date('2026-11-03T20:00:00Z'),
+  });
+
+  const logCalls = calls.filter((call) => call.args[0] === 'logs');
+  assert.equal(logCalls.length, 4);
+  assert.deepEqual(logCalls.map(({ args }) => [
+    new Date(Number(args[args.indexOf('--start-time') + 1])).toISOString(),
+    new Date(Number(args[args.indexOf('--end-time') + 1])).toISOString(),
+  ]), [
+    ['2026-11-03T18:00:00.000Z', '2026-11-03T19:00:00.000Z'],
+    ['2026-11-03T19:00:00.000Z', '2026-11-03T20:00:00.000Z'],
+    ['2026-11-03T18:00:00.000Z', '2026-11-03T19:00:00.000Z'],
+    ['2026-11-03T19:00:00.000Z', '2026-11-03T20:00:00.000Z'],
+  ]);
+  assert.equal(result.sdkOperationLogs.length, 2);
+  assert.equal(result.perRefreshAvoidedRequestLogs.length, 2);
+  assert.equal(result.sdkOperationLogsTruncated, false);
+  assert.equal(result.perRefreshLogsTruncated, false);
+});

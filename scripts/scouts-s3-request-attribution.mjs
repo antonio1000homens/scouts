@@ -10,6 +10,7 @@ const FUNCTION_NAME = 'scouts';
 const LOG_GROUP = '/aws/lambda/scouts';
 const MAX_HOURS = 7 * 24;
 const MAX_PAGES = 10;
+const LOG_WINDOW_MS = 60 * 60 * 1000;
 const METRIC_IDS = Object.freeze({
   s3get: ['s3', 'GetRequests'],
   s3head: ['s3', 'HeadRequests'],
@@ -191,19 +192,35 @@ function aggregateLogMessages(events) {
 }
 
 function collectAggregateLogs(run, start, end, phrase) {
-  const startTime = String(new Date(start).getTime());
-  const endTime = String(new Date(end).getTime());
-  const result = collectPagedResults(run, ['logs', 'filter-log-events'], [
-    '--log-group-name', LOG_GROUP,
-    '--start-time', startTime,
-    '--end-time', endTime,
-    '--filter-pattern', `"${phrase}"`,
-    '--limit', '1000',
-  ], 'events', 'nextToken');
+  const endMs = new Date(end).getTime();
+  let windowStartMs = new Date(start).getTime();
+  const events = [];
+  let truncated = false;
+  let pageCount = 0;
+
+  // FilterLogEvents returns events in chronological order. On a busy Lambda
+  // log group, a single multi-day query can spend its bounded page budget on
+  // older events before it reaches the aggregate summaries we need. Partition
+  // the range so every hour gets its own bounded pagination budget.
+  while (windowStartMs < endMs) {
+    const windowEndMs = Math.min(windowStartMs + LOG_WINDOW_MS, endMs);
+    const result = collectPagedResults(run, ['logs', 'filter-log-events'], [
+      '--log-group-name', LOG_GROUP,
+      '--start-time', String(windowStartMs),
+      '--end-time', String(windowEndMs),
+      '--filter-pattern', `"${phrase}"`,
+      '--limit', '1000',
+    ], 'events', 'nextToken');
+    events.push(...result.items);
+    truncated ||= result.truncated;
+    pageCount += result.pageCount;
+    windowStartMs = windowEndMs;
+  }
+
   return {
-    events: aggregateLogMessages(result.items),
-    truncated: result.truncated,
-    pageCount: result.pageCount,
+    events: aggregateLogMessages(events),
+    truncated,
+    pageCount,
   };
 }
 
