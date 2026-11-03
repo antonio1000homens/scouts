@@ -515,12 +515,23 @@ manual-review rows. It again evaluated 158 items in 80 two-item requests and
 reported 950.5 consumed read capacity units. All 27 rows had valid HEX values
 and no `expiresAt`; their update times ranged from 2026-09-08 through
 2026-09-13. Stage counts were 19 `tagline`, 3 `imageTheme`, and 5 `image`.
-One S3 `HeadObject` was issued for each corresponding `events/{HEX}.json` key:
-14 succeeded and 13 returned a nonzero result. The script did not capture the
-HTTP codes for those 13 outcomes, so they are **not confirmed missing objects**
-and the Admin reachability check remains incomplete. The additional
-`ConsumedReadCapacityUnits` datapoints across 20:36–20:41 UTC were 134.5,
-155, 210.5, 172.5, 232.5 and 45.5; `ReadThrottleEvents` had no datapoints.
+That pass issued one `HeadObject` for each of the 27 rows, including a
+duplicate HEX, and found 14 successes and 13 nonzero outcomes. A third scan
+deduplicated the 27 rows to 26 unique HEX values and classified their canonical
+`events/{HEX}.json` keys: 14 exist and 12 returned HTTP 404. No access-denied or
+other errors occurred. The 12 corresponding manual-review records are
+orphaned from current canonical event objects. Their states date from
+2026-09-08 through 2026-09-13 and have no TTL; keep them for owner review, and
+do not treat them as active enrichment work or delete them automatically.
+
+Each of the three complete two-item-page scans consumed 950.5 read capacity
+units (2,851.5 total for this audit). The second scan's minute datapoints were
+134.5, 155, 210.5, 172.5, 232.5 and 45.5. For the third scan, available
+20:46–20:50 datapoints were 151, 158.5, 248, 229.5 and 144; the 20:51 minute
+was not yet complete. The highest observed scan minute was 355 units, below
+the earlier 927.5-unit minute from 2026-11-01. `ReadThrottleEvents` had no
+datapoints during either scan window. Do not repeat a full-table scan for this
+inventory; use the recorded item-level result for further parity work.
 
 At the same recheck, the activity-feed GSI query returned zero rows; all five
 SQS queues had zero visible, in-flight and delayed messages; and the three
