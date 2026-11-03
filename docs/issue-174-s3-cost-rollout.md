@@ -268,7 +268,11 @@ verified as immutable enough for a long cache lifetime.
    direct code-path attribution without logging object keys. One live sample
    is recorded above. Counts represent SDK `send()` calls; SDK-internal
    retries may cause more wire requests, so correlate them with bucket
-   metrics over longer windows.
+   metrics over longer windows. The 19:32 live sample showed that the current
+   counter's all-bucket totals do not match the configured data-bucket metrics.
+   A follow-up adds fixed `data`, `other`, and `unknown` bucket-role counts
+   without logging bucket names or object keys; deploy it before using those
+   counters for bucket-level reconciliation.
 8. Implement an opt-in DynamoDB outbox for excess scheduled enrichment work.
    Work keys include HEX, stage and generation; writes coalesce source feed
    identifiers; the dispatcher claims leases and sends at most 10 items each
