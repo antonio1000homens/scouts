@@ -40,16 +40,9 @@ const {
 
 const DEFAULT_BUCKET = 'scouts-2ndtolworth-prod-553490163883';
 const DEFAULT_SCOUTS2SQS_URL = '';
-const QUEUED_REQUESTS_RUNTIME_KEY = 'runtime/scoutsQueued.json';
-const PROCESSING_REQUESTS_RUNTIME_KEY = 'runtime/scoutsProcessing.json';
-const COMPLETED_REQUESTS_RUNTIME_KEY = 'runtime/scoutsComplete.json';
-const QUEUED_RUNTIME_STALE_PRUNE_MS = 24 * 60 * 60 * 1000;
 const MAX_HEX_READ_CACHE_ENTRIES = 500;
 const DEFERRED_REFRESH_ENABLED = ['true', '1', 'yes', 'on'].includes(
   String(process.env.SCOUTS_DEFERRED_REFRESH_ENABLED || 'false').trim().toLowerCase(),
-);
-const LEGACY_RUNTIME_SNAPSHOTS_ENABLED = !['false', '0', 'no', 'off'].includes(
-  String(process.env.SCOUTS_LEGACY_RUNTIME_SNAPSHOTS ?? 'true').trim().toLowerCase(),
 );
 
 const SECTION_CUBS = 'cubs';
@@ -382,282 +375,6 @@ function appendMetadataRequestRecord(eventData, record) {
 
   eventData.requests.push(normalizedRecord);
   return true;
-}
-
-function getQueuedRuntimeHexFromSubject(subject) {
-  if (typeof subject === 'string') {
-    const trimmed = subject.trim().toLowerCase();
-    if (trimmed && /^[0-9a-f]+$/i.test(trimmed) && trimmed.length % 2 === 0) {
-      return trimmed;
-    }
-    return null;
-  }
-  if (!subject || typeof subject !== 'object') {
-    return null;
-  }
-  const candidate = subject.hex ?? null;
-  return typeof candidate === 'string' && candidate.trim()
-    ? candidate.trim().toLowerCase()
-    : null;
-}
-
-function normaliseRuntimeText(value) {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  const text = String(value)
-    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
-    .trim();
-  return text || null;
-}
-
-function getQueuedRuntimeHexFromPayload(payload) {
-  const directHex = normaliseRuntimeText(payload?.hex ?? payload?.requestHex ?? null);
-  if (directHex && /^[0-9a-f]+$/i.test(directHex)) {
-    return directHex.toLowerCase();
-  }
-  return getQueuedRuntimeHexFromSubject(payload?.subject);
-}
-
-function getQueuedRuntimeTitleFromPayload(payload) {
-  const directTitle = normaliseRuntimeText(payload?.title ?? null);
-  if (directTitle) {
-    return directTitle;
-  }
-
-  const subject = payload?.subject;
-  if (!subject || typeof subject !== 'object') {
-    return null;
-  }
-  return normaliseRuntimeText(subject.title ?? null);
-}
-
-function getQueuedRuntimeSubjectFromPayload(payload) {
-  const explicitSubject = normaliseRuntimeText(payload?.subjectLabel ?? null);
-  if (explicitSubject) {
-    return explicitSubject;
-  }
-
-  if (typeof payload?.subject === 'string') {
-    return normaliseRuntimeText(payload.subject);
-  }
-
-  if (payload?.subject && typeof payload.subject === 'object') {
-    return normaliseRuntimeText(payload.subject.value ?? null);
-  }
-
-  return null;
-}
-
-function buildQueuedRuntimeRequestEntry(payload, messageId = null, timestamp = new Date().toISOString()) {
-  const requestId = typeof payload?.requestId === 'string' && payload.requestId.trim()
-    ? payload.requestId.trim()
-    : null;
-  const runtimeMessageId = typeof messageId === 'string' && messageId.trim() ? messageId.trim() : null;
-  const hex = getQueuedRuntimeHexFromPayload(payload);
-  const subject = getQueuedRuntimeSubjectFromPayload(payload);
-  const realm = typeof payload?.realm === 'string' && payload.realm.trim() ? payload.realm.trim() : null;
-  const action = typeof payload?.action === 'string' && payload.action.trim() ? payload.action.trim() : null;
-  const taskToken = normaliseRuntimeText(payload?.taskToken ?? null);
-  const orchestrationType = normaliseRuntimeText(payload?.orchestrationType ?? null);
-  const orchestrationStep = normaliseRuntimeText(payload?.orchestrationStep ?? null);
-
-  return {
-    requestTime: timestamp,
-    requestId,
-    messageId: runtimeMessageId,
-    hex,
-    title: getQueuedRuntimeTitleFromPayload(payload),
-    subject,
-    realm,
-    action,
-    taskToken,
-    orchestrationType,
-    orchestrationStep,
-    status: 'queued',
-  };
-}
-
-function deduplicateQueuedRuntimeRequests(entries = []) {
-  const deduped = new Map();
-  for (const entry of Array.isArray(entries) ? entries : []) {
-    if (!entry || typeof entry !== 'object') continue;
-    const taskToken = normaliseRuntimeText(entry.taskToken ?? null);
-    const key = taskToken
-      ? [
-          'taskToken',
-          taskToken,
-          entry.orchestrationStep ?? '',
-          entry.status ?? '',
-        ].join('|')
-      : [
-          entry.requestId ?? '',
-          entry.messageId ?? '',
-          entry.hex ?? '',
-          entry.realm ?? '',
-          entry.action ?? '',
-          entry.status ?? '',
-        ].join('|');
-    deduped.set(key, entry);
-  }
-  return Array.from(deduped.values()).slice(0, 200);
-}
-
-function getRuntimeSnapshotRequests(snapshot) {
-  return Array.isArray(snapshot?.requests) ? snapshot.requests : [];
-}
-
-function getQueuedRuntimeRequestId(entry) {
-  if (typeof entry?.requestId === 'string' && entry.requestId.trim()) return entry.requestId.trim();
-  if (typeof entry?.messageId === 'string' && entry.messageId.trim()) return entry.messageId.trim();
-  return '';
-}
-
-function getQueuedRuntimeRequestHex(entry) {
-  if (typeof entry?.hex === 'string' && entry.hex.trim()) return entry.hex.trim().toLowerCase();
-  return '';
-}
-
-function getQueuedRuntimeRequestKey(entry) {
-  const taskToken = typeof entry?.taskToken === 'string' && entry.taskToken.trim()
-    ? entry.taskToken.trim()
-    : '';
-  if (taskToken) return `taskToken:${taskToken}`;
-  const requestId = getQueuedRuntimeRequestId(entry);
-  if (requestId) return requestId;
-  const hex = getQueuedRuntimeRequestHex(entry);
-  const title = typeof entry?.title === 'string' && entry.title.trim() ? entry.title.trim() : '';
-  return [hex, title].filter(Boolean).join('|');
-}
-
-function getQueuedRuntimeRequestTimestamp(entry) {
-  const candidate = typeof entry?.requestTime === 'string' && entry.requestTime.trim()
-    ? entry.requestTime.trim()
-    : (typeof entry?.updatedAt === 'string' && entry.updatedAt.trim() ? entry.updatedAt.trim() : '');
-  if (!candidate) return 0;
-  const parsed = Date.parse(candidate);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function buildRuntimeRequestKeySet(snapshot) {
-  return new Set(
-    getRuntimeSnapshotRequests(snapshot)
-      .map((entry) => getQueuedRuntimeRequestKey(entry))
-      .filter(Boolean)
-  );
-}
-
-function getQueuedRuntimeHexSignature(entry) {
-  const hex = getQueuedRuntimeRequestHex(entry);
-  if (!hex) return '';
-  const realm = typeof entry?.realm === 'string' && entry.realm.trim() ? entry.realm.trim() : '';
-  const action = typeof entry?.action === 'string' && entry.action.trim() ? entry.action.trim() : '';
-  const title = typeof entry?.title === 'string' && entry.title.trim() ? entry.title.trim() : '';
-  return [hex, realm, action, title].filter(Boolean).join('|');
-}
-
-function buildRuntimeRequestState(snapshot) {
-  const requestKeys = buildRuntimeRequestKeySet(snapshot);
-  const hexSignatures = new Map();
-
-  for (const entry of getRuntimeSnapshotRequests(snapshot)) {
-    const signature = getQueuedRuntimeHexSignature(entry);
-    if (!signature) continue;
-    const timestampMs = getQueuedRuntimeRequestTimestamp(entry);
-    const existingTimestampMs = hexSignatures.get(signature) ?? 0;
-    if (timestampMs >= existingTimestampMs) {
-      hexSignatures.set(signature, timestampMs);
-    }
-  }
-
-  return { requestKeys, hexSignatures };
-}
-
-function pruneQueuedRuntimeRequests(entries = [], processingSnapshot = null, completedSnapshot = null, nowMs = Date.now()) {
-  const processingState = buildRuntimeRequestState(processingSnapshot);
-  const completedState = buildRuntimeRequestState(completedSnapshot);
-  const latestQueuedByHex = new Map();
-  const retainedWithoutHex = [];
-  let removedCount = 0;
-
-  for (const [index, entry] of (Array.isArray(entries) ? entries : []).entries()) {
-    const key = getQueuedRuntimeRequestKey(entry);
-    const hexSignature = getQueuedRuntimeHexSignature(entry);
-    const timestampMs = getQueuedRuntimeRequestTimestamp(entry);
-    const isOlderThanPruneThreshold = timestampMs > 0 && (nowMs - timestampMs) > QUEUED_RUNTIME_STALE_PRUNE_MS;
-    const completedTimestampMs = hexSignature ? (completedState.hexSignatures.get(hexSignature) ?? 0) : 0;
-    const matchesCompletedRequest = (key && completedState.requestKeys.has(key))
-      || (hexSignature && completedState.hexSignatures.has(hexSignature) && (
-        completedTimestampMs === 0 || timestampMs === 0 || completedTimestampMs >= timestampMs
-      ));
-    const existsDownstream = (key && processingState.requestKeys.has(key))
-      || (hexSignature && processingState.hexSignatures.has(hexSignature));
-
-    if (matchesCompletedRequest) {
-      removedCount += 1;
-      continue;
-    }
-
-    if (isOlderThanPruneThreshold && !existsDownstream) {
-      removedCount += 1;
-      continue;
-    }
-
-    if (!hexSignature) {
-      retainedWithoutHex.push({ entry, index });
-      continue;
-    }
-
-    const existing = latestQueuedByHex.get(hexSignature);
-    if (!existing || timestampMs >= existing.timestampMs) {
-      if (existing) {
-        removedCount += 1;
-      }
-      latestQueuedByHex.set(hexSignature, { entry, index, timestampMs });
-      continue;
-    }
-
-    removedCount += 1;
-  }
-
-  const retained = [
-    ...retainedWithoutHex,
-    ...Array.from(latestQueuedByHex.values()),
-  ]
-    .sort((left, right) => left.index - right.index)
-    .map((item) => item.entry);
-
-  return {
-    requests: deduplicateQueuedRuntimeRequests(retained),
-    removedCount,
-  };
-}
-
-function buildQueuedRuntimeSnapshotPayload(requests, timestamp = new Date().toISOString()) {
-  const requestIds = Array.from(new Set(requests.map((entry) => entry?.requestId).filter(Boolean))).slice(0, 50);
-  const hexes = Array.from(new Set(requests.map((entry) => entry?.hex).filter(Boolean))).slice(0, 50);
-  const links = Array.from(new Map(
-    requests
-      .filter((entry) => entry?.requestId && entry?.hex)
-      .map((entry) => [`${entry.requestId}|${entry.hex}`, {
-        requestId: entry.requestId,
-        hex: entry.hex,
-        sourceMessageId: entry.messageId ?? null,
-        realm: entry.realm ?? null,
-        action: entry.action ?? null,
-      }])
-  ).values()).slice(0, 100);
-
-  return {
-    source: 'scouts',
-    queue: 'scoutsRequests',
-    updatedAt: timestamp,
-    requests,
-    requestIds,
-    hexes,
-    links,
-    recordCount: requests.length,
-  };
 }
 
 function getRequestHistory(eventData) {
@@ -1838,34 +1555,6 @@ async function checkEnrichmentEligibility(hex, stage, context = {}) {
     console.warn('[Enrichment] Failed to read per-stage state; skipping automatic enqueue:', error?.message || error);
     return { eligible: false, reason: 'state_store_unavailable' };
   }
-}
-
-async function readLegacyRuntimeQueueSnapshots(bucket) {
-  const queuedSnapshot = await getJsonFromS3(bucket, QUEUED_REQUESTS_RUNTIME_KEY, 'runtime:queuedrequests');
-  const processingSnapshot = await getJsonFromS3(bucket, PROCESSING_REQUESTS_RUNTIME_KEY, 'runtime:processingrequests');
-  const completedSnapshot = await getJsonFromS3(bucket, COMPLETED_REQUESTS_RUNTIME_KEY, 'runtime:completedrequests');
-
-  const queuedRequests = getRuntimeSnapshotRequests(queuedSnapshot);
-  const prunedQueuedResult = pruneQueuedRuntimeRequests(queuedRequests, processingSnapshot, completedSnapshot, Date.now());
-  let nextQueuedSnapshot = queuedSnapshot;
-  if (prunedQueuedResult.removedCount > 0) {
-    nextQueuedSnapshot = buildQueuedRuntimeSnapshotPayload(prunedQueuedResult.requests);
-    await putJsonToS3(bucket, QUEUED_REQUESTS_RUNTIME_KEY, nextQueuedSnapshot, 'runtime:scoutsQueued', true);
-  }
-
-  return { queuedSnapshot: nextQueuedSnapshot, processingSnapshot, completedSnapshot };
-}
-
-function summariseRuntimeQueueSnapshot(snapshot) {
-  const counts = snapshot?.counts && typeof snapshot.counts === 'object' ? snapshot.counts : null;
-  return {
-    updatedAt: typeof snapshot?.updatedAt === 'string' ? snapshot.updatedAt : null,
-    counts: counts ? {
-      visible: Number.isFinite(counts.visible) ? counts.visible : null,
-      inFlight: Number.isFinite(counts.inFlight) ? counts.inFlight : null,
-      delayed: Number.isFinite(counts.delayed) ? counts.delayed : null,
-    } : null,
-  };
 }
 
 function hydrateStoredDataset(dataset) {
@@ -4407,9 +4096,6 @@ async function lambdaHandlerCore(event = {}) {
       console.log('[Agenda Command] Skipping calendar refresh; using existing agenda.json for enrichment only.');
     }
 
-    const runtimeQueueSnapshots = LEGACY_RUNTIME_SNAPSHOTS_ENABLED
-      ? await readLegacyRuntimeQueueSnapshots(bucket)
-      : null;
     const existingAgendaRaw = await (resetRequested ? null : getJsonFromS3(bucket, agendaKey, 'agenda'));
     const existingAgenda = hydrateStoredDataset(existingAgendaRaw);
     const mergedAgenda = mergeEvents(existingAgenda, dedupedNewEvents);
@@ -4596,20 +4282,12 @@ async function lambdaHandlerCore(event = {}) {
       normalization: buildNormalizationSummary(),
       processedEvents,
       runtimeQueueSnapshots: {
-        source: LEGACY_RUNTIME_SNAPSHOTS_ENABLED ? 'legacy-s3' : 'retired',
-        available: LEGACY_RUNTIME_SNAPSHOTS_ENABLED,
-        note: LEGACY_RUNTIME_SNAPSHOTS_ENABLED
-          ? null
-          : 'Legacy request snapshots are disabled; request lifecycle is available through Activity and live queue counts are available through the Operations queue-status command.',
-        queued: LEGACY_RUNTIME_SNAPSHOTS_ENABLED
-          ? summariseRuntimeQueueSnapshot(runtimeQueueSnapshots?.queuedSnapshot)
-          : null,
-        processing: LEGACY_RUNTIME_SNAPSHOTS_ENABLED
-          ? summariseRuntimeQueueSnapshot(runtimeQueueSnapshots?.processingSnapshot)
-          : null,
-        completed: LEGACY_RUNTIME_SNAPSHOTS_ENABLED
-          ? summariseRuntimeQueueSnapshot(runtimeQueueSnapshots?.completedSnapshot)
-          : null,
+        source: 'retired',
+        available: false,
+        note: 'Calendar refresh no longer reads legacy request snapshots. Use Activity for request lifecycle and Operations for current SQS queue status.',
+        queued: null,
+        processing: null,
+        completed: null,
       },
       stepFunctions: {
         imageEnrich: imageEnrichExecutions,
@@ -4704,9 +4382,7 @@ export const handler = lambdaHandler;
 
 // Named exports for testing
 export {
-  buildQueuedRuntimeRequestEntry,
   prepareEventForStorage,
-  pruneQueuedRuntimeRequests,
   parseIcsEvents,
   stableOsmEventIdentity,
   dedupeSectionedEvents,

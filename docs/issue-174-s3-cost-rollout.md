@@ -71,10 +71,34 @@ state by the supplemental check below:
   inventory. Avoid a full-table scan for parity without a measured read plan.
 
 These reads show the old S3 objects contain historical state the empty
-activity ledger cannot reproduce. The snapshot retirement flag therefore
-defaults to compatibility reads enabled. Do not opt into retirement until
-task-token dependencies, historical coverage, and manual-review compatibility
-have a verified migration contract.
+activity ledger cannot reproduce. Keep the private admin snapshot API enabled
+until task-token dependencies, historical coverage, and manual-review
+compatibility have a verified migration contract. The calendar-refresh
+diagnostic reads are separately removed in source because they do not drive
+request processing; the old objects and admin viewer are retained.
+
+## Read-only snapshot replacement recheck (2026-11-03 19:26 UTC)
+
+AWS Core verified the Scouts account before this read-only sample. The queued
+snapshot remained empty (184 bytes, updated 18:04 UTC); the processing
+snapshot still contained one September `processing` row (680 bytes), and the
+completed snapshot one September `completed` row (1,762 bytes). The records
+exposed the legacy field set, including `taskToken`; one completed record had
+a nonempty token. The `scouts-request-activity/activity-feed` query returned
+zero rows. Five Scouts SQS queues each reported zero visible, in-flight and
+delayed messages, and all three Scouts enrichment state machines reported no
+running executions. Queue counts are approximate; this is a point-in-time
+sample and does not establish historical parity or manual-review compatibility.
+
+The processing/completed snapshot records are therefore stale relative to all
+three live sources sampled. In source, the agenda refresh no longer reads or
+prunes these three S3 snapshots and no longer writes the queued snapshot.
+That path supplied only a diagnostic summary and stale-snapshot pruning; it
+did not determine SQS publication eligibility or active Step Functions state.
+The private `subject=snapshot` admin API remains feature-gated and the old
+objects remain untouched for manual review and rollback. This code change has
+not yet been deployed; it does not change the live read path until a reviewed
+deployment occurs.
 
 ## Supplemental live recheck (2026-11-03 18:36 UTC)
 
@@ -181,17 +205,16 @@ verified as immutable enough for a long cache lifetime.
    behaviour is unchanged. The cadence is live in the stack. The follow-up
    refresh optimizations and operation counters were deployed in the later
    rollout recorded above.
-2. **Prepare runtime snapshot lifecycle retirement**: the start/finally paths
-   previously read queued, processing, completed and wrote queued (up to
-   six GET + two PUT per normal execution). The dead append/touch writers
-   and snapshot-derived active-processing index are removed. Legacy S3
-   snapshot reads in reconciliation and the private `subject=snapshot`
-   API are behind `LEGACY_RUNTIME_SNAPSHOTS_ENABLED`. It defaults to true
-   until production parity is verified. After that audit, setting it to
-   false disables the reads and makes the API return HTTP 410; setting it
-   back to true is the rollback. No snapshot objects are deleted.
-   Active Step Functions executions remain authoritative; stage labels
-   are enriched from at most 100 active DynamoDB activity rows.
+2. **Retire refresh-path snapshot reads**: the start/finally paths previously
+   read queued, processing, completed and wrote queued (up to six GET + two
+   PUT per normal execution). The dead append/touch writers, snapshot-derived
+   active-processing index, and refresh-path snapshot reads/pruning are now
+   removed in source. The private `subject=snapshot` admin API remains behind
+   `LEGACY_RUNTIME_SNAPSHOTS_ENABLED`, defaulting to true until historical and
+   manual-review compatibility is accepted. Setting it false returns HTTP 410
+   from that API; setting it true restores the viewer. No snapshot objects are
+   deleted. Active Step Functions executions remain authoritative; stage
+   labels are enriched from at most 100 active DynamoDB activity rows.
 3. **Add on-demand live queue status**: Operations can request approximate
    visible, in-flight, delayed and oldest-message-age attributes for the
    two primary queues and their DLQs. This uses SQS `GetQueueAttributes`
@@ -300,15 +323,14 @@ and a full post-change trend remain to be measured.
 
 ## Follow-on PRs required for issue closure
 
-- Snapshot/Activity parity: the merged code removes snapshot-derived
-  enrichment stage checks and gates the remaining legacy reads/API behind
-  `SCOUTS_LEGACY_RUNTIME_SNAPSHOTS`; the flag defaults to `true`, so existing
-  behavior remains active unless explicitly changed. A production parity
-  audit is still required before disabling those reads or calling migration
-  complete. The source mapping and known gaps are recorded below. Old snapshot
-  arrays and point-in-time aggregates cannot be reconstructed from queue
-  counts or a bounded activity query. Preserve old S3 objects until the audit
-  and production acceptance are complete.
+- Snapshot/Activity parity: the agenda refresh no longer reads the legacy
+  snapshots in the current source. The private admin snapshot API still reads
+  them behind `SCOUTS_LEGACY_RUNTIME_SNAPSHOTS`, default `true`, until
+  historical and manual-review compatibility is accepted. The source mapping
+  and known gaps are recorded below. Old snapshot arrays and point-in-time
+  aggregates cannot be reconstructed from queue counts or a bounded activity
+  query. Preserve old S3 objects until the audit and production acceptance
+  are complete.
 - S3 canonical persistence integrity: review unconditional PUT+GET
   verification and duplicate caller readbacks; do **not** remove these
   until conditional revision/ETag contracts and failure tests pass. The two
