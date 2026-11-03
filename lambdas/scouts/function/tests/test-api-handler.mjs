@@ -40,6 +40,13 @@ async function loadService() {
     if (specifier === '/opt/nodejs/request-activity.mjs') return synthetic(specifier, { recordRequestActivity: async (entry) => { activities.push(entry); return entry; } });
     if (specifier === '/opt/nodejs/enrichment-state.mjs') return synthetic(specifier, { getEnrichmentState: async () => null, evaluateEnrichmentEligibility: async () => ({ eligible: true }), buildGenerationId: () => 'fixture-generation' });
     if (specifier === '/opt/nodejs/occurrence-identity.mjs') return synthetic(specifier, { resolveOccurrenceId: () => OCCURRENCE, occurrenceStorageKey: (id) => `occurrences/${id}.json` });
+    if (specifier === './image-head-memo.mjs') {
+      // Load the real local helper in the same VM context as scouts-service.
+      const memoPath = path.resolve(import.meta.dirname, '../image-head-memo.mjs');
+      const memoModule = new vm.SourceTextModule(readFileSync(memoPath, 'utf8'), { context, identifier: memoPath });
+      modules.set(specifier, memoModule);
+      return memoModule;
+    }
     throw new Error(`Unhandled import ${specifier}`);
   };
   await module.link(linker);
