@@ -93,7 +93,7 @@ test('Scouts role separates normal queue publishing from permissions required by
 });
 
 test('EventBridge owns periodic calendar refresh and scheduled queue publication is fail-safe zero by default', () => {
-  assert.match(scoutsTemplate, /ScheduledRefreshExpression:[\s\S]*Default: rate\(30 minutes\)/);
+  assert.match(scoutsTemplate, /ScheduledRefreshExpression:[\s\S]*Default: rate\(6 hours\)/);
   assert.match(scoutsTemplate, /ScheduledRefreshMaxEvents:[\s\S]*Default: 0/);
   assert.match(scoutsTemplate, /ScoutsScheduledRefreshRule:\n\s+Type: AWS::Events::Rule/);
   assert.match(scoutsTemplate, /ScheduleExpression: !Ref ScheduledRefreshExpression/);
