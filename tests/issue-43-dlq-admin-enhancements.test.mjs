@@ -89,6 +89,7 @@ test('Scouts role separates normal queue publishing from permissions required by
   assert.match(scoutsTemplate, /# StartMessageMoveTask requires Receive\/Delete\/GetAttributes on the[\s\S]*?sqs:ReceiveMessage[\s\S]*?sqs:DeleteMessage[\s\S]*?sqs:StartMessageMoveTask/);
   assert.match(scoutsTemplate, /sqs:StartMessageMoveTask[\s\S]*?Resource:\n\s+- !Sub arn:aws:sqs:\$\{AWS::Region\}:\$\{AWS::AccountId\}:scoutsRequestsDLQ\n\s+- !Sub arn:aws:sqs:\$\{AWS::Region\}:\$\{AWS::AccountId\}:scoutsProcessingDLQ/);
   assert.match(scoutsTemplate, /sqs:SendMessage\n\s+Resource:\n\s+- !Ref ScoutsRequestsQueueArn\n\s+- !Sub arn:aws:sqs:\$\{AWS::Region\}:\$\{AWS::AccountId\}:scoutsProcessing/);
+  assert.match(scoutsTemplate, /cloudwatch:GetMetricData\n\s+Resource: '\*'/);
   assert.doesNotMatch(scoutsTemplate, /arn:aws:sqs:[^\n]*:\*/);
 });
 

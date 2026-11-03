@@ -293,10 +293,11 @@ verified as immutable enough for a long cache lifetime.
    deleted. Active Step Functions executions remain authoritative; stage
    labels are enriched from at most 100 active DynamoDB activity rows.
 3. **Add on-demand live queue status**: Operations can request approximate
-   visible, in-flight, delayed and oldest-message-age attributes for the
-   two primary queues and their DLQs. This uses SQS `GetQueueAttributes`
-   and does not sample, receive, or change messages. Existing explicit DLQ
-   inspect/redrive behavior remains separate.
+   visible, in-flight and delayed counts from SQS `GetQueueAttributes`, plus
+   oldest-message age from the `AWS/SQS` CloudWatch metric. Age can be absent
+   when CloudWatch has no datapoint. The status read does not sample, receive,
+   or change messages. Existing explicit DLQ inspect/redrive behavior remains
+   separate.
 4. **Deduplicate per-invocation image HEAD checks** across agenda and
    canonical HEX verification. Failed checks are never cached; 404 means
    missing, while permission/throttle/service failures now propagate
@@ -482,7 +483,8 @@ CloudWatch and any use above free allocations can still incur charges.
 | --- | --- | --- |
 | Request identity, root request ID, HEX, action, state, stage and update time | DynamoDB request activity rows | Activity Centre reads its ledger. Runtime stage labels query at most 100 active rows; a missing or older row leaves the execution stage unknown. |
 | Current active execution and start time | Step Functions `ListExecutions` | This is authoritative for running executions. Request ID/root ID is preferred for matching; HEX is a display-only fallback when IDs are absent. Activity older than two minutes before an execution start is rejected. |
-| Visible, in-flight, delayed counts and oldest message age | SQS `GetQueueAttributes` | Approximate queue-level values only; they do not identify or enumerate requests and may lag. Read is on demand. |
+| Visible, in-flight and delayed counts | SQS `GetQueueAttributes` | Approximate queue-level values only; they do not identify or enumerate requests and may lag. Read is on demand. |
+| Oldest message age | CloudWatch `AWS/SQS` / `ApproximateAgeOfOldestMessage` | Metric may have no datapoint when no active messages are present; it is sampled separately from SQS counts. |
 | Per-request pending/completed arrays and aggregate counts | No one-to-one replacement | The old materialized snapshot may include historical or stale members not represented by active activity rows or current queue depth. Consumers requiring these arrays need an explicit query contract before retirement is accepted. |
 | Durable enrichment state, retries, cooldowns and manual-review status | Enrichment state table and activity records | These sources represent enrichment workflow state, not the old S3 queue snapshot. Legacy manual-review records need a production compatibility audit. |
 | Step Functions task token | Not exposed by replacement views | Tokens remain workflow-internal and are not stored in the activity index; do not infer or recreate them from execution metadata. |
