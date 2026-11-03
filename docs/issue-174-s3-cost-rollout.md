@@ -420,11 +420,14 @@ not measure a change in bucket-wide S3 requests or charges.
    therefore limited to 20 RCUs and 20 WCUs across both resources. The mode
    still defaults to PAY_PER_REQUEST, and all runtime permissions/schedules
    plus table creation are conditioned on the outbox flag. A normal stack
-   deployment leaves the table uncreated. Benchmarking and the shared #172
-   capacity/eligibility review are still required before enabling the table
-   or selecting provisioned capacity. The deployment workflow reads these
-   settings from `DEFERRED_REFRESH_OUTBOX_*` repository variables; changes to
-   those variables affect subsequent Scouts deployments.
+   deployment leaves the table uncreated. Benchmarking is still required
+   before enabling the table or selecting provisioned capacity. The current
+   Free Tier and organization-scope readback confirms that the nominal 25/25
+   allowance is available to this payer account in `eu-west-2`; it does not
+   establish that the queue workload is safe within that allowance. The
+   deployment workflow reads these settings from
+   `DEFERRED_REFRESH_OUTBOX_*` repository variables; changes to those variables
+   affect subsequent Scouts deployments.
    PR #198 deployed the new parameters with the feature still disabled and
    billing mode `PAY_PER_REQUEST`; AWS readback found no outbox table and no
    change to the three existing table modes. See the detailed readback in
@@ -576,9 +579,10 @@ comparison or proof that the scheduled refresh caused all bucket requests.
   Verify backlog age, expiry, retry recovery and throttling under live load.
   No continuously polling SQS mapping is added. See
   [`issue-174-deferred-refresh-design.md`](issue-174-deferred-refresh-design.md).
-- Capacity planning belongs with **#172**. Benchmark provisioned RCU/WCU
-  peaks, shared free allocation, burst behaviour, GSI usage and throttle
-  retries before any on-demand-to-provisioned mode change.
+- Capacity planning belongs with **#172**. The shared Free Tier allocation is
+  now confirmed from AWS account and regional inventory; benchmark provisioned
+  RCU/WCU peaks, burst behaviour, GSI usage and throttle retries before any
+  on-demand-to-provisioned mode change.
 - SQS options: keep two processing mappings unless cost evidence proves
   another approach; separately evaluate replacing only the idle DLQ
   activity mapping with queue-depth alarms plus safe manual diagnostics.
