@@ -152,6 +152,8 @@ test('live regression canary uses conditional S3 writes and explicit ownership f
   assert.match(liveRegressionSource, /assertOwnedAgendaEvent/);
   assert.match(liveRegressionSource, /Same-HEX sibling hidden/);
   assert.match(liveRegressionSource, /S3 object still exists after delete/);
+  assert.match(liveRegressionSource, /const siblingStartIso = new Date\(Date\.parse\(FUTURE_DATE_ISO\) \+ 60 \* 60 \* 1000\)\.toISOString\(\)/);
+  assert.match(liveRegressionSource, /startIso: siblingStartIso, startRaw: formatIcsDate\(siblingStartIso\)/);
 });
 
 test('live regression canary verifies deployment and sweeps its full generated-image namespace', () => {

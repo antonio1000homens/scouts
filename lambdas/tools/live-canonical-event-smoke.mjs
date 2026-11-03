@@ -277,26 +277,30 @@ function addAgendaDummies(agenda, dummy, entries) {
     throw new Error(`Refusing to replace existing agenda entry for HEX ${dummy.metadata.hex}`);
   }
   const events = Array.isArray(agenda?.events) ? [...agenda.events] : [];
-  for (const { uid, occurrenceId } of entries) events.push({
+  for (const { uid, occurrenceId, startIso = FUTURE_DATE_ISO, startRaw = FUTURE_DATE_RAW } of entries) events.push({
+    uid,
+    occurrenceId,
+    title: dummy.title,
+    description: 'Temporary deployed regression canary event',
+    start: {
+      raw: startRaw,
+      iso: startIso.replace(/Z$/, ''),
+      epochMillis: Date.parse(startIso),
+    },
+    source: {
       uid,
-      occurrenceId,
       title: dummy.title,
-      description: 'Temporary deployed regression canary event',
-      start: {
-        raw: FUTURE_DATE_RAW,
-        iso: FUTURE_DATE_ISO.replace(/Z$/, ''),
-        epochMillis: Date.parse(FUTURE_DATE_ISO),
-      },
-      source: {
-        uid,
-        title: dummy.title,
-        section: 'cubs',
-        icsType: 'regression',
-        dtstart: FUTURE_DATE_RAW,
-      },
-      metadata: structuredClone(dummy.metadata),
-    });
+      section: 'cubs',
+      icsType: 'regression',
+      dtstart: startRaw,
+    },
+    metadata: structuredClone(dummy.metadata),
+  });
   return { ...agenda, generatedAt: new Date().toISOString(), events };
+}
+
+function formatIcsDate(iso) {
+  return new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, '');
 }
 
 function assertOwnedAgendaEvent(event, hex, uids) {
@@ -408,9 +412,10 @@ const hex = titleToHex(title);
 const uidSibling = `${REGRESSION_UID_PREFIX}${runSuffix.split('-', 1)[0]}-sibling`;
 const occurrenceId = `occ_${hex.slice(0, 24).padEnd(24, '0')}`;
 const siblingOccurrenceId = `occ_${titleToHex(`${title} sibling`).slice(-24).padStart(24, '0')}`;
+const siblingStartIso = new Date(Date.parse(FUTURE_DATE_ISO) + 60 * 60 * 1000).toISOString();
 const agendaEntries = [
-  { uid, occurrenceId },
-  { uid: uidSibling, occurrenceId: siblingOccurrenceId },
+  { uid, occurrenceId, startIso: FUTURE_DATE_ISO, startRaw: FUTURE_DATE_RAW },
+  { uid: uidSibling, occurrenceId: siblingOccurrenceId, startIso: siblingStartIso, startRaw: formatIcsDate(siblingStartIso) },
 ];
 const agendaUids = agendaEntries.map((entry) => entry.uid);
 const eventKey = `events/${hex}.json`;
