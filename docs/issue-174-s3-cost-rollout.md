@@ -20,10 +20,11 @@ running the Scouts deployment, or changing a production resource.
   event-source mappings; **no SQS charges** in the recorded baseline.
   Idle receives are Lambda-managed, not a custom polling loop.
 
-## Read-only production recheck (2026-11-03)
+## Initial read-only production recheck (2026-11-03)
 
 AWS Core `GetCallerIdentity` verified account `553490163883` before these
-reads. This current state is independent of the uncommitted local branch:
+reads. These earlier observations are superseded for schedule and runtime
+state by the supplemental check below:
 
 - The deployed `scouts-lambda-ScoutsScheduledRefreshRule-…` remained enabled
   at `rate(30 minutes)`. The local six-hour default has not been deployed.
@@ -69,19 +70,67 @@ reads. This current state is independent of the uncommitted local branch:
 
 These reads show the old S3 objects contain historical state the empty
 activity ledger cannot reproduce. The snapshot retirement flag therefore
-defaults to enabled. Do not opt into retirement until task-token dependencies,
-historical coverage, and manual-review compatibility have a verified
-migration contract.
+defaults to compatibility reads enabled. Do not opt into retirement until
+task-token dependencies, historical coverage, and manual-review compatibility
+have a verified migration contract.
+
+## Supplemental live recheck (2026-11-03 18:36 UTC)
+
+AWS Core again verified account `553490163883` before read-only calls. The
+production state changed after the initial recheck:
+
+- `scouts-lambda` reached `UPDATE_COMPLETE` at 18:19:40 UTC. Its scheduled
+  rule is enabled at `rate(6 hours)`, and the `scouts` Lambda last-modified
+  time is 18:19:51 UTC. `SCOUTS_SCHEDULED_REFRESH_MAX_EVENTS=0` remains in
+  effect. The local CLI SSO profile was expired, so this check used the
+  connected AWS Core account and verified identity first.
+- A refresh log at 18:20:34 UTC reported
+  `reusedHexReads=98`, `imageHead.requests=36`, and `imageHead.cacheHits=6`.
+  This is per-invocation avoided-request telemetry from the deployed refresh
+  path, not a full before/after billing comparison.
+- The `CodexRequestCostAudit` S3 datapoint for the 18:15 15-minute interval
+  was 180 GET, 38 HEAD, 2 LIST and 1 PUT. One-minute metrics placed 72 GET /
+  21 HEAD in 18:20 and 108 GET / 17 HEAD plus 2 LIST / 1 PUT in 18:21. The
+  Lambda metric showed one `scouts` invocation at 18:20 and no error; its log
+  shows a 7.8-second run from 18:20:26 to 18:20:34. The 18:21 bucket counts
+  are not explained by that observed invocation unless metric publication
+  latency shifts their timestamps. Bucket metrics do not identify callers,
+  so this is correlation, not full request attribution or a clean before/after
+  window.
+- A second minute-level query through 18:44 UTC found S3 GETs at 18:39 (1),
+  18:40 (4), and 18:41 (1), while the `scouts` Lambda had no invocation
+  datapoints from 18:22 through 18:44. This confirms bucket GET traffic exists
+  outside the scheduled Scouts invocation window (or has delayed metric
+  timestamps); its specific caller remains unknown. Keep CloudFront/browser
+  and other AWS callers separate from Lambda SDK counts.
+- No `[S3 Request Reduction] SDK calls by operation` log appeared between
+  18:15 and 18:36 UTC. That per-invocation operation counter exists in this
+  follow-up PR but is not deployed yet.
+- `SCOUTS_LEGACY_RUNTIME_SNAPSHOTS` and the deferred-outbox environment
+  variables are unset on the live Lambda. The deployed code defaults legacy
+  reads to enabled and deferred writes to disabled. The queued snapshot was
+  still 184 bytes with zero requests, last modified at 18:04 UTC; processing
+  and completed snapshots remained at 680/1,762 bytes from 2026-09-08 and each
+  still contained a `taskToken` field. No S3 objects were changed by this
+  recheck.
+- All three existing DynamoDB tables remain `PAY_PER_REQUEST`, with TTL
+  enabled on `expiresAt`; the request-activity table still has zero items and
+  a bounded `activity-feed` query returned zero rows at 0.5 read capacity
+  units. `scouts-deferred-refresh` is not present, so the outbox remains off.
+- Because legacy snapshot objects remain needed and the activity ledger is
+  empty, production parity and safe legacy-read retirement are still unproven.
 
 ## Code changes on the local follow-up branch
 
-1. **Proposed four refreshes/day**: CloudFormation and runtime defaults
-   move to `rate(6 hours)`. The deploy script **explicitly passes** the
-   cadence so preexisting CloudFormation stacks do not silently retain
+1. **Four refreshes/day**: CloudFormation and runtime defaults move to
+   `rate(6 hours)`. The live stack now reports this cadence (see supplemental
+   recheck). The deploy script **explicitly passes** the cadence so
+   preexisting CloudFormation stacks do not silently retain
    `rate(30 minutes)`. Admin **Run refresh now** and independently
    invoked workflows remain available. Existing 24-hour ICS freshness
-   behaviour is unchanged. The change takes effect only if the stack
-   is actually deployed after review.
+   behaviour is unchanged. The cadence is now live in the stack; the follow-up
+   refresh optimizations and operation counters still require their own
+   reviewed deployment.
 2. **Prepare runtime snapshot lifecycle retirement**: the start/finally paths
    previously read queued, processing, completed and wrote queued (up to
    six GET + two PUT per normal execution). The dead append/touch writers
@@ -112,11 +161,13 @@ migration contract.
    `imageHead.requests` and `imageHead.cacheHits`. No custom
    CloudWatch metrics, high-cardinality object-key logging, or new
    paid monitoring were added.
-7. Emit low-cardinality per-invocation S3 SDK call counts by operation, with
+7. Add low-cardinality per-invocation S3 SDK call counts by operation, with
    scheduled refresh tagged separately from other invocations. This gives
-   direct code-path attribution without logging object keys. Counts represent
-   SDK `send()` calls; SDK-internal retries may cause more wire requests, so
-   correlate these with the existing bucket request metrics after deployment.
+   direct code-path attribution without logging object keys. The follow-up
+   counter is not deployed yet; the current CloudWatch recheck found no
+   matching log. Counts represent SDK `send()` calls; SDK-internal retries
+   may cause more wire requests, so correlate these with bucket metrics after
+   deployment.
 8. Implement an opt-in DynamoDB outbox for excess scheduled enrichment work.
    Work keys include HEX, stage and generation; writes coalesce source feed
    identifiers; the dispatcher claims leases and sends at most 10 items each
@@ -145,11 +196,37 @@ claiming these savings. The removed legacy touches avoid additional
 reads/writes per actual Scouts execution; the new aggregate logs quantify
 HEX reread and duplicate image HEAD savings per invocation.
 
+For cost scale, October's observed Tier-2 charge implies an effective rate of
+about **$0.000420 per 1,000 GET/HEAD requests**. A deliberately conditional
+scenario assumes all old rough counts (327 GET+HEAD per run) were scheduled
+refreshes, and that the one post-phase-one bucket window (218 GET+HEAD) was
+entirely one representative refresh. At 48 versus 4 runs/day over 30 days,
+that scenario moves Tier-2 GET/HEAD cost from about **$0.198/month** to
+**$0.011/month**, a difference of **$0.187/month**. This is a sensitivity
+case, not a savings claim: caller attribution is incomplete, the new sample
+includes an unexplained later minute, and one invocation does not establish a
+monthly average. It excludes Tier-1 requests and monitoring cost.
+
 An initial comparison can use the existing bucket request monitoring
 (`CodexRequestCostAudit`) by operation and 5–15-minute intervals.
 Account for the cost of that temporary monitoring and remove it once
 the benchmark is complete, subject to its own approval. Distinguish
 Edge/CloudFront requests and browser/admin traffic from Lambda work.
+
+Repeatable read-only collection is available with:
+
+```sh
+AWS_PROFILE=scouts node scripts/scouts-s3-request-attribution.mjs --hours 24
+```
+
+The command verifies account `553490163883`, reads the existing S3 metrics
+configuration, and returns 1-minute S3 request counts beside `scouts` Lambda
+invocations/errors and the low-cardinality SDK/per-refresh summary logs. It
+accepts timezone-qualified `--start`/`--end` timestamps, caps the range at
+seven days, and does not create metrics, alarms, or log queries. CloudWatch S3
+metrics can be delayed and remain bucket-wide; only the SDK summary log
+attributes a request to the Lambda path. That log will appear after this
+follow-up is deployed.
 
 ## Rollout and rollback
 
@@ -189,12 +266,22 @@ Edge/CloudFront requests and browser/admin traffic from Lambda work.
 - Approval idempotency currently uses S3 conditional PUT (`If-None-Match` for
   first claim, `If-Match` for stale-claim takeover and completion) plus GET to
   arbitrate conflicts and read the winning result. This preserves a durable
-  cross-invocation claim and compare-and-swap behavior. A DynamoDB migration
-  might reduce S3 requests but would add a table/index and another on-demand
-  request workload; it also needs parity for takeover, TTL, conflict, and
-  queue-published/marker-failed cases. Keep the S3 contract until measured
-  request attribution shows material savings and a dedicated migration test
-  covers those races. No migration is included here.
+  cross-invocation claim and compare-and-swap behavior. The existing
+  `scouts-request-activity` table can host these records without a new table or
+  GSI: use `requestId=approval-idempotency#<idempotencyKey>` and
+  `feed=approval-idempotency`, which keeps them out of the Activity Centre's
+  `feed=activity` query. The table is currently PAY_PER_REQUEST and its TTL is
+  seven days. The S3 claim objects have no expiry, so setting `expiresAt` on
+  migrated claims would weaken replay protection; omitting it preserves that
+  protection but retains records indefinitely. A safe cutover also needs to
+  backfill or lazily import existing S3 claims before accepting DDB misses,
+  preserve ETag-equivalent ownership with a conditional `claimToken`/version
+  update, and test takeover, concurrent conflict, queue-published/marker-failed
+  recovery, and backfill races. A dual-read fallback retains an S3 GET on each
+  DDB miss and therefore delays request savings. Keep S3 as the active store
+  until request attribution shows material savings, #172 settles capacity and
+  retention, and a tested migration/import plan preserves the current
+  indefinite replay contract. No migration is included here.
 - Deferred refresh production acceptance: the outbox implementation is
   present but disabled by default. Benchmark its read/write peaks and GSI
   traffic with #172, choose whether on-demand or a separately approved
