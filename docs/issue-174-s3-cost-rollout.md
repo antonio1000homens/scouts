@@ -91,14 +91,43 @@ running executions. Queue counts are approximate; this is a point-in-time
 sample and does not establish historical parity or manual-review compatibility.
 
 The processing/completed snapshot records are therefore stale relative to all
-three live sources sampled. In source, the agenda refresh no longer reads or
-prunes these three S3 snapshots and no longer writes the queued snapshot.
-That path supplied only a diagnostic summary and stale-snapshot pruning; it
-did not determine SQS publication eligibility or active Step Functions state.
-The private `subject=snapshot` admin API remains feature-gated and the old
-objects remain untouched for manual review and rollback. This code change has
-not yet been deployed; it does not change the live read path until a reviewed
-deployment occurs.
+three live sources sampled. The agenda refresh previously read and pruned these
+snapshots for a diagnostic summary; that path did not determine SQS publication
+eligibility or active Step Functions state. PR #179 removed those refresh-path
+reads and the queued-snapshot write. The private `subject=snapshot` admin API
+remains feature-gated and the old objects remain untouched for manual review
+and rollback. The production rollout is recorded below.
+
+## Snapshot refresh-read cutover verification (2026-11-03 19:29–19:33 UTC)
+
+PR #179 merged as `517ae801`. Deployment workflow `41703666341` completed
+successfully; CloudFormation `scouts-lambda` reached `UPDATE_COMPLETE` at
+19:30:15 UTC and the `scouts` Lambda was `Active` with
+`LastUpdateStatus=Successful` at 19:30:20 UTC. The six-hour schedule and
+zero-event publication cap remain unchanged. `LegacyRuntimeSnapshotsEnabled`
+is still `true`, preserving the admin viewer.
+
+A controlled scheduled-refresh invocation returned Lambda and HTTP status
+200, read 56 events, modified zero events, and reported
+`runtimeQueueSnapshots.source=retired`. Its 19:32:09 UTC aggregate SDK log
+recorded 177 `GetObject`, 38 `HeadObject`, 2 `ListObjectsV2`, and 1
+`PutObject`. The prior comparable controlled sample recorded 180 GETs with
+the same other operation counts. The three-request GET reduction matches the
+three removed snapshot reads for this one refresh; this is measured SDK-call
+reduction, not yet a full-day or bill-level comparison. S3 bucket metrics for
+the 19:32 minute became available by 19:35 UTC: 145 GET, 27 HEAD, 1 LIST and
+1 PUT, alongside one Lambda invocation and zero Lambda errors. These bucket
+counts do not match the 177/38/2/1 aggregate SDK counts. The request-metrics
+configuration covers the whole bucket with no prefix filter, while the Lambda
+counter aggregates calls without bucket or response-status dimensions; the
+discrepancy remains unexplained, so this is not yet bucket-level attribution
+for the controlled run.
+
+After the invocation, `HeadObject` readbacks showed the queued, processing and
+completed snapshot sizes and `LastModified` timestamps unchanged from the
+19:26 UTC sample. No snapshot object was written or deleted. The activity
+ledger remains empty and the stale historical snapshots remain available via
+the admin API. Historical/manual-review parity is not established.
 
 ## Supplemental live recheck (2026-11-03 18:36 UTC)
 
@@ -260,13 +289,14 @@ verified as immutable enough for a long cache lifetime.
 ## Expected impact and limits
 
 The schedule change is a **91.7% reduction in scheduled invocations**
-(48 → 4/day), but post-change billing savings are still unmeasured. The
-controlled invocation's SDK log recorded 180 GET and 38 HEAD calls. This is
-one sample and does not establish a daily average; its S3 bucket metrics had
-not reconciled to that count by 19:12 UTC. Continue collecting full-day and
-seven-day before/after windows before claiming savings. The removed legacy
-touches avoid additional reads/writes per actual Scouts execution; the
-aggregate logs quantify HEX reread and duplicate image HEAD savings per run.
+(48 → 4/day), but post-change billing savings are still unmeasured. One
+comparable controlled refresh fell from 180 to 177 logical GET calls after
+the three legacy snapshot reads were removed; HEAD, LIST and PUT counts were
+unchanged. These are individual SDK samples, not a daily average or a bill
+comparison. Continue collecting full-day and seven-day before/after windows
+and reconcile the latest bucket metrics before claiming savings. The earlier
+touch-path removals and the aggregate logs also quantify HEX read reuse and
+duplicate image HEAD checks per run.
 
 For cost scale, October's observed Tier-2 charge implies an effective rate of
 about **$0.000420 per 1,000 GET/HEAD requests**. An earlier conditional
@@ -302,18 +332,18 @@ and a full post-change trend remain to be measured.
 
 ## Rollout and rollback
 
-1. **Completed:** PRs #175, #176 and #177 passed their required checks and
-   merged. The full AWS deploy run `41699914320` completed after an earlier
-   run was cancelled during the Slack handler step. The live stack and Lambda
-   readbacks are recorded above.
-2. **Verified once:** a controlled scheduled refresh returned successfully,
-   published no enrichment requests with the configured zero cap, and its
-   SDK request counts matched the adjacent one-minute S3 request metrics.
-3. **Still required:** collect a full seven-day post-change request trend;
-   compare daily operation totals and S3/CloudWatch charges; and verify image
-   repair, queue age, failure/DLQ behavior and admin manual refresh through
-   representative production traffic. Keep legacy snapshots enabled and the
-   deferred outbox disabled until their separate parity/capacity gates pass.
+1. **Completed:** PRs #175–#179 passed their required checks and merged.
+   Deploy run `41703666341` completed successfully. The live stack, Lambda,
+   controlled invocation, and request-count readbacks are recorded above.
+2. **Verified once:** the latest controlled scheduled refresh returned
+   successfully and its SDK log showed three fewer GETs than the comparable
+   pre-cutover run. The six-hour schedule and zero-event cap remain active.
+3. **Still required:** reconcile delayed S3 metric bins, collect a full
+   seven-day post-change request trend, compare daily operation totals and
+   S3/CloudWatch charges, and verify image repair, queue age, failure/DLQ
+   behavior and admin manual refresh through representative production
+   traffic. Keep the admin legacy snapshot viewer enabled and the deferred
+   outbox disabled until their separate parity/capacity gates pass.
 4. **Rollback cadence**: set
    `SCHEDULED_REFRESH_EXPRESSION='rate(30 minutes)'` for the
    subsequent Scouts CloudFormation deployment (or restore the previous
