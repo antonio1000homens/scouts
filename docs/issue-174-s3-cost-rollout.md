@@ -97,6 +97,12 @@ production state changed after the initial recheck:
   latency shifts their timestamps. Bucket metrics do not identify callers,
   so this is correlation, not full request attribution or a clean before/after
   window.
+- A second minute-level query through 18:44 UTC found S3 GETs at 18:39 (1),
+  18:40 (4), and 18:41 (1), while the `scouts` Lambda had no invocation
+  datapoints from 18:22 through 18:44. This confirms bucket GET traffic exists
+  outside the scheduled Scouts invocation window (or has delayed metric
+  timestamps); its specific caller remains unknown. Keep CloudFront/browser
+  and other AWS callers separate from Lambda SDK counts.
 - No `[S3 Request Reduction] SDK calls by operation` log appeared between
   18:15 and 18:36 UTC. That per-invocation operation counter exists in this
   follow-up PR but is not deployed yet.
