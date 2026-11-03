@@ -707,3 +707,31 @@ known caller and does not establish a post-change comparison. Allow the metric
 window to mature, capture a successful persistence event, then compare daily
 and seven-day operation totals and posted S3 charges. Keep web/admin traffic
 separate from Lambda SDK counts; no S3 objects were modified for this readback.
+
+## Live regression canary outcome (2026-11-03 22:42–22:48 UTC)
+
+The explicitly authorized production canary run
+[`41733128144`](https://github.com/antonio1000homens/scouts/actions/runs/41733128144)
+used master commit `ffd6cb6096dfde57f602672a3162d4cc739b8de1`. The workflow
+verified AWS account `553490163883` and the deployed public-loader exclusion
+guard before creating the synthetic event. Full enrichment, tagline and image
+theme regeneration, approval, hide, and the initial same-HEX sibling hide
+checks passed. Full enrichment also generated an S3-backed Cloudflare image,
+which the cleanup phase removed.
+
+The run failed at the post-hide refresh assertion. The synthetic sibling had a
+different occurrence ID but the same title, date and location; Scouts merges
+agenda entries by date/title/location, so the refresh correctly coalesced the
+two entries before the assertion expected both. PR #200 changes only the
+synthetic fixture to use a distinct future start time, and merged as
+`7c599490d11a48e079b7da0759c8640dc0efa502` after its focused test and CI passed.
+The production canary has not been rerun, so post-refresh hidden-state
+preservation and unhide remain unverified.
+
+The failed run's cleanup passed: the synthetic agenda entries and canonical
+event were removed, the run's generated image was removed, and a recovery copy
+of the pre-run `agenda.json` remains at
+`migration-backups/live-regression/1793745763599-1ddfe7/agenda.json`. Read-only
+S3 checks after the workflow confirmed the event key returned 404, the
+generated-image prefix was empty, and the retained backup exists. Do not treat
+this partial run as full live lifecycle acceptance.
