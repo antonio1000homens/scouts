@@ -39,12 +39,15 @@ test('image quota deferrals clear TTL for retry_wait rows in both writers', () =
     ['../lambdas/sqs2scouts/function/image-provider-worker.mjs', 'markImageDeferral'],
   ]) {
     const source = read(path);
-    const deferral = source.match(new RegExp(`async function ${functionName}\\([\\s\\S]*?\\n}\\n`))?.[0];
-    assert.ok(deferral, `${functionName} must be present`);
-    assert.match(deferral, /:state': \\{ S: 'retry_wait' \\}/);
-    assert.match(deferral, /REMOVE #inProgressExpiresAt, #expiresAt/);
-    assert.doesNotMatch(deferral, /#expiresAt = :expiresAt/);
-    assert.doesNotMatch(deferral, /':expiresAt'\\s*:/);
+    const start = source.indexOf(`async function ${functionName}(`);
+    assert.notEqual(start, -1, `${functionName} must be present`);
+    const end = source.indexOf('\n}\n', start);
+    assert.notEqual(end, -1, `${functionName} must have a complete body`);
+    const deferral = source.slice(start, end);
+    assert.ok(deferral.includes("':state': { S: 'retry_wait' }"));
+    assert.ok(deferral.includes('REMOVE #inProgressExpiresAt, #expiresAt'));
+    assert.ok(!deferral.includes('#expiresAt = :expiresAt'));
+    assert.ok(!deferral.includes("':expiresAt':"));
   }
 });
 
