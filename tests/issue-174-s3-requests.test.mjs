@@ -19,6 +19,7 @@ test('image HEAD checks are shared across duplicate events in one invocation', a
   await memo('website-bucket', 'website/eventImages/other.jpg', check);
   await memo('other-bucket', 'website/eventImages/shared.jpg', check);
   assert.equal(checks, 3, 'cache keys must include both bucket and object');
+  assert.deepEqual(memo.stats(), { requests: 3, cacheHits: 19 });
 });
 
 test('missing object is cached for this invocation but rechecked on the next', async () => {
@@ -54,6 +55,12 @@ test('Scouts image verification shares the per-invocation HEAD cache without mas
   assert.match(scouts, /Number\(error\?\.\$metadata\?\.httpStatusCode\) === 404/);
   assert.match(scouts, /throw error;/);
   assert.match(scouts, /migrateLegacyImageIfNeeded\(bucket, currentUrl\)/);
+  assert.match(scouts, /const hexReadCache = new Map\(\)/);
+  assert.match(scouts, /hexReadCache\.size < MAX_HEX_READ_CACHE_ENTRIES/);
+  assert.match(scouts, /hexReadCache\?\.delete\(key\)/);
+  assert.match(scouts, /const cachedHex = hexReadCache\.get\(key\)/);
+  assert.match(scouts, /reusedHexReads/);
+  assert.match(scouts, /imageHead: imageHeadMemo\.stats\(\)/);
 });
 
 test('retired unconditional queued snapshot writes do not remove compatibility reads', () => {
