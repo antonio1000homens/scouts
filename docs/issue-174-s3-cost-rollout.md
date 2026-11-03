@@ -1,8 +1,10 @@
 # Issue #174 — staged Scouts S3/SQS cost optimisation
 
-This local follow-up branch builds on the open [phase 1 PR #175](https://github.com/antonio1000homens/scouts/pull/175).
-It is not issue closure or permission to deploy production infrastructure
-without review.
+The staged implementation is in [PR #175](https://github.com/antonio1000homens/scouts/pull/175),
+[PR #176](https://github.com/antonio1000homens/scouts/pull/176), and
+[PR #177](https://github.com/antonio1000homens/scouts/pull/177). This document
+tracks the rollout and outstanding acceptance evidence; the merged PRs do not
+by themselves prove issue closure.
 
 ## Read-only baseline (from issue #174, 2026-11-03)
 
@@ -38,10 +40,10 @@ state by the supplemental check below:
   confirmed; attribution to scheduled refresh is still unproven.
 - `ListTrails` returned no CloudTrail trails and `GetBucketLogging` returned
   no S3 server access logging configuration. Historical bucket request metrics
-  therefore do not identify callers. The local code now logs low-cardinality
-  S3 SDK operation counts for the complete Scouts invocation, with scheduled
-  refresh separated; compare those logical calls against bucket metrics after
-  deployment and account for SDK retries.
+  therefore do not identify callers. At this initial recheck, the pending
+  follow-up code added low-cardinality S3 SDK operation counts for the complete
+  Scouts invocation, with scheduled refresh separated; the later live check is
+  recorded below.
 - Three enabled Lambda event-source mappings remained attached to
   `scoutsRequests`, `scoutsProcessing`, and `scoutsProcessingDLQ`. Their
   `NumberOfEmptyReceives` totals were **60,468**, **60,467**, and **60,468**
@@ -120,7 +122,55 @@ production state changed after the initial recheck:
 - Because legacy snapshot objects remain needed and the activity ledger is
   empty, production parity and safe legacy-read retirement are still unproven.
 
-## Code changes on the local follow-up branch
+## Post-follow-up deployment check (2026-11-03 19:06–19:17 UTC)
+
+AWS Core verified account `553490163883` before these calls. PR #176's first
+master deployment was cancelled after the Scouts function step completed and
+before the Slack handler step. After PR #177 merged, the full deployment run
+`41699914320` completed successfully.
+
+- CloudFormation `scouts-lambda` reached `UPDATE_COMPLETE` at 19:06:17 UTC;
+  the `scouts` Lambda was `Active`, with `LastUpdateStatus=Successful` and
+  `LastModified=19:06:22 UTC`. The stack remains at `rate(6 hours)` with
+  `ScheduledRefreshMaxEvents=0`. `LegacyRuntimeSnapshotsEnabled=true` and
+  `DeferredRefreshOutboxEnabled=false`; the deferred table is not created.
+- One controlled scheduled-refresh invocation at 19:08:51 UTC returned HTTP
+  200 with no Lambda `FunctionError`. It read 56 events, reported zero
+  modified events and zero enrichment requests started, and reported five
+  expired hidden-event cleanup records. It exercised the deployed S3 wrapper.
+  The response still identified `runtimeQueueSnapshots.source=legacy-s3`, so
+  the compatibility path is active and snapshot parity is not established.
+- Its aggregate logs reported `reusedHexReads=98`,
+  `imageHead.requests=36`, `imageHead.cacheHits=6`, and SDK calls by operation:
+  180 `GetObject`, 38 `HeadObject`, 2 `ListObjectsV2`, and 1 `PutObject`, tagged
+  `source=scheduled-refresh`. This attributes those logical SDK calls to one
+  scheduled-refresh execution; SDK retries and other bucket callers remain
+  outside that count.
+- One-minute CloudWatch metrics showed one `scouts` invocation and zero Lambda
+  errors at 19:08. S3 request metrics reported 20 `GetRequests` in that minute
+  and 160 `GetRequests`, 38 `HeadRequests`, 2 `ListRequests`, and 1 `PutRequests`
+  in the 19:09 minute. The combined two-minute totals exactly match the
+  invocation's 180/38/2/1 SDK counts. This is direct attribution for that
+  single scheduled run, with S3 metrics reporting most of its requests in the
+  following minute; it does not attribute the rest of the bucket's traffic or
+  establish a full-day savings trend.
+- No SQS mappings or DynamoDB billing modes were changed. A single controlled
+  invocation does not establish a full-day post-change trend, queue capacity,
+  or snapshot/activity parity.
+
+## Cache behavior review (2026-11-03)
+
+The live CloudFront distribution uses `Managed-CachingOptimized` for its
+default behavior (minimum TTL 1 second) and `Managed-CachingDisabled` (all TTLs
+zero) for `/agenda.json`, `/runtime/*`, and `/events/*`. S3 metadata for
+`agenda.json` is `no-store`; `index.html` and `website/styles.css` are
+`max-age=0, no-cache, no-store, must-revalidate`; the queued runtime object is
+also `no-store`. The event loader requests data with `cache: 'no-store'`.
+These paths retain freshness. No cache-header changes were made: shared HTML,
+CSS, and JavaScript names are not content-versioned, and image keys were not
+verified as immutable enough for a long cache lifetime.
+
+## Merged implementation
 
 1. **Four refreshes/day**: CloudFormation and runtime defaults move to
    `rate(6 hours)`. The live stack now reports this cadence (see supplemental
@@ -128,9 +178,9 @@ production state changed after the initial recheck:
    preexisting CloudFormation stacks do not silently retain
    `rate(30 minutes)`. Admin **Run refresh now** and independently
    invoked workflows remain available. Existing 24-hour ICS freshness
-   behaviour is unchanged. The cadence is now live in the stack; the follow-up
-   refresh optimizations and operation counters still require their own
-   reviewed deployment.
+   behaviour is unchanged. The cadence is live in the stack. The follow-up
+   refresh optimizations and operation counters were deployed in the later
+   rollout recorded above.
 2. **Prepare runtime snapshot lifecycle retirement**: the start/finally paths
    previously read queued, processing, completed and wrote queued (up to
    six GET + two PUT per normal execution). The dead append/touch writers
@@ -161,13 +211,12 @@ production state changed after the initial recheck:
    `imageHead.requests` and `imageHead.cacheHits`. No custom
    CloudWatch metrics, high-cardinality object-key logging, or new
    paid monitoring were added.
-7. Add low-cardinality per-invocation S3 SDK call counts by operation, with
+7. Emit low-cardinality per-invocation S3 SDK call counts by operation, with
    scheduled refresh tagged separately from other invocations. This gives
-   direct code-path attribution without logging object keys. The follow-up
-   counter is not deployed yet; the current CloudWatch recheck found no
-   matching log. Counts represent SDK `send()` calls; SDK-internal retries
-   may cause more wire requests, so correlate these with bucket metrics after
-   deployment.
+   direct code-path attribution without logging object keys. One live sample
+   is recorded above. Counts represent SDK `send()` calls; SDK-internal
+   retries may cause more wire requests, so correlate them with bucket
+   metrics over longer windows.
 8. Implement an opt-in DynamoDB outbox for excess scheduled enrichment work.
    Work keys include HEX, stage and generation; writes coalesce source feed
    identifiers; the dispatcher claims leases and sends at most 10 items each
@@ -187,25 +236,25 @@ production state changed after the initial recheck:
 
 ## Expected impact and limits
 
-The scheduling change is a **91.7% reduction in scheduled invocations**
-(48 → 4/day), *not* a proven 91.7% reduction in S3 billing.
-Using an **unverified** rough attribution of 283 GET and 44 HEAD per old
-refresh, removing 44 executions/day could avoid around 12,452 GET and
-1,936 HEAD/day; record real per-operation before/after traffic before
-claiming these savings. The removed legacy touches avoid additional
-reads/writes per actual Scouts execution; the new aggregate logs quantify
-HEX reread and duplicate image HEAD savings per invocation.
+The schedule change is a **91.7% reduction in scheduled invocations**
+(48 → 4/day), but post-change billing savings are still unmeasured. The
+controlled invocation's SDK log recorded 180 GET and 38 HEAD calls. This is
+one sample and does not establish a daily average; its S3 bucket metrics had
+not reconciled to that count by 19:12 UTC. Continue collecting full-day and
+seven-day before/after windows before claiming savings. The removed legacy
+touches avoid additional reads/writes per actual Scouts execution; the
+aggregate logs quantify HEX reread and duplicate image HEAD savings per run.
 
 For cost scale, October's observed Tier-2 charge implies an effective rate of
-about **$0.000420 per 1,000 GET/HEAD requests**. A deliberately conditional
-scenario assumes all old rough counts (327 GET+HEAD per run) were scheduled
-refreshes, and that the one post-phase-one bucket window (218 GET+HEAD) was
-entirely one representative refresh. At 48 versus 4 runs/day over 30 days,
-that scenario moves Tier-2 GET/HEAD cost from about **$0.198/month** to
-**$0.011/month**, a difference of **$0.187/month**. This is a sensitivity
-case, not a savings claim: caller attribution is incomplete, the new sample
-includes an unexplained later minute, and one invocation does not establish a
-monthly average. It excludes Tier-1 requests and monitoring cost.
+about **$0.000420 per 1,000 GET/HEAD requests**. An earlier conditional
+sensitivity case used rough old counts (327 GET+HEAD per run) and a single
+post-phase-one bucket window (218 GET+HEAD). It estimated about
+**$0.198/month** at 48 runs/day versus **$0.011/month** at 4 runs/day, a
+**$0.187/month** difference if both samples were entirely scheduled traffic
+and representative. The newer direct SDK sample also counted 218 GET+HEAD,
+but the corresponding bucket metric remained incomplete at the last read.
+Neither calculation is measured savings; both exclude Tier-1 requests and
+monitoring cost.
 
 An initial comparison can use the existing bucket request monitoring
 (`CodexRequestCostAudit`) by operation and 5–15-minute intervals.
@@ -224,32 +273,34 @@ configuration, and returns 1-minute S3 request counts beside `scouts` Lambda
 invocations/errors and the low-cardinality SDK/per-refresh summary logs. It
 accepts timezone-qualified `--start`/`--end` timestamps, caps the range at
 seven days, and does not create metrics, alarms, or log queries. CloudWatch S3
-metrics can be delayed and remain bucket-wide; only the SDK summary log
-attributes a request to the Lambda path. That log will appear after this
-follow-up is deployed.
+metrics can be delayed and remain bucket-wide. The one controlled live sample
+matched the SDK operation counts across adjacent minute bins; broader traffic
+and a full post-change trend remain to be measured.
 
 ## Rollout and rollback
 
-1. Review the PR and synthetic tests. Confirm the deployed
-   EventBridge rule, selected CloudFormation parameter and absence of
-   latency-critical consumers of scheduled discovery. Record a 7-day
-   request baseline and an acceptable 6-hour calendar freshness SLA.
-2. Before deployment, check account identity and region explicitly.
-   Deploy via the existing verified Scouts deployment path; do not
-   disable any SQS mappings, delete S3 objects or alter DynamoDB billing
-   mode as part of this PR.
-3. Compare per-refresh S3 calls, queue age, reconciled event counts,
-   image repair, failure/DLQ behaviour and admin manual refresh.
-   Inspect logs for `[S3 Request Reduction]`.
+1. **Completed:** PRs #175, #176 and #177 passed their required checks and
+   merged. The full AWS deploy run `41699914320` completed after an earlier
+   run was cancelled during the Slack handler step. The live stack and Lambda
+   readbacks are recorded above.
+2. **Verified once:** a controlled scheduled refresh returned successfully,
+   published no enrichment requests with the configured zero cap, and its
+   SDK request counts matched the adjacent one-minute S3 request metrics.
+3. **Still required:** collect a full seven-day post-change request trend;
+   compare daily operation totals and S3/CloudWatch charges; and verify image
+   repair, queue age, failure/DLQ behavior and admin manual refresh through
+   representative production traffic. Keep legacy snapshots enabled and the
+   deferred outbox disabled until their separate parity/capacity gates pass.
 4. **Rollback cadence**: set
    `SCHEDULED_REFRESH_EXPRESSION='rate(30 minutes)'` for the
    subsequent Scouts CloudFormation deployment (or restore the previous
    parameter in a controlled stack update). **Rollback code** by
-   reverting this PR if required. Historical S3 objects are untouched.
+   reverting the implementation PRs if required. Historical S3 objects are
+   untouched.
 
 ## Follow-on PRs required for issue closure
 
-- Snapshot/Activity parity: the local code removes snapshot-derived
+- Snapshot/Activity parity: the merged code removes snapshot-derived
   enrichment stage checks and gates the remaining legacy reads/API behind
   `SCOUTS_LEGACY_RUNTIME_SNAPSHOTS`; the flag defaults to `true`, so existing
   behavior remains active unless explicitly changed. A production parity
@@ -318,10 +369,9 @@ CloudWatch and any use above free allocations can still incur charges.
 | Durable enrichment state, retries, cooldowns and manual-review status | Enrichment state table and activity records | These sources represent enrichment workflow state, not the old S3 queue snapshot. Legacy manual-review records need a production compatibility audit. |
 | Step Functions task token | Not exposed by replacement views | Tokens remain workflow-internal and are not stored in the activity index; do not infer or recreate them from execution metadata. |
 
-The local code and hermetic tests establish the intended read routing and
-cutover flag only. The cutover flag defaults to enabled, and legacy reads
-remain active at that setting. The production recheck above confirms parity is not
-established: activity has no rows, historical snapshots contain task tokens,
-and the manual-review scan was partial. Therefore the flag remains enabled
-by default. Do not disable it, delete historical snapshot objects, or claim
-full migration acceptance until the required comparison is recorded.
+The merged code and hermetic tests establish the intended read routing and
+cutover flag. The flag remains enabled, so legacy reads are still active. The
+production rechecks confirm parity is not established: activity has no rows,
+historical snapshots contain task tokens, and the manual-review scan was
+partial. Do not disable the flag, delete historical snapshot objects, or
+claim full migration acceptance until the required comparison is recorded.
