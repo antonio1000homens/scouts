@@ -189,12 +189,22 @@ Edge/CloudFront requests and browser/admin traffic from Lambda work.
 - Approval idempotency currently uses S3 conditional PUT (`If-None-Match` for
   first claim, `If-Match` for stale-claim takeover and completion) plus GET to
   arbitrate conflicts and read the winning result. This preserves a durable
-  cross-invocation claim and compare-and-swap behavior. A DynamoDB migration
-  might reduce S3 requests but would add a table/index and another on-demand
-  request workload; it also needs parity for takeover, TTL, conflict, and
-  queue-published/marker-failed cases. Keep the S3 contract until measured
-  request attribution shows material savings and a dedicated migration test
-  covers those races. No migration is included here.
+  cross-invocation claim and compare-and-swap behavior. The existing
+  `scouts-request-activity` table can host these records without a new table or
+  GSI: use `requestId=approval-idempotency#<idempotencyKey>` and
+  `feed=approval-idempotency`, which keeps them out of the Activity Centre's
+  `feed=activity` query. The table is currently PAY_PER_REQUEST and its TTL is
+  seven days. The S3 claim objects have no expiry, so setting `expiresAt` on
+  migrated claims would weaken replay protection; omitting it preserves that
+  protection but retains records indefinitely. A safe cutover also needs to
+  backfill or lazily import existing S3 claims before accepting DDB misses,
+  preserve ETag-equivalent ownership with a conditional `claimToken`/version
+  update, and test takeover, concurrent conflict, queue-published/marker-failed
+  recovery, and backfill races. A dual-read fallback retains an S3 GET on each
+  DDB miss and therefore delays request savings. Keep S3 as the active store
+  until request attribution shows material savings, #172 settles capacity and
+  retention, and a tested migration/import plan preserves the current
+  indefinite replay contract. No migration is included here.
 - Deferred refresh production acceptance: the outbox implementation is
   present but disabled by default. Benchmark its read/write peaks and GSI
   traffic with #172, choose whether on-demand or a separately approved
