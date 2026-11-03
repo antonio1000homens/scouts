@@ -1,6 +1,7 @@
 const AGENDA_URL = '/agenda.json';
 const FALLBACK_AGENDA_URL = 'https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com/agenda.json';
-const S3_OBJECT_BASE_URL = 'https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com';
+const S3_OBJECT_HOST = 'scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com';
+const EVENT_IMAGE_PATH_PREFIX = '/website/eventImages/';
 const EVENT_LOADER_SCRIPT_URL = new URL(
     document.currentScript?.src || 'event-loader.js',
     window.location.href
@@ -123,9 +124,23 @@ function normaliseImagePath(url) {
     if (!url || typeof url !== 'string') return url;
     const trimmed = url.trim();
     if (!trimmed) return trimmed;
-    if (/^https?:\/\//i.test(trimmed)) return trimmed;
-    if (trimmed.startsWith('/website/eventImages/')) return `${S3_OBJECT_BASE_URL}${trimmed}`;
-    if (trimmed.startsWith('website/eventImages/')) return `${S3_OBJECT_BASE_URL}/${trimmed}`;
+    if (/^https?:\/\//i.test(trimmed)) {
+        let parsed;
+        try {
+            parsed = new URL(trimmed);
+        } catch {
+            return trimmed;
+        }
+        if (parsed.hostname === S3_OBJECT_HOST && parsed.pathname.startsWith(EVENT_IMAGE_PATH_PREFIX)) {
+            return new URL(`${parsed.pathname}${parsed.search}${parsed.hash}`, window.location.href).href;
+        }
+        return trimmed;
+    }
+
+    const imagePath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+    if (imagePath.startsWith(EVENT_IMAGE_PATH_PREFIX)) {
+        return new URL(imagePath, window.location.href).href;
+    }
     throw new Error(`Unsupported canonical event image path: ${trimmed}`);
 }
 

@@ -101,6 +101,21 @@ test('public loader renders generated images only for approved events', () => {
   assert.equal(helpers.createEventImageMarkup(pending), '');
 });
 
+test('issue 174 routes canonical S3 event images through same-origin CloudFront', () => {
+  const helpers = loadPublicHelpers();
+  const origin = 'https://site.invalid';
+  const path = '/website/eventImages/camp.jpg';
+  const s3Image = `https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com${path}?download=1#preview`;
+
+  assert.equal(helpers.normaliseImagePath('website/eventImages/camp.jpg'), `${origin}${path}`);
+  assert.equal(helpers.normaliseImagePath(s3Image), `${origin}${path}?download=1#preview`);
+  assert.equal(helpers.normaliseImagePath('https://images.example.test/camp.jpg'), 'https://images.example.test/camp.jpg');
+  assert.equal(
+    helpers.normaliseImagePath('https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com/agenda.json'),
+    'https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com/agenda.json',
+  );
+});
+
 test('public loader handles an approved event without an image without broken markup', () => {
   const helpers = loadPublicHelpers();
   const event = {

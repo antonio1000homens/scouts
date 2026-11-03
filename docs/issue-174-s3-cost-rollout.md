@@ -267,9 +267,56 @@ zero) for `/agenda.json`, `/runtime/*`, and `/events/*`. S3 metadata for
 `agenda.json` is `no-store`; `index.html` and `website/styles.css` are
 `max-age=0, no-cache, no-store, must-revalidate`; the queued runtime object is
 also `no-store`. The event loader requests data with `cache: 'no-store'`.
-These paths retain freshness. No cache-header changes were made: shared HTML,
-CSS, and JavaScript names are not content-versioned, and image keys were not
-verified as immutable enough for a long cache lifetime.
+These paths retain freshness. At the time of this review, no cache-header
+changes were made: shared HTML, CSS, and JavaScript names are not
+content-versioned. Public image routing and the live image-key cache behavior
+were assessed separately below.
+
+## Public event-image CDN routing assessment (2026-11-03)
+
+The public event loader previously converted canonical
+`website/eventImages/*` paths directly to the S3 REST hostname, bypassing the
+existing CloudFront distribution. The source change in this follow-up resolves
+those relative paths and legacy URLs from the exact Scouts S3 bucket host to
+the current page origin, which is Cloudflare in front of CloudFront in
+production. Other absolute image URLs remain unchanged. The admin viewer
+already resolves relative event-image paths against its page origin. Agenda
+JSON continues to use `cache: 'no-store'`, including its direct S3 fallback; no
+runtime or private path is redirected.
+
+Before the source change, the verified CloudFront distribution was enabled
+with alias `2ndtolworth.org.uk`, the S3 website endpoint as origin, and
+`Managed-CachingOptimized` as its default behavior (MinTTL 1 second,
+DefaultTTL 86,400 seconds, MaxTTL 31,536,000 seconds). `/agenda.json`,
+`/runtime/*`, and `/events/*` retain the caching-disabled policy. A bounded
+production request to a public `website/eventImages/*` object returned HTTP
+200 from the CloudFront distribution domain; a first request was `Miss from
+cloudfront`, and an immediate repeat was `Hit from cloudfront`. The public
+alias `2ndtolworth.org.uk` also returned HTTP 200 through Cloudflare and
+CloudFront; the first viewer request was a Cloudflare cache miss and the repeat
+was a Cloudflare cache hit. The sampled old image had no S3 `Cache-Control`
+metadata, so its CloudFront freshness used the configured 24-hour default TTL.
+Generated images are stored with a one-year `Cache-Control` header and
+timestamped keys; manual image edits to an overwritten object can remain stale
+at CloudFront for up to the applicable TTL.
+
+Seven daily CloudFront datapoints from Oct 27 21:45 to Nov 3 21:45 totaled
+4,512 requests and 9,037,605 downloaded bytes (8.62 MiB). The same S3 request
+metrics filter recorded 145,649,289 downloaded bytes (138.90 MiB) during that
+window, across all bucket callers and prefixes. The latest 24-hour bucket
+sample had 12,681 GETs. These totals do not identify which S3 reads are browser
+image requests. AWS currently documents a CloudFront Free Tier allowance of
+10 million HTTP/HTTPS requests and 1 TB transfer per month across the account
+([CloudFront pricing FAQ](https://aws.amazon.com/cloudfront/faqs/)). The
+observed request and byte volumes are well below those allowances, including
+an upper-bound estimate that routes all currently measured bucket downloads
+through CloudFront. S3 GET request rates are listed at $0.0004 per 1,000 for
+S3 Standard in AWS pricing examples; even eliminating every GET in the latest
+daily sample would save at most about $0.15/month at that rate, and only the
+repeated browser image portion is affected. Treat savings as conditional, and
+recheck request metrics and Cost Explorer after deployment; do not claim
+bucket-wide attribution or a guaranteed bill reduction from this routing
+change.
 
 ## Merged implementation
 
