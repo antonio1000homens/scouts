@@ -118,8 +118,8 @@ Parameters:
     Default: scouts-request-activity
   ScheduledRefreshExpression:
     Type: String
-    Default: rate(30 minutes)
-    Description: EventBridge cadence for automatic calendar/agenda refresh.
+    Default: rate(6 hours)
+    Description: EventBridge cadence for non-urgent calendar/agenda refresh (rollback rate(30 minutes)).
   ScheduledRefreshDefaultEnabled:
     Type: String
     AllowedValues:
