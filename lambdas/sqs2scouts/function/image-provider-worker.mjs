@@ -569,7 +569,7 @@ async function markImageDeferral({ hex, attemptCount = 0, attemptWasReserved = f
     await dynamo.send(new UpdateItemCommand({
       TableName: ENRICHMENT_TABLE_NAME,
       Key: { hex: { S: hex }, stage: { S: 'image' } },
-      UpdateExpression: 'SET #state = :state, #attemptCount = :attemptCount, #lastErrorType = :errorType, #lastErrorMessage = :errorMessage, #nextRetryAt = :nextRetryAt, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #inProgressExpiresAt',
+      UpdateExpression: 'SET #state = :state, #attemptCount = :attemptCount, #lastErrorType = :errorType, #lastErrorMessage = :errorMessage, #nextRetryAt = :nextRetryAt, #updatedAt = :updatedAt REMOVE #inProgressExpiresAt, #expiresAt',
       ConditionExpression: 'attribute_not_exists(#state) OR (#state <> :manualReview AND #state <> :succeeded)',
       ExpressionAttributeNames: {
         '#state': 'state', '#attemptCount': 'attemptCount', '#lastErrorType': 'lastErrorType',
@@ -580,7 +580,7 @@ async function markImageDeferral({ hex, attemptCount = 0, attemptWasReserved = f
         ':state': { S: 'retry_wait' }, ':manualReview': { S: 'manual_review' }, ':succeeded': { S: 'succeeded' },
         ':attemptCount': { N: String(persistedAttemptCount) }, ':errorType': { S: errorType },
         ':errorMessage': { S: String(message || errorType).slice(0, 500) }, ':nextRetryAt': { S: nextRetryAt },
-        ':updatedAt': { S: now.toISOString() }, ':expiresAt': { N: String(ttlEpoch(now)) },
+        ':updatedAt': { S: now.toISOString() },
       },
     }));
   } catch (error) {

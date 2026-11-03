@@ -64,10 +64,6 @@ const dynamo = new DynamoDBClient({ region: AWS_REGION });
 let cachedScoutsConfig = null;
 let cachedScoutsConfigExpiresAt = 0;
 
-function ttlEpoch(now = new Date()) {
-  return Math.floor(now.getTime() / 1000) + (90 * 24 * 60 * 60);
-}
-
 function getHex(message) {
   const candidate = text(message?.requestHex ?? message?.hex ?? null)?.toLowerCase();
   if (candidate && /^[0-9a-f]+$/i.test(candidate)) return candidate;
@@ -202,7 +198,7 @@ async function markQuotaDeferralWithoutAttempt({
     await dynamo.send(new UpdateItemCommand({
       TableName: ENRICHMENT_TABLE_NAME,
       Key: { hex: { S: hex }, stage: { S: 'image' } },
-      UpdateExpression: 'SET #state = :state, #attemptCount = :attemptCount, #lastErrorType = :errorType, #lastErrorMessage = :errorMessage, #nextRetryAt = :nextRetryAt, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #inProgressExpiresAt',
+      UpdateExpression: 'SET #state = :state, #attemptCount = :attemptCount, #lastErrorType = :errorType, #lastErrorMessage = :errorMessage, #nextRetryAt = :nextRetryAt, #updatedAt = :updatedAt REMOVE #inProgressExpiresAt, #expiresAt',
       ConditionExpression: 'attribute_not_exists(#state) OR (#state <> :manualReview AND #state <> :succeeded)',
       ExpressionAttributeNames: {
         '#state': 'state',
@@ -223,7 +219,6 @@ async function markQuotaDeferralWithoutAttempt({
         ':errorMessage': { S: String(error?.message || error || 'Image provider quota exhausted').slice(0, 500) },
         ':nextRetryAt': { S: nextRetryAt },
         ':updatedAt': { S: now.toISOString() },
-        ':expiresAt': { N: String(ttlEpoch(now)) },
       },
     }));
   } catch (updateError) {

@@ -33,6 +33,21 @@ test('image publishers emit only alarm-backed dimensionless failure/quota metric
   assert.doesNotMatch(fullEnrich, /Dimensions: \[\['Provider', 'Outcome'\]\]/);
 });
 
+test('image quota deferrals clear TTL for retry_wait rows in both writers', () => {
+  for (const [path, functionName] of [
+    ['../lambdas/sqs2scouts/function/full-enrich-core.mjs', 'markQuotaDeferralWithoutAttempt'],
+    ['../lambdas/sqs2scouts/function/image-provider-worker.mjs', 'markImageDeferral'],
+  ]) {
+    const source = read(path);
+    const deferral = source.match(new RegExp(`async function ${functionName}\\([\\s\\S]*?\\n}\\n`))?.[0];
+    assert.ok(deferral, `${functionName} must be present`);
+    assert.match(deferral, /:state': \\{ S: 'retry_wait' \\}/);
+    assert.match(deferral, /REMOVE #inProgressExpiresAt, #expiresAt/);
+    assert.doesNotMatch(deferral, /#expiresAt = :expiresAt/);
+    assert.doesNotMatch(deferral, /':expiresAt'\\s*:/);
+  }
+});
+
 test('cost-audit script refuses any account other than the Scouts account', () => {
   const source = read('../scripts/scouts-cost-audit.mjs');
   assert.match(source, /const ACCOUNT_ID = '553490163883'/);
