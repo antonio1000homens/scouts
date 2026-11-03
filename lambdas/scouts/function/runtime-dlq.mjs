@@ -31,6 +31,13 @@ const DLQS = Object.freeze({
   },
 });
 
+const QUEUE_STATUS_TARGETS = Object.freeze([
+  { name: 'scoutsRequests', queueUrl: REQUESTS_QUEUE_URL },
+  { name: 'scoutsProcessing', queueUrl: PROCESSING_QUEUE_URL },
+  { name: 'scoutsRequestsDLQ', queueUrl: REQUESTS_DLQ_URL },
+  { name: 'scoutsProcessingDLQ', queueUrl: PROCESSING_DLQ_URL },
+]);
+
 function text(value) {
   if (value === undefined || value === null) return '';
   return String(value).trim();
@@ -144,6 +151,7 @@ async function queueAttributes(queueUrl) {
       'ApproximateNumberOfMessages',
       'ApproximateNumberOfMessagesNotVisible',
       'ApproximateNumberOfMessagesDelayed',
+      'ApproximateAgeOfOldestMessage',
     ],
   }));
   const attrs = response?.Attributes || {};
@@ -152,6 +160,42 @@ async function queueAttributes(queueUrl) {
     visible: Number(attrs.ApproximateNumberOfMessages || 0),
     inFlight: Number(attrs.ApproximateNumberOfMessagesNotVisible || 0),
     delayed: Number(attrs.ApproximateNumberOfMessagesDelayed || 0),
+    oldestMessageAgeSeconds: attrs.ApproximateAgeOfOldestMessage === undefined
+      ? null
+      : Number(attrs.ApproximateAgeOfOldestMessage),
+  };
+}
+
+/** Read approximate SQS queue depth on demand without sampling or changing messages. */
+export async function getRuntimeQueueStatus() {
+  const queues = await Promise.all(QUEUE_STATUS_TARGETS.map(async ({ name, queueUrl }) => {
+    try {
+      const attributes = await queueAttributes(queueUrl);
+      return {
+        name,
+        visible: attributes.visible,
+        inFlight: attributes.inFlight,
+        delayed: attributes.delayed,
+        oldestMessageAgeSeconds: attributes.oldestMessageAgeSeconds,
+        ok: true,
+      };
+    } catch (error) {
+      return {
+        name,
+        visible: null,
+        inFlight: null,
+        delayed: null,
+        oldestMessageAgeSeconds: null,
+        ok: false,
+        error: error?.name || 'QueueStatusUnavailable',
+      };
+    }
+  }));
+  return {
+    sampledAt: new Date().toISOString(),
+    source: 'sqs:GetQueueAttributes',
+    queues,
+    note: 'SQS queue counts and oldest-message age are approximate. No messages are sampled or changed.',
   };
 }
 
@@ -193,6 +237,7 @@ export async function inspectRuntimeDlq(queueName, maxMessages = 5) {
     visible: attrs.visible,
     inFlight: attrs.inFlight,
     delayed: attrs.delayed,
+    oldestMessageAgeSeconds: attrs.oldestMessageAgeSeconds,
     sampleCount: messages.length,
     messages,
     note: 'SQS has no peek API. Sampling uses visibility timeout 0 and does not delete messages, but ApproximateReceiveCount can increase.',

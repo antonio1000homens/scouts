@@ -40,7 +40,7 @@ Parameters:
     AllowedValues:
       - 'true'
       - 'false'
-    Default: 'false'
+    Default: 'true'
   FunctionUrlAuthType:
     Type: String
     AllowedValues:
@@ -120,6 +120,13 @@ Parameters:
     Type: String
     Default: rate(6 hours)
     Description: EventBridge cadence for non-urgent calendar/agenda refresh (rollback rate(30 minutes)).
+  LegacyRuntimeSnapshotsEnabled:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Description: Keep legacy S3 snapshot reads enabled until production parity is verified; set false to opt into retirement, with true as rollback.
   ScheduledRefreshDefaultEnabled:
     Type: String
     AllowedValues:
@@ -131,16 +138,36 @@ Parameters:
     Type: Number
     Default: 0
     MinValue: 0
-    Description: Maximum new enrichment queue publications per scheduled refresh. Zero keeps scheduled refresh discovery-only.
+    Description: Maximum immediate enrichment queue publications per scheduled refresh. With the opt-in outbox enabled, further eligible work is deferred; otherwise zero is discovery-only.
   ScheduledRefreshConfigKey:
     Type: String
     Default: runtime/scheduledRefresh.json
+  DeferredRefreshOutboxEnabled:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+    Description: Opt in to the scheduled non-urgent enrichment outbox after capacity and failure testing.
+  DeferredRefreshOutboxTableName:
+    Type: String
+    Default: scouts-deferred-refresh
+  DeferredRefreshDispatchExpression:
+    Type: String
+    Default: rate(15 minutes)
+    Description: Bounded dispatcher cadence for the optional deferred-refresh outbox.
+  DeferredRefreshDispatchBatchSize:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 10
 
 Conditions:
   ShouldCreateDataBucket: !Equals [!Ref CreateDataBucket, 'true']
   IsPublicFunctionUrl: !Equals [!Ref FunctionUrlAuthType, 'NONE']
   HasFullEnrichStateMachineArn: !Not [!Equals [!Ref FullEnrichStateMachineArn, '']]
   HasSharedLayerVersionArn: !Not [!Equals [!Ref SharedLayerVersionArn, '']]
+  ShouldEnableDeferredRefreshOutbox: !Equals [!Ref DeferredRefreshOutboxEnabled, 'true']
 
 Resources:
   ScoutsDataBucket:
@@ -148,6 +175,45 @@ Resources:
     Condition: ShouldCreateDataBucket
     Properties:
       BucketName: !Ref DataBucketName
+
+  ScoutsDeferredRefreshOutbox:
+    Type: AWS::DynamoDB::Table
+    Condition: ShouldEnableDeferredRefreshOutbox
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref DeferredRefreshOutboxTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: workKey
+          AttributeType: S
+        - AttributeName: state
+          AttributeType: S
+        - AttributeName: nextAttemptAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: workKey
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: state-nextAttemptAt-index
+          KeySchema:
+            - AttributeName: state
+              KeyType: HASH
+            - AttributeName: nextAttemptAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - createdAt
+              - expiresAt
+              - attemptCount
+              - hex
+              - stage
+              - lastError
+              - terminalReason
+      TimeToLiveSpecification:
+        AttributeName: ttlAt
+        Enabled: true
 
   ScoutsLambdaRole:
     Type: AWS::IAM::Role
@@ -226,6 +292,17 @@ Resources:
                 Resource:
                   - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${GeminiEnrichmentStateTableName}
                   - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScoutsRequestActivityTableName}
+              - !If
+                - ShouldEnableDeferredRefreshOutbox
+                - Effect: Allow
+                  Action:
+                    - dynamodb:GetItem
+                    - dynamodb:Query
+                    - dynamodb:UpdateItem
+                  Resource:
+                    - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DeferredRefreshOutboxTableName}
+                    - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DeferredRefreshOutboxTableName}/index/*
+                - !Ref AWS::NoValue
               - Effect: Allow
                 Action:
                   - ssm:GetParameter
@@ -274,10 +351,14 @@ Resources:
           FULL_ENRICH_STATE_MACHINE_ARN: !Ref FullEnrichStateMachineArn
           GEMINI_ENRICHMENT_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
           SCOUTS_REQUEST_ACTIVITY_TABLE_NAME: !Ref ScoutsRequestActivityTableName
+          SCOUTS_LEGACY_RUNTIME_SNAPSHOTS: !Ref LegacyRuntimeSnapshotsEnabled
           SCOUTS_SCHEDULE_EXPRESSION: !Ref ScheduledRefreshExpression
           SCOUTS_SCHEDULED_REFRESH_DEFAULT_ENABLED: !Ref ScheduledRefreshDefaultEnabled
           SCOUTS_SCHEDULED_REFRESH_MAX_EVENTS: !Ref ScheduledRefreshMaxEvents
           SCOUTS_SCHEDULED_REFRESH_CONFIG_KEY: !Ref ScheduledRefreshConfigKey
+          SCOUTS_DEFERRED_REFRESH_ENABLED: !Ref DeferredRefreshOutboxEnabled
+          SCOUTS_DEFERRED_REFRESH_TABLE_NAME: !If [ShouldEnableDeferredRefreshOutbox, !Ref DeferredRefreshOutboxTableName, '']
+          SCOUTS_DEFERRED_REFRESH_DISPATCH_BATCH_SIZE: !Ref DeferredRefreshDispatchBatchSize
       Code:
         S3Bucket: !Ref CodeBucket
         S3Key: !Ref FunctionCodeKey
@@ -357,6 +438,27 @@ Resources:
       Principal: events.amazonaws.com
       Action: lambda:InvokeFunction
       SourceArn: !GetAtt ScoutsScheduledRefreshRule.Arn
+
+  ScoutsDeferredRefreshDispatchRule:
+    Type: AWS::Events::Rule
+    Condition: ShouldEnableDeferredRefreshOutbox
+    Properties:
+      Description: Bounded scheduled dispatcher for non-urgent Scouts enrichment work.
+      ScheduleExpression: !Ref DeferredRefreshDispatchExpression
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ScoutsFunction.Arn
+          Id: ScoutsDeferredRefreshDispatch
+          Input: '{"_deferredRefreshDispatch":true}'
+
+  ScoutsDeferredRefreshDispatchInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: ShouldEnableDeferredRefreshOutbox
+    Properties:
+      FunctionName: !Ref ScoutsFunction
+      Principal: events.amazonaws.com
+      Action: lambda:InvokeFunction
+      SourceArn: !GetAtt ScoutsDeferredRefreshDispatchRule.Arn
 
   ScoutsFunctionUrl:
     Type: AWS::Lambda::Url

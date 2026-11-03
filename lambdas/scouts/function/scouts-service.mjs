@@ -11,8 +11,11 @@ import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { SFNClient, DescribeExecutionCommand, ListExecutionsCommand } from '@aws-sdk/client-sfn';
 import { randomUUID } from 'crypto';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
-import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
+import { listRequestActivity, recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 import { createImageHeadMemo } from './image-head-memo.mjs';
+import { buildImageEnrichRuntimeStageIndex, findImageEnrichRuntimeStage } from './runtime-activity-index.mjs';
+import { runWithS3RequestMetrics, sendS3Command } from './s3-request-metrics.mjs';
+import { enqueueDeferredRefresh } from './runtime-deferred-refresh.mjs';
 import {
   getEnrichmentState,
   evaluateEnrichmentEligibility,
@@ -42,6 +45,12 @@ const PROCESSING_REQUESTS_RUNTIME_KEY = 'runtime/scoutsProcessing.json';
 const COMPLETED_REQUESTS_RUNTIME_KEY = 'runtime/scoutsComplete.json';
 const QUEUED_RUNTIME_STALE_PRUNE_MS = 24 * 60 * 60 * 1000;
 const MAX_HEX_READ_CACHE_ENTRIES = 500;
+const DEFERRED_REFRESH_ENABLED = ['true', '1', 'yes', 'on'].includes(
+  String(process.env.SCOUTS_DEFERRED_REFRESH_ENABLED || 'false').trim().toLowerCase(),
+);
+const LEGACY_RUNTIME_SNAPSHOTS_ENABLED = !['false', '0', 'no', 'off'].includes(
+  String(process.env.SCOUTS_LEGACY_RUNTIME_SNAPSHOTS ?? 'true').trim().toLowerCase(),
+);
 
 const SECTION_CUBS = 'cubs';
 const SECTION_BEAVERS = 'beavers';
@@ -887,7 +896,7 @@ async function migrateLegacyImageIfNeeded(bucket, imageUrl) {
       CopySource: `${bucket}/${details.key}`,
       Key: destinationKey,
     });
-    await s3.send(copyCommand);
+    await sendS3Command(copyCommand);
     console.log(`[Image Migration] Copied ${details.key} -> ${destinationKey}`);
     return details.hadLeadingSlash ? `/${destinationKey}` : destinationKey;
   } catch (error) {
@@ -951,53 +960,18 @@ function buildSortKey(value) {
 // a proxy or use a pre-authorised calendar URL in your configuration.
 
 const s3 = new S3Client({ region: process.env.AWS_REGION || 'eu-west-2' });
+
+function s3RequestSource(event = {}) {
+  const headers = event?.headers || {};
+  const scheduled = headers['x-scheduled-refresh'] ?? headers['X-Scheduled-Refresh'];
+  return String(scheduled || '').trim().toLowerCase() === 'true'
+    ? 'scheduled-refresh'
+    : 'non-scheduled';
+}
 const sqs = new SQSClient({ region: process.env.AWS_REGION || 'eu-west-2' });
 const sfn = new SFNClient({ region: process.env.AWS_REGION || 'eu-west-2' });
 const SCOUTS_REQUESTS_QUEUE_URL = SCOUTS_REQUESTS_QUEUE_URL_ENV || "https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequests";
 const ACTIVE_EXECUTIONS_LIMIT = 20;
-
-function buildImageEnrichRuntimeStageIndex(runtimeQueueSnapshots = {}) {
-  const stageIndex = new Map();
-  const snapshots = [
-    { snapshot: runtimeQueueSnapshots?.processingSnapshot, fallbackStage: 'processing' },
-    { snapshot: runtimeQueueSnapshots?.queuedSnapshot, fallbackStage: 'queued' },
-    { snapshot: runtimeQueueSnapshots?.completedSnapshot, fallbackStage: 'completed' },
-  ];
-
-  for (const { snapshot, fallbackStage } of snapshots) {
-    for (const entry of getRuntimeSnapshotRequests(snapshot)) {
-      const orchestrationType = normaliseRuntimeText(entry?.orchestrationType ?? null);
-      if (orchestrationType !== 'imageEnrich') {
-        continue;
-      }
-
-      const hex = normaliseRuntimeText(entry?.hex ?? null)?.toLowerCase() ?? null;
-      if (!hex) continue;
-
-      const updatedAt = firstDefinedValue(
-        entry?.updatedAt,
-        entry?.requestTime,
-        entry?.completedAt,
-        null,
-      );
-      const timestampValue = hasText(updatedAt) ? new Date(updatedAt).getTime() : 0;
-      const existing = stageIndex.get(hex);
-      if (existing && existing.timestampValue > timestampValue) {
-        continue;
-      }
-
-      stageIndex.set(hex, {
-        currentStage: normaliseRuntimeText(entry?.orchestrationStep ?? null) ?? fallbackStage,
-        workerStatus: normaliseRuntimeText(entry?.status ?? null) ?? fallbackStage,
-        requestId: normaliseRuntimeText(entry?.requestId ?? null),
-        updatedAt: hasText(updatedAt) ? String(updatedAt) : null,
-        timestampValue,
-      });
-    }
-  }
-
-  return stageIndex;
-}
 
 async function describeExecutionInput(executionArn) {
   if (!hasText(executionArn)) {
@@ -1014,7 +988,7 @@ async function describeExecutionInput(executionArn) {
   }
 }
 
-async function listActiveImageEnrichExecutions(runtimeQueueSnapshots = null) {
+async function listActiveImageEnrichExecutions() {
   const stateMachineArn = trimOptionalText(IMAGE_ENRICH_STATE_MACHINE_ARN);
   if (!stateMachineArn) {
     return {
@@ -1030,13 +1004,22 @@ async function listActiveImageEnrichExecutions(runtimeQueueSnapshots = null) {
     statusFilter: 'RUNNING',
     maxResults: ACTIVE_EXECUTIONS_LIMIT,
   }));
-
-  const runtimeStageIndex = buildImageEnrichRuntimeStageIndex(runtimeQueueSnapshots || {});
+  let runtimeStageIndex = buildImageEnrichRuntimeStageIndex([]);
+  if (Array.isArray(response?.executions) && response.executions.length > 0) {
+    try {
+      const activity = await listRequestActivity({ activeOnly: true, limit: 100 });
+      runtimeStageIndex = buildImageEnrichRuntimeStageIndex(activity?.requests || []);
+    } catch (error) {
+      // Step Functions is authoritative for execution state. The ledger only adds
+      // stage labels, so a missing/unavailable activity query must not hide a run.
+      console.warn('[Activity] Unable to load bounded image-enrichment stage metadata:', error?.name || 'unknown');
+    }
+  }
   const activeExecutions = Array.isArray(response?.executions)
     ? await Promise.all(response.executions.map(async (execution) => {
         const executionInput = await describeExecutionInput(execution?.executionArn ?? null);
         const hex = trimOptionalText(executionInput?.requestHex ?? executionInput?.hex ?? null)?.toLowerCase() ?? null;
-        const runtimeStage = hex ? runtimeStageIndex.get(hex) : null;
+        const runtimeStage = findImageEnrichRuntimeStage(runtimeStageIndex, executionInput, execution?.startDate);
         return {
           executionArn: execution?.executionArn ?? null,
           name: execution?.name ?? null,
@@ -1326,7 +1309,7 @@ async function putJsonToS3(bucket, key, payload, label, suppressLog = false) {
     CacheControl: 'no-store',
   });
 
-  await s3.send(command);
+  await sendS3Command(command);
   if (!suppressLog) {
     console.log(`Stored ${label} data in s3://${bucket}/${key}`);
   }
@@ -1341,7 +1324,7 @@ async function putRawIcsToS3(bucket, key, icsData, label) {
     CacheControl: 'max-age=300',
   });
 
-  await s3.send(command);
+  await sendS3Command(command);
   console.log(`Stored raw ${label} ICS data in s3://${bucket}/${key}`);
 }
 
@@ -1404,7 +1387,7 @@ async function downloadImageToS3(imageUrl, bucket, eventTitle) {
       CacheControl: 'public, max-age=31536000', // Cache for 1 year
     });
 
-    await s3.send(command);
+    await sendS3Command(command);
     console.log(`[Image Download] Uploaded image to s3://${bucket}/${s3Key}`);
 
     // Return the S3 website URL
@@ -1427,12 +1410,12 @@ async function downloadImageToS3(imageUrl, bucket, eventTitle) {
 async function getFreshIcsFromS3(bucket, key, freshnessMs = 60 * 60 * 1000) {
   try {
     const headCmd = new HeadObjectCommand({ Bucket: bucket, Key: key });
-    const head = await s3.send(headCmd);
+    const head = await sendS3Command(headCmd);
     const lastModified = head?.LastModified ? new Date(head.LastModified).getTime() : null;
     if (lastModified && Date.now() - lastModified <= freshnessMs) {
       // Read the object content and return it
       const getCmd = new GetObjectCommand({ Bucket: bucket, Key: key });
-      const resp = await s3.send(getCmd);
+      const resp = await sendS3Command(getCmd);
       const body = await resp.Body.transformToString();
       console.log(`Using cached ICS from s3://${bucket}/${key} (LastModified=${head.LastModified})`);
       return body;
@@ -1454,7 +1437,7 @@ async function getJsonFromS3(bucket, key, label) {
       Bucket: bucket,
       Key: key,
     });
-    const response = await s3.send(command);
+    const response = await sendS3Command(command);
     const bodyString = await response.Body.transformToString();
     const data = JSON.parse(bodyString);
     return data;
@@ -1471,7 +1454,7 @@ async function deleteObjectFromS3(bucket, key, label) {
     Bucket: bucket,
     Key: key,
   });
-  await s3.send(command);
+  await sendS3Command(command);
   console.log(`Deleted ${label} data from s3://${bucket}/${key}`);
 }
 
@@ -1485,7 +1468,7 @@ async function purgeEventFilesFromS3(bucket, prefix = 'events/') {
       Prefix: prefix,
       ContinuationToken: continuationToken,
     });
-    const response = await s3.send(listCommand);
+    const response = await sendS3Command(listCommand);
     const objects = response?.Contents || [];
 
     if (!objects.length && !response?.IsTruncated) {
@@ -1545,7 +1528,7 @@ async function deleteOrphanedHexFiles(bucket, agendaData, hexReadCache = null) {
       Prefix: 'events/',
       ContinuationToken: continuationToken,
     });
-    const response = await s3.send(listCommand);
+    const response = await sendS3Command(listCommand);
     const objects = response?.Contents || [];
 
     if (!objects.length && !response?.IsTruncated) {
@@ -1857,80 +1840,7 @@ async function checkEnrichmentEligibility(hex, stage, context = {}) {
   }
 }
 
-function mergeProcessingSnapshotIntoIndex(snapshot, index, eventByHex) {
-  const requests = Array.isArray(snapshot?.requests)
-    ? snapshot.requests
-    : (Array.isArray(snapshot?.observed?.requests) ? snapshot.observed.requests : []);
-  for (const request of requests) {
-    const hex = typeof request?.hex === 'string' ? request.hex.trim().toLowerCase() : '';
-    if (!hex) continue;
-
-    const requestSubject = typeof request?.subject === 'string' ? request.subject.trim().toLowerCase() : '';
-    if (requestSubject === 'tagline') {
-      addProcessingRealmToIndex(index, hex, 'tagline');
-      continue;
-    }
-    if (requestSubject === 'imagetheme') {
-      addProcessingRealmToIndex(index, hex, 'imageTheme');
-      continue;
-    }
-    if (requestSubject === 'imageurl') {
-      addProcessingRealmToIndex(index, hex, 'image');
-      continue;
-    }
-
-    const requestRealm = normaliseProcessingRealm(request?.realm);
-    if (requestRealm) {
-      addProcessingRealmToIndex(index, hex, requestRealm);
-      continue;
-    }
-
-    const derivedRealm = deriveProcessingRealmFromEvent(eventByHex.get(hex));
-    if (derivedRealm) {
-      addProcessingRealmToIndex(index, hex, derivedRealm);
-    }
-  }
-
-  const links = Array.isArray(snapshot?.links)
-    ? snapshot.links
-    : (Array.isArray(snapshot?.observed?.links) ? snapshot.observed.links : []);
-  for (const link of links) {
-    const hex = typeof link?.hex === 'string' ? link.hex.trim().toLowerCase() : '';
-    if (!hex) continue;
-
-    const linkedRealm = normaliseProcessingRealm(link?.realm);
-    if (linkedRealm) {
-      addProcessingRealmToIndex(index, hex, linkedRealm);
-      continue;
-    }
-
-    const linkRealm = typeof link?.realm === 'string' ? link.realm.trim().toLowerCase() : '';
-    if (linkRealm === 'scoutsrequest') {
-      const derivedRealm = deriveProcessingRealmFromEvent(eventByHex.get(hex));
-      if (derivedRealm) {
-        addProcessingRealmToIndex(index, hex, derivedRealm);
-      }
-    }
-  }
-
-  const hexes = Array.isArray(snapshot?.hexes)
-    ? snapshot.hexes
-    : (Array.isArray(snapshot?.observed?.hexes)
-      ? snapshot.observed.hexes
-      : (Array.isArray(snapshot?.hexIds)
-        ? snapshot.hexIds
-        : (Array.isArray(snapshot?.observed?.hexIds) ? snapshot.observed.hexIds : [])));
-  for (const rawHex of hexes) {
-    const hex = typeof rawHex === 'string' ? rawHex.trim().toLowerCase() : '';
-    if (!hex) continue;
-    const derivedRealm = deriveProcessingRealmFromEvent(eventByHex.get(hex));
-    if (derivedRealm) {
-      addProcessingRealmToIndex(index, hex, derivedRealm);
-    }
-  }
-}
-
-async function readRuntimeQueueSnapshots(bucket) {
+async function readLegacyRuntimeQueueSnapshots(bucket) {
   const queuedSnapshot = await getJsonFromS3(bucket, QUEUED_REQUESTS_RUNTIME_KEY, 'runtime:queuedrequests');
   const processingSnapshot = await getJsonFromS3(bucket, PROCESSING_REQUESTS_RUNTIME_KEY, 'runtime:processingrequests');
   const completedSnapshot = await getJsonFromS3(bucket, COMPLETED_REQUESTS_RUNTIME_KEY, 'runtime:completedrequests');
@@ -1956,35 +1866,6 @@ function summariseRuntimeQueueSnapshot(snapshot) {
       delayed: Number.isFinite(counts.delayed) ? counts.delayed : null,
     } : null,
   };
-}
-
-async function buildActiveProcessingIndex(bucket, events, liveQueuedByHex = new Map(), runtimeSnapshots = null) {
-  const activeProcessingByHex = new Map();
-  const eventByHex = new Map();
-  for (const event of events || []) {
-    const hex = typeof event?.hex === 'string' ? event.hex.trim().toLowerCase() : '';
-    if (!hex || eventByHex.has(hex)) continue;
-    eventByHex.set(hex, event);
-  }
-
-  const snapshots = runtimeSnapshots && typeof runtimeSnapshots === 'object'
-    ? runtimeSnapshots
-    : await readRuntimeQueueSnapshots(bucket);
-  const queuedSnapshot = snapshots?.queuedSnapshot ?? null;
-  const processingSnapshot = snapshots?.processingSnapshot ?? null;
-  mergeProcessingSnapshotIntoIndex(queuedSnapshot, activeProcessingByHex, eventByHex);
-  mergeProcessingSnapshotIntoIndex(processingSnapshot, activeProcessingByHex, eventByHex);
-
-  if (liveQueuedByHex instanceof Map) {
-    for (const [hex, realms] of liveQueuedByHex.entries()) {
-      if (!Array.isArray(realms)) continue;
-      for (const realm of realms) {
-        addProcessingRealmToIndex(activeProcessingByHex, hex, realm);
-      }
-    }
-  }
-
-  return activeProcessingByHex;
 }
 
 function hydrateStoredDataset(dataset) {
@@ -2521,7 +2402,7 @@ async function imageExistsInS3(bucket, imageUrl, imageHeadMemo = null) {
 
   const check = async () => {
     try {
-      await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+      await sendS3Command(new HeadObjectCommand({ Bucket: bucket, Key: key }));
       return true;
     } catch (error) {
       // An absent image is repairable; permission errors, throttling and S3
@@ -2668,6 +2549,12 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
   const eventsAtThreshold = [];
   const processedTitles = new Set(); // Track processed titles to avoid duplicates
   const liveQueuedProcessingByHex = new Map(); // Map<hexValue, Array<'tagline'|'imageTheme'|'image'>>
+  let deferredCount = 0;
+  const deferredSourceKey = (event) => {
+    const token = (value, fallback) => String(value ?? '')
+      .trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '').slice(0, 32) || fallback;
+    return `${token(event?.icsType, 'calendar')}#${token(event?.section, 'all')}`;
+  };
 
   for (let index = 0; index < events.length; index++) {
     const event = events[index];
@@ -2874,6 +2761,8 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
           hexKey,
           label: hexLabel,
           hexFileData,
+          sourceEvent: baseEvent,
+          sourceKey: deferredSourceKey(baseEvent),
         });
       }
 
@@ -2911,14 +2800,29 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
         }
 
         if (queuedScoutRequest) {
-          // Collect HEX for individual notification instead of sending immediately
-          if (!hexNotifications.has(titleHex) && newScoutRequestCount < maxScoutRequestLimit) {
-            hexNotifications.set(titleHex, {
-              realm: 'scoutsRequest',
-              hexData: hexFileData,
-              processingRealm: updatedProcessingRealm,
-            });
-            newScoutRequestCount += 1;
+          if (!hexNotifications.has(titleHex)) {
+            if (newScoutRequestCount < maxScoutRequestLimit) {
+              hexNotifications.set(titleHex, {
+                realm: 'scoutsRequest',
+                hexData: hexFileData,
+                processingRealm: updatedProcessingRealm,
+              });
+              newScoutRequestCount += 1;
+            } else if (options.deferExcess === true) {
+              const generationId = buildGenerationId(titleHex, updatedProcessingRealm, baseEvent);
+              const queued = await enqueueDeferredRefresh({
+                hex: titleHex,
+                stage: updatedProcessingRealm,
+                generationId,
+                title: eventTitle,
+                subject: hexFileData,
+                sourceKey: deferredSourceKey(baseEvent),
+              });
+              if (queued.enqueued) {
+                deferredCount += 1;
+                addProcessingRealmToIndex(liveQueuedProcessingByHex, titleHex, updatedProcessingRealm);
+              }
+            }
           }
         }
       }
@@ -2944,7 +2848,23 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
     for (const item of eventsAtThreshold) {
       // Respect the maxScoutRequestLimit for retries too
       if (retryCount >= maxScoutRequestLimit) {
-        break;
+        if (!options.deferExcess) break;
+        const retryStage = deriveProcessingRealmFromEvent(item.hexFileData) || 'tagline';
+        const eligibility = await checkEnrichmentEligibility(item.hex, retryStage, { event: item.sourceEvent || item.hexFileData });
+        if (!eligibility.eligible) continue;
+        const deferred = await enqueueDeferredRefresh({
+          hex: item.hex,
+          stage: retryStage,
+          generationId: buildGenerationId(item.hex, retryStage, item.sourceEvent || item.hexFileData),
+          title: item.title,
+          subject: item.hexFileData,
+          sourceKey: item.sourceKey || deferredSourceKey(item.sourceEvent || item.hexFileData),
+        });
+        if (deferred.enqueued) {
+          deferredCount += 1;
+          addProcessingRealmToIndex(liveQueuedProcessingByHex, item.hex, retryStage);
+        }
+        continue;
       }
       
       try {
@@ -3001,6 +2921,7 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
   return {
     events: enrichedEvents,
     liveQueuedProcessingByHex,
+    deferredCount,
   };
 }
 
@@ -3046,7 +2967,7 @@ function formatInvocationResponse({ isHttpInvocation, corsHeaders, statusCode, b
   };
 }
 
-export async function lambdaHandler(event = {}) {
+async function lambdaHandlerCore(event = {}) {
   const corsHeaders = {
     'Content-Type': 'application/json',
   };
@@ -4486,7 +4407,9 @@ export async function lambdaHandler(event = {}) {
       console.log('[Agenda Command] Skipping calendar refresh; using existing agenda.json for enrichment only.');
     }
 
-    const runtimeQueueSnapshots = await readRuntimeQueueSnapshots(bucket);
+    const runtimeQueueSnapshots = LEGACY_RUNTIME_SNAPSHOTS_ENABLED
+      ? await readLegacyRuntimeQueueSnapshots(bucket)
+      : null;
     const existingAgendaRaw = await (resetRequested ? null : getJsonFromS3(bucket, agendaKey, 'agenda'));
     const existingAgenda = hydrateStoredDataset(existingAgendaRaw);
     const mergedAgenda = mergeEvents(existingAgenda, dedupedNewEvents);
@@ -4501,12 +4424,23 @@ export async function lambdaHandler(event = {}) {
       enrichedAgenda = mergedAgenda.map(stripEventEnhancements);
       console.log('[Images] Reset requested: cleared tagline and image fields');
     } else {
-      const enrichmentOptions = maxScoutRequests !== null ? { maxScoutRequests } : undefined;
+      const isInternalScheduledRefresh = event?._scheduledRefresh === true;
+      const enrichmentOptions = maxScoutRequests !== null
+        ? {
+            maxScoutRequests,
+            deferExcess: DEFERRED_REFRESH_ENABLED && isInternalScheduledRefresh && bodyParams?.deferExcess === true,
+          }
+        : undefined;
       const enrichmentResult = await enrichEventsWithAI(mergedAgenda, aiContext, 'agenda', enrichmentOptions);
       enrichedAgenda = Array.isArray(enrichmentResult?.events) ? enrichmentResult.events : [];
       liveQueuedProcessingByHex = enrichmentResult?.liveQueuedProcessingByHex instanceof Map
         ? enrichmentResult.liveQueuedProcessingByHex
         : new Map();
+      if (Number(enrichmentResult?.deferredCount || 0) > 0) {
+        console.log('[DeferredRefresh] Scheduled candidates added to the outbox.', {
+          count: Number(enrichmentResult.deferredCount),
+        });
+      }
     }
 
     logImageDiagnostics('Final agenda before storage', enrichedAgenda);
@@ -4586,7 +4520,7 @@ export async function lambdaHandler(event = {}) {
           Prefix: 'events/',
           ContinuationToken: continuationToken,
         });
-        const response = await s3.send(listCommand);
+        const response = await sendS3Command(listCommand);
         const objects = response?.Contents || [];
 
         if (!objects.length && !response?.IsTruncated) {
@@ -4639,7 +4573,7 @@ export async function lambdaHandler(event = {}) {
 
     let imageEnrichExecutions = null;
     try {
-      imageEnrichExecutions = await listActiveImageEnrichExecutions(runtimeQueueSnapshots);
+      imageEnrichExecutions = await listActiveImageEnrichExecutions();
     } catch (stepFunctionsError) {
       console.warn('[Step Functions] Failed to list active image-enrich executions:', stepFunctionsError?.message || String(stepFunctionsError));
       imageEnrichExecutions = {
@@ -4662,9 +4596,20 @@ export async function lambdaHandler(event = {}) {
       normalization: buildNormalizationSummary(),
       processedEvents,
       runtimeQueueSnapshots: {
-        queued: summariseRuntimeQueueSnapshot(runtimeQueueSnapshots?.queuedSnapshot),
-        processing: summariseRuntimeQueueSnapshot(runtimeQueueSnapshots?.processingSnapshot),
-        completed: summariseRuntimeQueueSnapshot(runtimeQueueSnapshots?.completedSnapshot),
+        source: LEGACY_RUNTIME_SNAPSHOTS_ENABLED ? 'legacy-s3' : 'retired',
+        available: LEGACY_RUNTIME_SNAPSHOTS_ENABLED,
+        note: LEGACY_RUNTIME_SNAPSHOTS_ENABLED
+          ? null
+          : 'Legacy request snapshots are disabled; request lifecycle is available through Activity and live queue counts are available through the Operations queue-status command.',
+        queued: LEGACY_RUNTIME_SNAPSHOTS_ENABLED
+          ? summariseRuntimeQueueSnapshot(runtimeQueueSnapshots?.queuedSnapshot)
+          : null,
+        processing: LEGACY_RUNTIME_SNAPSHOTS_ENABLED
+          ? summariseRuntimeQueueSnapshot(runtimeQueueSnapshots?.processingSnapshot)
+          : null,
+        completed: LEGACY_RUNTIME_SNAPSHOTS_ENABLED
+          ? summariseRuntimeQueueSnapshot(runtimeQueueSnapshots?.completedSnapshot)
+          : null,
       },
       stepFunctions: {
         imageEnrich: imageEnrichExecutions,
@@ -4749,6 +4694,10 @@ export async function lambdaHandler(event = {}) {
       message: error.message,
     });
   }
+}
+
+export async function lambdaHandler(event = {}) {
+  return runWithS3RequestMetrics(s3RequestSource(event), () => lambdaHandlerCore(event));
 }
 
 export const handler = lambdaHandler;

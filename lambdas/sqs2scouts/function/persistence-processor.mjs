@@ -10,7 +10,6 @@ import { getOptionalSecret, getRequiredSecret } from '/opt/nodejs/ssm-secrets.mj
 import { recordRequestActivity as defaultRecordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 import { publishCanonicalEventToAgenda as defaultPublishCanonicalEventToAgenda } from './agenda-publisher.mjs';
 import { generateGeminiTextWithFallback, parseGeminiTextModels, GEMINI_TEXT_RESPONSE_SCHEMAS, validateGeminiTextResponse } from './gemini-text-models.mjs';
-import { buildRuntimeRequestEntry } from './runtime-request-entry.mjs';
 import { reconcileSlackDecision } from './slack-decision-sync.mjs';
 import {
     buildGenerationId,
@@ -60,7 +59,6 @@ const SCOUTS_DECISION_QUEUE_URL = process.env.SCOUTS_DECISION_QUEUE_URL || 'http
 const SCOUTS_PROCESSING_QUEUE_URL_FALLBACK =
     process.env.SCOUTS_PROCESSING_QUEUE_URL
     || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing';
-const COMPLETED_REQUESTS_RUNTIME_KEY = 'runtime/scoutsComplete.json';
 const APPROVAL_METADATA_PREFIX = process.env.APPROVAL_METADATA_PREFIX || 'approvals';
 const S3_WEBSITE_BASE_URL = process.env.S3_WEBSITE_BASE_URL || 'https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com';
 const S3_PUBLIC_ASSET_BASE_URL = (process.env.S3_PUBLIC_ASSET_BASE_URL || '').trim() ||
@@ -266,115 +264,6 @@ function getHexHintFromMessageBody(messageBody) {
     return getHexHintFromSubject(messageBody?.subject);
 }
 
-function normaliseActionHint(value) {
-    if (value === undefined || value === null) return null;
-    const normalized = String(value).trim();
-    return normalized || null;
-}
-
-function getRequestTimeHint(record, messageBody) {
-    const directTimeCandidates = [
-        messageBody?.requestTime,
-        messageBody?.requestedAt,
-        messageBody?.timestamp,
-        messageBody?.createdAt,
-    ];
-
-    for (const candidate of directTimeCandidates) {
-        if (typeof candidate !== 'string' || !candidate.trim()) continue;
-        const parsed = new Date(candidate);
-        if (!Number.isNaN(parsed.getTime())) {
-            return parsed.toISOString();
-        }
-    }
-
-    const sentTimestamp = Number(record?.attributes?.SentTimestamp);
-    if (Number.isFinite(sentTimestamp) && sentTimestamp > 0) {
-        return new Date(sentTimestamp).toISOString();
-    }
-
-    const firstReceiveTimestamp = Number(record?.attributes?.ApproximateFirstReceiveTimestamp);
-    if (Number.isFinite(firstReceiveTimestamp) && firstReceiveTimestamp > 0) {
-        return new Date(firstReceiveTimestamp).toISOString();
-    }
-
-    return null;
-}
-
-function deduplicateRuntimeRequestEntries(entries = []) {
-    const deduped = new Map();
-
-    for (const entry of entries) {
-        if (!entry || typeof entry !== 'object') continue;
-        const taskToken = normaliseRuntimeText(entry.taskToken ?? null);
-        const key = taskToken
-            ? [
-                'taskToken',
-                taskToken,
-                entry.orchestrationStep ?? '',
-                entry.status ?? '',
-            ].join('|')
-            : [
-                entry.requestId ?? '',
-                entry.messageId ?? '',
-                entry.hex ?? '',
-                entry.realm ?? '',
-                entry.action ?? '',
-                entry.status ?? '',
-            ].join('|');
-        deduped.set(key, entry);
-    }
-
-    return Array.from(deduped.values()).slice(0, 200);
-}
-
-function collectRequestHints(record, messageBody) {
-    const requestIds = new Set();
-    const hexes = new Set();
-    const links = [];
-
-    const requestId =
-        (messageBody && typeof messageBody === 'object'
-            ? (messageBody.requestId ?? null)
-            : null)
-        ?? record?.messageId
-        ?? null;
-    const normalizedRequestId = requestId ? String(requestId) : null;
-
-    if (record?.messageId) {
-        requestIds.add(String(record.messageId));
-    }
-    if (normalizedRequestId) {
-        requestIds.add(normalizedRequestId);
-    }
-
-    if (messageBody && typeof messageBody === 'object') {
-        const hexHint = getHexHintFromSubject(messageBody.subject);
-        if (hexHint) {
-            hexes.add(hexHint);
-            if (normalizedRequestId) {
-                links.push({
-                    requestId: normalizedRequestId,
-                    hex: hexHint,
-                    sourceMessageId: record?.messageId ? String(record.messageId) : null,
-                    realm: messageBody?.realm ?? null,
-                    action: messageBody?.action ?? null,
-                });
-            }
-        }
-    }
-
-    const requests = [buildRuntimeRequestEntry(record, messageBody, 'processing')]
-        .filter((entry) => entry.requestId || entry.messageId || entry.hex || entry.title);
-
-    return {
-        requestIds: Array.from(requestIds),
-        hexes: Array.from(hexes),
-        links,
-        requests,
-    };
-}
-
 function buildRequestContext(record, messageBody) {
     const baseRequestId =
         messageBody?.requestId
@@ -438,56 +327,6 @@ async function fetchQueueDepthSnapshot(queueUrl) {
             delayed: null,
             error: error?.message || String(error),
         };
-    }
-}
-
-async function writeRuntimeSnapshot(key, payload) {
-    const command = new PutObjectCommand({
-        Bucket: TARGET_BUCKET,
-        Key: key,
-        Body: JSON.stringify(payload, null, 2),
-        ContentType: 'application/json',
-        CacheControl: 'no-store',
-    });
-    await s3Client.send(command);
-}
-
-function withRuntimeRequestStatus(entries = [], status = 'completed', failure = null) {
-    return (Array.isArray(entries) ? entries : []).map((entry) => ({
-        ...entry,
-        status,
-        completedAt: new Date().toISOString(),
-        ...(failure ? { failure } : {}),
-    }));
-}
-
-async function persistCompletedRequestsRuntimeSnapshot(records, requestIds, hexes, links, requests = [], outcome = {}) {
-    const payload = {
-        source: 'sqs2scouts',
-        queue: 'scoutsComplete',
-        updatedAt: new Date().toISOString(),
-        requests: deduplicateRuntimeRequestEntries(withRuntimeRequestStatus(
-            requests,
-            outcome.status || 'completed',
-            outcome.failure || null,
-        )),
-        requestIds: Array.from(new Set((requestIds || []).filter(Boolean))).slice(0, 50),
-        hexes: Array.from(new Set((hexes || []).filter(Boolean))).slice(0, 50),
-        links: Array.from(
-            new Map(
-                (Array.isArray(links) ? links : [])
-                    .filter((entry) => entry && entry.requestId && entry.hex)
-                    .map((entry) => [`${entry.requestId}|${entry.hex}`, entry])
-            ).values()
-        ).slice(0, 100),
-        recordCount: Array.isArray(records) ? records.length : 0,
-    };
-
-    try {
-        await writeRuntimeSnapshot(COMPLETED_REQUESTS_RUNTIME_KEY, payload);
-        console.log(`[Runtime] Wrote queue snapshot to ${COMPLETED_REQUESTS_RUNTIME_KEY}`);
-    } catch (error) {
-        console.warn('[Runtime] Failed writing scoutsComplete snapshot:', error?.message || error);
     }
 }
 
@@ -2013,6 +1852,7 @@ async function saveHexEventToS3(hexValue, payload) {
                 eTag: verifyResponse?.ETag || null,
                 versionId: verifyResponse?.VersionId || null,
             });
+            return verified;
         } catch (verifyError) {
             console.error(`[Hex] Read-after-write verification failed for s3://${bucket}/${key}:`, verifyError?.message || verifyError);
             throw verifyError;
@@ -3346,32 +3186,17 @@ async function lambdaHandlerWithDependencies(event) {
     console.log('[sqs2scouts] Lambda invoked:', JSON.stringify(summarizeInvocationEvent(event)));
     const directInvocation = isStepFunctionsInvocation(event);
     const records = Array.isArray(event?.Records) ? event.Records : [];
-    const observedRequestIds = [];
-    const observedHexes = [];
-    const observedLinks = [];
-    const observedRequests = [];
     let runtimeOutcome = { status: 'needs_attention', failure: { type: 'NO_SUCCESS_OUTCOME', message: 'Processing did not reach a verified terminal outcome' } };
     let activityContext = null;
     try {
         if (directInvocation) {
-            const hints = collectRequestHints(null, event);
-            observedRequestIds.push(...hints.requestIds);
-            observedHexes.push(...hints.hexes);
-            observedLinks.push(...hints.links);
-            observedRequests.push(...hints.requests);
         } else {
             for (const record of records) {
                 if (record?.eventSource !== 'aws:sqs') continue;
                 try {
                     const body = typeof record.body === 'string' ? JSON.parse(record.body) : record.body;
-                    const hints = collectRequestHints(record, body);
-                    observedRequestIds.push(...hints.requestIds);
-                    observedHexes.push(...hints.hexes);
-                    observedLinks.push(...hints.links);
-                    observedRequests.push(...hints.requests);
                 } catch {
                     if (record?.messageId) {
-                        observedRequestIds.push(String(record.messageId));
                     }
                 }
             }
@@ -3603,8 +3428,7 @@ async function lambdaHandlerWithDependencies(event) {
             }
 
             try {
-                await saveHexEventToS3(hexValue, hexData);
-                const persisted = await loadHexEventFromS3(hexValue);
+                const persisted = await saveHexEventToS3(hexValue, hexData);
                 const persistedTagline = getTagline(persisted);
                 const persistedImageTheme = getImageThemeValue(persisted);
 
@@ -3744,8 +3568,7 @@ async function lambdaHandlerWithDependencies(event) {
             }
 
             try {
-                await saveHexEventToS3(hexValue, hexData);
-                const persisted = await loadHexEventFromS3(hexValue);
+                const persisted = await saveHexEventToS3(hexValue, hexData);
                 if (getImageThemeValue(persisted) !== result.imageTheme) throw new Error('Image theme enrichment read-back did not contain the generated field');
                 await publishHexEventToAgenda(hexValue, hexData);
             } catch (error) {
@@ -4140,7 +3963,7 @@ async function lambdaHandlerWithDependencies(event) {
     }
 }
 
-export { buildRuntimeRequestEntry };
+
 
 async function runWithPersistenceDependencies(event, dependencies = {}) {
     return persistenceDependencyContext.run(dependencies, () => lambdaHandlerWithDependencies(event));
