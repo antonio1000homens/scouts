@@ -392,6 +392,23 @@ best-effort and unsuitable for complete request accounting. Use them as
 approximate trends only; full-day and seven-day post-change totals and posted
 S3 charges remain unverified.
 
+The collector partitions CloudWatch Logs searches into one-hour windows so a
+busy log group cannot consume the full query's bounded page budget before the
+scheduled-refresh summaries are reached. A 24-hour read-only recheck on
+2026-11-03 verified the Scouts account and returned complete metric query
+statuses with no S3 metric pagination. The request window was
+2026-11-02 21:09:46 through 2026-11-03 21:09:46 UTC; nonzero S3 minute bins
+covered 21:34 through 20:50 UTC, showing about 19 minutes of metric delay at
+the query end. Bucket totals were 12,681 GET, 2,081 HEAD, 135 LIST and 360 PUT.
+The same run recovered three SDK summaries and four per-refresh summaries with
+neither log query truncated. The three SDK samples (GET/HEAD/LIST/PUT) were
+180/38/2/1 at 19:08, then 177/38/2/1 at 19:32 and 19:44. The 19:44 sample
+classified all SDK requests to the data bucket; earlier summaries predate the
+bucket-role logging deployment. Each per-refresh summary recorded 98 reused
+HEX reads and 36 image HEAD requests with 6 cache hits. These are individual
+invocation and bucket-wide trend samples, not a clean before/after bill
+comparison or proof that the scheduled refresh caused all bucket requests.
+
 ## Rollout and rollback
 
 1. **Completed:** PRs #175–#182 are merged. PR #179 deployment run
@@ -428,11 +445,12 @@ S3 charges remain unverified.
   aggregates cannot be reconstructed from queue counts or a bounded activity
   query. Preserve old S3 objects until the audit and production acceptance
   are complete.
-- S3 canonical persistence integrity: review unconditional PUT+GET
-  verification and duplicate caller readbacks; do **not** remove these
-  until conditional revision/ETag contracts and failure tests pass. The two
-  redundant caller GETs have now been removed by reusing the verified response;
-  the remaining unconditional PUT and single GET are unchanged.
+- S3 canonical persistence integrity: open PR #191 proposes replacing the
+  trailing GET in `saveHexEventToS3()` with a validated S3 SHA-256 full-object
+  checksum and failing closed on a mismatch. Caller field checks and separate
+  revisioned approval ETag guards remain in place. The one-GET-per-save source
+  change is not merged or deployed yet; its request savings require post-rollout
+  daily and seven-day measurement against bucket-wide traffic.
 - Approval idempotency currently uses S3 conditional PUT (`If-None-Match` for
   first claim, `If-Match` for stale-claim takeover and completion) plus GET to
   arbitrate conflicts and read the winning result. This preserves a durable
