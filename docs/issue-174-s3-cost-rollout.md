@@ -445,12 +445,12 @@ comparison or proof that the scheduled refresh caused all bucket requests.
   aggregates cannot be reconstructed from queue counts or a bounded activity
   query. Preserve old S3 objects until the audit and production acceptance
   are complete.
-- S3 canonical persistence integrity: PR #191 replaces the trailing GET in
-  `saveHexEventToS3()` with a validated S3 SHA-256 full-object checksum and
-  fails closed on a mismatch. Caller field checks and the separate revisioned
-  approval ETag guards remain in place. The one-GET-per-save source change is
-  not deployed yet; its request savings require post-rollout daily and seven-day
-  measurement against bucket-wide traffic.
+- S3 canonical persistence integrity: open PR #191 proposes replacing the
+  trailing GET in `saveHexEventToS3()` with a validated S3 SHA-256 full-object
+  checksum and failing closed on a mismatch. Caller field checks and separate
+  revisioned approval ETag guards remain in place. The one-GET-per-save source
+  change is not merged or deployed yet; its request savings require post-rollout
+  daily and seven-day measurement against bucket-wide traffic.
 - Approval idempotency currently uses S3 conditional PUT (`If-None-Match` for
   first claim, `If-Match` for stale-claim takeover and completion) plus GET to
   arbitrate conflicts and read the winning result. This preserves a durable
