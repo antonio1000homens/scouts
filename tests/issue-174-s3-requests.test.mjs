@@ -91,11 +91,14 @@ test('active Step Functions stage metadata comes from bounded activity rows, not
   assert.equal(findImageEnrichRuntimeStage(buildImageEnrichRuntimeStageIndex([]), { requestId: 'legacy-no-row', hex: 'aa' }), null);
 });
 
-test('S3 lifecycle snapshot cutover is opt-in until parity is verified, with a rollback path', () => {
+test('calendar refresh never reads or republishes legacy runtime snapshots', () => {
   const scouts = source('../lambdas/scouts/function/scouts-service.mjs');
   assert.doesNotMatch(scouts, /touchQueuedRuntimeSnapshot/);
   assert.doesNotMatch(scouts, /appendQueuedRuntimeSnapshot/);
-  assert.match(scouts, /LEGACY_RUNTIME_SNAPSHOTS_ENABLED\s*\? await readLegacyRuntimeQueueSnapshots\(bucket\)\s*:\s*null/);
+  assert.doesNotMatch(scouts, /readLegacyRuntimeQueueSnapshots|pruneQueuedRuntimeRequests|buildQueuedRuntimeSnapshotPayload/);
+  assert.doesNotMatch(scouts, /runtime\/scouts(?:Queued|Processing|Complete)\.json/);
+  assert.match(scouts, /runtimeQueueSnapshots:\s*\{\s*source: 'retired',\s*available: false/);
+  assert.match(scouts, /Calendar refresh no longer reads legacy request snapshots/);
   assert.match(scouts, /if \(Array\.isArray\(response\?\.executions\) && response\.executions\.length > 0\) \{[\s\S]*?listRequestActivity\(\{ activeOnly: true, limit: 100 \}\)/);
   assert.match(scouts, /findImageEnrichRuntimeStage\(runtimeStageIndex, executionInput, execution\?\.startDate\)/);
   assert.doesNotMatch(scouts, /buildActiveProcessingIndex/);
