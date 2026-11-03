@@ -90,6 +90,32 @@ without those measurements. If the GSI/query model exceeds safe provisioned
 capacity, retain on-demand mode or use bounded scheduled scans only after
 measuring their read cost.
 
+## Read-only DynamoDB capacity evidence (2026-11-03 19:59 UTC)
+
+AWS STS verified account `553490163883` before this read. All three existing
+tables remain `PAY_PER_REQUEST`; `scouts-request-activity` has zero items, and
+`scouts-deferred-refresh` is not present. A seven-day `GetMetricData` query
+(2026-10-27 19:59 through 2026-11-03 19:59 UTC) returned complete one-minute
+series with 10,078 points per metric:
+
+| Resource | Consumed read units | Nonzero minutes | Largest one-minute sum |
+|---|---:|---:|---:|
+| `scouts-enrichment-state` table | 5,709.5 | 343 | 927.5 at Nov 1 23:01 UTC |
+| `scouts-gemini-usage` table | 6 | 3 | 2 at Nov 1 23:00 UTC |
+| `scouts-request-activity` table | 6 | 3 | 2 at Nov 1 23:00 UTC |
+| `scouts-request-activity/activity-feed` GSI | 3 | 4 | 1.5 at Nov 3 19:23 UTC |
+
+All four table/index write-capacity series had zero consumed units in this
+window. The enrichment-state maximum is a one-minute sum: it is a 15.46 RCU/s
+minute-average equivalent only if consumption was uniform, and does not bound
+the per-second peak or concurrency. The window also contains no request-activity
+rows and no deferred-outbox traffic, so it does not represent the read/write
+mix or retry amplification expected after enabling the outbox. This readback
+does not establish unused account free-tier capacity. Do not enable the outbox
+or change billing modes on the strength of these metrics; a representative
+benchmark, shared-account allowance check and throttling/retry acceptance are
+still required.
+
 Implementation acceptance:
 
 - Concurrent duplicate discoveries create one active item per work key.
@@ -105,6 +131,8 @@ Implementation acceptance:
   size have explicit rollback settings.
 
 The queue code and hermetic failure tests are implemented, but the feature is
-not production-validated. Capacity benchmarking, deployment, live queue-age
-and drain-lag proof, and the shared provisioned-capacity decision remain before
-it can satisfy the queue rollout portion of issue #174.
+not production-validated. The seven-day live capacity readback above is useful
+baseline evidence, not a workload benchmark: capacity benchmarking,
+deployment, live queue-age and drain-lag proof, and the shared
+provisioned-capacity decision remain before it can satisfy the queue rollout
+portion of issue #174.
