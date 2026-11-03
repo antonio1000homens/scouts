@@ -26,6 +26,17 @@ test('image HEAD checks are shared across duplicate events in one invocation', a
   assert.deepEqual(memo.stats(), { requests: 3, cacheHits: 19 });
 });
 
+test('public image CDN routing leaves fresh agenda reads on the disabled-cache behavior', () => {
+  const loader = source('../website/scripts/event-loader.js');
+  const cloudfront = source('../cloudfront-stack.yaml');
+
+  assert.match(loader, /const imagePath = trimmed\.startsWith\('\/'\) \? trimmed : `\/\$\{trimmed\}`/);
+  assert.match(loader, /new URL\(imagePath, window\.location\.href\)/);
+  assert.match(loader, /fetch\(url, \{ cache: 'no-store' \}\)/);
+  assert.match(cloudfront, /DefaultCacheBehavior:[\s\S]*?CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6/);
+  assert.match(cloudfront, /PathPattern: \/agenda\.json[\s\S]*?CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad/);
+});
+
 test('missing object is cached for this invocation but rechecked on the next', async () => {
   let checks = 0;
   const check = async () => { checks += 1; return false; };
