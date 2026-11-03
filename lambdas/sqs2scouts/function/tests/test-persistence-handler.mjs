@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -40,8 +41,9 @@ async function loadPersistenceModule(store, sentMessages) {
         return { Body: body(store[Key]), ETag: '"fixture"' };
       }
       if (request.name === 'PutObjectCommand') {
-        store[Key] = JSON.parse(Buffer.from(request.input.Body).toString('utf8'));
-        return { ETag: '"fixture-after"' };
+        const body = Buffer.from(request.input.Body).toString('utf8');
+        store[Key] = JSON.parse(body);
+        return { ETag: '"fixture-after"', ...(request.input.ChecksumAlgorithm === 'SHA256' ? { ChecksumSHA256: crypto.createHash('sha256').update(body).digest('base64') } : {}) };
       }
       throw new Error(`Unexpected S3 command ${request.name}`);
     }
@@ -77,7 +79,7 @@ async function loadPersistenceModule(store, sentMessages) {
     if (specifier === '@aws-sdk/client-s3') return synthetic(specifier, { S3Client, DeleteObjectCommand: command('DeleteObjectCommand'), GetObjectCommand: command('GetObjectCommand'), ListObjectsV2Command: command('ListObjectsV2Command'), PutObjectCommand: command('PutObjectCommand') });
     if (specifier === '@aws-sdk/client-sqs') return synthetic(specifier, { SQSClient: class {}, SendMessageCommand: command('SendMessageCommand'), GetQueueAttributesCommand: command('GetQueueAttributesCommand') });
     if (specifier === '@aws-sdk/client-sfn') return synthetic(specifier, { SFNClient: class {}, SendTaskFailureCommand: command('SendTaskFailureCommand'), SendTaskSuccessCommand: command('SendTaskSuccessCommand') });
-    if (specifier === 'crypto') return synthetic(specifier, { default: { randomUUID: () => 'fixture-request', randomBytes: () => Buffer.from('fixture') } });
+    if (specifier === 'crypto') return synthetic(specifier, { default: { randomUUID: () => 'fixture-request', randomBytes: () => Buffer.from('fixture'), createHash: crypto.createHash } });
     if (specifier === 'https') return synthetic(specifier, { default: { request: () => { throw new Error('Unexpected HTTPS call'); } } });
     if (specifier === 'fs') return synthetic(specifier, { readFileSync: (file) => String(file).endsWith('scouts.conf') ? JSON.stringify({}) : readFileSync(file) });
     if (specifier === 'sharp') return synthetic(specifier, { default: () => ({}) });
@@ -178,18 +180,21 @@ test('field-level persist aliases update canonical metadata instead of being ove
 test('real persistence handler merges canonical sparse field saves without clearing unrelated metadata', async () => {
   const store = fixtureStore();
   const sentMessages = [];
+  const eventObjectCalls = [];
   const { createPersistenceHandler } = await loadPersistenceModule(store, sentMessages);
   const handler = createPersistenceHandler({
     recordRequestActivity: async () => null,
     s3Client: { send: async (request) => {
       const { Key } = request.input;
+      if (Key === `events/${HEX}.json`) eventObjectCalls.push(request.name);
       if (request.name === 'GetObjectCommand') {
         if (!(Key in store)) { const error = new Error('Missing'); error.name = 'NoSuchKey'; throw error; }
         return { Body: body(store[Key]), ETag: '"fixture"' };
       }
       if (request.name === 'PutObjectCommand') {
-        store[Key] = JSON.parse(Buffer.from(request.input.Body).toString('utf8'));
-        return { ETag: '"fixture-after"' };
+        const body = Buffer.from(request.input.Body).toString('utf8');
+        store[Key] = JSON.parse(body);
+        return { ETag: '"fixture-after"', ...(request.input.ChecksumAlgorithm === 'SHA256' ? { ChecksumSHA256: crypto.createHash('sha256').update(body).digest('base64') } : {}) };
       }
       throw new Error(`Unexpected S3 command ${request.name}`);
     } },
@@ -218,6 +223,39 @@ test('real persistence handler merges canonical sparse field saves without clear
   assert.equal(persisted.metadata.tagline, 'Updated through handler');
   assert.equal(persisted.metadata.image.theme, 'calendar');
   assert.equal(persisted.metadata.image.url, '/website/eventImages/holiday.webp');
+  assert.deepEqual(eventObjectCalls, ['GetObjectCommand', 'PutObjectCommand']);
+});
+
+test('persistence rejects a mismatched S3 checksum before publishing the event', async () => {
+  const store = fixtureStore();
+  let published = false;
+  const { createPersistenceHandler } = await loadPersistenceModule(store, []);
+  const handler = createPersistenceHandler({
+    recordRequestActivity: async () => null,
+    s3Client: { send: async (request) => {
+      const { Key } = request.input;
+      if (request.name === 'GetObjectCommand') {
+        if (!(Key in store)) { const error = new Error(`Missing ${Key}`); error.name = 'NoSuchKey'; throw error; }
+        return { Body: body(store[Key]), ETag: '"fixture"' };
+      }
+      if (request.name === 'PutObjectCommand' && Key === `events/${HEX}.json`) {
+        return { ETag: '"fixture-after"', ChecksumSHA256: 'mismatch' };
+      }
+      throw new Error(`Unexpected S3 command ${request.name}`);
+    } },
+    sqsClient: { send: async () => ({}) },
+    publishCanonicalEventToAgenda: async () => { published = true; return { matched: 1 }; },
+  });
+
+  const result = await handler({ Records: [{ eventSource: 'aws:sqs', messageId: 'message-checksum-mismatch', body: JSON.stringify({
+    realm: 'persist', action: 'persist', requestId: 'checksum-mismatch', hex: HEX,
+    subject: { metadata: { hex: HEX, tagline: 'Must not publish' } },
+  }) }] });
+
+  assert.equal(result.statusCode, 500);
+  assert.match(result.body, /SHA-256 checksum mismatch/);
+  assert.equal(published, false);
+  assert.equal(store[`events/${HEX}.json`].metadata.tagline, 'School holiday');
 });
 
 test('handler preserves title and media, invalidates approval only when website title changes, and publishes every occurrence', async () => {
@@ -236,8 +274,9 @@ test('handler preserves title and media, invalidates approval only when website 
         return { Body: body(store[Key]), ETag: '"fixture"' };
       }
       if (request.name === 'PutObjectCommand') {
-        store[Key] = JSON.parse(Buffer.from(request.input.Body).toString('utf8'));
-        return { ETag: '"fixture-after"' };
+        const body = Buffer.from(request.input.Body).toString('utf8');
+        store[Key] = JSON.parse(body);
+        return { ETag: '"fixture-after"', ...(request.input.ChecksumAlgorithm === 'SHA256' ? { ChecksumSHA256: crypto.createHash('sha256').update(body).digest('base64') } : {}) };
       }
       throw new Error(`Unexpected S3 command ${request.name}`);
     } },
@@ -304,7 +343,11 @@ test('real persistence handler treats legacy occurrence selectors as HEX-wide vi
         if (!(Key in store)) { const error = new Error('Missing'); error.name = 'NoSuchKey'; throw error; }
         return { Body: body(store[Key]), ETag: '"fixture"' };
       }
-      if (request.name === 'PutObjectCommand') { store[Key] = JSON.parse(Buffer.from(request.input.Body).toString('utf8')); return { ETag: '"fixture-after"' }; }
+      if (request.name === 'PutObjectCommand') {
+        const body = Buffer.from(request.input.Body).toString('utf8');
+        store[Key] = JSON.parse(body);
+        return { ETag: '"fixture-after"', ...(request.input.ChecksumAlgorithm === 'SHA256' ? { ChecksumSHA256: crypto.createHash('sha256').update(body).digest('base64') } : {}) };
+      }
       throw new Error(`Unexpected S3 command ${request.name}`);
     } },
     sqsClient: { send: async (request) => { sentMessages.push(request.input); return {}; } },

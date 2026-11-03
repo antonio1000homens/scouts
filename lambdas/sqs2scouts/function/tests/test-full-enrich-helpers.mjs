@@ -298,8 +298,12 @@ test('all direct enrichment persistence paths publish their canonical HEX event 
   assert.match(approvalLifecycleAdapter, /await saveEvent\(hex, accepted, current\.eTag\);[\s\S]*?await publishEvent\(hex, accepted\);/);
 });
 
-test('enrichment field verification reuses the HEX save read-back instead of issuing a second GET', () => {
-  assert.match(persistenceProcessor, /const verified = JSON\.parse\(verifyBody\);[\s\S]*?return verified;/);
+test('HEX saves verify the S3 full-object checksum without a post-PUT GET', () => {
+  const saveFunction = persistenceProcessor.match(/async function saveHexEventToS3\([\s\S]*?\n}\n\nasync function publishHexEventToAgenda/)[0];
+  assert.match(saveFunction, /ChecksumAlgorithm: 'SHA256'/);
+  assert.match(saveFunction, /putResult\?\.ChecksumSHA256 !== expectedChecksum/);
+  assert.match(saveFunction, /return JSON\.parse\(body\);/);
+  assert.doesNotMatch(saveFunction, /GetObjectCommand/);
   assert.match(persistenceProcessor, /const persisted = await saveHexEventToS3\(hexValue, hexData\);/);
   assert.doesNotMatch(persistenceProcessor, /await saveHexEventToS3\(hexValue, hexData\);\s*const persisted = await loadHexEventFromS3\(hexValue\);/);
 });
