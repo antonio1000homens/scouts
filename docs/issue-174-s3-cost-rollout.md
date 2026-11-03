@@ -735,3 +735,23 @@ of the pre-run `agenda.json` remains at
 S3 checks after the workflow confirmed the event key returned 404, the
 generated-image prefix was empty, and the retained backup exists. Do not treat
 this partial run as full live lifecycle acceptance.
+
+## Production configuration recheck (2026-11-03 23:02 UTC)
+
+AWS STS verified account `553490163883` before this read-only check. The
+`scouts-lambda` stack reports `ScheduledRefreshExpression=rate(6 hours)` and
+`ScheduledRefreshMaxEvents=0`; `LegacyRuntimeSnapshotsEnabled=true` remains in
+place for manual compatibility review. The deferred-refresh outbox remains
+disabled, its configured billing mode is `PAY_PER_REQUEST`, and the table is
+absent. The three production Lambda event-source mappings for
+`scoutsRequests`, `scoutsProcessing`, and `scoutsProcessingDLQ` are all enabled.
+The `scouts-enrichment-state` table remains `PAY_PER_REQUEST` with zero
+provisioned read/write capacity. No queue mappings, tables, billing modes, or
+production data were changed.
+
+This readback confirms the intended guarded rollout state, not safe provisioned
+capacity or deferred-work behavior. Required next evidence remains a
+representative outbox workload benchmark, queue-age and drain-lag acceptance,
+and migration compatibility review for the retained snapshot/manual-review
+records. The live canary post-hide refresh and unhide checks also remain
+unverified.
