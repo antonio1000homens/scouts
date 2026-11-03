@@ -121,6 +121,7 @@ export function buildRequestActivityUpdate(input = {}) {
   const stage = text(input.stage || state) || state;
   const failure = input.failure && typeof input.failure === 'object' ? input.failure : null;
   const reconciliationId = reconciliationIdOf(input);
+  const retainForRecovery = state === 'manual_review';
   const timelineEntry = JSON.stringify({
     state,
     stage,
@@ -132,7 +133,6 @@ export function buildRequestActivityUpdate(input = {}) {
     ':feed': { S: 'activity' }, ':updatedAt': { S: timestamp },
     ':createdAt': { S: text(input.createdAt) || timestamp }, ':state': { S: state }, ':stage': { S: stage },
     ':timeline': { L: [{ S: timelineEntry }] }, ':empty': { L: [] },
-    ':expiresAt': { N: String(Math.floor(now.getTime() / 1000) + RETENTION_SECONDS) },
     ':priority': { N: String(PRIORITY[state] || 0) }, ':terminal': { S: TERMINAL.has(state) ? 'true' : 'false' },
     ':hex': itemValue(hexOf(input)), ':title': itemValue(titleOf(input)), ':action': itemValue(text(input.action || input.operation) || null),
     ':rootRequestId': itemValue(rootRequestId), ':reconciliationId': itemValue(reconciliationId),
@@ -149,12 +149,15 @@ export function buildRequestActivityUpdate(input = {}) {
     attrs[':failed'] = { S: 'failed' };
     attrs[':manualReview'] = { S: 'manual_review' };
   }
+  if (!retainForRecovery) {
+    attrs[':expiresAt'] = { N: String(Math.floor(now.getTime() / 1000) + RETENTION_SECONDS) };
+  }
   return {
     requestId, rootRequestId, state, stage, updatedAt: timestamp, reconciliationId,
     command: new UpdateItemCommand({
       TableName: TABLE_NAME,
       Key: { requestId: { S: requestId } },
-      UpdateExpression: 'SET feed = :feed, updatedAt = :updatedAt, createdAt = if_not_exists(createdAt, :createdAt), #state = :state, stage = :stage, timeline = list_append(if_not_exists(timeline, :empty), :timeline), expiresAt = :expiresAt, priority = :priority, terminal = :terminal, hex = if_not_exists(hex, :hex), title = if_not_exists(title, :title), #action = if_not_exists(#action, :action), rootRequestId = if_not_exists(rootRequestId, :rootRequestId), reconciliationId = if_not_exists(reconciliationId, :reconciliationId), publication = :publication, failureType = :failureType, failureMessage = :failureMessage',
+      UpdateExpression: `SET feed = :feed, updatedAt = :updatedAt, createdAt = if_not_exists(createdAt, :createdAt), #state = :state, stage = :stage, timeline = list_append(if_not_exists(timeline, :empty), :timeline), priority = :priority, terminal = :terminal, hex = if_not_exists(hex, :hex), title = if_not_exists(title, :title), #action = if_not_exists(#action, :action), rootRequestId = if_not_exists(rootRequestId, :rootRequestId), reconciliationId = if_not_exists(reconciliationId, :reconciliationId), publication = :publication, failureType = :failureType, failureMessage = :failureMessage${retainForRecovery ? ' REMOVE expiresAt' : ', expiresAt = :expiresAt'}`,
       // A DLQ terminal state is authoritative over delayed processing updates. A
       // later successful publish/completion is the only permitted recovery path.
       ConditionExpression: strictTerminal
