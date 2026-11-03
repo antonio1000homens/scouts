@@ -229,6 +229,10 @@ jobs:
         working-directory: lambdas/shared-layer/nodejs
         run: npm ci
 
+      - name: Expose shared-layer dependencies to Scouts function tests
+        if: steps.plan.outputs.retry_safety == 'true'
+        run: ln -s ../shared-layer/nodejs/node_modules lambdas/scouts/node_modules
+
       - name: Run authoritative hermetic test and static-safety runner
         if: steps.plan.outputs.retry_safety == 'true'
         run: node scripts/run-hermetic-tests.mjs
