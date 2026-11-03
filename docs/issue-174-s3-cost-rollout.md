@@ -130,10 +130,14 @@ completed at 19:42:59 UTC. A controlled refresh returned status 200 with 56
 events, zero modifications and zero enrichment requests. Its aggregate log
 at 19:44:29 UTC recorded 177 GET, 38 HEAD, 2 LIST and 1 PUT, and classified
 all of them as `data`; there were no `other` or `unknown` calls. The S3
-`CodexRequestCostAudit` configuration has no prefix filter. At 19:45 UTC its
-19:42–19:46 metric query had not returned any S3 points yet. Recheck after
-metric publication before deciding why the earlier one-minute bucket counts
-were below the SDK counts.
+`CodexRequestCostAudit` configuration has no prefix filter. The 19:45 UTC
+query had no S3 points; by 19:47 UTC, the 19:44 bucket metric showed 82 GET,
+17 HEAD, 1 LIST and no PUT. This still does not reconcile to the 177/38/2/1
+SDK totals. AWS describes S3 request metrics as best-effort, with completeness
+and timeliness not guaranteed and not intended as complete request accounting
+([AWS documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/cloudwatch-monitoring.html)).
+Keep the operation log as the invocation-level evidence and bucket metrics as
+an approximate trend; the present samples cannot establish bill-level savings.
 
 After the invocation, `HeadObject` readbacks showed the queued, processing and
 completed snapshot sizes and `LastModified` timestamps unchanged from the
