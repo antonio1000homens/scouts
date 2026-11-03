@@ -755,3 +755,22 @@ representative outbox workload benchmark, queue-age and drain-lag acceptance,
 and migration compatibility review for the retained snapshot/manual-review
 records. The live canary post-hide refresh and unhide checks also remain
 unverified.
+
+## Manual-review Admin reachability audit (2026-11-03 23:04 UTC)
+
+The earlier paced enrichment-state audit established that 14 of the 27
+manual-review rows have a canonical `events/{HEX}.json` object and 12 unique
+HEX values do not. That object-existence check is not by itself proof of
+operator reachability. Current source inspection found two separate Admin
+paths: event details batch-read durable enrichment status for the HEX values
+of loaded event entries and render a retry action for visible
+`manual_review` stages; the Activity Centre renders retry actions from
+`scouts-request-activity` rows. The latter lookup was empty in the recorded
+production sample. Thus, Activity Centre cannot currently surface these
+historical rows from the activity ledger alone. The 14 event-backed rows may
+be recoverable through event details when those events are loaded there, but
+that row-by-row Admin read/retry visibility has not been verified. The 12
+orphaned rows lack canonical event documents and cannot be assumed safely
+retryable. Keep the legacy snapshot viewer enabled and retain historical
+objects/state until an owner-reviewed recovery or archival decision covers
+both groups and the embedded task-token contract.
