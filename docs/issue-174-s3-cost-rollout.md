@@ -145,6 +145,25 @@ completed snapshot sizes and `LastModified` timestamps unchanged from the
 ledger remains empty and the stale historical snapshots remain available via
 the admin API. Historical/manual-review parity is not established.
 
+## Preliminary Cost Explorer check (2026-11-03 19:51 UTC)
+
+AWS STS verified account `553490163883` before the Cost Explorer query. The
+query marks every returned day as estimated. On Nov 1 and Nov 2, before the
+six-hour schedule deployment on Nov 3, S3 request usage was 16,092 and 16,028
+requests respectively (Tier 1 + Tier 2), at estimated request charges of
+about $0.00843 and $0.00791 per day. Total S3 service estimates were $0.00857
+and $0.00805 per day, including non-request usage. The Nov 3 estimate was
+still partial: 9,996 S3 requests and $0.00509 total S3 service cost at query
+time. These preliminary totals are not a post-change daily comparison and
+must not be extrapolated as savings.
+
+SQS usage was 27,542 and 27,540 requests on Nov 1 and Nov 2, with estimated
+SQS cost of $0 on both days; the partial Nov 3 estimate showed 17,224 requests
+and $0. This is total SQS request usage, not a ReceiveMessage-only count. It
+supports retaining the existing mappings while SQS remains free in this
+estimate, but it does not replace the CloudWatch empty-receive evidence or
+prove that the configured free allocation will always cover future traffic.
+
 ## Supplemental live recheck (2026-11-03 18:36 UTC)
 
 AWS Core again verified account `553490163883` before read-only calls. The
