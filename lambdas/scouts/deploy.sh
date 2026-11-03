@@ -71,6 +71,8 @@ SCOUTS2SQS_FUNCTION_URL="${SCOUTS2SQS_FUNCTION_URL:-}"
 FULL_ENRICH_STATE_MACHINE_ARN="${FULL_ENRICH_STATE_MACHINE_ARN:-}"
 GEMINI_ENRICH_STATE_TABLE_NAME="${GEMINI_ENRICH_STATE_TABLE_NAME:-scouts-enrichment-state}"
 SCOUTS_REQUEST_ACTIVITY_TABLE_NAME="${SCOUTS_REQUEST_ACTIVITY_TABLE_NAME:-scouts-request-activity}"
+# Override for an immediate rollback to the previous 30-minute cadence.
+SCHEDULED_REFRESH_EXPRESSION="${SCHEDULED_REFRESH_EXPRESSION:-rate(6 hours)}"
 
 TEMPLATE_FILE="${ROOT_DIR}/cloudformation/templates/scouts.yaml"
 
@@ -216,7 +218,8 @@ rm -f function/scouts-lambda.zip
     dlq-activity.mjs \
     dlq-activity-handler.mjs \
     runtime-dlq.mjs \
-    runtime-schedule.mjs
+    runtime-schedule.mjs \
+    image-head-memo.mjs
 )
 
 echo -e "\n${YELLOW}Step 3: Upload function artifact to S3...${NC}"
@@ -255,6 +258,7 @@ CFN_DEPLOY_ARGS+=(
     FullEnrichStateMachineArn="${FULL_ENRICH_STATE_MACHINE_ARN}"
     GeminiEnrichmentStateTableName="${GEMINI_ENRICH_STATE_TABLE_NAME}"
     ScoutsRequestActivityTableName="${SCOUTS_REQUEST_ACTIVITY_TABLE_NAME}"
+    ScheduledRefreshExpression="${SCHEDULED_REFRESH_EXPRESSION}"
 )
 
 deploy_cloudformation_with_diagnostics "${STACK_NAME}" "${REGION}" "${CFN_DEPLOY_ARGS[@]}"
