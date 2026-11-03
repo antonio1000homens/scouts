@@ -1,17 +1,22 @@
 /**
  * Deduplicate S3 image HEAD checks within one calendar refresh invocation.
- * This cache is intentionally not shared across invocations: a previously
- * present object may have been deleted, and later refreshes must detect it.
+ * A subsequent invocation always rechecks: objects may have been deleted or
+ * restored. A resolved false (404) is safe to reuse only within this run.
  *
- * Rejected checks are evicted so transient AWS errors can be retried. A 404
- * should be represented by `false` by the caller and can be cached for the
- * remainder of this invocation.
+ * Failed checks are evicted; do not mistake transient AWS errors for missing
+ * images. The aggregate counters are bounded and contain no S3 object keys.
  */
 export function createImageHeadMemo() {
   const checks = new Map();
-  return function imageHead(bucket, key, check) {
+  let cacheHits = 0;
+  let requests = 0;
+  function imageHead(bucket, key, check) {
     const cacheKey = JSON.stringify([bucket, key]);
-    if (checks.has(cacheKey)) return checks.get(cacheKey);
+    if (checks.has(cacheKey)) {
+      cacheHits += 1;
+      return checks.get(cacheKey);
+    }
+    requests += 1;
     const pending = Promise.resolve()
       .then(check)
       .catch((error) => {
@@ -20,5 +25,7 @@ export function createImageHeadMemo() {
       });
     checks.set(cacheKey, pending);
     return pending;
-  };
+  }
+  imageHead.stats = () => ({ requests, cacheHits });
+  return imageHead;
 }
