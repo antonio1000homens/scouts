@@ -86,6 +86,8 @@ test('eligibility enforces cooldown, quarantine, max attempts, active lease and 
   assert.equal(evaluateEnrichmentEligibility({ state: 'retry_wait', nextRetryAt: '2026-09-02T13:00:00Z', attemptCount: 1 }, now).reason, 'cooldown_active');
   assert.equal(evaluateEnrichmentEligibility({ state: 'retry_wait', nextRetryAt: '2026-09-02T11:00:00Z', attemptCount: 1 }, now).eligible, true);
   assert.equal(evaluateEnrichmentEligibility({ state: 'manual_review', attemptCount: 3 }, now).reason, 'manual_review');
+  assert.equal(evaluateEnrichmentEligibility({ state: 'manual_review', attemptCount: 3, generationId: 'old' }, now, 'old').reason, 'manual_review');
+  assert.equal(evaluateEnrichmentEligibility({ state: 'manual_review', attemptCount: 3, generationId: 'old' }, now, 'new').eligible, true);
   assert.equal(evaluateEnrichmentEligibility({ state: 'retry_wait', attemptCount: 3 }, now).reason, 'max_attempts_reached');
   assert.equal(evaluateEnrichmentEligibility({ state: 'in_progress', attemptCount: 1, inProgressExpiresAt: now.getTime() + 1000 }, now).reason, 'in_progress');
   assert.equal(evaluateEnrichmentEligibility({ state: 'in_progress', attemptCount: 1, inProgressExpiresAt: now.getTime() - 1 }, now).eligible, true);

@@ -40,9 +40,9 @@
                 <div id="viewer-menu" class="viewer-menu-dropdown">
                     <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showAgendaViewer()">Agenda</button>
                     <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showEventsJsonViewer()">Events</button>
-                    <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showRuntimeSnapshotViewer('queued')">Runtime Queued</button>
-                    <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showRuntimeSnapshotViewer('processing')">Runtime Processing</button>
-                    <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showRuntimeSnapshotViewer('completed')">Runtime Completed</button>
+                    <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showRuntimeSnapshotViewer('queued')">Legacy Runtime Queued</button>
+                    <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showRuntimeSnapshotViewer('processing')">Legacy Runtime Processing</button>
+                    <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showRuntimeSnapshotViewer('completed')">Legacy Runtime Completed</button>
                     <button class="viewer-menu-item" type="button" onclick="closeViewerMenu(); showScoutsConfigViewer()">Config</button>
                 </div>
             </div>
@@ -98,10 +98,11 @@
         <section id="runtime-json-viewer" class="agenda-viewer" style="display: none;" onclick="handleViewerBackdropClick(event)">
             <div class="agenda-viewer-panel">
                 <div class="agenda-viewer-header">
-                    <h2 id="runtime-json-title">Runtime Snapshot</h2>
+                    <h2 id="runtime-json-title">Legacy Runtime Snapshot</h2>
                     <button class="btn btn-secondary" onclick="toggleRuntimeSnapshotViewer()">Close</button>
                 </div>
-                <pre id="runtime-json-content" class="agenda-json-content">Loading runtime snapshot...</pre>
+                <p class="viewer-notice">Legacy S3 snapshots can be stale. Use the Activity Centre and Operations views for current request and queue state. This viewer is kept only for temporary rollback.</p>
+                <pre id="runtime-json-content" class="agenda-json-content">Loading legacy runtime snapshot...</pre>
             </div>
         </section>
 

@@ -11,6 +11,10 @@
     const dlqSamples = new Map();
     const dlqActionState = new Map();
     let latestDlqActivity = null;
+    let latestQueueStatus = null;
+    let queueStatusBusy = false;
+    let latestDeferredRefreshStatus = null;
+    let deferredRefreshBusy = false;
     let scheduledRefreshSettings = null;
     let scheduledRefreshBusy = false;
 
@@ -65,7 +69,7 @@
                 <button type="button" class="btn btn-secondary requires-api" id="scheduled-refresh-run-now">Run refresh now</button>
                 <button type="button" class="btn btn-secondary requires-api" id="scheduled-refresh-status-refresh">Refresh schedule status</button>
             </div>
-            <p class="diagnostics-help">Scheduled runs are discovery-only by default: they refresh calendars/agenda but publish 0 new enrichment jobs. Existing queued jobs continue automatically through SQS and Step Functions.</p>
+            <p class="diagnostics-help">Scheduled runs publish 0 immediate enrichment jobs by default. If the optional deferred outbox is enabled, excess eligible work is retained for bounded scheduled dispatch; existing queued jobs continue through SQS and Step Functions.</p>
             <p class="diagnostics-help">Turning scheduled refresh off is durable. EventBridge still invokes the lightweight guard on its cadence, but the Lambda exits before calendar downloads, agenda refresh or queue publication.</p>
         `;
         body.appendChild(section);
@@ -126,6 +130,192 @@
             renderScheduledRefreshControls();
         } catch (error) {
             renderScheduledRefreshControls(`Failed to load scheduled refresh status: ${error?.message || error}`);
+        }
+    }
+
+    function ensureLiveQueueStatusSection() {
+        let section = document.getElementById('diagnostics-live-queues');
+        if (section) return section;
+        const body = operationsBody();
+        if (!body) return null;
+
+        section = document.createElement('section');
+        section.id = 'diagnostics-live-queues';
+        section.className = 'admin-diagnostics-section';
+        section.innerHTML = `
+            <h3>Live queue depth</h3>
+            <p class="admin-diagnostics-section-description">Counts come from on-demand SQS GetQueueAttributes reads. They are approximate and do not inspect or change messages.</p>
+            <div class="dlq-toolbar"><button type="button" class="btn btn-secondary requires-api" id="live-queue-refresh">Refresh queue counts</button></div>
+            <div id="diagnostics-live-queues-content"><p>Queue status not loaded yet.</p></div>
+        `;
+        const scheduled = document.getElementById('diagnostics-scheduled-refresh');
+        if (scheduled) scheduled.insertAdjacentElement('afterend', section);
+        else body.appendChild(section);
+        section.querySelector('#live-queue-refresh')?.addEventListener('click', () => refreshLiveQueueStatus(true));
+        return section;
+    }
+
+    function renderLiveQueueStatus(statusMessage = '') {
+        const target = document.getElementById('diagnostics-live-queues-content');
+        const button = document.getElementById('live-queue-refresh');
+        if (button) {
+            button.disabled = queueStatusBusy || !apiAuthReady;
+            button.textContent = queueStatusBusy ? 'Refreshing…' : 'Refresh queue counts';
+        }
+        if (!target) return;
+        target.replaceChildren();
+        if (statusMessage) {
+            const status = document.createElement('p');
+            status.className = 'dlq-action-status info';
+            status.textContent = statusMessage;
+            target.appendChild(status);
+        }
+        const queues = Array.isArray(latestQueueStatus?.queues) ? latestQueueStatus.queues : [];
+        if (!queues.length) {
+            if (!statusMessage) {
+                const waiting = document.createElement('p');
+                waiting.textContent = apiAuthReady ? 'Queue status not loaded yet.' : 'Waiting for admin API authentication…';
+                target.appendChild(waiting);
+            }
+            return;
+        }
+        renderDefinition(target, 'Last sampled', formatDateTime(latestQueueStatus.sampledAt));
+        for (const queue of queues) {
+            const panel = document.createElement('article');
+            panel.className = 'dlq-panel';
+            const heading = document.createElement('div');
+            heading.className = 'dlq-panel-header';
+            const name = document.createElement('strong');
+            name.textContent = queue.name || 'SQS queue';
+            const count = document.createElement('span');
+            count.className = 'dlq-count';
+            count.textContent = queue.ok === false ? 'unavailable' : `${queue.visible ?? 'n/a'} visible`;
+            heading.append(name, count);
+            panel.appendChild(heading);
+            if (queue.error) renderDefinition(panel, 'Read error', queue.error);
+            renderDefinition(panel, 'In flight / delayed', `${queue.inFlight ?? 'n/a'} / ${queue.delayed ?? 'n/a'}`);
+            renderDefinition(panel, 'Oldest message age', queue.oldestMessageAgeSeconds === null || queue.oldestMessageAgeSeconds === undefined
+                ? 'n/a'
+                : `${queue.oldestMessageAgeSeconds} seconds`);
+            target.appendChild(panel);
+        }
+        if (latestQueueStatus.note) {
+            const note = document.createElement('p');
+            note.className = 'diagnostics-help';
+            note.textContent = latestQueueStatus.note;
+            target.appendChild(note);
+        }
+    }
+
+    async function refreshLiveQueueStatus(showStatus = false) {
+        if (!apiAuthReady || queueStatusBusy) {
+            renderLiveQueueStatus();
+            return latestQueueStatus;
+        }
+        queueStatusBusy = true;
+        renderLiveQueueStatus(showStatus ? 'Reading approximate SQS queue attributes…' : '');
+        try {
+            const result = await sendScoutsReadCommand({ realm: 'runtime', subject: 'queues', action: 'status' });
+            if (!result?.queueStatus || !Array.isArray(result.queueStatus.queues)) {
+                throw new Error('Live queue status payload missing');
+            }
+            latestQueueStatus = result.queueStatus;
+            return latestQueueStatus;
+        } catch (error) {
+            renderLiveQueueStatus(`Live queue status unavailable: ${error?.message || error}`);
+            return null;
+        } finally {
+            queueStatusBusy = false;
+            renderLiveQueueStatus();
+        }
+    }
+
+    function ensureDeferredRefreshStatusSection() {
+        let section = document.getElementById('diagnostics-deferred-refresh');
+        if (section) return section;
+        const body = operationsBody();
+        if (!body) return null;
+        section = document.createElement('section');
+        section.id = 'diagnostics-deferred-refresh';
+        section.className = 'admin-diagnostics-section';
+        section.innerHTML = `
+            <h3>Deferred enrichment work</h3>
+            <p class="admin-diagnostics-section-description">Bounded read-only sample of scheduled work waiting for dispatch, retry, expiry, or operator attention.</p>
+            <div class="dlq-toolbar"><button type="button" class="btn btn-secondary requires-api" id="deferred-refresh-status-button">Refresh deferred work status</button></div>
+            <div id="diagnostics-deferred-refresh-content"><p>Deferred work status not loaded yet.</p></div>
+        `;
+        const queues = document.getElementById('diagnostics-live-queues');
+        if (queues) queues.insertAdjacentElement('afterend', section);
+        else body.appendChild(section);
+        section.querySelector('#deferred-refresh-status-button')?.addEventListener('click', () => refreshDeferredRefreshStatus(true));
+        return section;
+    }
+
+    function renderDeferredRefreshStatus(statusMessage = '') {
+        const target = document.getElementById('diagnostics-deferred-refresh-content');
+        const button = document.getElementById('deferred-refresh-status-button');
+        if (button) {
+            button.disabled = deferredRefreshBusy || !apiAuthReady;
+            button.textContent = deferredRefreshBusy ? 'Refreshing…' : 'Refresh deferred work status';
+        }
+        if (!target) return;
+        target.replaceChildren();
+        if (statusMessage) {
+            const status = document.createElement('p');
+            status.className = 'dlq-action-status info';
+            status.textContent = statusMessage;
+            target.appendChild(status);
+        }
+        if (!latestDeferredRefreshStatus) {
+            if (!statusMessage) target.appendChild(makeHelp(apiAuthReady ? 'Deferred work status not loaded yet.' : 'Waiting for admin API authentication…'));
+            return;
+        }
+        if (latestDeferredRefreshStatus.status === 'disabled') {
+            target.appendChild(makeHelp('The deferred refresh outbox is not enabled in this deployment.'));
+            return;
+        }
+        const states = latestDeferredRefreshStatus.deferredRefresh?.states || {};
+        renderDefinition(target, 'Ready items sampled', `${states.ready?.sampledItems ?? 0}${states.ready?.hasMore ? '+' : ''}`);
+        renderDefinition(target, 'Due ready items sampled', `${states.ready?.dueSampledItems ?? 0}${states.ready?.dueHasMore ? '+' : ''}`);
+        renderDefinition(target, 'Oldest ready item', formatDateTime(states.ready?.oldestReadyAt));
+        renderDefinition(target, 'Retries in sample', states.ready?.sampledRetryCount ?? 0);
+        renderDefinition(target, 'Leased items sampled', `${states.leased?.sampledItems ?? 0}${states.leased?.hasMore ? '+' : ''}`);
+        renderDefinition(target, 'Expired leases sampled', `${states.leased?.dueSampledItems ?? 0}${states.leased?.dueHasMore ? '+' : ''}`);
+        renderDefinition(target, 'Needs attention sampled', `${states.needs_attention?.sampledItems ?? 0}${states.needs_attention?.hasMore ? '+' : ''}`);
+        renderDefinition(target, 'Expired sampled', `${states.expired?.sampledItems ?? 0}${states.expired?.hasMore ? '+' : ''}`);
+        const attentionSamples = Array.isArray(states.needs_attention?.actionableSamples) ? states.needs_attention.actionableSamples : [];
+        if (attentionSamples.length) {
+            const list = document.createElement('ul');
+            list.className = 'diagnostics-help';
+            for (const item of attentionSamples) {
+                const row = document.createElement('li');
+                row.textContent = `${item.hex || 'unknown HEX'} · ${item.stage || 'unknown stage'} · ${item.reason || 'retry limit reached'}`;
+                list.appendChild(row);
+            }
+            target.appendChild(list);
+        }
+        target.appendChild(makeHelp(`Each state is capped at ${latestDeferredRefreshStatus.deferredRefresh?.sampleLimitPerState ?? 'a bounded'} records; a plus sign means more records exist.`));
+    }
+
+    async function refreshDeferredRefreshStatus(showStatus = false) {
+        if (!apiAuthReady || deferredRefreshBusy) {
+            renderDeferredRefreshStatus();
+            return latestDeferredRefreshStatus;
+        }
+        deferredRefreshBusy = true;
+        renderDeferredRefreshStatus(showStatus ? 'Reading a bounded outbox status sample…' : '');
+        try {
+            latestDeferredRefreshStatus = await sendScoutsReadCommand({ realm: 'runtime', subject: 'deferredRefresh', action: 'status' });
+            if (!latestDeferredRefreshStatus || !['ok', 'disabled'].includes(latestDeferredRefreshStatus.status)) {
+                throw new Error('Deferred refresh status payload missing');
+            }
+            return latestDeferredRefreshStatus;
+        } catch (error) {
+            renderDeferredRefreshStatus(`Deferred refresh status unavailable: ${error?.message || error}`);
+            return null;
+        } finally {
+            deferredRefreshBusy = false;
+            renderDeferredRefreshStatus();
         }
     }
 
@@ -354,11 +544,11 @@
             if (showStatus) {
                 DLQ_NAMES.forEach((name) => setDlqState(name, { message: 'Refreshing queue counts…', tone: 'info', busy: 'refresh' }));
             }
-            const controller = window.adminActivityController;
-            if (!controller?.refreshNow) throw new Error('Activity controller unavailable');
-            const activity = await controller.refreshNow();
-            if (!activity) throw new Error('Activity payload missing');
-            latestDlqActivity = activity;
+            const status = await refreshLiveQueueStatus(false);
+            if (!status) throw new Error('Live queue status unavailable');
+            latestDlqActivity = {
+                queueHealth: Object.fromEntries((status.queues || []).map((queue) => [queue.name, queue])),
+            };
             DLQ_NAMES.forEach((name) => dlqActionState.delete(name));
             renderDlqDiagnostics();
         } catch (error) {
@@ -394,6 +584,7 @@
                         visible: result.dlq.visible,
                         inFlight: result.dlq.inFlight,
                         delayed: result.dlq.delayed,
+                        oldestMessageAgeSeconds: result.dlq.oldestMessageAgeSeconds,
                         ok: true,
                     },
                 },
@@ -450,6 +641,7 @@
         if (apiAuthReady) {
             refreshDlqOverview(false);
             refreshScheduledRefreshStatus(false);
+            refreshDeferredRefreshStatus(false);
             return;
         }
         renderScheduledRefreshControls();
@@ -461,11 +653,14 @@
     function initialize() {
         replaceAutoLambdaHeartbeat();
         ensureScheduledRefreshSection();
+        ensureLiveQueueStatusSection();
+        ensureDeferredRefreshStatusSection();
         ensureDlqSection();
         document.getElementById('diagnostics-open')?.addEventListener('click', () => {
             if (!apiAuthReady) return;
             refreshDlqOverview(false);
             refreshScheduledRefreshStatus(false);
+            refreshDeferredRefreshStatus(false);
         });
         refreshOperationalStatusWhenReady();
     }

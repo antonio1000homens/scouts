@@ -77,7 +77,8 @@ class InMemoryEnrichmentDynamo {
     let item = { ...(this.items.get(key) || {}), hex: input.Key.hex.S, stage: input.Key.stage.S };
 
     if (values[':previousGenerationId'] !== undefined) {
-      if (item.state !== 'succeeded' || item.generationId !== values[':previousGenerationId']) throw conditionalFailure();
+      const expectedState = values[':manual'] !== undefined ? 'manual_review' : 'succeeded';
+      if (item.state !== expectedState || item.generationId !== values[':previousGenerationId']) throw conditionalFailure();
       item.state = 'pending';
       item.attemptCount = 0;
       item.generationId = values[':generationId'];
@@ -86,6 +87,10 @@ class InMemoryEnrichmentDynamo {
       delete item.generatedValue;
       delete item.nextRetryAt;
       delete item.inProgressExpiresAt;
+      delete item.expiresAt;
+      delete item.lastErrorType;
+      delete item.lastErrorMessage;
+      delete item.escalatedAt;
       this.items.set(key, item);
       return {};
     }
@@ -232,6 +237,12 @@ test('retryable failures enforce 1h then 6h cooldown and quarantine after attemp
   const quarantined = await reserveEnrichmentAttempt({ hex: 'abcd', stage: 'imageTheme', generationId: 'g1', requestId: 'r4', now: new Date('2026-09-08T17:00:00Z') });
   assert.equal(quarantined.reserved, false);
   assert.equal(quarantined.reason, 'manual_review');
+
+  const changedGeneration = await reserveEnrichmentAttempt({ hex: 'abcd', stage: 'imageTheme', generationId: 'g2', requestId: 'r5', now: new Date('2026-09-08T17:01:00Z') });
+  assert.equal(changedGeneration.reserved, true);
+  assert.equal(changedGeneration.state.generationId, 'g2');
+  assert.equal(changedGeneration.state.attemptCount, 1);
+  assert.equal(changedGeneration.state.lastErrorType, undefined);
 });
 
 test('deterministic configuration/auth errors quarantine immediately', async () => {

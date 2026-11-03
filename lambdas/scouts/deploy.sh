@@ -73,6 +73,11 @@ GEMINI_ENRICH_STATE_TABLE_NAME="${GEMINI_ENRICH_STATE_TABLE_NAME:-scouts-enrichm
 SCOUTS_REQUEST_ACTIVITY_TABLE_NAME="${SCOUTS_REQUEST_ACTIVITY_TABLE_NAME:-scouts-request-activity}"
 # Override for an immediate rollback to the previous 30-minute cadence.
 SCHEDULED_REFRESH_EXPRESSION="${SCHEDULED_REFRESH_EXPRESSION:-rate(6 hours)}"
+LEGACY_RUNTIME_SNAPSHOTS_ENABLED="${LEGACY_RUNTIME_SNAPSHOTS_ENABLED:-true}"
+DEFERRED_REFRESH_OUTBOX_ENABLED="${DEFERRED_REFRESH_OUTBOX_ENABLED:-false}"
+DEFERRED_REFRESH_OUTBOX_TABLE_NAME="${DEFERRED_REFRESH_OUTBOX_TABLE_NAME:-scouts-deferred-refresh}"
+DEFERRED_REFRESH_DISPATCH_EXPRESSION="${DEFERRED_REFRESH_DISPATCH_EXPRESSION:-rate(15 minutes)}"
+DEFERRED_REFRESH_DISPATCH_BATCH_SIZE="${DEFERRED_REFRESH_DISPATCH_BATCH_SIZE:-10}"
 
 TEMPLATE_FILE="${ROOT_DIR}/cloudformation/templates/scouts.yaml"
 
@@ -219,7 +224,10 @@ rm -f function/scouts-lambda.zip
     dlq-activity-handler.mjs \
     runtime-dlq.mjs \
     runtime-schedule.mjs \
-    image-head-memo.mjs
+    runtime-deferred-refresh.mjs \
+    s3-request-metrics.mjs \
+    image-head-memo.mjs \
+    runtime-activity-index.mjs
 )
 
 echo -e "\n${YELLOW}Step 3: Upload function artifact to S3...${NC}"
@@ -259,6 +267,11 @@ CFN_DEPLOY_ARGS+=(
     GeminiEnrichmentStateTableName="${GEMINI_ENRICH_STATE_TABLE_NAME}"
     ScoutsRequestActivityTableName="${SCOUTS_REQUEST_ACTIVITY_TABLE_NAME}"
     ScheduledRefreshExpression="${SCHEDULED_REFRESH_EXPRESSION}"
+    LegacyRuntimeSnapshotsEnabled="${LEGACY_RUNTIME_SNAPSHOTS_ENABLED}"
+    DeferredRefreshOutboxEnabled="${DEFERRED_REFRESH_OUTBOX_ENABLED}"
+    DeferredRefreshOutboxTableName="${DEFERRED_REFRESH_OUTBOX_TABLE_NAME}"
+    DeferredRefreshDispatchExpression="${DEFERRED_REFRESH_DISPATCH_EXPRESSION}"
+    DeferredRefreshDispatchBatchSize="${DEFERRED_REFRESH_DISPATCH_BATCH_SIZE}"
 )
 
 deploy_cloudformation_with_diagnostics "${STACK_NAME}" "${REGION}" "${CFN_DEPLOY_ARGS[@]}"

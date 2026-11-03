@@ -1,4 +1,5 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { sendS3Command } from './s3-request-metrics.mjs';
 
 const REGION = process.env.AWS_REGION || 'eu-west-2';
 const TARGET_BUCKET = process.env.TARGET_BUCKET || 'scouts-2ndtolworth-prod-553490163883';
@@ -344,7 +345,7 @@ async function loadFreshCalendarSnapshot(now = Date.now()) {
 
   for (const feed of configuredFeeds) {
     try {
-      const response = await s3.send(new GetObjectCommand({
+      const response = await sendS3Command(s3, new GetObjectCommand({
         Bucket: TARGET_BUCKET,
         Key: feed.key,
       }));
@@ -387,7 +388,7 @@ async function resetContaminatedRenamedHexDocuments(resets = []) {
 
     const key = `events/${hex}.json`;
     try {
-      const response = await s3.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: key }));
+      const response = await sendS3Command(s3, new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: key }));
       const raw = await response.Body.transformToString();
       const current = JSON.parse(raw);
 
@@ -408,7 +409,7 @@ async function resetContaminatedRenamedHexDocuments(resets = []) {
         },
         requests: [],
       };
-      await s3.send(new PutObjectCommand({
+      await sendS3Command(s3, new PutObjectCommand({
         Bucket: TARGET_BUCKET,
         Key: key,
         Body: JSON.stringify(cleaned, null, 2),
@@ -431,7 +432,7 @@ export async function repairAgendaHexMetadata({
   allowSourceReconciliation = true,
   allowDestructiveReconciliation = false,
 } = {}) {
-  const response = await s3.send(new GetObjectCommand({
+  const response = await sendS3Command(s3, new GetObjectCommand({
     Bucket: TARGET_BUCKET,
     Key: AGENDA_KEY,
   }));
@@ -468,7 +469,7 @@ export async function repairAgendaHexMetadata({
     };
   }
 
-  await s3.send(new PutObjectCommand({
+  await sendS3Command(s3, new PutObjectCommand({
     Bucket: TARGET_BUCKET,
     Key: AGENDA_KEY,
     Body: JSON.stringify(repair.agenda, null, 2),

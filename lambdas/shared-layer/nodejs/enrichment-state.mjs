@@ -101,9 +101,11 @@ export async function getEnrichmentState(hex, stage) {
 
 export function evaluateEnrichmentEligibility(state, now = new Date(), generationId = null) {
   if (!state) return { eligible: true, reason: null };
-  if (state.state === 'manual_review') return { eligible: false, reason: 'manual_review' };
+  const manualReviewGenerationChanged = state.state === 'manual_review'
+    && Boolean(generationId && state.generationId && state.generationId !== generationId);
+  if (state.state === 'manual_review' && !manualReviewGenerationChanged) return { eligible: false, reason: 'manual_review' };
   if (state.state === 'succeeded' && state.geminiSucceeded !== false && (!generationId || state.generationId === generationId)) return { eligible: false, reason: 'already_succeeded' };
-  if (Number(state.attemptCount || 0) >= MAX_ATTEMPTS && state.state !== 'succeeded') return { eligible: false, reason: 'max_attempts_reached' };
+  if (Number(state.attemptCount || 0) >= MAX_ATTEMPTS && state.state !== 'succeeded' && !manualReviewGenerationChanged) return { eligible: false, reason: 'max_attempts_reached' };
   if (state.state === 'in_progress' && Number(state.inProgressExpiresAt || 0) > now.getTime()) return { eligible: false, reason: 'in_progress' };
   if (state.state === 'retry_wait' && state.nextRetryAt) {
     const next = new Date(state.nextRetryAt).getTime();
@@ -160,12 +162,26 @@ export async function reserveEnrichmentAttempt({ hex, stage, generationId, reque
       if (error?.name !== 'ConditionalCheckFailedException') throw error;
     }
   }
+  if (existing?.state === 'manual_review' && existing.generationId && existing.generationId !== generationId) {
+    try {
+      await client.send(new UpdateItemCommand({
+        TableName: TABLE_NAME,
+        Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
+        UpdateExpression: 'SET #state = :pending, #attemptCount = :zero, #generationId = :generationId, #updatedAt = :now REMOVE #nextRetryAt, #inProgressExpiresAt, #expiresAt, #lastErrorType, #lastErrorMessage, #escalatedAt',
+        ConditionExpression: '#state = :manual AND #generationId = :previousGenerationId',
+        ExpressionAttributeNames: { '#state': 'state', '#attemptCount': 'attemptCount', '#generationId': 'generationId', '#updatedAt': 'updatedAt', '#nextRetryAt': 'nextRetryAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#expiresAt': 'expiresAt', '#lastErrorType': 'lastErrorType', '#lastErrorMessage': 'lastErrorMessage', '#escalatedAt': 'escalatedAt' },
+        ExpressionAttributeValues: { ':pending': asString('pending'), ':zero': asNumber(0), ':generationId': asString(generationId || ''), ':now': asString(nowIso), ':manual': asString('manual_review'), ':previousGenerationId': asString(existing.generationId) },
+      }));
+    } catch (error) {
+      if (error?.name !== 'ConditionalCheckFailedException') throw error;
+    }
+  }
   try {
     const response = await client.send(new UpdateItemCommand({
       TableName: TABLE_NAME,
       Key: { hex: asString(normalisedHex), stage: asString(normalisedStage) },
       UpdateExpression: 'SET #state = :inProgress, #attemptCount = if_not_exists(#attemptCount, :zero) + :one, #firstAttemptAt = if_not_exists(#firstAttemptAt, :now), #lastAttemptAt = :now, #inProgressExpiresAt = :lease, #generationId = :generationId, #lastRequestId = :requestId, #updatedAt = :now REMOVE #nextRetryAt, #expiresAt',
-      ConditionExpression: '(attribute_not_exists(#state) OR (#state <> :inProgress OR attribute_not_exists(#inProgressExpiresAt) OR #inProgressExpiresAt <= :nowMs)) AND (attribute_not_exists(#state) OR #state <> :manual) AND (attribute_not_exists(#attemptCount) OR #attemptCount < :max) AND (attribute_not_exists(#nextRetryAt) OR #nextRetryAt <= :now)',
+      ConditionExpression: '(attribute_not_exists(#state) OR (#state <> :inProgress OR attribute_not_exists(#inProgressExpiresAt) OR #inProgressExpiresAt <= :nowMs)) AND (attribute_not_exists(#state) OR #state <> :manual OR (attribute_exists(#generationId) AND #generationId <> :generationId)) AND (attribute_not_exists(#attemptCount) OR #attemptCount < :max OR (#state = :manual AND #generationId <> :generationId)) AND (attribute_not_exists(#nextRetryAt) OR #nextRetryAt <= :now)',
       ExpressionAttributeNames: { '#state': 'state', '#attemptCount': 'attemptCount', '#firstAttemptAt': 'firstAttemptAt', '#lastAttemptAt': 'lastAttemptAt', '#inProgressExpiresAt': 'inProgressExpiresAt', '#generationId': 'generationId', '#lastRequestId': 'lastRequestId', '#updatedAt': 'updatedAt', '#expiresAt': 'expiresAt', '#nextRetryAt': 'nextRetryAt' },
       ExpressionAttributeValues: values,
       ReturnValues: 'ALL_NEW',
