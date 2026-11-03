@@ -1820,43 +1820,33 @@ async function saveHexEventToS3(hexValue, payload) {
         delete toStore.processing;
     }
     
+    const body = JSON.stringify(toStore, null, 2);
+    const expectedChecksum = crypto.createHash('sha256').update(body).digest('base64');
+
     try {
         const command = new PutObjectCommand({
             Bucket: bucket,
             Key: key,
-            Body: JSON.stringify(toStore, null, 2),
+            Body: body,
             ContentType: 'application/json',
             CacheControl: 'no-store',
+            ChecksumAlgorithm: 'SHA256',
         });
         
         const putResult = await s3Client.send(command);
+        if (putResult?.ChecksumSHA256 !== expectedChecksum) {
+            throw new Error(`S3 SHA-256 checksum mismatch for ${key}`);
+        }
         console.log(`[Hex] Successfully saved HEX file to s3://${bucket}/${key}`, {
             eTag: putResult?.ETag || null,
             versionId: putResult?.VersionId || null,
+            checksumSHA256: putResult.ChecksumSHA256,
         });
 
-        // Read-after-write verification to prove what was persisted to this exact key.
-        try {
-            const verifyResponse = await s3Client.send(
-                new GetObjectCommand({
-                    Bucket: bucket,
-                    Key: key,
-                })
-            );
-            const verifyBody = await readBodyStream(verifyResponse.Body);
-            const verified = JSON.parse(verifyBody);
-            console.log(`[Hex] Verified persisted HEX content at s3://${bucket}/${key}`, {
-                tagline: getTagline(verified),
-                imageTheme: getImageThemeValue(verified),
-                imageUrl: getImageUrlValue(verified),
-                eTag: verifyResponse?.ETag || null,
-                versionId: verifyResponse?.VersionId || null,
-            });
-            return verified;
-        } catch (verifyError) {
-            console.error(`[Hex] Read-after-write verification failed for s3://${bucket}/${key}:`, verifyError?.message || verifyError);
-            throw verifyError;
-        }
+        // S3 validates the full-object checksum before accepting the PUT. Return
+        // the exact serialized content that was checksum-verified, avoiding a
+        // second GET while preserving the caller's field-level persistence checks.
+        return JSON.parse(body);
     } catch (error) {
         console.error(`[Hex] Failed to save HEX file to s3://${bucket}/${key}:`, error.message);
         throw error;

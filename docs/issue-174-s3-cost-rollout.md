@@ -543,3 +543,24 @@ execution state. `LegacyRuntimeSnapshotsEnabled` remains `true`; no snapshot
 was modified or deleted. Keep the compatibility viewer enabled until the 27
 manual-review rows receive an item-level reachability audit and the legacy
 task-token/history contract is resolved.
+
+## Canonical event PUT integrity without a follow-up GET
+
+`saveHexEventToS3()` now serializes the normalized canonical event once and
+requests S3 `SHA256` full-object checksum validation on the `PutObject`. It
+compares the returned checksum with a locally calculated SHA-256 digest and
+fails closed on a mismatch. The saved payload is returned from that exact
+serialization; existing caller-side field checks remain in place. This removes
+the unconditional `GetObject` that previously followed each canonical event
+PUT. The revisioned approval flow and its ETag-based stale-review checks were
+not changed.
+
+The hermetic persistence regression verifies a normal sparse save performs one
+event GET to load the current canonical document and one event PUT, rejects a
+checksum mismatch before agenda publication, and preserves event fields. The
+full suite passes 593 tests. This is source and test evidence only: it does not
+yet establish a production request reduction. After rollout, compare S3 GET
+and PUT request metrics against the previous per-save behavior, account for
+non-Lambda website traffic, and record the daily/7-day trend after the metric
+window matures. No production deployment or S3 object change is part of this
+source change.
