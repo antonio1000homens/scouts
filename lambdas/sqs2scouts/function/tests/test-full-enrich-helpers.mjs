@@ -297,3 +297,9 @@ test('all direct enrichment persistence paths publish their canonical HEX event 
   assert.match(imageProviderWorker, /await saveEvent\(hex, event\);\s*await publishEvent\(hex, event\);/);
   assert.match(approvalLifecycleAdapter, /await saveEvent\(hex, accepted, current\.eTag\);[\s\S]*?await publishEvent\(hex, accepted\);/);
 });
+
+test('enrichment field verification reuses the HEX save read-back instead of issuing a second GET', () => {
+  assert.match(persistenceProcessor, /const verified = JSON\.parse\(verifyBody\);[\s\S]*?return verified;/);
+  assert.match(persistenceProcessor, /const persisted = await saveHexEventToS3\(hexValue, hexData\);/);
+  assert.doesNotMatch(persistenceProcessor, /await saveHexEventToS3\(hexValue, hexData\);\s*const persisted = await loadHexEventFromS3\(hexValue\);/);
+});

@@ -115,9 +115,10 @@ test('scheduled refresh enablement is durable and fails closed before calendar w
   assert.match(scoutsEntry, /if \(!schedule\.enabled\)/);
   assert.match(scoutsEntry, /schedule_state_unavailable/);
   assert.match(scoutsEntry, /const trustedInternalEvent/);
-  assert.match(scoutsEntry, /headers: \{ 'x-api-key': requiredApiKey \}/);
+  assert.match(scoutsEntry, /headers: \{ 'x-api-key': requiredApiKey, 'x-scheduled-refresh': 'true' \}/);
   assert.match(scoutsEntry, /const result = await scoutsServiceHandler\(event\)/);
-  assert.match(scoutsEntry, /return invokeScoutsService\(trustedInternalEvent\)/);
+  assert.match(scoutsEntry, /const result = await invokeScoutsService\(trustedInternalEvent\)/);
+  assert.match(scoutsEntry, /if \(Number\(result\?\.statusCode\) >= 500\)[\s\S]*?throw error/);
 });
 
 test('scheduled refresh status stays observable when persisted state is unavailable', () => {

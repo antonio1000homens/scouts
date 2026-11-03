@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -15,6 +16,15 @@ async function loadModule() {
   });
 
   await module.link(async (specifier) => {
+    if (specifier === './s3-request-metrics.mjs') {
+      const metricsPath = path.resolve(import.meta.dirname, '../s3-request-metrics.mjs');
+      return new vm.SourceTextModule(readFileSync(metricsPath, 'utf8'), { context, identifier: metricsPath });
+    }
+    if (specifier === 'node:async_hooks') {
+      return new vm.SyntheticModule(['AsyncLocalStorage'], function initialize() {
+        this.setExport('AsyncLocalStorage', AsyncLocalStorage);
+      }, { context, identifier: specifier });
+    }
     if (specifier !== '@aws-sdk/client-s3') {
       throw new Error(`Unhandled import ${specifier}`);
     }

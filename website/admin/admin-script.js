@@ -741,7 +741,7 @@ function getRuntimeSnapshotViewerConfig(snapshotKey) {
     if (snapshotKey === 'queued') {
         return {
             key: 'queued',
-            title: 'Runtime Queued Snapshot',
+            title: 'Legacy Runtime Queued Snapshot',
             url: QUEUED_REQUESTS_RUNTIME_URL,
             getSnapshot: () => latestQueuedSnapshot,
             setSnapshot: (snapshot) => {
@@ -752,7 +752,7 @@ function getRuntimeSnapshotViewerConfig(snapshotKey) {
     if (snapshotKey === 'processing') {
         return {
             key: 'processing',
-            title: 'Runtime Processing Snapshot',
+            title: 'Legacy Runtime Processing Snapshot',
             url: PROCESSING_REQUESTS_RUNTIME_URL,
             getSnapshot: () => latestProcessingSnapshot,
             setSnapshot: (snapshot) => {
@@ -763,7 +763,7 @@ function getRuntimeSnapshotViewerConfig(snapshotKey) {
     if (snapshotKey === 'completed') {
         return {
             key: 'completed',
-            title: 'Runtime Completed Snapshot',
+            title: 'Legacy Runtime Completed Snapshot',
             url: COMPLETED_REQUESTS_RUNTIME_URL,
             getSnapshot: () => latestCompletedSnapshot,
             setSnapshot: (snapshot) => {
@@ -781,7 +781,7 @@ async function renderRuntimeSnapshotViewerContent(snapshotKey, force = false) {
     if (!config || !titleEl || !contentEl) return;
 
     titleEl.textContent = config.title;
-    contentEl.textContent = 'Loading runtime snapshot...';
+    contentEl.textContent = 'Loading legacy runtime snapshot...';
 
     let snapshot = !force ? config.getSnapshot() : null;
     if (!snapshot) {
@@ -790,7 +790,7 @@ async function renderRuntimeSnapshotViewerContent(snapshotKey, force = false) {
     }
 
     if (!snapshot) {
-        contentEl.textContent = 'Runtime snapshot not available.';
+        contentEl.textContent = 'Legacy S3 snapshots are disabled. Use the Activity Centre for request lifecycle and Operations for live queue or DLQ actions. To roll back temporarily, deploy with LEGACY_RUNTIME_SNAPSHOTS_ENABLED=true.';
         return;
     }
 
@@ -808,7 +808,7 @@ function showRuntimeSnapshotViewer(snapshotKey = 'queued') {
     renderRuntimeSnapshotViewerContent(config.key, true).catch((error) => {
         const contentEl = document.getElementById('runtime-json-content');
         if (contentEl) {
-            contentEl.textContent = `Failed to load runtime snapshot: ${error.message}`;
+            contentEl.textContent = `Failed to load legacy runtime snapshot: ${error.message}`;
         }
     });
 }

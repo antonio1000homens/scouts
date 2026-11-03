@@ -8,9 +8,11 @@ import { coordinateEventApproval } from '/opt/nodejs/approval-coordinator.mjs';
 import { buildEventReviewSnapshot } from '/opt/nodejs/event-review.mjs';
 import { normaliseEnrichmentStage, retryManualReviewEnrichment } from '/opt/nodejs/enrichment-state.mjs';
 import { repairAgendaHexMetadata } from './agenda-hex-repair.mjs';
+import { runWithS3RequestMetrics, sendS3Command } from './s3-request-metrics.mjs';
 import { handler as scoutsServiceHandler } from './scouts-service.mjs';
 import { buildRuntimeActivity } from './runtime-activity.mjs';
-import { inspectRuntimeDlq, redriveRuntimeDlq } from './runtime-dlq.mjs';
+import { getRuntimeQueueStatus, inspectRuntimeDlq, redriveRuntimeDlq } from './runtime-dlq.mjs';
+import { drainDeferredRefreshQueue, getDeferredRefreshStatus } from './runtime-deferred-refresh.mjs';
 import {
   getScheduledRefreshSettings,
   getScheduledRefreshStatus,
@@ -25,6 +27,9 @@ const TARGET_BUCKET = process.env.TARGET_BUCKET || '';
 const SCOUTS_REQUESTS_QUEUE_URL = process.env.SCOUTS_REQUESTS_QUEUE_URL || '';
 const ENRICHMENT_STATE_TABLE_NAME = String(process.env.GEMINI_ENRICHMENT_STATE_TABLE_NAME || '').trim();
 const REQUEST_ACTIVITY_TABLE_NAME = String(process.env.SCOUTS_REQUEST_ACTIVITY_TABLE_NAME || '').trim();
+const LEGACY_RUNTIME_SNAPSHOTS_ENABLED = !['false', '0', 'no', 'off'].includes(
+  String(process.env.SCOUTS_LEGACY_RUNTIME_SNAPSHOTS ?? 'true').trim().toLowerCase(),
+);
 const ENRICHMENT_STAGES = Object.freeze(['tagline', 'imageTheme', 'image']);
 const PRIVATE_RUNTIME_SNAPSHOT_KEYS = Object.freeze({
   queued: 'runtime/scoutsQueued.json',
@@ -84,7 +89,7 @@ async function readPrivateJsonObject(key) {
   }
 
   try {
-    const result = await s3.send(new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: key }));
+    const result = await sendS3Command(s3, new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: key }));
     const raw = await result.Body.transformToString();
     return JSON.parse(raw);
   } catch (error) {
@@ -103,7 +108,7 @@ async function listPrivateEventObjects() {
   const keys = [];
   let continuationToken;
   do {
-    const result = await s3.send(new ListObjectsV2Command({
+    const result = await sendS3Command(s3, new ListObjectsV2Command({
       Bucket: TARGET_BUCKET,
       Prefix: 'events/',
       ContinuationToken: continuationToken,
@@ -420,6 +425,8 @@ function isInterceptedRuntimeCommand(command) {
   if (!command) return false;
   if (command.subject === 'activity' && ['status', 'history', 'lookup'].includes(command.action)) return true;
   if (command.subject === 'snapshot' && command.action === 'get') return true;
+  if (command.subject === 'queues' && command.action === 'status') return true;
+  if (command.subject === 'deferredrefresh' && command.action === 'status') return true;
   if (command.subject === 'event' && ['get', 'review', 'list'].includes(command.action)) return true;
   if (command.subject === 'enrichment' && ['status', 'retry'].includes(command.action)) return true;
   if (command.subject === 'dlq' && ['inspect', 'redrive'].includes(command.action)) return true;
@@ -621,14 +628,16 @@ async function handleScheduledInvocation() {
 
     const requiredApiKey = await getRequiredSecret('REQUIRED_API_KEY_PARAMETER');
     const trustedInternalEvent = {
+      _scheduledRefresh: true,
       requestContext: { http: { method: 'POST' } },
-      headers: { 'x-api-key': requiredApiKey },
+      headers: { 'x-api-key': requiredApiKey, 'x-scheduled-refresh': 'true' },
       body: JSON.stringify({
         realm: 'scouts',
         subject: 'calendars',
         action: 'refreshAllCalendars',
         calendar: 'all',
         maxEvents: schedule.maxQueuePublishesPerRun,
+        deferExcess: DEFERRED_REFRESH_ENABLED,
       }),
     };
 
@@ -636,8 +645,15 @@ async function handleScheduledInvocation() {
       scheduleExpression: schedule.scheduleExpression,
       maxQueuePublishesPerRun: schedule.maxQueuePublishesPerRun,
     });
-    return invokeScoutsService(trustedInternalEvent);
+    const result = await invokeScoutsService(trustedInternalEvent);
+    if (Number(result?.statusCode) >= 500) {
+      const error = new Error(`Scheduled refresh failed with HTTP ${result.statusCode}`);
+      error.statusCode = Number(result.statusCode);
+      throw error;
+    }
+    return result;
   } catch (error) {
+    if (Number(error?.statusCode) >= 500) throw error;
     // Fail closed: a schedule-state/secret read problem should not accidentally
     // trigger calendar/network/enrichment work. Returning successfully also
     // avoids an EventBridge retry storm while configuration is unavailable.
@@ -650,7 +666,44 @@ async function handleScheduledInvocation() {
   }
 }
 
-export async function handler(event = {}) {
+const DEFERRED_REFRESH_ENABLED = ['true', '1', 'yes', 'on'].includes(
+  String(process.env.SCOUTS_DEFERRED_REFRESH_ENABLED || 'false').trim().toLowerCase(),
+);
+
+function isDeferredRefreshDispatchInvocation(event) {
+  return event?._deferredRefreshDispatch === true
+    || String(event?._deferredRefreshDispatch || '').trim().toLowerCase() === 'true';
+}
+
+async function publishDeferredRefreshMessage(payload) {
+  if (!SCOUTS_REQUESTS_QUEUE_URL) throw new Error('SCOUTS_REQUESTS_QUEUE_URL is not configured');
+  const result = await sqs.send(new SendMessageCommand({
+    QueueUrl: SCOUTS_REQUESTS_QUEUE_URL,
+    MessageBody: JSON.stringify(payload),
+  }));
+  await recordRequestActivity({
+    ...payload,
+    requestId: payload.requestId,
+    rootRequestId: payload.rootRequestId,
+    state: 'queued',
+    stage: 'scoutsRequests',
+    action: payload.action || 'deferred-refresh',
+  }).catch((error) => console.warn('[Activity] Unable to record deferred queued request:', error?.message || error));
+  return { messageId: text(result?.MessageId) || null };
+}
+
+async function handleDeferredRefreshDispatch() {
+  if (!DEFERRED_REFRESH_ENABLED) return { status: 'disabled' };
+  const limit = Math.max(1, Number.parseInt(process.env.SCOUTS_DEFERRED_REFRESH_DISPATCH_BATCH_SIZE || '10', 10) || 10);
+  const result = await drainDeferredRefreshQueue({ publish: publishDeferredRefreshMessage, limit });
+  console.log('[DeferredRefresh] Dispatcher completed.', result);
+  return { status: 'ok', deferredRefresh: result };
+}
+
+async function handlerCore(event = {}) {
+  if (isDeferredRefreshDispatchInvocation(event)) {
+    return handleDeferredRefreshDispatch();
+  }
   if (isScheduledRefreshInvocation(event)) {
     return handleScheduledInvocation();
   }
@@ -695,7 +748,26 @@ export async function handler(event = {}) {
       return response(200, { status: 'ok', activity });
     }
 
+    if (command.subject === 'queues' && command.action === 'status') {
+      const queueStatus = await getRuntimeQueueStatus();
+      return response(200, { status: 'ok', queueStatus });
+    }
+
+    if (command.subject === 'deferredrefresh' && command.action === 'status') {
+      if (!DEFERRED_REFRESH_ENABLED) {
+        return response(200, { status: 'disabled', deferredRefresh: null });
+      }
+      const deferredRefresh = await getDeferredRefreshStatus({ limit: command.body?.limit });
+      return response(200, { status: 'ok', deferredRefresh });
+    }
+
     if (command.subject === 'snapshot') {
+      if (!LEGACY_RUNTIME_SNAPSHOTS_ENABLED) {
+        return response(410, {
+          status: 'retired',
+          error: 'Legacy S3 runtime snapshots are disabled. Use the Activity Centre and live queue/DLQ operations.',
+        });
+      }
       const snapshotName = text(command.body?.snapshot).toLowerCase();
       const key = PRIVATE_RUNTIME_SNAPSHOT_KEYS[snapshotName];
       if (!key) {
@@ -886,6 +958,10 @@ export async function handler(event = {}) {
     const statusCode = Number.isFinite(Number(error?.statusCode)) ? Number(error.statusCode) : 503;
     const subject = command?.subject === 'dlq'
       ? 'DLQ diagnostics'
+      : command?.subject === 'queues'
+        ? 'Live queue status'
+      : command?.subject === 'deferredrefresh'
+        ? 'Deferred refresh status'
       : command?.subject === 'schedule'
         ? 'Scheduled refresh controls'
         : command?.subject === 'snapshot'
@@ -903,4 +979,11 @@ export async function handler(event = {}) {
       ...(Number.isFinite(Number(error?.currentVisible)) ? { currentVisible: Number(error.currentVisible) } : {}),
     });
   }
+}
+
+export async function handler(event = {}) {
+  const source = isDeferredRefreshDispatchInvocation(event)
+    ? 'deferred-refresh-dispatch'
+    : isScheduledRefreshInvocation(event) ? 'scheduled-refresh' : 'non-scheduled';
+  return runWithS3RequestMetrics(source, () => handlerCore(event));
 }

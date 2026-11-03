@@ -260,7 +260,7 @@ test('calendar refresh backfills canonical agenda HEX independently of enrichmen
   assert.match(scoutsEntry, /repairAgendaHexMetadata/);
   assert.match(scoutsEntry, /function isCalendarRefreshInvocation/);
   assert.match(scoutsEntry, /action\.startsWith\('refresh'\)/);
-  assert.match(scoutsEntry, /return invokeScoutsService\(trustedInternalEvent\)/);
+  assert.match(scoutsEntry, /const result = await invokeScoutsService\(trustedInternalEvent\)/);
   assert.match(scoutsEntry, /return invokeScoutsService\(event\)/);
   assert.match(scoutsEntry, /maxEvents: schedule\.maxQueuePublishesPerRun/);
 });

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -36,8 +37,12 @@ async function loadService() {
     if (specifier === '@aws-sdk/client-sqs') return synthetic(specifier, { SQSClient, SendMessageCommand: command('SendMessageCommand') });
     if (specifier === '@aws-sdk/client-sfn') return synthetic(specifier, { SFNClient, DescribeExecutionCommand: command('DescribeExecutionCommand'), ListExecutionsCommand: command('ListExecutionsCommand') });
     if (specifier === 'crypto') return synthetic(specifier, { randomUUID: () => 'request-fixture' });
+    if (specifier === 'node:async_hooks') return synthetic(specifier, { AsyncLocalStorage });
     if (specifier === '/opt/nodejs/ssm-secrets.mjs') return synthetic(specifier, { getRequiredSecret: async () => 'fixture-key' });
-    if (specifier === '/opt/nodejs/request-activity.mjs') return synthetic(specifier, { recordRequestActivity: async (entry) => { activities.push(entry); return entry; } });
+    if (specifier === '/opt/nodejs/request-activity.mjs') return synthetic(specifier, {
+      listRequestActivity: async () => ({ requests: [] }),
+      recordRequestActivity: async (entry) => { activities.push(entry); return entry; },
+    });
     if (specifier === '/opt/nodejs/enrichment-state.mjs') return synthetic(specifier, { getEnrichmentState: async () => null, evaluateEnrichmentEligibility: async () => ({ eligible: true }), buildGenerationId: () => 'fixture-generation' });
     if (specifier === '/opt/nodejs/occurrence-identity.mjs') return synthetic(specifier, { resolveOccurrenceId: () => OCCURRENCE, occurrenceStorageKey: (id) => `occurrences/${id}.json` });
     if (specifier === './image-head-memo.mjs') {
@@ -46,6 +51,23 @@ async function loadService() {
       const memoModule = new vm.SourceTextModule(readFileSync(memoPath, 'utf8'), { context, identifier: memoPath });
       modules.set(specifier, memoModule);
       return memoModule;
+    }
+    if (specifier === './runtime-activity-index.mjs') {
+      const indexPath = path.resolve(import.meta.dirname, '../runtime-activity-index.mjs');
+      const indexModule = new vm.SourceTextModule(readFileSync(indexPath, 'utf8'), { context, identifier: indexPath });
+      modules.set(specifier, indexModule);
+      return indexModule;
+    }
+    if (specifier === './s3-request-metrics.mjs') {
+      const metricsPath = path.resolve(import.meta.dirname, '../s3-request-metrics.mjs');
+      const metricsModule = new vm.SourceTextModule(readFileSync(metricsPath, 'utf8'), { context, identifier: metricsPath });
+      modules.set(specifier, metricsModule);
+      return metricsModule;
+    }
+    if (specifier === './runtime-deferred-refresh.mjs') {
+      return synthetic(specifier, {
+        enqueueDeferredRefresh: async () => ({ enqueued: true, state: 'ready' }),
+      });
     }
     throw new Error(`Unhandled import ${specifier}`);
   };
