@@ -164,6 +164,19 @@ supports retaining the existing mappings while SQS remains free in this
 estimate, but it does not replace the CloudWatch empty-receive evidence or
 prove that the configured free allocation will always cover future traffic.
 
+At 19:56 UTC, a read-only queue recheck verified all five Scouts queue
+attributes directly. Visible, in-flight and delayed counts were zero on every
+queue; configured message retention was 14 days. CloudWatch's latest hourly
+point (18:56 UTC) also showed zero oldest-message age. In the preceding
+24-hour query, each of the three enabled Lambda event-source mappings
+(`scoutsRequests`, `scoutsProcessing` and `scoutsProcessingDLQ`) recorded
+8,638 empty receives and zero messages received. All three mappings remain
+enabled. The two DLQs (`scoutsRequestsDLQ` and `scoutsProcessingDLQ`) were
+empty. The primary queues retain their configured redrive thresholds of five
+receives (`scoutsRequests`) and three receives (`scoutsProcessing`). This is
+a quiet-window readback; it does not exercise message delivery, retries,
+redrive or manual recovery.
+
 ## Supplemental live recheck (2026-11-03 18:36 UTC)
 
 AWS Core again verified account `553490163883` before read-only calls. The
