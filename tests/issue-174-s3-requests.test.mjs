@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createImageHeadMemo } from '../lambdas/scouts/function/image-head-memo.mjs';
+import { loadFunctionsFromSource } from './helpers/source-function-loader.mjs';
 import {
   buildImageEnrichRuntimeStageIndex,
   findImageEnrichRuntimeStage,
@@ -35,6 +36,29 @@ test('public image CDN routing leaves fresh agenda reads on the disabled-cache b
   assert.match(loader, /fetch\(url, \{ cache: 'no-store' \}\)/);
   assert.match(cloudfront, /DefaultCacheBehavior:[\s\S]*?CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6/);
   assert.match(cloudfront, /PathPattern: \/agenda\.json[\s\S]*?CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad/);
+});
+
+test('admin image viewer routes legacy S3 event-image URLs through the page origin', () => {
+  const admin = source('../website/admin/admin-script.js');
+  const origin = 'https://admin.site.invalid/admin/';
+  const { functions } = loadFunctionsFromSource(admin, ['normaliseImagePath'], {
+    EVENT_IMAGE_BUCKET_HOST: 'scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com',
+    EVENT_IMAGE_PATH_PREFIX: '/website/eventImages/',
+    URL,
+    window: { location: { href: origin } },
+  });
+  const normalize = functions.normaliseImagePath;
+
+  assert.equal(
+    normalize('https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com/website/eventImages/camp.jpg?preview=1'),
+    'https://admin.site.invalid/website/eventImages/camp.jpg?preview=1',
+  );
+  assert.equal(normalize('website/eventImages/camp.jpg'), '/website/eventImages/camp.jpg');
+  assert.equal(normalize('https://images.example.test/camp.jpg'), 'https://images.example.test/camp.jpg');
+  assert.equal(
+    normalize('https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com/agenda.json'),
+    'https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com/agenda.json',
+  );
 });
 
 test('missing object is cached for this invocation but rechecked on the next', async () => {

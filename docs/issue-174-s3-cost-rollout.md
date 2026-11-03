@@ -276,13 +276,12 @@ were assessed separately below.
 
 The public event loader previously converted canonical
 `website/eventImages/*` paths directly to the S3 REST hostname, bypassing the
-existing CloudFront distribution. The source change in this follow-up resolves
-those relative paths and legacy URLs from the exact Scouts S3 bucket host to
+existing CloudFront distribution. The public loader and admin viewer now
+resolve relative paths and legacy URLs from the exact Scouts S3 bucket host to
 the current page origin, which is Cloudflare in front of CloudFront in
-production. Other absolute image URLs remain unchanged. The admin viewer
-already resolves relative event-image paths against its page origin. Agenda
-JSON continues to use `cache: 'no-store'`, including its direct S3 fallback; no
-runtime or private path is redirected.
+production. Other absolute image URLs remain unchanged. Agenda JSON continues
+to use `cache: 'no-store'`, including its direct S3 fallback; no runtime or
+private path is redirected.
 
 Before the source change, the verified CloudFront distribution was enabled
 with alias `2ndtolworth.org.uk`, the S3 website endpoint as origin, and
