@@ -213,6 +213,21 @@ Account for the cost of that temporary monitoring and remove it once
 the benchmark is complete, subject to its own approval. Distinguish
 Edge/CloudFront requests and browser/admin traffic from Lambda work.
 
+Repeatable read-only collection is available with:
+
+```sh
+AWS_PROFILE=scouts node scripts/scouts-s3-request-attribution.mjs --hours 24
+```
+
+The command verifies account `553490163883`, reads the existing S3 metrics
+configuration, and returns 1-minute S3 request counts beside `scouts` Lambda
+invocations/errors and the low-cardinality SDK/per-refresh summary logs. It
+accepts timezone-qualified `--start`/`--end` timestamps, caps the range at
+seven days, and does not create metrics, alarms, or log queries. CloudWatch S3
+metrics can be delayed and remain bucket-wide; only the SDK summary log
+attributes a request to the Lambda path. That log will appear after this
+follow-up is deployed.
+
 ## Rollout and rollback
 
 1. Review the PR and synthetic tests. Confirm the deployed
