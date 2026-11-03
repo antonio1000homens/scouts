@@ -89,9 +89,14 @@ production state changed after the initial recheck:
   This is per-invocation avoided-request telemetry from the deployed refresh
   path, not a full before/after billing comparison.
 - The `CodexRequestCostAudit` S3 datapoint for the 18:15 15-minute interval
-  was 180 GET, 38 HEAD, 2 LIST and 1 PUT. It straddles the 18:19 rollout and
-  includes callers outside the scheduled Lambda; do not attribute these counts
-  to that refresh or use this partial interval as a post-deployment baseline.
+  was 180 GET, 38 HEAD, 2 LIST and 1 PUT. One-minute metrics placed 72 GET /
+  21 HEAD in 18:20 and 108 GET / 17 HEAD plus 2 LIST / 1 PUT in 18:21. The
+  Lambda metric showed one `scouts` invocation at 18:20 and no error; its log
+  shows a 7.8-second run from 18:20:26 to 18:20:34. The 18:21 bucket counts
+  are not explained by that observed invocation unless metric publication
+  latency shifts their timestamps. Bucket metrics do not identify callers,
+  so this is correlation, not full request attribution or a clean before/after
+  window.
 - No `[S3 Request Reduction] SDK calls by operation` log appeared between
   18:15 and 18:36 UTC. That per-invocation operation counter exists in this
   follow-up PR but is not deployed yet.
