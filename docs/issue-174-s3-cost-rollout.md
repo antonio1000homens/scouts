@@ -196,6 +196,17 @@ claiming these savings. The removed legacy touches avoid additional
 reads/writes per actual Scouts execution; the new aggregate logs quantify
 HEX reread and duplicate image HEAD savings per invocation.
 
+For cost scale, October's observed Tier-2 charge implies an effective rate of
+about **$0.000420 per 1,000 GET/HEAD requests**. A deliberately conditional
+scenario assumes all old rough counts (327 GET+HEAD per run) were scheduled
+refreshes, and that the one post-phase-one bucket window (218 GET+HEAD) was
+entirely one representative refresh. At 48 versus 4 runs/day over 30 days,
+that scenario moves Tier-2 GET/HEAD cost from about **$0.198/month** to
+**$0.011/month**, a difference of **$0.187/month**. This is a sensitivity
+case, not a savings claim: caller attribution is incomplete, the new sample
+includes an unexplained later minute, and one invocation does not establish a
+monthly average. It excludes Tier-1 requests and monitoring cost.
+
 An initial comparison can use the existing bucket request monitoring
 (`CodexRequestCostAudit`) by operation and 5–15-minute intervals.
 Account for the cost of that temporary monitoring and remove it once
