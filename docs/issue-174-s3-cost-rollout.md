@@ -115,7 +115,13 @@ recorded 177 `GetObject`, 38 `HeadObject`, 2 `ListObjectsV2`, and 1
 the same other operation counts. The three-request GET reduction matches the
 three removed snapshot reads for this one refresh; this is measured SDK-call
 reduction, not yet a full-day or bill-level comparison. S3 bucket metrics for
-this latest run still need their delayed-bin reconciliation.
+the 19:32 minute became available by 19:35 UTC: 145 GET, 27 HEAD, 1 LIST and
+1 PUT, alongside one Lambda invocation and zero Lambda errors. These bucket
+counts do not match the 177/38/2/1 aggregate SDK counts. The request-metrics
+configuration covers the whole bucket with no prefix filter, while the Lambda
+counter aggregates calls without bucket or response-status dimensions; the
+discrepancy remains unexplained, so this is not yet bucket-level attribution
+for the controlled run.
 
 After the invocation, `HeadObject` readbacks showed the queued, processing and
 completed snapshot sizes and `LastModified` timestamps unchanged from the
