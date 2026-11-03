@@ -22,10 +22,24 @@ shows no current SQS charge and does not justify changing that mapping.
 The repository now defines a DynamoDB outbox table and a conditional 15-minute
 EventBridge dispatcher in the Scouts Lambda stack. The dispatcher sends at
 most 10 ready items per invocation to the existing `scoutsRequests` queue; it
-does not add an SQS event-source mapping. The table uses on-demand capacity,
-has a `state-nextAttemptAt-index` with a narrow INCLUDE projection, and retains
-terminal items for 14 days after their 14-day work expiry. The table is
-retained if the stack is removed or replaced.
+does not add an SQS event-source mapping. The table defaults to on-demand
+capacity, has a `state-nextAttemptAt-index` with a narrow INCLUDE projection,
+and retains terminal items for 14 days after their 14-day work expiry. The
+table is retained if the stack is removed or replaced.
+
+The stack also supports `PROVISIONED` capacity for this optional outbox table
+and its GSI. Each resource's RCU and WCU parameter is capped at 10, so this
+table plus its index cannot be configured above 20 RCUs or 20 WCUs. This cap
+keeps the outbox alone below the nominal shared 25-unit allowance, but does
+not establish account eligibility or free capacity: other provisioned tables
+and GSIs must be included in the #172 review. The default remains
+`PAY_PER_REQUEST`; neither the feature nor the table is enabled by default.
+Capacity values must come from the workload benchmark, not the parameter
+defaults. The GitHub deployment workflow reads the corresponding
+`DEFERRED_REFRESH_OUTBOX_*` repository variables and falls back to the same
+off/on-demand defaults. Setting those variables changes the configuration
+applied by subsequent Scouts deployments, so set them only after the staged
+capacity review and approval.
 
 `DeferredRefreshOutboxEnabled` defaults to `false`. The table, dispatcher
 schedule, outbox writes, outbox IAM permissions and admin reads are all
@@ -83,12 +97,13 @@ The outbox table is defined in source but remains uncreated and unused by
 default. Before
 enabling it, coordinate with #172 and measure actual write/read peaks, GSI
 allocation, burst behavior, retry amplification, maximum batch size, and
-concurrent scheduled invocations. The table currently uses PAY_PER_REQUEST;
-it is an additional request-cost consumer and does not use the owner's
-preferred shared provisioned free allocation. Do not enable it or claim $0
-without those measurements. If the GSI/query model exceeds safe provisioned
-capacity, retain on-demand mode or use bounded scheduled scans only after
-measuring their read cost.
+concurrent scheduled invocations. The table defaults to PAY_PER_REQUEST and
+remains an additional request-cost consumer in that mode. Provisioned mode is
+available in source but has not been benchmarked or enabled. Do not enable the
+outbox, switch its billing mode, or claim $0 without workload measurements and
+a shared-account capacity review. If the GSI/query model exceeds safe
+provisioned capacity, retain on-demand mode or use bounded scheduled scans
+only after measuring their read cost.
 
 ## Read-only DynamoDB capacity evidence (2026-11-03 19:59 UTC)
 

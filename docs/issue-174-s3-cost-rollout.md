@@ -411,12 +411,20 @@ not measure a change in bucket-wide S3 requests or charges.
    identifiers; the dispatcher claims leases and sends at most 10 items each
    15-minute invocation through the existing `scoutsRequests` queue. Failed
    work retries with bounded backoff and becomes visible as `needs_attention`
-   or `expired`. The table is on-demand and retained; the feature flag defaults
-   off, while Operations exposes bounded read-only queue-age/status samples.
+   or `expired`. The table defaults to on-demand capacity and is retained; the
+   feature flag defaults off, while Operations exposes bounded read-only
+   queue-age/status samples.
    See [`issue-174-deferred-refresh-design.md`](issue-174-deferred-refresh-design.md).
-   The retained PAY_PER_REQUEST table and all runtime permissions/schedules
-   are conditioned on the opt-in flag. A normal stack deployment leaves the
-   table uncreated. Enabling it still requires the #172 capacity review.
+   The stack supports opt-in provisioned throughput for the outbox table and
+   GSI, with each capacity parameter capped at 10; the outbox alone is
+   therefore limited to 20 RCUs and 20 WCUs across both resources. The mode
+   still defaults to PAY_PER_REQUEST, and all runtime permissions/schedules
+   plus table creation are conditioned on the outbox flag. A normal stack
+   deployment leaves the table uncreated. Benchmarking and the shared #172
+   capacity/eligibility review are still required before enabling the table
+   or selecting provisioned capacity. The deployment workflow reads these
+   settings from `DEFERRED_REFRESH_OUTBOX_*` repository variables; changes to
+   those variables affect subsequent Scouts deployments.
 9. **Remove a duplicate canonical read-back**: persistence already GETs the
    just-written HEX object and parses it for verification. Two enrichment
    paths now reuse that verified body for their generated-field checks instead
@@ -559,6 +567,8 @@ comparison or proof that the scheduled refresh caused all bucket requests.
   present but disabled by default. Benchmark its read/write peaks and GSI
   traffic with #172, choose whether on-demand or a separately approved
   provisioned allocation is safe, then enable it under a measured rollout.
+  The stack now accepts explicit provisioned RCU/WCU values for the outbox
+  table and GSI, each capped at 10, while the default remains PAY_PER_REQUEST.
   Verify backlog age, expiry, retry recovery and throttling under live load.
   No continuously polling SQS mapping is added. See
   [`issue-174-deferred-refresh-design.md`](issue-174-deferred-refresh-design.md).

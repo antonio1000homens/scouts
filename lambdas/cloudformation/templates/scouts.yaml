@@ -152,6 +152,37 @@ Parameters:
   DeferredRefreshOutboxTableName:
     Type: String
     Default: scouts-deferred-refresh
+  DeferredRefreshOutboxBillingMode:
+    Type: String
+    AllowedValues:
+      - PAY_PER_REQUEST
+      - PROVISIONED
+    Default: PAY_PER_REQUEST
+    Description: Keep on-demand unless a workload and shared-capacity review approves provisioned throughput.
+  DeferredRefreshOutboxTableReadCapacity:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+    Description: Base-table RCU when provisioned; choose after the #172 capacity benchmark.
+  DeferredRefreshOutboxTableWriteCapacity:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+    Description: Base-table WCU when provisioned; choose after the #172 capacity benchmark.
+  DeferredRefreshOutboxIndexReadCapacity:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+    Description: GSI RCU when provisioned; choose after the #172 capacity benchmark.
+  DeferredRefreshOutboxIndexWriteCapacity:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+    Description: GSI WCU when provisioned; choose after the #172 capacity benchmark.
   DeferredRefreshDispatchExpression:
     Type: String
     Default: rate(15 minutes)
@@ -168,6 +199,7 @@ Conditions:
   HasFullEnrichStateMachineArn: !Not [!Equals [!Ref FullEnrichStateMachineArn, '']]
   HasSharedLayerVersionArn: !Not [!Equals [!Ref SharedLayerVersionArn, '']]
   ShouldEnableDeferredRefreshOutbox: !Equals [!Ref DeferredRefreshOutboxEnabled, 'true']
+  ShouldUseProvisionedDeferredRefreshOutbox: !Equals [!Ref DeferredRefreshOutboxBillingMode, 'PROVISIONED']
 
 Resources:
   ScoutsDataBucket:
@@ -183,7 +215,12 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       TableName: !Ref DeferredRefreshOutboxTableName
-      BillingMode: PAY_PER_REQUEST
+      BillingMode: !Ref DeferredRefreshOutboxBillingMode
+      ProvisionedThroughput: !If
+        - ShouldUseProvisionedDeferredRefreshOutbox
+        - ReadCapacityUnits: !Ref DeferredRefreshOutboxTableReadCapacity
+          WriteCapacityUnits: !Ref DeferredRefreshOutboxTableWriteCapacity
+        - !Ref AWS::NoValue
       AttributeDefinitions:
         - AttributeName: workKey
           AttributeType: S
@@ -211,6 +248,11 @@ Resources:
               - stage
               - lastError
               - terminalReason
+          ProvisionedThroughput: !If
+            - ShouldUseProvisionedDeferredRefreshOutbox
+            - ReadCapacityUnits: !Ref DeferredRefreshOutboxIndexReadCapacity
+              WriteCapacityUnits: !Ref DeferredRefreshOutboxIndexWriteCapacity
+            - !Ref AWS::NoValue
       TimeToLiveSpecification:
         AttributeName: ttlAt
         Enabled: true
