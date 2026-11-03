@@ -41,6 +41,7 @@ const QUEUED_REQUESTS_RUNTIME_KEY = 'runtime/scoutsQueued.json';
 const PROCESSING_REQUESTS_RUNTIME_KEY = 'runtime/scoutsProcessing.json';
 const COMPLETED_REQUESTS_RUNTIME_KEY = 'runtime/scoutsComplete.json';
 const QUEUED_RUNTIME_STALE_PRUNE_MS = 24 * 60 * 60 * 1000;
+const MAX_HEX_READ_CACHE_ENTRIES = 500;
 
 const SECTION_CUBS = 'cubs';
 const SECTION_BEAVERS = 'beavers';
@@ -1523,7 +1524,7 @@ async function purgeEventFilesFromS3(bucket, prefix = 'events/') {
   return removed;
 }
 
-async function deleteOrphanedHexFiles(bucket, agendaData) {
+async function deleteOrphanedHexFiles(bucket, agendaData, hexReadCache = null) {
   const removed = [];
   let continuationToken = undefined;
   
@@ -1564,6 +1565,12 @@ async function deleteOrphanedHexFiles(bucket, agendaData) {
       }
 
       if (!hexData || typeof hexData !== 'object') continue;
+      // The subsequent HEX verification would otherwise GET the same canonical
+      // event again in this invocation. Keep the memo bounded; a future run
+      // always reads S3 afresh so deleted and updated objects are detected.
+      if (hexReadCache instanceof Map && hexReadCache.size < MAX_HEX_READ_CACHE_ENTRIES) {
+        hexReadCache.set(key, hexData);
+      }
 
       const title = hexData.title || hexData.summary;
       if (!title) continue;
@@ -1590,6 +1597,7 @@ async function deleteOrphanedHexFiles(bucket, agendaData) {
       // Delete the orphaned HEX file
       try {
         await deleteObjectFromS3(bucket, key, `orphaned-hex:${title}`);
+        hexReadCache?.delete(key);
         removed.push({
           key,
           title,
@@ -4409,6 +4417,7 @@ export async function lambdaHandler(event = {}) {
   try {
     // Per-run only: a later invocation must check for deleted/broken images again.
     const imageHeadMemo = createImageHeadMemo();
+    const hexReadCache = new Map();
     let dedupedNewEvents = [];
     const feedFailures = [];
     if (!isAgendaEnrichmentOnlyCommand) {
@@ -4554,7 +4563,7 @@ export async function lambdaHandler(event = {}) {
     // Clean up orphaned HEX files
     let orphanedHexFiles = [];
     try {
-      orphanedHexFiles = await deleteOrphanedHexFiles(bucket, agendaPayload);
+      orphanedHexFiles = await deleteOrphanedHexFiles(bucket, agendaPayload, hexReadCache);
       if (orphanedHexFiles.length > 0) {
         console.log(`[Cleanup] Removed ${orphanedHexFiles.length} orphaned HEX files`);
       }
@@ -4566,6 +4575,7 @@ export async function lambdaHandler(event = {}) {
     let hexFilesRepaired = 0;
     let hexFilesWithBrokenImages = 0;
     let hexFilesMigrated = 0;
+    let reusedHexReads = 0;
     try {
       console.log('[HEX Image Verification] Starting image verification for HEX files...');
       let continuationToken = undefined;
@@ -4588,7 +4598,9 @@ export async function lambdaHandler(event = {}) {
           if (!key || !key.endsWith('.json')) continue;
 
           try {
-            const hexData = await getJsonFromS3(bucket, key, `hex:${key}`);
+            const cachedHex = hexReadCache.get(key);
+            const hexData = cachedHex || await getJsonFromS3(bucket, key, `hex:${key}`);
+            if (cachedHex) reusedHexReads += 1;
             if (!hexData || typeof hexData !== 'object') continue;
 
             const repairResult = await verifyAndRepairHexFile(bucket, key, hexData, imageHeadMemo);
@@ -4619,6 +4631,11 @@ export async function lambdaHandler(event = {}) {
     } catch (hexVerifyError) {
       console.warn('[HEX Image Verification] Error during HEX file image verification:', hexVerifyError?.message || String(hexVerifyError));
     }
+
+    console.log('[S3 Request Reduction] Per-refresh avoided requests', {
+      reusedHexReads,
+      imageHead: imageHeadMemo.stats(),
+    });
 
     let imageEnrichExecutions = null;
     try {
