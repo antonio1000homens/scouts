@@ -198,20 +198,30 @@ async function loadScoutsConfig() {
 }
 
 function emitImageMetric(metricName, provider = 'cloudflare', outcome = null) {
-  console.log(JSON.stringify({
-    _aws: {
-      Timestamp: Date.now(),
-      CloudWatchMetrics: [{
-        Namespace: 'Scouts/ImageGeneration',
-        Dimensions: [[]],
-        Metrics: [{ Name: metricName, Unit: 'Count' }],
-      }],
-    },
-    Provider: provider,
-    Model: provider === 'cloudflare' ? CLOUDFLARE_MODEL : null,
-    Outcome: outcome || metricName,
-    [metricName]: 1,
-  }));
+  const event = {
+    event: 'image_generation',
+    metric: metricName,
+    provider,
+    outcome: outcome || metricName,
+    model: provider === 'cloudflare' ? CLOUDFLARE_MODEL : null,
+    timestamp: Date.now(),
+  };
+  // Only these two metrics have active CloudWatch alarms. Keep one
+  // dimensionless series for each alarm; log every other outcome as JSON.
+  if (metricName === 'Failure' || metricName === 'ProviderQuotaExhausted') {
+    Object.assign(event, {
+      _aws: {
+        Timestamp: event.timestamp,
+        CloudWatchMetrics: [{
+          Namespace: 'Scouts/ImageGeneration',
+          Dimensions: [[]],
+          Metrics: [{ Name: metricName, Unit: 'Count' }],
+        }],
+      },
+      [metricName]: 1,
+    });
+  }
+  console.log(JSON.stringify(event));
 }
 
 function logImageEvent({
@@ -559,7 +569,7 @@ async function markImageDeferral({ hex, attemptCount = 0, attemptWasReserved = f
     await dynamo.send(new UpdateItemCommand({
       TableName: ENRICHMENT_TABLE_NAME,
       Key: { hex: { S: hex }, stage: { S: 'image' } },
-      UpdateExpression: 'SET #state = :state, #attemptCount = :attemptCount, #lastErrorType = :errorType, #lastErrorMessage = :errorMessage, #nextRetryAt = :nextRetryAt, #updatedAt = :updatedAt, #expiresAt = :expiresAt REMOVE #inProgressExpiresAt',
+      UpdateExpression: 'SET #state = :state, #attemptCount = :attemptCount, #lastErrorType = :errorType, #lastErrorMessage = :errorMessage, #nextRetryAt = :nextRetryAt, #updatedAt = :updatedAt REMOVE #inProgressExpiresAt, #expiresAt',
       ConditionExpression: 'attribute_not_exists(#state) OR (#state <> :manualReview AND #state <> :succeeded)',
       ExpressionAttributeNames: {
         '#state': 'state', '#attemptCount': 'attemptCount', '#lastErrorType': 'lastErrorType',
@@ -570,7 +580,7 @@ async function markImageDeferral({ hex, attemptCount = 0, attemptWasReserved = f
         ':state': { S: 'retry_wait' }, ':manualReview': { S: 'manual_review' }, ':succeeded': { S: 'succeeded' },
         ':attemptCount': { N: String(persistedAttemptCount) }, ':errorType': { S: errorType },
         ':errorMessage': { S: String(message || errorType).slice(0, 500) }, ':nextRetryAt': { S: nextRetryAt },
-        ':updatedAt': { S: now.toISOString() }, ':expiresAt': { N: String(ttlEpoch(now)) },
+        ':updatedAt': { S: now.toISOString() },
       },
     }));
   } catch (error) {

@@ -10,11 +10,14 @@ const {
   ENRICHMENT_STAGES,
   ENRICHMENT_STATES,
   buildGenerationId,
+  getEnrichmentState,
   normaliseEnrichmentStage,
   evaluateEnrichmentEligibility,
   classifyGeminiError,
   retryDelaySeconds,
   reserveEnrichmentAttempt,
+  markEnrichmentFailure,
+  markGeminiSucceeded,
   resetEnrichmentStateClientForTests,
   setEnrichmentStateClientForTests,
 } = await import('./enrichment-state.mjs');
@@ -107,4 +110,45 @@ test('retry delays implement the 1 hour then 6 hour policy', () => {
   assert.equal(retryDelaySeconds(1), 3600);
   assert.equal(retryDelaySeconds(2), 21600);
   assert.equal(retryDelaySeconds(3), 21600);
+});
+
+test('actionable enrichment states do not receive TTL expiry timestamps', async () => {
+  const commands = [];
+  setEnrichmentStateClientForTests({
+    async send(command) {
+      commands.push(command);
+      return { Attributes: {} };
+    },
+  });
+  try {
+    await markGeminiSucceeded({ hex: 'abc', stage: 'tagline', generationId: 'g1', generatedValue: 'camp' });
+    await markEnrichmentFailure({ hex: 'abc', stage: 'tagline', error: { status: 503 }, attemptCount: 1 });
+    await markEnrichmentFailure({ hex: 'abc', stage: 'tagline', error: { status: 401 }, attemptCount: 1 });
+    for (const command of commands) {
+      assert.match(command.input.UpdateExpression, /REMOVE[^]*#expiresAt/);
+      assert.equal(command.input.ExpressionAttributeValues[':expiresAt'], undefined);
+    }
+  } finally {
+    resetEnrichmentStateClientForTests();
+  }
+});
+
+test('an expired-but-present DynamoDB row is still read until TTL physically removes it', async () => {
+  setEnrichmentStateClientForTests({
+    async send() {
+      return { Item: {
+        hex: { S: 'abc' },
+        stage: { S: 'tagline' },
+        state: { S: 'manual_review' },
+        expiresAt: { N: '1' },
+      } };
+    },
+  });
+  try {
+    const state = await getEnrichmentState('abc', 'tagline');
+    assert.equal(state.state, 'manual_review');
+    assert.equal(state.expiresAt, 1);
+  } finally {
+    resetEnrichmentStateClientForTests();
+  }
 });

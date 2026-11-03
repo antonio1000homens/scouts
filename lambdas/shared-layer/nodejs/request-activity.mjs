@@ -1,11 +1,12 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { DynamoDBClient, QueryCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand, QueryCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 
 const REGION = process.env.AWS_REGION || 'eu-west-2';
 const TABLE_NAME = String(process.env.SCOUTS_REQUEST_ACTIVITY_TABLE_NAME || '').trim();
 const RETENTION_SECONDS = 7 * 24 * 60 * 60;
 const MAX_TIMELINE = 24;
-const client = new DynamoDBClient({ region: REGION });
+const defaultClient = new DynamoDBClient({ region: REGION });
+let client = defaultClient;
 const requestActivityContext = new AsyncLocalStorage();
 
 const TERMINAL = new Set(['completed', 'failed', 'needs_attention', 'manual_review']);
@@ -68,6 +69,15 @@ function unmarshall(item = {}) {
 }
 
 export function requestActivityEnabled() { return Boolean(TABLE_NAME); }
+
+export function setRequestActivityClientForTests(nextClient) {
+  if (!nextClient || typeof nextClient.send !== 'function') {
+    throw new TypeError('Request-activity test client must expose send(command)');
+  }
+  client = nextClient;
+}
+
+export function resetRequestActivityClientForTests() { client = defaultClient; }
 
 export function withRequestActivityContext(context = {}, callback) {
   if (typeof callback !== 'function') throw new TypeError('Request activity context callback must be a function');
@@ -207,8 +217,13 @@ export async function listRequestActivity({ requestIds = [], rootRequestId = '',
   const normalizedIds = [...new Set((Array.isArray(requestIds) ? requestIds : []).map(text).filter(Boolean))];
   if (normalizedIds.length) {
     const results = await Promise.all(normalizedIds.slice(0, 50).map(async (requestId) => {
-      const response = await client.send(new QueryCommand({ TableName: TABLE_NAME, KeyConditionExpression: 'requestId = :requestId', ExpressionAttributeValues: { ':requestId': { S: requestId } }, Limit: 1 }));
-      return unmarshall(response.Items?.[0]);
+      // requestId is the table partition key, so GetItem reads exactly one row
+      // and avoids Query's index/query overhead for the by-ID recovery path.
+      const response = await client.send(new GetItemCommand({
+        TableName: TABLE_NAME,
+        Key: { requestId: { S: requestId } },
+      }));
+      return unmarshall(response.Item);
     }));
     return { requests: results.filter((entry) => entry.requestId), nextCursor: null };
   }

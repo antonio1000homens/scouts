@@ -23,8 +23,8 @@ test('issue 122 extensions register owners instead of replacing base controller 
 
 test('issue 122 Activity is the only recurring lifecycle poll owner', () => {
   assert.match(activity, /function schedulePoll/);
-  assert.match(activity, /ACTIVE_POLL_MS = 4000/);
-  assert.match(activity, /IDLE_POLL_MS = 25000/);
+  assert.match(activity, /ACTIVE_POLL_MS = 10000/);
+  assert.match(activity, /IDLE_POLL_MS = 60000/);
   assert.match(admin, /Canonical Activity polling is owned by admin-activity-centre\.js/);
   assert.match(admin, /setStatusPollingEnabled\(false, false\)/);
   assert.doesNotMatch(shell, /pollAuthoritativeActivity|setInterval|setTimeout/);

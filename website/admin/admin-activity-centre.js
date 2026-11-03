@@ -3,8 +3,8 @@
 (function () {
     const STORAGE_KEY = 'scouts_admin_tracked_request_ids';
     const SEEN_KEY = 'scouts_admin_activity_seen';
-    const ACTIVE_POLL_MS = 4000;
-    const IDLE_POLL_MS = 25000;
+    const ACTIVE_POLL_MS = 10000;
+    const IDLE_POLL_MS = 60000;
     const TERMINAL = new Set(['completed', 'failed', 'needs_attention', 'manual_review']);
     const RETRYABLE_ENRICHMENT_STAGES = new Set(['tagline', 'imageTheme', 'image']);
     const tracked = new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]').filter(Boolean));
@@ -303,8 +303,10 @@
                 const result = await activityCommand('status');
                 const statusActivity = result?.activity || null;
                 const statusRequests = Array.isArray(statusActivity?.requests) ? statusActivity.requests : [];
-                const lookup = tracked.size
-                    ? await activityCommand('lookup', { requestIds: [...tracked] })
+                const statusIds = new Set(statusRequests.map((request) => text(request?.requestId)).filter(Boolean));
+                const missingTrackedIds = [...tracked].filter((requestId) => !statusIds.has(requestId));
+                const lookup = missingTrackedIds.length
+                    ? await activityCommand('lookup', { requestIds: missingTrackedIds })
                     : { activity: { requests: [] } };
                 const requests = [...statusRequests, ...(lookup?.activity?.requests || [])]
                     .filter((request, index, list) => list.findIndex((candidate) => candidate.requestId === request.requestId) === index);
