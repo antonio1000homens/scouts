@@ -336,6 +336,26 @@ browser reads now avoid S3. The pre-change seven-day request and byte samples
 remain the baseline. Collect a mature post-deployment daily and seven-day S3
 request trend and posted S3/CloudFront charges before quantifying savings.
 
+## Admin event-image CDN deployment readback (2026-11-03 22:00–22:16 UTC)
+
+PR #196 merged as `31f1b0a7d2a77fcc3dbff7859bfc932995d2f218`. Master workflow
+[`41726938753`](https://github.com/antonio1000homens/scouts/actions/runs/41726938753)
+completed successfully: plan-and-test passed, `deploy-web` uploaded the site
+and completed its CloudFront invalidation, and `deploy-aws` was skipped. This
+change routes legacy absolute event-image URLs from the exact Scouts S3
+hostname through the admin page origin, while preserving unrelated absolute
+URLs and relative paths.
+
+The deployed S3 object `website/admin/admin-script.js` and the source file
+have the same SHA-256:
+`8b8719f4077825478cb22932c1fa550761ead0689f4b94c34d9dac9569f68430`. A
+request to the underlying CloudFront distribution URL returned HTTP 200 and
+the same hash, with the source object's `no-store` cache policy. The public
+hostname redirected an unauthenticated request to Cloudflare Access, so this
+readback proves the deployed static asset is available from CloudFront but does
+not exercise the rewrite inside an authenticated admin session. It also does
+not measure a change in bucket-wide S3 requests or charges.
+
 ## Merged implementation
 
 1. **Four refreshes/day**: CloudFormation and runtime defaults move to
