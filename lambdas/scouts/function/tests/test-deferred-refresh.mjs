@@ -76,6 +76,32 @@ test('enqueue uses one conditional outbox item and atomically coalesces source f
   }
 });
 
+test('failed DynamoDB enqueue rejects instead of reporting deferred work as saved', async () => {
+  const commands = [];
+  const error = Object.assign(new Error('DynamoDB write throttled'), {
+    name: 'ProvisionedThroughputExceededException',
+  });
+  setDeferredRefreshClientForTests({
+    async send(command) {
+      commands.push(command);
+      throw error;
+    },
+  });
+  try {
+    await assert.rejects(
+      enqueueDeferredRefresh({
+        hex: '63616d70', stage: 'tagline', generationId: GENERATION,
+        title: 'Camp', subject: SUBJECT, sourceKey: 'cubsevents#cubs',
+      }, { now: NOW }),
+      (received) => received === error,
+    );
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0].constructor.name, 'UpdateItemCommand');
+  } finally {
+    resetDeferredRefreshClientForTests();
+  }
+});
+
 test('terminal duplicate discovery is not revived', async () => {
   const commands = [];
   setDeferredRefreshClientForTests({

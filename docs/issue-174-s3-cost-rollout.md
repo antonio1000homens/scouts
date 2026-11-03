@@ -445,12 +445,12 @@ comparison or proof that the scheduled refresh caused all bucket requests.
   aggregates cannot be reconstructed from queue counts or a bounded activity
   query. Preserve old S3 objects until the audit and production acceptance
   are complete.
-- S3 canonical persistence integrity: open PR #191 proposes replacing the
+- S3 canonical persistence integrity: PR #191 merged as
+  `95fbd71e68536a636ef9fb6e7135e009413dce00` and deployed. It replaces the
   trailing GET in `saveHexEventToS3()` with a validated S3 SHA-256 full-object
-  checksum and failing closed on a mismatch. Caller field checks and separate
-  revisioned approval ETag guards remain in place. The one-GET-per-save source
-  change is not merged or deployed yet; its request savings require post-rollout
-  daily and seven-day measurement against bucket-wide traffic.
+  checksum and fails closed on a mismatch. Caller field checks and separate
+  revisioned approval ETag guards remain in place. The post-deployment request
+  measurement is recorded below and still needs a full seven-day window.
 - Approval idempotency currently uses S3 conditional PUT (`If-None-Match` for
   first claim, `If-Match` for stale-claim takeover and completion) plus GET to
   arbitrate conflicts and read the winning result. This preserves a durable
@@ -576,9 +576,31 @@ not changed.
 The hermetic persistence regression verifies a normal sparse save performs one
 event GET to load the current canonical document and one event PUT, rejects a
 checksum mismatch before agenda publication, and preserves event fields. The
-full suite passes 593 tests. This is source and test evidence only: it does not
-yet establish a production request reduction. After rollout, compare S3 GET
-and PUT request metrics against the previous per-save behavior, account for
-non-Lambda website traffic, and record the daily/7-day trend after the metric
-window matures. No production deployment or S3 object change is part of this
-source change.
+full suite passed 593 tests before merge. This source and test evidence did not
+by itself establish a production request reduction; deployment and the
+short-window readback are recorded in the following section. A successful
+canonical event save and a mature daily/seven-day request comparison are still
+needed. No S3 objects were modified for the deployment readback.
+
+## Canonical event checksum deployment readback (2026-11-03 21:20–21:32 UTC)
+
+Before the readback, `AWS_PROFILE=scouts aws sts get-caller-identity` verified
+account `553490163883` and the expected account role. Master deployment run
+[`41720523063`](https://github.com/antonio1000homens/scouts/actions/runs/41720523063)
+completed successfully for commit `95fbd71e68536a636ef9fb6e7135e009413dce00`.
+CloudFormation stack `sqs2scouts-lambda` reported `UPDATE_COMPLETE` at
+21:20:49 UTC. Lambda `sqs2scouts` was `Active`, with
+`LastUpdateStatus=Successful`, `LastModified=21:20:54 UTC`, and
+`CodeSha256=l25Ae/PNMXr1LkaN39yjPEHu2i3F4i+z+PQtJXhmXrI=`. This confirms the
+deployment control plane updated; a real canonical event save has not yet
+exercised the checksum path.
+
+The pre-deployment 24-hour bucket sample at 21:09 UTC recorded 12,681 GET,
+2,081 HEAD, 135 LIST, and 360 PUT requests. It is an approximate bucket-wide
+baseline, not a per-save attribution. In the first 12 minutes after deployment,
+the one-minute S3 request-metric query returned one GET at 21:26, no PUT data,
+and the `sqs2scouts` invocation metric had no datapoints. The single GET has no
+known caller and does not establish a post-change comparison. Allow the metric
+window to mature, capture a successful persistence event, then compare daily
+and seven-day operation totals and posted S3 charges. Keep web/admin traffic
+separate from Lambda SDK counts; no S3 objects were modified for this readback.
