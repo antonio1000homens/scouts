@@ -20,10 +20,11 @@ running the Scouts deployment, or changing a production resource.
   event-source mappings; **no SQS charges** in the recorded baseline.
   Idle receives are Lambda-managed, not a custom polling loop.
 
-## Read-only production recheck (2026-11-03)
+## Initial read-only production recheck (2026-11-03)
 
 AWS Core `GetCallerIdentity` verified account `553490163883` before these
-reads. This current state is independent of the uncommitted local branch:
+reads. These earlier observations are superseded for schedule and runtime
+state by the supplemental check below:
 
 - The deployed `scouts-lambda-ScoutsScheduledRefreshRule-…` remained enabled
   at `rate(30 minutes)`. The local six-hour default has not been deployed.
@@ -69,19 +70,56 @@ reads. This current state is independent of the uncommitted local branch:
 
 These reads show the old S3 objects contain historical state the empty
 activity ledger cannot reproduce. The snapshot retirement flag therefore
-defaults to enabled. Do not opt into retirement until task-token dependencies,
-historical coverage, and manual-review compatibility have a verified
-migration contract.
+defaults to compatibility reads enabled. Do not opt into retirement until
+task-token dependencies, historical coverage, and manual-review compatibility
+have a verified migration contract.
+
+## Supplemental live recheck (2026-11-03 18:36 UTC)
+
+AWS Core again verified account `553490163883` before read-only calls. The
+production state changed after the initial recheck:
+
+- `scouts-lambda` reached `UPDATE_COMPLETE` at 18:19:40 UTC. Its scheduled
+  rule is enabled at `rate(6 hours)`, and the `scouts` Lambda last-modified
+  time is 18:19:51 UTC. `SCOUTS_SCHEDULED_REFRESH_MAX_EVENTS=0` remains in
+  effect. The local CLI SSO profile was expired, so this check used the
+  connected AWS Core account and verified identity first.
+- A refresh log at 18:20:34 UTC reported
+  `reusedHexReads=98`, `imageHead.requests=36`, and `imageHead.cacheHits=6`.
+  This is per-invocation avoided-request telemetry from the deployed refresh
+  path, not a full before/after billing comparison.
+- The `CodexRequestCostAudit` S3 datapoint for the 18:15 15-minute interval
+  was 180 GET, 38 HEAD, 2 LIST and 1 PUT. It straddles the 18:19 rollout and
+  includes callers outside the scheduled Lambda; do not attribute these counts
+  to that refresh or use this partial interval as a post-deployment baseline.
+- No `[S3 Request Reduction] SDK calls by operation` log appeared between
+  18:15 and 18:36 UTC. That per-invocation operation counter exists in this
+  follow-up PR but is not deployed yet.
+- `SCOUTS_LEGACY_RUNTIME_SNAPSHOTS` and the deferred-outbox environment
+  variables are unset on the live Lambda. The deployed code defaults legacy
+  reads to enabled and deferred writes to disabled. The queued snapshot was
+  still 184 bytes with zero requests, last modified at 18:04 UTC; processing
+  and completed snapshots remained at 680/1,762 bytes from 2026-09-08 and each
+  still contained a `taskToken` field. No S3 objects were changed by this
+  recheck.
+- All three existing DynamoDB tables remain `PAY_PER_REQUEST`, with TTL
+  enabled on `expiresAt`; the request-activity table still has zero items and
+  a bounded `activity-feed` query returned zero rows at 0.5 read capacity
+  units. `scouts-deferred-refresh` is not present, so the outbox remains off.
+- Because legacy snapshot objects remain needed and the activity ledger is
+  empty, production parity and safe legacy-read retirement are still unproven.
 
 ## Code changes on the local follow-up branch
 
-1. **Proposed four refreshes/day**: CloudFormation and runtime defaults
-   move to `rate(6 hours)`. The deploy script **explicitly passes** the
-   cadence so preexisting CloudFormation stacks do not silently retain
+1. **Four refreshes/day**: CloudFormation and runtime defaults move to
+   `rate(6 hours)`. The live stack now reports this cadence (see supplemental
+   recheck). The deploy script **explicitly passes** the cadence so
+   preexisting CloudFormation stacks do not silently retain
    `rate(30 minutes)`. Admin **Run refresh now** and independently
    invoked workflows remain available. Existing 24-hour ICS freshness
-   behaviour is unchanged. The change takes effect only if the stack
-   is actually deployed after review.
+   behaviour is unchanged. The cadence is now live in the stack; the follow-up
+   refresh optimizations and operation counters still require their own
+   reviewed deployment.
 2. **Prepare runtime snapshot lifecycle retirement**: the start/finally paths
    previously read queued, processing, completed and wrote queued (up to
    six GET + two PUT per normal execution). The dead append/touch writers
@@ -112,11 +150,13 @@ migration contract.
    `imageHead.requests` and `imageHead.cacheHits`. No custom
    CloudWatch metrics, high-cardinality object-key logging, or new
    paid monitoring were added.
-7. Emit low-cardinality per-invocation S3 SDK call counts by operation, with
+7. Add low-cardinality per-invocation S3 SDK call counts by operation, with
    scheduled refresh tagged separately from other invocations. This gives
-   direct code-path attribution without logging object keys. Counts represent
-   SDK `send()` calls; SDK-internal retries may cause more wire requests, so
-   correlate these with the existing bucket request metrics after deployment.
+   direct code-path attribution without logging object keys. The follow-up
+   counter is not deployed yet; the current CloudWatch recheck found no
+   matching log. Counts represent SDK `send()` calls; SDK-internal retries
+   may cause more wire requests, so correlate these with bucket metrics after
+   deployment.
 8. Implement an opt-in DynamoDB outbox for excess scheduled enrichment work.
    Work keys include HEX, stage and generation; writes coalesce source feed
    identifiers; the dispatcher claims leases and sends at most 10 items each
