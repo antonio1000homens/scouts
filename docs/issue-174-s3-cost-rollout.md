@@ -774,3 +774,17 @@ orphaned rows lack canonical event documents and cannot be assumed safely
 retryable. Keep the legacy snapshot viewer enabled and retain historical
 objects/state until an owner-reviewed recovery or archival decision covers
 both groups and the embedded task-token contract.
+
+## Bucket-wide S3 request sample (2026-11-03 23:00 UTC)
+
+AWS STS verified account `553490163883` before querying the existing
+`CodexRequestCostAudit` metrics. The complete 24-hour datapoints for
+2026-11-02 23:00 through 2026-11-03 23:00 UTC report 12,199 GET, 2,153 HEAD,
+163 LIST, and 526 PUT requests. This is a bucket-wide sample, not a per-caller
+or per-refresh count. It overlaps the Nov 3 CDN/image and canonical-write
+deployments and the authorized synthetic canary, so it cannot isolate any one
+change. The earlier sample ended at Nov 3 21:09 and reported 12,681 GET, 2,081
+HEAD, 135 LIST, and 360 PUT; because those windows overlap heavily and have
+different boundaries, the counts are not a valid before/after comparison.
+Continue collecting aligned daily totals and a complete seven-day post-change
+window before claiming request or bill savings.
