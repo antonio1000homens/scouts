@@ -145,6 +145,25 @@ completed snapshot sizes and `LastModified` timestamps unchanged from the
 ledger remains empty and the stale historical snapshots remain available via
 the admin API. Historical/manual-review parity is not established.
 
+## Preliminary Cost Explorer check (2026-11-03 19:51 UTC)
+
+AWS STS verified account `553490163883` before the Cost Explorer query. The
+query marks every returned day as estimated. On Nov 1 and Nov 2, before the
+six-hour schedule deployment on Nov 3, S3 request usage was 16,092 and 16,028
+requests respectively (Tier 1 + Tier 2), at estimated request charges of
+about $0.00843 and $0.00791 per day. Total S3 service estimates were $0.00857
+and $0.00805 per day, including non-request usage. The Nov 3 estimate was
+still partial: 9,996 S3 requests and $0.00509 total S3 service cost at query
+time. These preliminary totals are not a post-change daily comparison and
+must not be extrapolated as savings.
+
+SQS usage was 27,542 and 27,540 requests on Nov 1 and Nov 2, with estimated
+SQS cost of $0 on both days; the partial Nov 3 estimate showed 17,224 requests
+and $0. This is total SQS request usage, not a ReceiveMessage-only count. It
+supports retaining the existing mappings while SQS remains free in this
+estimate, but it does not replace the CloudWatch empty-receive evidence or
+prove that the configured free allocation will always cover future traffic.
+
 ## Supplemental live recheck (2026-11-03 18:36 UTC)
 
 AWS Core again verified account `553490163883` before read-only calls. The
@@ -312,10 +331,15 @@ The schedule change is a **91.7% reduction in scheduled invocations**
 comparable controlled refresh fell from 180 to 177 logical GET calls after
 the three legacy snapshot reads were removed; HEAD, LIST and PUT counts were
 unchanged. These are individual SDK samples, not a daily average or a bill
-comparison. Continue collecting full-day and seven-day before/after windows
-and reconcile the latest bucket metrics before claiming savings. The earlier
-touch-path removals and the aggregate logs also quantify HEX read reuse and
-duplicate image HEAD checks per run.
+comparison. The post-#181 controlled invocation logged 177 GET, 38 HEAD,
+2 LIST and 1 PUT, all attributed by the SDK bucket-role counter to `data`.
+The delayed bucket metric for that minute showed only 82 GET, 17 HEAD, 1 LIST
+and no PUT, so the role counter does not reconcile the SDK-to-bucket gap. It
+establishes the SDK client's configured bucket role for its calls, not a
+complete count of billable S3 requests. Continue collecting full-day and
+seven-day windows and compare them with posted usage before claiming savings.
+The earlier touch-path removals and aggregate logs also quantify HEX read
+reuse and duplicate image HEAD checks per run.
 
 For cost scale, October's observed Tier-2 charge implies an effective rate of
 about **$0.000420 per 1,000 GET/HEAD requests**. An earlier conditional
@@ -323,10 +347,11 @@ sensitivity case used rough old counts (327 GET+HEAD per run) and a single
 post-phase-one bucket window (218 GET+HEAD). It estimated about
 **$0.198/month** at 48 runs/day versus **$0.011/month** at 4 runs/day, a
 **$0.187/month** difference if both samples were entirely scheduled traffic
-and representative. The newer direct SDK sample also counted 218 GET+HEAD,
-but the corresponding bucket metric remained incomplete at the last read.
-Neither calculation is measured savings; both exclude Tier-1 requests and
-monitoring cost.
+and representative. Direct SDK samples counted 218 GET+HEAD before
+snapshot-read retirement and 215 GET+HEAD in each of the two recorded
+post-retirement controlled refreshes. The delayed bucket metrics for those
+post-change minutes did not match either SDK count. Neither calculation is
+measured savings; both exclude Tier-1 requests and monitoring cost.
 
 An initial comparison can use the existing bucket request monitoring
 (`CodexRequestCostAudit`) by operation and 5–15-minute intervals.
@@ -345,18 +370,27 @@ configuration, and returns 1-minute S3 request counts beside `scouts` Lambda
 invocations/errors and the low-cardinality SDK/per-refresh summary logs. It
 accepts timezone-qualified `--start`/`--end` timestamps, caps the range at
 seven days, and does not create metrics, alarms, or log queries. CloudWatch S3
-metrics can be delayed and remain bucket-wide. The one controlled live sample
-matched the SDK operation counts across adjacent minute bins; broader traffic
-and a full post-change trend remain to be measured.
+metrics can be delayed and remain bucket-wide. The recorded controlled samples
+did not match SDK operation counts: the 19:32 sample's bucket metric was
+145/27/1/1 versus SDK 177/38/2/1, and the 19:44 sample's was 82/17/1/0
+versus SDK 177/38/2/1 (GET/HEAD/LIST/PUT). AWS documents these metrics as
+best-effort and unsuitable for complete request accounting. Use them as
+approximate trends only; full-day and seven-day post-change totals and posted
+S3 charges remain unverified.
 
 ## Rollout and rollback
 
-1. **Completed:** PRs #175–#179 passed their required checks and merged.
-   Deploy run `41703666341` completed successfully. The live stack, Lambda,
-   controlled invocation, and request-count readbacks are recorded above.
-2. **Verified once:** the latest controlled scheduled refresh returned
-   successfully and its SDK log showed three fewer GETs than the comparable
-   pre-cutover run. The six-hour schedule and zero-event cap remain active.
+1. **Completed:** PRs #175–#182 are merged. PR #179 deployment run
+   `41703666341` completed successfully; PR #181 subsequently deployed the
+   bucket-role counter at 19:42:59 UTC. PR #182 records the resulting
+   attribution evidence and metric limitations. The live stack, Lambda,
+   controlled invocations and request-count readbacks are recorded above.
+2. **Verified in two controlled samples:** after snapshot-read retirement,
+   the SDK log showed 177 GETs versus 180 in the comparable pre-cutover
+   sample, with HEAD, LIST and PUT unchanged. The post-#181 sample classified
+   all SDK calls as `data`, but bucket request metrics still did not reconcile.
+   The six-hour schedule and zero-event cap remain active. These samples do
+   not establish full-day savings.
 3. **Still required:** reconcile delayed S3 metric bins, collect a full
    seven-day post-change request trend, compare daily operation totals and
    S3/CloudWatch charges, and verify image repair, queue age, failure/DLQ
