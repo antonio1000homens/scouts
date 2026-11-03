@@ -99,11 +99,11 @@ enabling it, coordinate with #172 and measure actual write/read peaks, GSI
 allocation, burst behavior, retry amplification, maximum batch size, and
 concurrent scheduled invocations. The table defaults to PAY_PER_REQUEST and
 remains an additional request-cost consumer in that mode. Provisioned mode is
-available in source but has not been benchmarked or enabled. Do not enable the
-outbox, switch its billing mode, or claim $0 without workload measurements and
-a shared-account capacity review. If the GSI/query model exceeds safe
-provisioned capacity, retain on-demand mode or use bounded scheduled scans
-only after measuring their read cost.
+available in source and deployment configuration but has not been benchmarked
+or enabled. Do not enable the outbox, switch its billing mode, or claim $0
+without workload measurements and a shared-account capacity review. If the
+GSI/query model exceeds safe provisioned capacity, retain on-demand mode or use
+bounded scheduled scans only after measuring their read cost.
 
 ## Read-only DynamoDB capacity evidence (2026-11-03 19:59 UTC)
 
@@ -130,6 +130,23 @@ does not establish unused account free-tier capacity. Do not enable the outbox
 or change billing modes on the strength of these metrics; a representative
 benchmark, shared-account allowance check and throttling/retry acceptance are
 still required.
+
+## Provisioned-capacity wiring deployment readback (2026-11-03 22:35 UTC)
+
+PR #198 merged as `8ba0b0242c54a9190708de79b94152c01ac5a126`. Deployment run
+[`41731893268`](https://github.com/antonio1000homens/scouts/actions/runs/41731893268)
+completed successfully, and the `scouts-lambda` stack reached
+`UPDATE_COMPLETE` at 22:35:41 UTC. The deployed parameters are
+`DeferredRefreshOutboxEnabled=false` and
+`DeferredRefreshOutboxBillingMode=PAY_PER_REQUEST`; each provisioned capacity
+parameter remains at its default of 1. The Lambda environment reports the
+outbox disabled with an empty table name. `ListTables` confirms
+`scouts-deferred-refresh` is absent, while the three existing Scouts DynamoDB
+tables remain `ACTIVE` and `PAY_PER_REQUEST`.
+
+This verifies the dormant configuration deployed without creating the outbox
+or changing existing table modes. It does not benchmark provisioned capacity,
+confirm remaining shared free allocation, or approve a later mode switch.
 
 Implementation acceptance:
 

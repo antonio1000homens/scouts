@@ -425,6 +425,10 @@ not measure a change in bucket-wide S3 requests or charges.
    or selecting provisioned capacity. The deployment workflow reads these
    settings from `DEFERRED_REFRESH_OUTBOX_*` repository variables; changes to
    those variables affect subsequent Scouts deployments.
+   PR #198 deployed the new parameters with the feature still disabled and
+   billing mode `PAY_PER_REQUEST`; AWS readback found no outbox table and no
+   change to the three existing table modes. See the detailed readback in
+   [`issue-174-deferred-refresh-design.md`](issue-174-deferred-refresh-design.md).
 9. **Remove a duplicate canonical read-back**: persistence already GETs the
    just-written HEX object and parses it for verification. Two enrichment
    paths now reuse that verified body for their generated-field checks instead
