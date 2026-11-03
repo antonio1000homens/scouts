@@ -318,6 +318,25 @@ recheck request metrics and Cost Explorer after deployment; do not claim
 bucket-wide attribution or a guaranteed bill reduction from this routing
 change.
 
+## Event-image CDN deployment readback (2026-11-03 21:48–21:51 UTC)
+
+PR #194 merged as `20be92efe0bbe1308911c922a284cea84b02984c`. Master workflow
+[`41725139862`](https://github.com/antonio1000homens/scouts/actions/runs/41725139862)
+completed successfully: plan-and-test passed, `deploy-web` uploaded the site
+and completed its cache-invalidation step, and `deploy-aws` was skipped. The
+SHA-256 of the deployed `/website/scripts/event-loader.js` fetched through the
+public hostname exactly matched the source file in the merged commit
+(`242259b9c6080e83d6b170572fa3d676c9ebbb5210607be96b0109116209753e`). This
+confirms the browser loader change is live.
+
+After rollout, a request to the public hostname for a canonical
+`website/eventImages/*` object returned HTTP 200 through Cloudflare and
+CloudFront, with `cf-cache-status: HIT`. This verifies delivery and a cached
+viewer response for that object; it does not measure how many production
+browser reads now avoid S3. The pre-change seven-day request and byte samples
+remain the baseline. Collect a mature post-deployment daily and seven-day S3
+request trend and posted S3/CloudFront charges before quantifying savings.
+
 ## Merged implementation
 
 1. **Four refreshes/day**: CloudFormation and runtime defaults move to
