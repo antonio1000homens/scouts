@@ -198,23 +198,34 @@ test('low-frequency schedule is configurable and the previous cadence can be res
   assert.match(deploy, /aws sts get-caller-identity/);
 });
 
-test('cost work does not alter live SQS mapping or DynamoDB table capacity', () => {
+test('cost work preserves live SQS mappings and existing DynamoDB billing modes', () => {
   const stack = source('../lambdas/cloudformation/templates/scouts.yaml');
+  const workerStack = source('../lambdas/cloudformation/templates/sqs2scouts.yaml');
   assert.match(stack, /ScoutsProcessingDlqActivityMapping:[\s\S]*?Enabled: true/);
   assert.match(stack, /ScoutsRequestActivityTableName/);
+  for (const resource of ['GeminiUsageTable', 'GeminiEnrichmentStateTable', 'ScoutsRequestActivityTable']) {
+    assert.match(workerStack, new RegExp(`${resource}:[\\s\\S]*?BillingMode: PAY_PER_REQUEST`));
+  }
 });
 
 test('deferred refresh outbox is durable, conditional, bounded and opt-in', () => {
   const stack = source('../lambdas/cloudformation/templates/scouts.yaml');
   const deploy = source('../lambdas/scouts/deploy.sh');
+  const deployWorkflow = source('../.github/workflows/deploy-to-s3.yml');
   const service = source('../lambdas/scouts/function/scouts-service.mjs');
   const entry = source('../lambdas/scouts/function/scouts-entry.mjs');
   const outbox = source('../lambdas/scouts/function/runtime-deferred-refresh.mjs');
   const admin = source('../website/admin/admin-diagnostics-enhancements.js');
 
   assert.match(stack, /DeferredRefreshOutboxEnabled:[\s\S]*?Default: 'false'/);
-  assert.match(stack, /ScoutsDeferredRefreshOutbox:[\s\S]*?BillingMode: PAY_PER_REQUEST/);
+  assert.match(stack, /DeferredRefreshOutboxBillingMode:[\s\S]*?Default: PAY_PER_REQUEST/);
+  assert.match(stack, /DeferredRefreshOutboxTableReadCapacity:[\s\S]*?MaxValue: 10/);
+  assert.match(stack, /DeferredRefreshOutboxTableWriteCapacity:[\s\S]*?MaxValue: 10/);
+  assert.match(stack, /DeferredRefreshOutboxIndexReadCapacity:[\s\S]*?MaxValue: 10/);
+  assert.match(stack, /DeferredRefreshOutboxIndexWriteCapacity:[\s\S]*?MaxValue: 10/);
   assert.match(stack, /ScoutsDeferredRefreshOutbox:[\s\S]*?Condition: ShouldEnableDeferredRefreshOutbox/);
+  assert.match(stack, /ShouldUseProvisionedDeferredRefreshOutbox: !Equals \[!Ref DeferredRefreshOutboxBillingMode, 'PROVISIONED'\]/);
+  assert.match(stack, /ScoutsDeferredRefreshOutbox:[\s\S]*?BillingMode: !Ref DeferredRefreshOutboxBillingMode[\s\S]*?ProvisionedThroughput: !If[\s\S]*?ShouldUseProvisionedDeferredRefreshOutbox[\s\S]*?DeferredRefreshOutboxTableReadCapacity[\s\S]*?GlobalSecondaryIndexes:[\s\S]*?ProvisionedThroughput: !If[\s\S]*?DeferredRefreshOutboxIndexReadCapacity/);
   assert.match(stack, /ScoutsDeferredRefreshOutbox:[\s\S]*?DeletionPolicy: Retain[\s\S]*?UpdateReplacePolicy: Retain/);
   assert.match(stack, /IndexName: state-nextAttemptAt-index[\s\S]*?ProjectionType: INCLUDE/);
   assert.match(stack, /DeferredRefreshDispatchExpression:[\s\S]*?Default: rate\(15 minutes\)/);
@@ -222,6 +233,11 @@ test('deferred refresh outbox is durable, conditional, bounded and opt-in', () =
   assert.match(stack, /DeferredRefreshDispatchBatchSize:[\s\S]*?MaxValue: 10/);
   assert.match(deploy, /runtime-deferred-refresh\.mjs/);
   assert.match(deploy, /DeferredRefreshOutboxEnabled="\$\{DEFERRED_REFRESH_OUTBOX_ENABLED\}"/);
+  assert.match(deploy, /DEFERRED_REFRESH_OUTBOX_BILLING_MODE="\$\{DEFERRED_REFRESH_OUTBOX_BILLING_MODE:-PAY_PER_REQUEST\}"/);
+  assert.match(deploy, /DeferredRefreshOutboxIndexWriteCapacity="\$\{DEFERRED_REFRESH_OUTBOX_INDEX_WRITE_CAPACITY\}"/);
+  assert.match(deployWorkflow, /DEFERRED_REFRESH_OUTBOX_ENABLED: \$\{\{ vars\.DEFERRED_REFRESH_OUTBOX_ENABLED \|\| 'false' \}\}/);
+  assert.match(deployWorkflow, /DEFERRED_REFRESH_OUTBOX_BILLING_MODE: \$\{\{ vars\.DEFERRED_REFRESH_OUTBOX_BILLING_MODE \|\| 'PAY_PER_REQUEST' \}\}/);
+  assert.match(deployWorkflow, /DEFERRED_REFRESH_OUTBOX_INDEX_WRITE_CAPACITY: \$\{\{ vars\.DEFERRED_REFRESH_OUTBOX_INDEX_WRITE_CAPACITY \|\| '1' \}\}/);
   assert.match(service, /options\.deferExcess === true/);
   assert.match(service, /event\?\._scheduledRefresh === true/);
   assert.match(entry, /isDeferredRefreshDispatchInvocation/);
