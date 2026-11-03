@@ -146,6 +146,72 @@ test('dispatcher claims due work conditionally, publishes stable IDs, then marks
   }
 });
 
+test('lost SQS acknowledgement retries with the same stable request identity', async () => {
+  const stored = itemAttributes({ nextAttemptAt: { S: `${NOW.toISOString()}#work-1` } });
+  const deliveries = [];
+  let loseFirstAcknowledgement = true;
+  setDeferredRefreshClientForTests({
+    async send(command) {
+      if (command.constructor.name === 'QueryCommand') {
+        const requestedState = command.input.ExpressionAttributeValues[':state'].S;
+        const due = command.input.ExpressionAttributeValues[':due']?.S;
+        if (stored.state.S !== requestedState || (due && stored.nextAttemptAt.S > due)) return { Items: [] };
+        return { Items: [{ workKey: stored.workKey, state: stored.state, nextAttemptAt: stored.nextAttemptAt }] };
+      }
+      if (command.constructor.name === 'GetItemCommand') return { Item: { ...stored } };
+
+      const input = command.input;
+      const values = input.ExpressionAttributeValues;
+      if (input.UpdateExpression.includes('ADD attemptCount :one')) {
+        stored.state = values[':leased'];
+        stored.attemptCount = { N: String(Number(stored.attemptCount.N) + 1) };
+        stored.nextAttemptAt = values[':leaseUntil'];
+        stored.leaseUntil = values[':leaseUntil'];
+        stored.leaseId = values[':leaseId'];
+        return { Attributes: { ...stored } };
+      }
+      if (input.UpdateExpression.includes('lastError = :lastError')) {
+        stored.state = values[':nextState'];
+        stored.nextAttemptAt = values[':nextAttemptAt'];
+        delete stored.leaseUntil;
+        delete stored.leaseId;
+        return {};
+      }
+      if (input.UpdateExpression.includes('dispatchedAt = :now')) {
+        stored.state = values[':dispatched'];
+        return {};
+      }
+      throw new Error(`Unexpected deferred-refresh command ${command.constructor.name}`);
+    },
+  });
+  try {
+    const publish = async (payload) => {
+      deliveries.push(payload);
+      if (loseFirstAcknowledgement) {
+        loseFirstAcknowledgement = false;
+        throw Object.assign(new Error('SQS accepted the message but the response was lost'), { name: 'TimeoutError' });
+      }
+      return { messageId: 'sqs-retry' };
+    };
+
+    const first = await drainDeferredRefreshQueue({ now: NOW, publish });
+    assert.equal(first.retried, 1);
+    assert.equal(deliveries.length, 1);
+
+    const second = await drainDeferredRefreshQueue({ now: new Date(NOW.getTime() + 61_000), publish });
+    assert.equal(second.dispatched, 1);
+    assert.equal(deliveries.length, 2);
+    assert.equal(deliveries[0].requestId, deliveries[1].requestId);
+    assert.equal(deliveries[0].rootRequestId, deliveries[1].rootRequestId);
+    assert.equal(deliveries[0].action, deliveries[1].action);
+    assert.deepEqual(deliveries[0].subject, deliveries[1].subject);
+    assert.equal(stored.state.S, 'dispatched');
+    assert.equal(Number(stored.attemptCount.N), 2);
+  } finally {
+    resetDeferredRefreshClientForTests();
+  }
+});
+
 test('dispatcher backs off failed sends and exposes terminal queues with a bounded read', async () => {
   const commands = [];
   const attributes = itemAttributes();
