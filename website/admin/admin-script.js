@@ -65,6 +65,8 @@ const AUTO_LAMBDA_PREF_KEY = 'scouts_admin_auto_lambda_enabled';
 const AUTO_LAMBDA_INTERVAL_PREF_KEY = 'scouts_admin_auto_lambda_interval_ms';
 const AGENDA_URL = '/agenda.json';
 const FALLBACK_AGENDA_URL = 'https://scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com/agenda.json';
+const EVENT_IMAGE_BUCKET_HOST = 'scouts-2ndtolworth-prod-553490163883.s3.eu-west-2.amazonaws.com';
+const EVENT_IMAGE_PATH_PREFIX = '/website/eventImages/';
 const STATUS_POLL_PREF_KEY = 'scouts_admin_status_poll_enabled';
 const STATUS_POLL_INTERVAL_PREF_KEY = 'scouts_admin_status_poll_interval_seconds';
 const HEX_PREVIEW_AUTO_REFRESH_PREF_KEY = 'scouts_admin_hex_preview_auto_refresh';
@@ -2667,13 +2669,25 @@ function normaliseImagePath(url) {
     if (!url || typeof url !== 'string') return url;
     const trimmed = url.trim();
     if (!trimmed) return trimmed;
-    if (/^https?:\/\//i.test(trimmed)) {
+    const lowerCaseUrl = trimmed.toLowerCase();
+    if (lowerCaseUrl.startsWith('http://') || lowerCaseUrl.startsWith('https://')) {
+        let parsed;
+        try {
+            parsed = new URL(trimmed);
+        } catch {
+            return trimmed;
+        }
+        if (parsed.hostname === EVENT_IMAGE_BUCKET_HOST && parsed.pathname.startsWith(EVENT_IMAGE_PATH_PREFIX)) {
+            return new URL(`${parsed.pathname}${parsed.search}${parsed.hash}`, window.location.href).href;
+        }
         return trimmed;
     }
     if (trimmed.startsWith('/')) {
         return trimmed;
     }
-    return `/${trimmed.replace(/^(\.\/)+/, '')}`;
+    let relative = trimmed;
+    while (relative.startsWith('./')) relative = relative.slice(2);
+    return `/${relative}`;
 }
 
 function getSourceData(event) {
