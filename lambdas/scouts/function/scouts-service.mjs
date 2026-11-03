@@ -12,6 +12,7 @@ import { SFNClient, DescribeExecutionCommand, ListExecutionsCommand } from '@aws
 import { randomUUID } from 'crypto';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
+import { createImageHeadMemo } from './image-head-memo.mjs';
 import {
   getEnrichmentState,
   evaluateEnrichmentEligibility,
@@ -648,35 +649,6 @@ function buildQueuedRuntimeSnapshotPayload(requests, timestamp = new Date().toIS
     recordCount: requests.length,
   };
 }
-
-async function appendQueuedRuntimeSnapshot(payload, messageId = null) {
-  const bucket = TARGET_BUCKET || DEFAULT_BUCKET;
-  const timestamp = new Date().toISOString();
-  const nextEntry = buildQueuedRuntimeRequestEntry(payload, messageId, timestamp);
-  const existingSnapshot = await getJsonFromS3(bucket, QUEUED_REQUESTS_RUNTIME_KEY, 'runtime:scoutsQueued');
-  const processingSnapshot = await getJsonFromS3(bucket, PROCESSING_REQUESTS_RUNTIME_KEY, 'runtime:processingrequests');
-  const completedSnapshot = await getJsonFromS3(bucket, COMPLETED_REQUESTS_RUNTIME_KEY, 'runtime:completedrequests');
-  const mergedRequests = deduplicateQueuedRuntimeRequests([
-    ...(Array.isArray(existingSnapshot?.requests) ? existingSnapshot.requests : []),
-    nextEntry,
-  ]);
-  const { requests } = pruneQueuedRuntimeRequests(mergedRequests, processingSnapshot, completedSnapshot, Date.now());
-  const snapshot = buildQueuedRuntimeSnapshotPayload(requests, timestamp);
-
-  await putJsonToS3(bucket, QUEUED_REQUESTS_RUNTIME_KEY, snapshot, 'runtime:scoutsQueued', true);
-}
-
-async function touchQueuedRuntimeSnapshot(bucket, existingSnapshot = null) {
-  const queuedSnapshot = existingSnapshot ?? await getJsonFromS3(bucket, QUEUED_REQUESTS_RUNTIME_KEY, 'runtime:scoutsQueued');
-  const processingSnapshot = await getJsonFromS3(bucket, PROCESSING_REQUESTS_RUNTIME_KEY, 'runtime:processingrequests');
-  const completedSnapshot = await getJsonFromS3(bucket, COMPLETED_REQUESTS_RUNTIME_KEY, 'runtime:completedrequests');
-  const queuedRequests = getRuntimeSnapshotRequests(queuedSnapshot);
-  const { requests } = pruneQueuedRuntimeRequests(queuedRequests, processingSnapshot, completedSnapshot, Date.now());
-  const nextSnapshot = buildQueuedRuntimeSnapshotPayload(requests);
-  await putJsonToS3(bucket, QUEUED_REQUESTS_RUNTIME_KEY, nextSnapshot, 'runtime:scoutsQueued', true);
-  return nextSnapshot;
-}
-
 
 function getRequestHistory(eventData) {
   if (!eventData || typeof eventData !== 'object') return [];
@@ -2526,40 +2498,45 @@ async function validateHiddenFutureEvents(events, bucket) {
  * Check if an image file exists in S3 bucket.
  * Returns true if the object exists and is accessible, false otherwise.
  */
-async function imageExistsInS3(bucket, imageUrl) {
-  if (!imageUrl || typeof imageUrl !== 'string') {
-    return false;
-  }
+async function imageExistsInS3(bucket, imageUrl, imageHeadMemo = null) {
+  if (!imageUrl || typeof imageUrl !== 'string') return false;
 
-  // Extract the key from the URL
-  // URLs look like: http://BUCKET.s3-website.REGION.amazonaws.com/KEY
-  // or direct S3 paths like: website/eventImages/file.jpg
+  // URLs can point to the S3 website or use a relative website/eventImages
+  // key. Cache by the resolved S3 key, not by URL spelling.
   let key = null;
-
   try {
     key = extractImageKeyDetails(imageUrl).key;
-    if (!key) return false;
-
-    const command = new HeadObjectCommand({
-      Bucket: bucket,
-      Key: key,
-    });
-
-    await s3.send(command);
-    return true;
-  } catch (error) {
-    if (error.name === 'NotFound' || error.Code === 'NotFound' || error.Code === 'NoSuchKey') {
-      return false;
-    }
+  } catch {
     return false;
   }
+  if (!key) return false;
+
+  const check = async () => {
+    try {
+      await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+      return true;
+    } catch (error) {
+      // An absent image is repairable; permission errors, throttling and S3
+      // outages are NOT evidence that the image was deleted.
+      if (
+        error?.name === 'NotFound'
+        || error?.name === 'NoSuchKey'
+        || error?.Code === 'NotFound'
+        || error?.Code === 'NoSuchKey'
+        || Number(error?.$metadata?.httpStatusCode) === 404
+      ) return false;
+      throw error;
+    }
+  };
+
+  return imageHeadMemo ? imageHeadMemo(bucket, key, check) : check();
 }
 
 /**
  * Check all images in a list of events and remove broken ones.
  * Returns a list of repaired events with details about removed images.
  */
-async function verifyAndRepairEventImages(events, bucket) {
+async function verifyAndRepairEventImages(events, bucket, imageHeadMemo = null) {
   const repairedEvents = [];
   const brokenImages = [];
 
@@ -2581,7 +2558,7 @@ async function verifyAndRepairEventImages(events, bucket) {
       eventCopy.image.url = migratedUrl;
     }
 
-    const exists = await imageExistsInS3(bucket, imageUrl);
+    const exists = await imageExistsInS3(bucket, imageUrl, imageHeadMemo);
 
     if (!exists) {
       console.log(`[Image Repair] Removing broken image from ${eventCopy.title}: ${imageUrl}`);
@@ -2610,7 +2587,7 @@ async function verifyAndRepairEventImages(events, bucket) {
  * Check and repair a specific HEX file if it has a broken image.
  * Returns the updated hex data or null if no repair was needed.
  */
-async function verifyAndRepairHexFile(bucket, hexKey, hexData) {
+async function verifyAndRepairHexFile(bucket, hexKey, hexData, imageHeadMemo = null) {
   if (!hexData || !hexData.image?.url) {
     return null;
   }
@@ -2633,7 +2610,7 @@ async function verifyAndRepairHexFile(bucket, hexKey, hexData) {
     mutationType = 'migrated';
   }
 
-  const exists = await imageExistsInS3(bucket, currentUrl);
+  const exists = await imageExistsInS3(bucket, currentUrl, imageHeadMemo);
 
   if (!exists) {
     console.log(`[Image Repair] Removing broken image from HEX file ${hexKey}: ${currentUrl}`);
@@ -4390,21 +4367,12 @@ export async function lambdaHandler(event = {}) {
   });
 
   let removedEventFiles = [];
-  const isScoutsExecutionCommand = Boolean(
-    structuredCommand
-    && structuredCommand.realm === 'scouts'
-    && (isScoutsCalendarCommand || ['events', 'agenda'].includes(commandSubjectString || ''))
-  );
   const isAgendaEnrichmentOnlyCommand = Boolean(
     structuredCommand
     && structuredCommand.realm === 'scouts'
     && commandSubjectString === 'agenda'
     && typeof structuredCommand.action === 'number'
   );
-
-  if (isScoutsExecutionCommand) {
-    await touchQueuedRuntimeSnapshot(bucket);
-  }
 
   if (resetRequested) {
     try {
@@ -4439,6 +4407,8 @@ export async function lambdaHandler(event = {}) {
   }
 
   try {
+    // Per-run only: a later invocation must check for deleted/broken images again.
+    const imageHeadMemo = createImageHeadMemo();
     let dedupedNewEvents = [];
     const feedFailures = [];
     if (!isAgendaEnrichmentOnlyCommand) {
@@ -4534,7 +4504,7 @@ export async function lambdaHandler(event = {}) {
 
     // Verify and repair images in the enriched agenda
     console.log('[Image Verification] Starting image verification for agenda events...');
-    const { repairedEvents: verifiedAgenda, brokenImages } = await verifyAndRepairEventImages(enrichedAgenda, bucket);
+    const { repairedEvents: verifiedAgenda, brokenImages } = await verifyAndRepairEventImages(enrichedAgenda, bucket, imageHeadMemo);
     
     if (brokenImages.length > 0) {
       console.log(`[Image Verification] Found ${brokenImages.length} broken images and removed their broken URLs from agenda output`);
@@ -4621,7 +4591,7 @@ export async function lambdaHandler(event = {}) {
             const hexData = await getJsonFromS3(bucket, key, `hex:${key}`);
             if (!hexData || typeof hexData !== 'object') continue;
 
-            const repairResult = await verifyAndRepairHexFile(bucket, key, hexData);
+            const repairResult = await verifyAndRepairHexFile(bucket, key, hexData, imageHeadMemo);
 
             if (repairResult) {
               const { updatedHex, status } = repairResult;
@@ -4761,10 +4731,6 @@ export async function lambdaHandler(event = {}) {
       status: 'error',
       message: error.message,
     });
-  } finally {
-    if (isScoutsExecutionCommand) {
-      await touchQueuedRuntimeSnapshot(bucket);
-    }
   }
 }
 
