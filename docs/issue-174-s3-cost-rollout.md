@@ -510,6 +510,18 @@ provides the full manual-review count without returning item contents, but it
 does not identify which events or stages those rows represent, nor prove that
 each is reachable in Admin.
 
+A second paced scan projected only HEX, stage, state, update time and TTL from
+manual-review rows. It again evaluated 158 items in 80 two-item requests and
+reported 950.5 consumed read capacity units. All 27 rows had valid HEX values
+and no `expiresAt`; their update times ranged from 2026-09-08 through
+2026-09-13. Stage counts were 19 `tagline`, 3 `imageTheme`, and 5 `image`.
+One S3 `HeadObject` was issued for each corresponding `events/{HEX}.json` key:
+14 succeeded and 13 returned a nonzero result. The script did not capture the
+HTTP codes for those 13 outcomes, so they are **not confirmed missing objects**
+and the Admin reachability check remains incomplete. The additional
+`ConsumedReadCapacityUnits` datapoints across 20:36–20:41 UTC were 134.5,
+155, 210.5, 172.5, 232.5 and 45.5; `ReadThrottleEvents` had no datapoints.
+
 At the same recheck, the activity-feed GSI query returned zero rows; all five
 SQS queues had zero visible, in-flight and delayed messages; and the three
 enrichment state machines had zero running executions. The queued legacy
