@@ -65,6 +65,7 @@ test('Scouts image verification shares the per-invocation HEAD cache without mas
   assert.match(scouts, /const cachedHex = hexReadCache\.get\(key\)/);
   assert.match(scouts, /reusedHexReads/);
   assert.match(scouts, /imageHead: imageHeadMemo\.stats\(\)/);
+  assert.doesNotMatch(scouts, /sendS3Command\((?!s3\s*,)/);
   assert.match(scouts, /runWithS3RequestMetrics\(s3RequestSource\(event\)/);
   assert.doesNotMatch(scouts, /s3\.send\(/);
   const s3Metrics = source('../lambdas/scouts/function/s3-request-metrics.mjs');

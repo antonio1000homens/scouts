@@ -896,7 +896,7 @@ async function migrateLegacyImageIfNeeded(bucket, imageUrl) {
       CopySource: `${bucket}/${details.key}`,
       Key: destinationKey,
     });
-    await sendS3Command(copyCommand);
+    await sendS3Command(s3, copyCommand);
     console.log(`[Image Migration] Copied ${details.key} -> ${destinationKey}`);
     return details.hadLeadingSlash ? `/${destinationKey}` : destinationKey;
   } catch (error) {
@@ -1309,7 +1309,7 @@ async function putJsonToS3(bucket, key, payload, label, suppressLog = false) {
     CacheControl: 'no-store',
   });
 
-  await sendS3Command(command);
+  await sendS3Command(s3, command);
   if (!suppressLog) {
     console.log(`Stored ${label} data in s3://${bucket}/${key}`);
   }
@@ -1324,7 +1324,7 @@ async function putRawIcsToS3(bucket, key, icsData, label) {
     CacheControl: 'max-age=300',
   });
 
-  await sendS3Command(command);
+  await sendS3Command(s3, command);
   console.log(`Stored raw ${label} ICS data in s3://${bucket}/${key}`);
 }
 
@@ -1387,7 +1387,7 @@ async function downloadImageToS3(imageUrl, bucket, eventTitle) {
       CacheControl: 'public, max-age=31536000', // Cache for 1 year
     });
 
-    await sendS3Command(command);
+    await sendS3Command(s3, command);
     console.log(`[Image Download] Uploaded image to s3://${bucket}/${s3Key}`);
 
     // Return the S3 website URL
@@ -1410,12 +1410,12 @@ async function downloadImageToS3(imageUrl, bucket, eventTitle) {
 async function getFreshIcsFromS3(bucket, key, freshnessMs = 60 * 60 * 1000) {
   try {
     const headCmd = new HeadObjectCommand({ Bucket: bucket, Key: key });
-    const head = await sendS3Command(headCmd);
+    const head = await sendS3Command(s3, headCmd);
     const lastModified = head?.LastModified ? new Date(head.LastModified).getTime() : null;
     if (lastModified && Date.now() - lastModified <= freshnessMs) {
       // Read the object content and return it
       const getCmd = new GetObjectCommand({ Bucket: bucket, Key: key });
-      const resp = await sendS3Command(getCmd);
+      const resp = await sendS3Command(s3, getCmd);
       const body = await resp.Body.transformToString();
       console.log(`Using cached ICS from s3://${bucket}/${key} (LastModified=${head.LastModified})`);
       return body;
@@ -1437,7 +1437,7 @@ async function getJsonFromS3(bucket, key, label) {
       Bucket: bucket,
       Key: key,
     });
-    const response = await sendS3Command(command);
+    const response = await sendS3Command(s3, command);
     const bodyString = await response.Body.transformToString();
     const data = JSON.parse(bodyString);
     return data;
@@ -1454,7 +1454,7 @@ async function deleteObjectFromS3(bucket, key, label) {
     Bucket: bucket,
     Key: key,
   });
-  await sendS3Command(command);
+  await sendS3Command(s3, command);
   console.log(`Deleted ${label} data from s3://${bucket}/${key}`);
 }
 
@@ -1468,7 +1468,7 @@ async function purgeEventFilesFromS3(bucket, prefix = 'events/') {
       Prefix: prefix,
       ContinuationToken: continuationToken,
     });
-    const response = await sendS3Command(listCommand);
+    const response = await sendS3Command(s3, listCommand);
     const objects = response?.Contents || [];
 
     if (!objects.length && !response?.IsTruncated) {
@@ -1528,7 +1528,7 @@ async function deleteOrphanedHexFiles(bucket, agendaData, hexReadCache = null) {
       Prefix: 'events/',
       ContinuationToken: continuationToken,
     });
-    const response = await sendS3Command(listCommand);
+    const response = await sendS3Command(s3, listCommand);
     const objects = response?.Contents || [];
 
     if (!objects.length && !response?.IsTruncated) {
@@ -2402,7 +2402,7 @@ async function imageExistsInS3(bucket, imageUrl, imageHeadMemo = null) {
 
   const check = async () => {
     try {
-      await sendS3Command(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+      await sendS3Command(s3, new HeadObjectCommand({ Bucket: bucket, Key: key }));
       return true;
     } catch (error) {
       // An absent image is repairable; permission errors, throttling and S3
@@ -4520,7 +4520,7 @@ async function lambdaHandlerCore(event = {}) {
           Prefix: 'events/',
           ContinuationToken: continuationToken,
         });
-        const response = await sendS3Command(listCommand);
+        const response = await sendS3Command(s3, listCommand);
         const objects = response?.Contents || [];
 
         if (!objects.length && !response?.IsTruncated) {
