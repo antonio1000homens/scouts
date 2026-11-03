@@ -123,6 +123,18 @@ counter aggregates calls without bucket or response-status dimensions; the
 discrepancy remains unexplained, so this is not yet bucket-level attribution
 for the controlled run.
 
+## Bucket-role attribution deployment (2026-11-03 19:41–19:45 UTC)
+
+PR #181 deployed the low-cardinality bucket-role breakdown. The Lambda update
+completed at 19:42:59 UTC. A controlled refresh returned status 200 with 56
+events, zero modifications and zero enrichment requests. Its aggregate log
+at 19:44:29 UTC recorded 177 GET, 38 HEAD, 2 LIST and 1 PUT, and classified
+all of them as `data`; there were no `other` or `unknown` calls. The S3
+`CodexRequestCostAudit` configuration has no prefix filter. At 19:45 UTC its
+19:42–19:46 metric query had not returned any S3 points yet. Recheck after
+metric publication before deciding why the earlier one-minute bucket counts
+were below the SDK counts.
+
 After the invocation, `HeadObject` readbacks showed the queued, processing and
 completed snapshot sizes and `LastModified` timestamps unchanged from the
 19:26 UTC sample. No snapshot object was written or deleted. The activity
@@ -268,11 +280,10 @@ verified as immutable enough for a long cache lifetime.
    direct code-path attribution without logging object keys. One live sample
    is recorded above. Counts represent SDK `send()` calls; SDK-internal
    retries may cause more wire requests, so correlate them with bucket
-   metrics over longer windows. The 19:32 live sample showed that the current
-   counter's all-bucket totals do not match the configured data-bucket metrics.
-   A follow-up adds fixed `data`, `other`, and `unknown` bucket-role counts
-   without logging bucket names or object keys; deploy it before using those
-   counters for bucket-level reconciliation.
+   metrics over longer windows. PR #181 adds fixed `data`, `other`, and
+   `unknown` bucket-role counts without logging bucket names or object keys.
+   One post-deploy sample classified all calls as `data`; reconcile that
+   sample with delayed S3 bucket metrics before relying on it for billing.
 8. Implement an opt-in DynamoDB outbox for excess scheduled enrichment work.
    Work keys include HEX, stage and generation; writes coalesce source feed
    identifiers; the dispatcher claims leases and sends at most 10 items each
