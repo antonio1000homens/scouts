@@ -855,6 +855,18 @@ async function handlerCore(event = {}) {
         });
       }
 
+      // A durable manual-review row can outlive its canonical event. Do not
+      // clear that quarantine or publish work which the worker cannot process.
+      // This check applies to both Activity-based and direct HEX/stage recovery.
+      const canonicalEvent = await readPrivateJsonObject(`events/${hex}.json`);
+      if (!canonicalEvent) {
+        return response(409, {
+          status: 'error',
+          error: 'Canonical event is missing; enrichment retry was not queued',
+          retry: { reset: false, reason: 'canonical_event_missing', activityId: activityId || null },
+        });
+      }
+
       // Re-read and conditionally reset the durable enrichment row. This remains
       // the concurrency gate: stale cards and double-clicks cannot reserve a
       // second retry once manual_review has already been reopened.
