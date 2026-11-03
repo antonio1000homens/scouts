@@ -492,6 +492,31 @@ CloudWatch and any use above free allocations can still incur charges.
 The merged code and hermetic tests establish the intended read routing and
 cutover flag. The flag remains enabled, so legacy reads are still active. The
 production rechecks confirm parity is not established: activity has no rows,
-historical snapshots contain task tokens, and the manual-review scan was
-partial. Do not disable the flag, delete historical snapshot objects, or
-claim full migration acceptance until the required comparison is recorded.
+historical snapshots contain task tokens, and manual-review item-level
+reachability remains unverified. Do not disable the flag, delete historical
+snapshot objects, or claim full migration acceptance until the required
+comparison is recorded.
+
+## Full manual-review count and current-state comparison (2026-11-03 20:29–20:32 UTC)
+
+AWS profile `scouts` again verified account `553490163883` in `eu-west-2`.
+The enrichment table remained `PAY_PER_REQUEST`, with 158 items and 7,575,114
+bytes reported by `DescribeTable`. A sequential, count-only scan evaluated two
+items per request and completed all 158 items: 27 had `state=manual_review`.
+It reported 950.5 total consumed read capacity units. The per-minute
+`ConsumedReadCapacityUnits` datapoints during that scan were 355, 334.5 and
+260.5; `ReadThrottleEvents` had no datapoints in the queried interval. This
+provides the full manual-review count without returning item contents, but it
+does not identify which events or stages those rows represent, nor prove that
+each is reachable in Admin.
+
+At the same recheck, the activity-feed GSI query returned zero rows; all five
+SQS queues had zero visible, in-flight and delayed messages; and the three
+enrichment state machines had zero running executions. The queued legacy
+snapshot was empty and last updated at 18:04 UTC. The processing and completed
+snapshots were unchanged since September and each still contained a historical
+request row with a `taskToken`. These are stale relative to current queue and
+execution state. `LegacyRuntimeSnapshotsEnabled` remains `true`; no snapshot
+was modified or deleted. Keep the compatibility viewer enabled until the 27
+manual-review rows receive an item-level reachability audit and the legacy
+task-token/history contract is resolved.
