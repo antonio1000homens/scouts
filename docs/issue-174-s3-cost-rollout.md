@@ -870,8 +870,12 @@ enabled mappings: `scoutsRequests` to `scouts2sqs`, `scoutsProcessing` to
 mapping from `scoutsDecision`, consistent with its documented notification-only
 role. The latest hourly `AWS/SQS ApproximateAgeOfOldestMessage` maximum for
 `scoutsDecision` was 36,200 seconds at 07:48 UTC; the 08:48 read had no newer
-hourly datapoint. This indicates aged notification messages, but does not
-identify their consumer or prove delivery failure. No messages were received,
-deleted, or otherwise changed. Review the notification queue's operational
-consumer and alerting before treating zero age or prompt notification delivery
-as established.
+hourly datapoint. Daily `AWS/SQS` counters from Nov 1 through the partial Nov 4
+day show two messages sent on Nov 3, with zero receives and zero deletes in all
+returned daily bins. Together with the visible count, this indicates that the
+notifications remain in the queue and have not been consumed during this
+measurement window. The metric evidence still cannot identify an expected
+external/manual consumer or prove what the notifications represent. No
+messages were received, deleted, or otherwise changed. Review the notification
+queue's operational consumer and alerting before treating zero age or prompt
+notification delivery as established.
