@@ -1332,3 +1332,14 @@ Do not claim full caller attribution from the bucket metric and Lambda logs
 alone. No object-level logging or CloudTrail data events were enabled; any
 such instrumentation needs a separate cost and retention estimate before
 approval.
+
+## Live scheduled-refresh cadence and rollback recheck (2026-11-04 13:44 UTC)
+
+AWS STS verified account `553490163883`. The enabled EventBridge rule
+`scouts-lambda-ScoutsScheduledRefreshRule-rLtLrT9JSxRn` has schedule
+`rate(6 hours)` and targets the `scouts` Lambda. CloudFormation reports
+`ScheduledRefreshExpression=rate(6 hours)` and stack status `UPDATE_COMPLETE`.
+The template's explicit rollback cadence remains `rate(30 minutes)`.
+`LegacyRuntimeSnapshotsEnabled=true` and `DeferredRefreshOutboxEnabled=false`
+remain deployed. This is a configuration readback; it does not substitute for
+a mature post-change S3 request comparison.
