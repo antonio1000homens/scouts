@@ -854,3 +854,24 @@ not costs isolated to this bucket. In particular, the lower estimated storage
 line items cannot be attributed to this code change. This readback therefore
 does not establish a charge reduction. Collect posted daily costs and a mature
 aligned seven-day post-change request window before evaluating savings.
+
+## SQS queue recheck (2026-11-04 08:48 UTC)
+
+AWS STS verified account `553490163883`. A read-only inventory found five
+Scouts queues; all report `MessageRetentionPeriod=1209600` seconds. At the
+attribute read, `scoutsDecision` had two visible messages and zero in-flight or
+delayed messages. `scoutsRequests`, `scoutsRequestsDLQ`, `scoutsProcessing`,
+and `scoutsProcessingDLQ` each had zero visible, in-flight, or delayed
+messages.
+
+The complete regional Lambda event-source mapping inventory contains three
+enabled mappings: `scoutsRequests` to `scouts2sqs`, `scoutsProcessing` to
+`sqs2scouts`, and `scoutsProcessingDLQ` to `scouts-dlq-activity`. There is no
+mapping from `scoutsDecision`, consistent with its documented notification-only
+role. The latest hourly `AWS/SQS ApproximateAgeOfOldestMessage` maximum for
+`scoutsDecision` was 36,200 seconds at 07:48 UTC; the 08:48 read had no newer
+hourly datapoint. This indicates aged notification messages, but does not
+identify their consumer or prove delivery failure. No messages were received,
+deleted, or otherwise changed. Review the notification queue's operational
+consumer and alerting before treating zero age or prompt notification delivery
+as established.
