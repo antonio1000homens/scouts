@@ -231,7 +231,7 @@ test('notification queue remains outside the Lambda event-source mappings', () =
   assert.match(queueDocs, /`scoutsDecision` is a notification queue/);
   assert.doesNotMatch(queueDocs, /SQS-Triggered Invocations \(scoutsDecision queue\)/);
   assert.match(legacyQueueDoc, /previously described an automatic SQS consumer[\s\S]*?That description is obsolete/);
-  assert.match(legacyQueueDoc, /no `scoutsDecision` Lambda event-source mapping/);
+  assert.match(legacyQueueDoc, /no\s+`scoutsDecision` Lambda event-source mapping/);
   assert.match(legacyQueueDoc, /does not receive or delete messages/);
   assert.doesNotMatch(legacyQueueDoc, /SQS triggers `scouts\.mjs` Lambda/);
 });
