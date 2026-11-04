@@ -147,6 +147,26 @@ two HEAD bucket requests. Those S3 request bins occurred in a different minute
 from the invocation bins, so this short sample does not establish attribution.
 It is also too short for a daily or seven-day comparison.
 
+## Cumulative post-cutover sample (18:08 UTC)
+
+The collector verified account `553490163883` and queried the aligned
+post-cutover interval 2026-11-03 19:42–2026-11-04 18:08 UTC (22 hours 26
+minutes). All six CloudWatch series returned `Complete` in one page, and the
+SDK-operation and per-refresh log searches were untruncated. Across 89
+populated minute bins, bucket-wide metrics recorded 1,677 GET, 791 HEAD, 106
+LIST, and 509 PUT requests. The `scouts` Lambda had 18 invocations and zero
+errors; the latest populated S3 request bin was 17:32 UTC.
+
+Six aggregate SDK summaries and six per-refresh summaries were returned. Four
+scheduled-refresh summaries each recorded 176–178 GET, 38 HEAD, 1–3 PUT, and
+2 LIST SDK calls; observed reuse ranged from 98 to 101 HEX reads, with 35–36
+image HEAD checks and six or seven cache hits per invocation. Two
+non-scheduled summaries each recorded 167–170 GET calls. The bucket-wide
+totals exceed the SDK summaries, so they include requests not attributed to
+these invocations. This interval is short of a full day and does not establish
+savings or bill reduction. Continue collecting through 2026-11-10 19:42 UTC
+for the exact seven-day comparison.
+
 ## Limits
 
 Bucket metrics include browser/admin and other S3 callers. The observations do
