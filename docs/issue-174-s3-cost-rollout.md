@@ -1398,3 +1398,24 @@ has not set a numeric maximum source-to-agenda staleness target. Record the
 roughly 30-hour nominal bound and keep that acceptance distinction explicit;
 do not describe six-hour cadence as six-hour calendar freshness. Feed errors
 can extend staleness and remain visible through per-feed failure diagnostics.
+
+## SQS request and free-tier recheck (2026-11-04 14:02 UTC)
+
+AWS STS again verified account `553490163883`. The Free Tier API continues to
+report the account plan as `PAID` / `ACTIVE` with no remaining credits. SQS
+usage is 90,811 actual requests and 681,082.5 forecast against the account's
+1,000,000-request Always Free allowance. A deterministic calculation gives
+forecast headroom of 318,917.5 requests (68.11% forecast utilization). This is
+account-wide usage, not a per-queue or Scouts-only bill; above the reported
+free allowance, the paid account has no credit balance to absorb charges.
+
+For the seven complete UTC days from Oct 28 through Nov 3, the three queue
+`NumberOfEmptyReceives` metrics sum to 60,470 (`scoutsRequests`), 60,489
+(`scoutsProcessing`), and 60,468 (`scoutsProcessingDLQ`), or 181,427 total.
+`NumberOfMessagesReceived` sums to 9, 6, and 0 respectively; all 15 counted
+receives occurred on Nov 3. SQS receive counters can count repeated receives,
+so this is not a unique-message count. The current data confirms ongoing use
+of the two processing mappings, while the DLQ mapping had no receives in this
+window. Keep all three mappings enabled: the existing processing mappings
+preserve asynchronous delivery and backpressure, and the DLQ mapping preserves
+automatic failure visibility. No queue, message, or mapping was changed.
