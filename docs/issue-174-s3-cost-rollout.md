@@ -377,6 +377,16 @@ not measure a change in bucket-wide S3 requests or charges.
    from that API; setting it true restores the viewer. No snapshot objects are
    deleted. Active Step Functions executions remain authoritative; stage
    labels are enriched from at most 100 active DynamoDB activity rows.
+   The compatibility flag is not changed in this source update. Once the
+   row-level legacy review manifest and historical task-token requirements
+   have been owner-reviewed, a controlled rollout can set
+   `LEGACY_RUNTIME_SNAPSHOTS_ENABLED=false` (CloudFormation parameter
+   `LegacyRuntimeSnapshotsEnabled=false`). The gated API then returns HTTP 410
+   without reading S3 and emits one structured `RuntimeSnapshot` log for each
+   admin request, allowing usage to be observed without adding a paid custom
+   metric. The Admin viewer directs users to Activity and Operations; rollback
+   is `LEGACY_RUNTIME_SNAPSHOTS_ENABLED=true`. No AWS parameter or snapshot
+   object was changed by this code update.
 3. **Add on-demand live queue status**: Operations can request approximate
    visible, in-flight and delayed counts from SQS `GetQueueAttributes`, plus
    oldest-message age from the `AWS/SQS` CloudWatch metric. Age can be absent
@@ -976,6 +986,42 @@ changed. The intended notification consumer and alerting remain unverified;
 preserve the queue and its messages
 until that contract is confirmed.
 
+## Live regression canary rerun and cleanup correction (2026-11-04 12:40–12:51 UTC)
+
+The authorized rerun, workflow
+[`41831345941`](https://github.com/antonio1000homens/scouts/actions/runs/41831345941),
+used master commit `8969304b`. It verified AWS account `553490163883` and the
+deployed public-event exclusion guard. Full enrichment, tagline and image-theme
+enrichment, approval, hide, and same-HEX sibling-hide checks passed. The
+post-hide command used `maxEvents=0`; runtime logs show this skips calendar-feed
+fetch and runs enrichment against the existing agenda. The canary timed out
+waiting for both siblings to remain hidden after that pass.
+
+The failure exposed a fixture defect: stage regeneration changed the synthetic
+event title to vary the enrichment generation ID. Title is also the canonical
+HEX identity, so image-theme processing wrote a second `events/{HEX}.json`
+document and changed the agenda entry's HEX. The workflow cleanup matched only
+the original HEX and left one canary sibling plus that second event document.
+The generated image and original event object were removed by workflow cleanup.
+I then removed the remaining sibling using an ETag-conditional agenda write
+guarded by its exact synthetic UID, occurrence ID, title and HEX, and deleted
+the exact staged event object with an ETag condition. Readbacks confirmed no
+canary UID remains in `agenda.json`, no event document remains under the run's
+unique HEX prefix, and the run's generated-image prefix is empty. The workflow's
+agenda recovery backup remains in `migration-backups/live-regression/`.
+
+A follow-up source change varies `location` (an agenda-only generation input)
+while preserving title/HEX and strengthens cleanup to enumerate all canary
+event documents and generated-image prefixes. It is not yet merged or rerun;
+the live post-hide check remains unverified.
+
+An attempt to run the corrected workflow from PR #228
+([`41834015634`](https://github.com/antonio1000homens/scouts/actions/runs/41834015634))
+was rejected at OIDC role assumption because the production role does not
+authorize feature-branch refs. It failed before AWS account verification and
+made no production calls. Keep the trust policy intact; the corrected canary
+must run from an authorized ref after the source change is merged.
+
 ## S3 request attribution recheck (2026-11-04 09:24 UTC)
 
 AWS STS verified account `553490163883` before running the read-only collector.
@@ -1173,3 +1219,40 @@ image checks remain active for broken-image detection.
 The read-only result was saved locally at
 `/tmp/scouts-174-attribution-post-deploy-20261104.json` with owner-only
 permissions. No AWS writes were made.
+## Decision-queue age recheck (2026-11-04 13:02 UTC)
+
+`AWS_PROFILE=scouts` again verified account `553490163883` in `eu-west-2`.
+The `scoutsDecision` queue reports four visible messages, zero in flight, zero
+delayed, and 14-day retention. The complete regional Lambda event-source
+mapping inventory still contains only the enabled `scoutsRequests`,
+`scoutsProcessing`, and `scoutsProcessingDLQ` mappings; none targets
+`scoutsDecision`.
+
+For the 24 hours ending 13:00 UTC, hourly `NumberOfMessagesSent` datapoints show
+two messages in the 22:00 UTC bin on Nov 3 and two in the 12:00 UTC bin on Nov
+4. `NumberOfMessagesReceived` and `NumberOfMessagesDeleted` remain zero in all
+returned bins. The latest hourly `ApproximateAgeOfOldestMessage` maximum is
+51,286 seconds at 12:00 UTC. These queue attributes and approximate metrics
+confirm an accumulating notification backlog but do not identify the intended
+consumer or message contents. No message body was read and no message or
+queue configuration was changed. Keep the queue and messages intact until the
+owner confirms the consumer and alerting contract.
+
+## SQS Free Tier usage readback (2026-11-04 13:07 UTC)
+
+After verifying account `553490163883`, AWS Free Tier reports the account plan
+as `PAID` / `ACTIVE` with $0 remaining credits. For Amazon SQS, the API reports
+90,811 actual global `Requests` against the `Always Free` 1,000,000-request
+limit, with 681,082.5 forecast for the current month. This account-wide
+forecast supports keeping the existing processing mappings without a cost
+driven shutdown at this time. It is a forecast rather than a final bill and
+does not identify which queue or operation consumes the requests.
+
+The same API reports CloudWatch `CW:MetricMonitorUsage` at 1.0986 actual and
+8.2396 forecast against the 10-metric Always Free allowance, and
+`CW:AlarmMonitorUsage` at 0.5486 actual and 4.1146 forecast against the
+10-alarm allowance. CloudWatch `DataProcessing-Bytes` is 0.000904 GB actual
+and 0.006780 GB forecast against 5 GB. These are account-wide forecasts; they
+show current usage within the listed allowances, but leave limited metric
+headroom. Keep the scheduled-refresh diagnostics in structured logs and avoid
+adding custom metric dimensions or series.
