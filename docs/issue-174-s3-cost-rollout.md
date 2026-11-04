@@ -1256,3 +1256,24 @@ and 0.006780 GB forecast against 5 GB. These are account-wide forecasts; they
 show current usage within the listed allowances, but leave limited metric
 headroom. Keep the scheduled-refresh diagnostics in structured logs and avoid
 adding custom metric dimensions or series.
+
+## Legacy manual-review Activity backfill (2026-11-04)
+
+After explicit owner review and authorization, the bounded migration was run
+against Scouts account `553490163883` in `eu-west-2`. Before applying writes, a
+fresh complete scan evaluated 164 source items and consumed 2,001 RCUs. Its 27
+candidate rows matched the reviewed owner-only manifest exactly, including
+source timestamps and canonical-event classifications: 14 event-backed,
+retryable `manual_review` records and 13 missing-event, non-retryable
+`needs_attention` records. No corresponding Activity item existed for any
+candidate at preflight.
+
+The apply repeated the complete scan and canonical-event checks, then created
+all 27 Activity rows using a transaction that condition-checks the source
+state and `updatedAt` while conditionally inserting the destination item. It
+reported zero conditional conflicts. A consistent readback of all approved
+request IDs found 14 `manual_review` and 13 `needs_attention` rows, all with
+the expected migration source and failure metadata, and no TTL field. The
+backfill preserves the underlying enrichment rows and canonical event objects;
+it does not validate historical task-token state or establish snapshot/admin
+viewer parity. Those remain separate cutover gates.
