@@ -1387,3 +1387,20 @@ HTTP response was not exercised because that route requires the admin API key;
 the stack and Lambda configuration readbacks prove the retirement gate is
 deployed, not the end-to-end response. Historical snapshot objects remain
 untouched, and the deferred-refresh outbox remains disabled.
+
+## S3 attribution window recheck (2026-11-04 14:35 UTC)
+
+After verifying the Scouts account, the read-only attribution collector
+re-queried the aligned window from 2026-11-03 19:42 UTC through 2026-11-04
+14:30 UTC. All six CloudWatch metric series completed in one page. The visible
+bucket-wide totals remain 1,601 GET, 789 HEAD, 92 LIST, and 433 PUT requests;
+the Scouts Lambda series remains 16 invocations and zero errors. These totals
+match the earlier read ending at 14:03 UTC, so the extra 27 minutes added no
+visible metric counts. Since S3 request metrics may be delayed, this does not
+establish that no requests occurred after the earlier read.
+
+The collector found six SDK-operation summaries and six per-refresh summaries;
+both searches completed without truncation. This remains partial attribution:
+it does not assign every bucket request to a caller, establish a mature
+seven-day post-change trend, or prove bill-level savings. No AWS writes were
+made.
