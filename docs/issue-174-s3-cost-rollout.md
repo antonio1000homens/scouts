@@ -1586,3 +1586,22 @@ messages at readback, with 14-day retention. Their Lambda event-source mappings
 remain enabled, and `scoutsDecision` still has no mapping. The notification
 queue had four visible messages and zero in flight or delayed, also with
 14-day retention. No messages, mappings, or queue settings were changed.
+
+## Partial post-cutover S3 attribution readback (2026-11-04 18:33 UTC)
+
+The aligned observation began at the schedule change, 2026-11-03 19:42 UTC.
+CloudWatch S3 request metrics through the latest returned hourly bin
+(`2026-11-04 17:42 UTC`) reported 1,794 GET, 827 HEAD, 108 LIST, and 510 PUT
+requests (3,239 total). The bucket metrics filter is bucket-wide and includes
+requests not represented in the Lambda SDK summaries. Lambda metrics returned
+19 invocations and zero errors for the interval; the latest populated bin was
+also 17:42 UTC.
+
+The `[S3 Request Reduction] SDK calls by operation` Lambda logs contained five
+`scheduled-refresh` summaries and two `non-scheduled` summaries. Scheduled
+summaries totaled 826 GET, 188 HEAD, 7 PUT, and 10 LIST calls. The two
+non-scheduled summaries totaled 337 GET, 71 HEAD, 4 PUT, and 4 LIST calls.
+Seven summaries are fewer than the 19 Lambda invocations, and the logged SDK
+totals do not reconcile to the bucket metrics. Do not attribute the difference
+to a specific caller or claim savings from this partial interval. The exact
+seven-day post-cutover comparison remains open through 2026-11-10 19:42 UTC.
