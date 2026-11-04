@@ -1115,3 +1115,13 @@ confirm an accumulating notification backlog but do not identify the intended
 consumer or message contents. No message body was read and no message or
 queue configuration was changed. Keep the queue and messages intact until the
 owner confirms the consumer and alerting contract.
+
+## SQS Free Tier usage readback (2026-11-04 13:07 UTC)
+
+After verifying account `553490163883`, AWS Free Tier reports the account plan
+as `PAID` / `ACTIVE` with $0 remaining credits. For Amazon SQS, the API reports
+90,811 actual global `Requests` against the `Always Free` 1,000,000-request
+limit, with 681,082.5 forecast for the current month. This account-wide
+forecast supports keeping the existing processing mappings without a cost
+driven shutdown at this time. It is a forecast rather than a final bill and
+does not identify which queue or operation consumes the requests.
