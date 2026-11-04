@@ -1316,3 +1316,19 @@ content-versioned and request attribution shows material repeat origin
 traffic. Dynamic agenda, runtime, and canonical-event paths remain uncached.
 No CloudFront configuration, website object metadata, or cache invalidation
 was changed by this review.
+
+## Object-level request-attribution configuration audit (2026-11-04 13:44 UTC)
+
+AWS STS verified account `553490163883`. A read-only configuration audit found
+no CloudTrail trails or event data stores, S3 server-access logging disabled
+for `scouts-2ndtolworth-prod-553490163883`, and standard logging disabled on
+CloudFront distribution `E3INLSADL3AN6C`. The existing S3 request metric
+configuration `CodexRequestCostAudit` is bucket-wide and has no prefix filter.
+
+The available evidence therefore attributes SDK calls inside the instrumented
+`scouts` Lambda to safe object categories, and measures aggregate bucket
+requests, but cannot assign every billable request to a caller or object path.
+Do not claim full caller attribution from the bucket metric and Lambda logs
+alone. No object-level logging or CloudTrail data events were enabled; any
+such instrumentation needs a separate cost and retention estimate before
+approval.
