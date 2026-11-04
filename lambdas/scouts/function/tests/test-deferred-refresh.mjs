@@ -76,6 +76,58 @@ test('enqueue uses one conditional outbox item and atomically coalesces source f
   }
 });
 
+test('concurrent duplicate discoveries coalesce into one active outbox item', async () => {
+  const records = new Map();
+  const commands = [];
+  setDeferredRefreshClientForTests({
+    async send(command) {
+      commands.push(command);
+      const input = command.input;
+      const key = input.Key.workKey.S;
+      const current = records.get(key) || {};
+      const values = input.ExpressionAttributeValues;
+      const sources = new Set([...(current.sourceKeys || []), ...values[':sourceKeys'].SS]);
+      const item = {
+        ...current,
+        workKey: key,
+        state: current.state || values[':ready'].S,
+        requestId: current.requestId || values[':requestId'].S,
+        rootRequestId: current.rootRequestId || values[':rootRequestId'].S,
+        sourceKeys: [...sources].sort(),
+      };
+      records.set(key, item);
+      await Promise.resolve();
+      return { Attributes: {
+        workKey: { S: item.workKey },
+        state: { S: item.state },
+        requestId: { S: item.requestId },
+        rootRequestId: { S: item.rootRequestId },
+        sourceKeys: { SS: item.sourceKeys },
+      } };
+    },
+  });
+  try {
+    const common = {
+      hex: '63616d70', stage: 'tagline', generationId: GENERATION,
+      title: 'Camp', subject: SUBJECT,
+    };
+    const results = await Promise.all([
+      enqueueDeferredRefresh({ ...common, sourceKey: 'cubsevents#cubs' }, { now: NOW }),
+      enqueueDeferredRefresh({ ...common, sourceKey: 'beaverevents#beavers' }, { now: NOW }),
+    ]);
+
+    assert.equal(commands.length, 2);
+    assert.equal(commands[0].input.Key.workKey.S, commands[1].input.Key.workKey.S);
+    assert.equal(records.size, 1);
+    assert.deepEqual(records.values().next().value.sourceKeys, ['beaverevents#beavers', 'cubsevents#cubs']);
+    assert.equal(results[0].workKey, results[1].workKey);
+    assert.equal(results[0].requestId, results[1].requestId);
+    assert.ok(results.every((result) => result.enqueued && result.state === 'ready'));
+  } finally {
+    resetDeferredRefreshClientForTests();
+  }
+});
+
 test('failed DynamoDB enqueue rejects instead of reporting deferred work as saved', async () => {
   const commands = [];
   const error = Object.assign(new Error('DynamoDB write throttled'), {
@@ -167,6 +219,68 @@ test('dispatcher claims due work conditionally, publishes stable IDs, then marks
     assert.equal(published.action, 'new');
     assert.equal(commands.filter((command) => command.constructor.name === 'UpdateItemCommand').length, 2);
     assert.match(commands.at(-1).input.UpdateExpression, /dispatchedAt/);
+  } finally {
+    resetDeferredRefreshClientForTests();
+  }
+});
+
+test('concurrent dispatchers publish only after one wins the conditional lease', async () => {
+  let storedState = 'ready';
+  let readyQueries = 0;
+  let releaseReadyQueries;
+  const bothReadyQueries = new Promise((resolve) => { releaseReadyQueries = resolve; });
+  const commands = [];
+  setDeferredRefreshClientForTests({
+    async send(command) {
+      commands.push(command);
+      if (command.constructor.name === 'QueryCommand') {
+        const state = command.input.ExpressionAttributeValues[':state'].S;
+        if (state === 'leased') return { Items: [] };
+        readyQueries += 1;
+        if (readyQueries === 2) releaseReadyQueries();
+        await bothReadyQueries;
+        return { Items: [{
+          workKey: { S: 'work-1' },
+          nextAttemptAt: { S: `${NOW.toISOString()}#work-1` },
+          state: { S: 'ready' },
+        }] };
+      }
+      if (command.constructor.name === 'GetItemCommand') return { Item: itemAttributes({ state: { S: 'ready' } }) };
+
+      const input = command.input;
+      if (input.UpdateExpression.includes('ADD attemptCount :one')) {
+        if (storedState !== 'ready') {
+          const error = new Error('ready item already claimed');
+          error.name = 'ConditionalCheckFailedException';
+          throw error;
+        }
+        storedState = 'leased';
+        return { Attributes: itemAttributes({
+          state: { S: 'leased' },
+          leaseId: input.ExpressionAttributeValues[':leaseId'],
+          attemptCount: { N: '1' },
+        }) };
+      }
+      if (input.UpdateExpression.includes('dispatchedAt = :now')) {
+        storedState = 'dispatched';
+        return {};
+      }
+      throw new Error(`Unexpected deferred-refresh command ${command.constructor.name}`);
+    },
+  });
+  try {
+    let published = 0;
+    const publish = async () => { published += 1; return { messageId: 'sqs-1' }; };
+    const results = await Promise.all([
+      drainDeferredRefreshQueue({ now: NOW, publish }),
+      drainDeferredRefreshQueue({ now: NOW, publish }),
+    ]);
+
+    assert.equal(readyQueries, 2);
+    assert.equal(published, 1);
+    assert.equal(results.reduce((sum, result) => sum + result.dispatched, 0), 1);
+    assert.equal(storedState, 'dispatched');
+    assert.equal(commands.filter((command) => command.input?.UpdateExpression?.includes('ADD attemptCount :one')).length, 2);
   } finally {
     resetDeferredRefreshClientForTests();
   }

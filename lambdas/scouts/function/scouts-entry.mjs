@@ -8,7 +8,7 @@ import { coordinateEventApproval } from '/opt/nodejs/approval-coordinator.mjs';
 import { buildEventReviewSnapshot } from '/opt/nodejs/event-review.mjs';
 import { normaliseEnrichmentStage, retryManualReviewEnrichment } from '/opt/nodejs/enrichment-state.mjs';
 import { repairAgendaHexMetadata } from './agenda-hex-repair.mjs';
-import { runWithS3RequestMetrics, sendS3Command } from './s3-request-metrics.mjs';
+import { runWithS3RequestMetrics, sendS3Command, s3ObjectCategory } from './s3-request-metrics.mjs';
 import { handler as scoutsServiceHandler } from './scouts-service.mjs';
 import { buildRuntimeActivity } from './runtime-activity.mjs';
 import { getRuntimeQueueStatus, inspectRuntimeDlq, redriveRuntimeDlq } from './runtime-dlq.mjs';
@@ -89,7 +89,7 @@ async function readPrivateJsonObject(key) {
   }
 
   try {
-    const result = await sendS3Command(s3, new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: key }));
+    const result = await sendS3Command(s3, new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: key }), s3ObjectCategory(key));
     const raw = await result.Body.transformToString();
     return JSON.parse(raw);
   } catch (error) {
@@ -112,7 +112,7 @@ async function listPrivateEventObjects() {
       Bucket: TARGET_BUCKET,
       Prefix: 'events/',
       ContinuationToken: continuationToken,
-    }));
+    }), 'canonical-event');
     for (const object of result?.Contents || []) {
       const key = text(object?.Key);
       if (/^events\/[0-9a-f]+\.json$/i.test(key)) keys.push(key);
@@ -852,6 +852,18 @@ async function handlerCore(event = {}) {
           error: activityId
             ? 'Activity recovery metadata is no longer valid'
             : 'A valid HEX and enrichment stage are required',
+        });
+      }
+
+      // A durable manual-review row can outlive its canonical event. Do not
+      // clear that quarantine or publish work which the worker cannot process.
+      // This check applies to both Activity-based and direct HEX/stage recovery.
+      const canonicalEvent = await readPrivateJsonObject(`events/${hex}.json`);
+      if (!canonicalEvent) {
+        return response(409, {
+          status: 'error',
+          error: 'Canonical event is missing; enrichment retry was not queued',
+          retry: { reset: false, reason: 'canonical_event_missing', activityId: activityId || null },
         });
       }
 

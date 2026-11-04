@@ -30,9 +30,10 @@ table is retained if the stack is removed or replaced.
 The stack also supports `PROVISIONED` capacity for this optional outbox table
 and its GSI. Each resource's RCU and WCU parameter is capped at 10, so this
 table plus its index cannot be configured above 20 RCUs or 20 WCUs. This cap
-keeps the outbox alone below the nominal shared 25-unit allowance, but does
-not establish account eligibility or free capacity: other provisioned tables
-and GSIs must be included in the #172 review. The default remains
+keeps the outbox alone below the nominal 25-unit allowance. The account and
+regional table inventory were subsequently checked against AWS's per-payer
+Free Tier and organization state (see the readback below). The cap is not a
+workload benchmark or capacity recommendation. The default remains
 `PAY_PER_REQUEST`; neither the feature nor the table is enabled by default.
 Capacity values must come from the workload benchmark, not the parameter
 defaults. The GitHub deployment workflow reads the corresponding
@@ -125,11 +126,11 @@ window. The enrichment-state maximum is a one-minute sum: it is a 15.46 RCU/s
 minute-average equivalent only if consumption was uniform, and does not bound
 the per-second peak or concurrency. The window also contains no request-activity
 rows and no deferred-outbox traffic, so it does not represent the read/write
-mix or retry amplification expected after enabling the outbox. This readback
-does not establish unused account free-tier capacity. Do not enable the outbox
-or change billing modes on the strength of these metrics; a representative
-benchmark, shared-account allowance check and throttling/retry acceptance are
-still required.
+mix or retry amplification expected after enabling the outbox. The later
+Free Tier readback below establishes the current regional allowance and
+account scope, but not safe workload capacity. Do not enable the outbox or
+change billing modes on the strength of these historical metrics; a
+representative benchmark and throttling/retry acceptance are still required.
 
 ## Provisioned-capacity wiring deployment readback (2026-11-03 22:35 UTC)
 
@@ -145,8 +146,50 @@ outbox disabled with an empty table name. `ListTables` confirms
 tables remain `ACTIVE` and `PAY_PER_REQUEST`.
 
 This verifies the dormant configuration deployed without creating the outbox
-or changing existing table modes. It does not benchmark provisioned capacity,
-confirm remaining shared free allocation, or approve a later mode switch.
+or changing existing table modes. It does not benchmark provisioned capacity
+or approve a later mode switch. The account's current Free Tier and organization
+scope are recorded below.
+
+## DynamoDB Free Tier and account-scope readback (2026-11-03 22:54 UTC)
+
+AWS STS verified account `553490163883` before the read-only checks. AWS
+Organizations identifies this account as the management/payer account; its
+organization currently contains one active account, `553490163883`. The
+`eu-west-2` DynamoDB inventory contains only `scouts-enrichment-state`,
+`scouts-gemini-usage`, and `scouts-request-activity`. All three are
+`PAY_PER_REQUEST`, and the `scouts-deferred-refresh` table is absent. There is
+currently no provisioned table or GSI capacity in this account and Region
+consuming the DynamoDB provisioned-capacity allowance.
+
+`GetAccountPlanState` reports account plan `PAID`, `ACTIVE`, with zero remaining
+credits. Paid-plan status does not remove access to Always Free offers: AWS
+documents DynamoDB's free tier as **25 RCUs and 25 WCUs per Region, per payer
+account**, for DynamoDB Standard tables. The Free Tier API currently reports
+DynamoDB storage usage only (`0.00061634 GB-Mo` actual, `0.0061634 GB-Mo`
+forecast of a 25 GB-Mo limit); it reports no provisioned read/write usage.
+That is consistent with the complete regional table inventory, which shows
+no provisioned tables or GSIs.
+
+The nominal 25/25 provisioned allowance is therefore available to this payer
+account in `eu-west-2` at this readback. The optional outbox's configured
+maximum of 20 RCUs and 20 WCUs across its table and GSI would fit inside that
+allowance in isolation, leaving 5 units of headroom per direction. This is
+eligibility evidence only; it does not prove that 20/20 (or any particular
+capacity) is safe for the outbox's query/write pattern. The seven-day baseline
+contains no outbox workload, and `scouts-enrichment-state` previously showed a
+927.5 RCU one-minute sum. Keep the outbox disabled until the queue path is
+benchmarked below the shared cap, throttling/retry behavior is accepted, and
+the staged rollout is approved.
+
+Related Free Tier API readback on the same date: SQS request usage is
+`72,306` actual and `723,060` forecast of a `1,000,000` monthly Always Free
+limit. CloudWatch metric monitor usage is `0.93333347` actual and
+`9.3333347` forecast of a `10` metric limit. These are usage forecasts, not
+posted charges; preserve low-cardinality telemetry and recheck the monthly
+forecast before introducing additional metric series.
+
+AWS references: [DynamoDB pricing and Free Tier](https://aws.amazon.com/dynamodb/pricing/)
+and [Using the Free Tier API](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/using-free-tier-api.html).
 
 Implementation acceptance:
 
@@ -168,3 +211,8 @@ baseline evidence, not a workload benchmark: capacity benchmarking,
 deployment, live queue-age and drain-lag proof, and the shared
 provisioned-capacity decision remain before it can satisfy the queue rollout
 portion of issue #174.
+
+PR #206 adds focused concurrency regressions for two same-generation
+discoveries coalescing on one work key and two dispatchers competing for one
+conditional lease. They exercise the DynamoDB command contract through the
+hermetic client; they do not replace a live throughput or backlog benchmark.

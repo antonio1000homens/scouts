@@ -420,11 +420,14 @@ not measure a change in bucket-wide S3 requests or charges.
    therefore limited to 20 RCUs and 20 WCUs across both resources. The mode
    still defaults to PAY_PER_REQUEST, and all runtime permissions/schedules
    plus table creation are conditioned on the outbox flag. A normal stack
-   deployment leaves the table uncreated. Benchmarking and the shared #172
-   capacity/eligibility review are still required before enabling the table
-   or selecting provisioned capacity. The deployment workflow reads these
-   settings from `DEFERRED_REFRESH_OUTBOX_*` repository variables; changes to
-   those variables affect subsequent Scouts deployments.
+   deployment leaves the table uncreated. Benchmarking is still required
+   before enabling the table or selecting provisioned capacity. The current
+   Free Tier and organization-scope readback confirms that the nominal 25/25
+   allowance is available to this payer account in `eu-west-2`; it does not
+   establish that the queue workload is safe within that allowance. The
+   deployment workflow reads these settings from
+   `DEFERRED_REFRESH_OUTBOX_*` repository variables; changes to those variables
+   affect subsequent Scouts deployments.
    PR #198 deployed the new parameters with the feature still disabled and
    billing mode `PAY_PER_REQUEST`; AWS readback found no outbox table and no
    change to the three existing table modes. See the detailed readback in
@@ -576,9 +579,10 @@ comparison or proof that the scheduled refresh caused all bucket requests.
   Verify backlog age, expiry, retry recovery and throttling under live load.
   No continuously polling SQS mapping is added. See
   [`issue-174-deferred-refresh-design.md`](issue-174-deferred-refresh-design.md).
-- Capacity planning belongs with **#172**. Benchmark provisioned RCU/WCU
-  peaks, shared free allocation, burst behaviour, GSI usage and throttle
-  retries before any on-demand-to-provisioned mode change.
+- Capacity planning belongs with **#172**. The shared Free Tier allocation is
+  now confirmed from AWS account and regional inventory; benchmark provisioned
+  RCU/WCU peaks, burst behaviour, GSI usage and throttle retries before any
+  on-demand-to-provisioned mode change.
 - SQS options: keep two processing mappings unless cost evidence proves
   another approach; separately evaluate replacing only the idle DLQ
   activity mapping with queue-depth alarms plus safe manual diagnostics.
@@ -703,6 +707,87 @@ known caller and does not establish a post-change comparison. Allow the metric
 window to mature, capture a successful persistence event, then compare daily
 and seven-day operation totals and posted S3 charges. Keep web/admin traffic
 separate from Lambda SDK counts; no S3 objects were modified for this readback.
+
+## Live regression canary outcome (2026-11-03 22:42–22:48 UTC)
+
+The explicitly authorized production canary run
+[`41733128144`](https://github.com/antonio1000homens/scouts/actions/runs/41733128144)
+used master commit `ffd6cb6096dfde57f602672a3162d4cc739b8de1`. The workflow
+verified AWS account `553490163883` and the deployed public-loader exclusion
+guard before creating the synthetic event. Full enrichment, tagline and image
+theme regeneration, approval, hide, and the initial same-HEX sibling hide
+checks passed. Full enrichment also generated an S3-backed Cloudflare image,
+which the cleanup phase removed.
+
+The run failed at the post-hide refresh assertion. The synthetic sibling had a
+different occurrence ID but the same title, date and location; Scouts merges
+agenda entries by date/title/location, so the refresh correctly coalesced the
+two entries before the assertion expected both. PR #200 changes only the
+synthetic fixture to use a distinct future start time, and merged as
+`7c599490d11a48e079b7da0759c8640dc0efa502` after its focused test and CI passed.
+The production canary has not been rerun, so post-refresh hidden-state
+preservation and unhide remain unverified.
+
+The failed run's cleanup passed: the synthetic agenda entries and canonical
+event were removed, the run's generated image was removed, and a recovery copy
+of the pre-run `agenda.json` remains at
+`migration-backups/live-regression/1793745763599-1ddfe7/agenda.json`. Read-only
+S3 checks after the workflow confirmed the event key returned 404, the
+generated-image prefix was empty, and the retained backup exists. Do not treat
+this partial run as full live lifecycle acceptance.
+
+## Production configuration recheck (2026-11-03 23:02 UTC)
+
+AWS STS verified account `553490163883` before this read-only check. The
+`scouts-lambda` stack reports `ScheduledRefreshExpression=rate(6 hours)` and
+`ScheduledRefreshMaxEvents=0`; `LegacyRuntimeSnapshotsEnabled=true` remains in
+place for manual compatibility review. The deferred-refresh outbox remains
+disabled, its configured billing mode is `PAY_PER_REQUEST`, and the table is
+absent. The three production Lambda event-source mappings for
+`scoutsRequests`, `scoutsProcessing`, and `scoutsProcessingDLQ` are all enabled.
+The `scouts-enrichment-state` table remains `PAY_PER_REQUEST` with zero
+provisioned read/write capacity. No queue mappings, tables, billing modes, or
+production data were changed.
+
+This readback confirms the intended guarded rollout state, not safe provisioned
+capacity or deferred-work behavior. Required next evidence remains a
+representative outbox workload benchmark, queue-age and drain-lag acceptance,
+and migration compatibility review for the retained snapshot/manual-review
+records. The live canary post-hide refresh and unhide checks also remain
+unverified.
+
+## Manual-review Admin reachability audit (2026-11-03 23:04 UTC)
+
+The earlier paced enrichment-state audit established that 14 of the 27
+manual-review rows have a canonical `events/{HEX}.json` object and 12 unique
+HEX values do not. That object-existence check is not by itself proof of
+operator reachability. Current source inspection found two separate Admin
+paths: event details batch-read durable enrichment status for the HEX values
+of loaded event entries and render a retry action for visible
+`manual_review` stages; the Activity Centre renders retry actions from
+`scouts-request-activity` rows. The latter lookup was empty in the recorded
+production sample. Thus, Activity Centre cannot currently surface these
+historical rows from the activity ledger alone. The 14 event-backed rows may
+be recoverable through event details when those events are loaded there, but
+that row-by-row Admin read/retry visibility has not been verified. The 12
+orphaned rows lack canonical event documents and cannot be assumed safely
+retryable. Keep the legacy snapshot viewer enabled and retain historical
+objects/state until an owner-reviewed recovery or archival decision covers
+both groups and the embedded task-token contract.
+
+## Bucket-wide S3 request sample (2026-11-03 23:00 UTC)
+
+AWS STS verified account `553490163883` before querying the existing
+`CodexRequestCostAudit` metrics. The complete 24-hour datapoints for
+2026-11-02 23:00 through 2026-11-03 23:00 UTC report 12,199 GET, 2,153 HEAD,
+163 LIST, and 526 PUT requests. This is a bucket-wide sample, not a per-caller
+or per-refresh count. It overlaps the Nov 3 CDN/image and canonical-write
+deployments and the authorized synthetic canary, so it cannot isolate any one
+change. The earlier sample ended at Nov 3 21:09 and reported 12,681 GET, 2,081
+HEAD, 135 LIST, and 360 PUT; because those windows overlap heavily and have
+different boundaries, the counts are not a valid before/after comparison.
+Continue collecting aligned daily totals and a complete seven-day post-change
+window before claiming request or bill savings.
 
 ## Legacy manual-review Activity backfill utility
 

@@ -41,6 +41,9 @@ test('S3 request summary separates configured data-bucket calls without logging 
       other: { GetObject: 1 },
       unknown: { ListObjectsV2: 1 },
     },
+    categoryOperationCounts: {
+      other: { GetObject: 2, HeadObject: 1, ListObjectsV2: 1 },
+    },
   });
   const logged = JSON.stringify(logEntries[0]);
   assert.doesNotMatch(logged, /another-private-bucket|private\/key\.json/);
