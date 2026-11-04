@@ -1132,3 +1132,41 @@ activity write or a human notification. Disabling the mapping would leave
 those failures out of the Activity ledger, so keep it enabled until a tested
 replacement preserves the activity record, queue-depth visibility and manual
 redrive path.
+
+## Decision-queue age recheck (2026-11-04 13:02 UTC)
+
+`AWS_PROFILE=scouts` again verified account `553490163883` in `eu-west-2`.
+The `scoutsDecision` queue reports four visible messages, zero in flight, zero
+delayed, and 14-day retention. The complete regional Lambda event-source
+mapping inventory still contains only the enabled `scoutsRequests`,
+`scoutsProcessing`, and `scoutsProcessingDLQ` mappings; none targets
+`scoutsDecision`.
+
+For the 24 hours ending 13:00 UTC, hourly `NumberOfMessagesSent` datapoints show
+two messages in the 22:00 UTC bin on Nov 3 and two in the 12:00 UTC bin on Nov
+4. `NumberOfMessagesReceived` and `NumberOfMessagesDeleted` remain zero in all
+returned bins. The latest hourly `ApproximateAgeOfOldestMessage` maximum is
+51,286 seconds at 12:00 UTC. These queue attributes and approximate metrics
+confirm an accumulating notification backlog but do not identify the intended
+consumer or message contents. No message body was read and no message or
+queue configuration was changed. Keep the queue and messages intact until the
+owner confirms the consumer and alerting contract.
+
+## SQS Free Tier usage readback (2026-11-04 13:07 UTC)
+
+After verifying account `553490163883`, AWS Free Tier reports the account plan
+as `PAID` / `ACTIVE` with $0 remaining credits. For Amazon SQS, the API reports
+90,811 actual global `Requests` against the `Always Free` 1,000,000-request
+limit, with 681,082.5 forecast for the current month. This account-wide
+forecast supports keeping the existing processing mappings without a cost
+driven shutdown at this time. It is a forecast rather than a final bill and
+does not identify which queue or operation consumes the requests.
+
+The same API reports CloudWatch `CW:MetricMonitorUsage` at 1.0986 actual and
+8.2396 forecast against the 10-metric Always Free allowance, and
+`CW:AlarmMonitorUsage` at 0.5486 actual and 4.1146 forecast against the
+10-alarm allowance. CloudWatch `DataProcessing-Bytes` is 0.000904 GB actual
+and 0.006780 GB forecast against 5 GB. These are account-wide forecasts; they
+show current usage within the listed allowances, but leave limited metric
+headroom. Keep the scheduled-refresh diagnostics in structured logs and avoid
+adding custom metric dimensions or series.
