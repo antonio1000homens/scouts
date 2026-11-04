@@ -13,14 +13,17 @@ function command(name) {
   };
 }
 
-async function loadEntry({ snapshotsEnabled = false } = {}) {
+async function loadEntry({ snapshotsEnabled = false, snapshotPayload = { requests: [] } } = {}) {
   const s3Commands = [];
   const context = vm.createContext({
     Buffer,
     URL,
     Date,
     console: { info() {}, log() {}, warn() {}, error() {} },
-    process: { env: { SCOUTS_LEGACY_RUNTIME_SNAPSHOTS: String(snapshotsEnabled) } },
+    process: { env: {
+      SCOUTS_LEGACY_RUNTIME_SNAPSHOTS: String(snapshotsEnabled),
+      TARGET_BUCKET: 'fixture-bucket',
+    } },
   });
   const module = new vm.SourceTextModule(readFileSync(entryPath, 'utf8'), {
     context,
@@ -45,7 +48,15 @@ async function loadEntry({ snapshotsEnabled = false } = {}) {
     if (specifier === '@aws-sdk/client-s3') return synthetic(specifier, {
       GetObjectCommand: command('GetObjectCommand'),
       ListObjectsV2Command: command('ListObjectsV2Command'),
-      S3Client: class { async send(request) { s3Commands.push(request); throw new Error('Unexpected S3 call'); } },
+      S3Client: class {
+        async send(request) {
+          s3Commands.push(request);
+          if (request.name === 'GetObjectCommand') {
+            return { Body: { transformToString: async () => JSON.stringify(snapshotPayload) } };
+          }
+          throw new Error(`Unexpected S3 command ${request.name}`);
+        }
+      },
     });
     if (specifier === '@aws-sdk/client-sqs') return synthetic(specifier, {
       SendMessageCommand: command('SendMessageCommand'),
@@ -130,4 +141,17 @@ test('legacy snapshot route still requires the admin API key', async () => {
 
   assert.equal(result.statusCode, 403);
   assert.equal(s3Commands.length, 0);
+});
+
+test('authenticated legacy snapshot reads remain available when the rollback flag is enabled', async () => {
+  const snapshotPayload = { requests: [{ requestId: 'legacy-request' }] };
+  const { handler, s3Commands } = await loadEntry({ snapshotsEnabled: true, snapshotPayload });
+
+  const result = await handler(snapshotRequest());
+
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(JSON.parse(result.body).snapshot, snapshotPayload);
+  assert.equal(s3Commands.length, 1);
+  assert.equal(s3Commands[0].name, 'GetObjectCommand');
+  assert.equal(s3Commands[0].input.Key, 'runtime/scoutsQueued.json');
 });
