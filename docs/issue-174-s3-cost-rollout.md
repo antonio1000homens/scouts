@@ -1490,3 +1490,6 @@ verified Scouts bucket; it contains the explicit retired-snapshot notice and
 was last modified at 16:35:32 UTC. An unauthenticated GET of the public admin
 route returned HTTP 403, so this check confirms the deployed script contents
 but not the rendered viewer in an authenticated browser session.
+
+The reconstructed legacy field contract and current source inventory are in
+[`issue-174-runtime-snapshot-contract.md`](issue-174-runtime-snapshot-contract.md).
