@@ -89,7 +89,7 @@ function loadCanonicalEvent(hex) {
     raw = execFileSync('aws', [
       's3', 'cp', `s3://${DATA_BUCKET}/events/${hex}.json`, '-', '--only-show-errors',
       '--region', REGION, '--no-cli-pager',
-    ], { env, encoding: 'utf8', maxBuffer: 2 * 1024 * 1024 });
+    ], { env, encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (error) {
     if (missingObject(error)) return { status: 'missing', event: null };
     throw new Error('Unable to read a canonical event during migration preflight');

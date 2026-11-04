@@ -711,10 +711,13 @@ one-time import from durable enrichment state into the Activity Centre ledger.
 It defaults to dry-run, verifies AWS account `553490163883`, scans at most two
 items per request with a one-second pause, classifies every canonical event
 before making any writes, and refuses apply mode unless the scan completed and
-`--ack-account 553490163883` was supplied. The current table has 158 items, so
-this migration requires a full-table read; the previous paced inventory used
-950.5 read capacity units. The utility reports actual capacity consumed and
-does not print HEX values or error text.
+`--ack-account 553490163883` was supplied. The 2026-11-04 dry-run evaluated
+161 table items and found 27 manual-review records: 14 with canonical events
+and 13 whose canonical event objects are missing. It found no invalid events
+or existing Activity records, and created none. The strongly consistent,
+two-item-page scan consumed 1,942 read capacity units, so a migration run has
+a material read cost. Expected missing-object diagnostics are suppressed so
+the utility emits aggregate results without HEX values or AWS error text.
 
 Event-backed rows are imported as `manual_review` with their supported stage,
 so existing Activity Centre retry controls can re-read and conditionally reset
@@ -724,4 +727,4 @@ idempotent, uses a transaction that verifies the source state has not changed
 before a conditional activity put, omits TTL for both categories, and never
 reads or copies snapshot task tokens. Do not run it in apply mode until the
 dry-run classification has been owner-reviewed; no migration writes have been
-performed.
+performed. The dry-run classification still requires owner review before apply.
