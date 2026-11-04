@@ -144,6 +144,61 @@ export function buildAttributionTimeline(metricResults = []) {
   return [...rows.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
 }
 
+export function summarizeAttributionTimeline(timeline = []) {
+  const requestNames = ['GetRequests', 'HeadRequests', 'ListRequests', 'PutRequests'];
+  const s3RequestTotals = Object.fromEntries(requestNames.map((name) => [name, 0]));
+  const scoutsLambdaTotals = { Invocations: 0, Errors: 0 };
+  let s3MetricDataMinuteBins = 0;
+  let s3RequestMinuteBins = 0;
+  let s3RequestMinuteBinsWithLambdaInvocations = 0;
+  let s3RequestMinuteBinsWithoutLambdaInvocations = 0;
+  let latestS3RequestMinute = null;
+  let latestScoutsLambdaInvocationMinute = null;
+
+  for (const row of timeline) {
+    let hasS3MetricData = false;
+    let hasS3Requests = false;
+    for (const name of requestNames) {
+      const value = row.s3?.[name];
+      if (value === null || value === undefined || !Number.isFinite(Number(value))) continue;
+      const count = Number(value);
+      s3RequestTotals[name] += count;
+      hasS3MetricData = true;
+      if (count > 0) hasS3Requests = true;
+    }
+
+    const invocations = row.scoutsLambda?.Invocations;
+    const errors = row.scoutsLambda?.Errors;
+    if (invocations !== null && invocations !== undefined && Number.isFinite(Number(invocations))) {
+      scoutsLambdaTotals.Invocations += Number(invocations);
+    }
+    if (errors !== null && errors !== undefined && Number.isFinite(Number(errors))) {
+      scoutsLambdaTotals.Errors += Number(errors);
+    }
+
+    if (hasS3MetricData) s3MetricDataMinuteBins += 1;
+    if (hasS3Requests) {
+      s3RequestMinuteBins += 1;
+      latestS3RequestMinute = row.timestamp;
+      if (Number(invocations) > 0) s3RequestMinuteBinsWithLambdaInvocations += 1;
+      else s3RequestMinuteBinsWithoutLambdaInvocations += 1;
+    }
+    if (Number(invocations) > 0) latestScoutsLambdaInvocationMinute = row.timestamp;
+  }
+
+  s3RequestTotals.TotalRequests = requestNames.reduce((sum, name) => sum + s3RequestTotals[name], 0);
+  return {
+    s3RequestTotals,
+    scoutsLambdaTotals,
+    s3MetricDataMinuteBins,
+    s3RequestMinuteBins,
+    s3RequestMinuteBinsWithLambdaInvocations,
+    s3RequestMinuteBinsWithoutLambdaInvocations,
+    latestS3RequestMinute,
+    latestScoutsLambdaInvocationMinute,
+  };
+}
+
 function collectPagedResults(run, command, args, resultKey, nextTokenKey = 'NextToken') {
   const collected = [];
   let nextToken;
@@ -265,6 +320,7 @@ export function collectAttribution({ profile, start, end, run = runAws, now = ne
     resolutionSeconds: 60,
     note: 'S3 request metrics are bucket-wide and can be delayed. Compare these minute bins with Scouts Lambda invocations and low-cardinality SDK logs; do not infer caller identity from bucket metrics alone.',
     timeline: metrics.timeline,
+    timelineSummary: summarizeAttributionTimeline(metrics.timeline),
     metricStatuses: metrics.metrics.map(({ Id, Label, StatusCode, Messages }) => ({ Id, Label, StatusCode, Messages })),
     metricPagination: { pageCount: metrics.pageCount, truncated: metrics.truncated },
     sdkOperationLogs: sdkLogs.events,
