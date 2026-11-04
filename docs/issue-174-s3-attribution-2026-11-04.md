@@ -54,6 +54,40 @@ request bins were visible at collection time; the latest observed GET bin was
 11 minutes before the query ended. This single sample does not establish a
 general delivery-latency bound or identify the caller.
 
+## Extended post-cutover sample (16:39 UTC)
+
+The collector queried the full post-cutover interval, 2026-11-03 19:42 UTC
+through 2026-11-04 16:37 UTC. All six CloudWatch metric series returned
+`Complete` in one page. The SDK-operation and per-refresh log searches were
+not truncated. The metrics showed 16 `scouts` Lambda invocations and zero
+errors. Six aggregate SDK summaries were returned: four tagged
+`scheduled-refresh` and two `non-scheduled`.
+
+The four scheduled summaries each recorded 177–178 GET, 38 HEAD, 1–3 PUT,
+and 2 LIST SDK calls. Their totals matched the corresponding S3 metric counts
+across adjacent minute bins for the 19:44, 00:20, 06:20 and 12:20 UTC runs.
+At 12:20 UTC, the summary attributed 168 GET calls to canonical-event reads,
+six GET calls to calendar-cache reads, and 36 HEAD calls to event-image
+checks. Per-refresh summaries recorded 98–101 reused HEX reads and 35–36
+image HEAD requests with six or seven cache hits. These are observed avoided
+SDK calls within those invocations, not a bill reduction estimate.
+
+The two `non-scheduled` summaries recorded 167 and 170 GET calls. The
+CloudWatch S3 bins around those summaries include additional requests beyond
+the logged call totals, so they do not support attributing every request to
+the corresponding invocation. After the 14:03 UTC endpoint of the earlier
+sample, nine additional S3 metric bins appeared: 74 GET, zero HEAD, 14 LIST,
+and 76 PUT requests. No `scouts` Lambda invocation or SDK aggregate log was
+present in those later bins. In particular, the 16:35 and 16:36 bins contain
+14 LIST and 76 PUT requests combined and were only about three minutes old at
+collection time. Their caller is unknown; metric delay and other bucket
+callers remain possible.
+
+This readback strengthens per-run SDK attribution for the scheduled refreshes
+and confirms the logged HEX-read reuse and image-HEAD cache hits. It still
+does not identify all bucket callers, establish request-metric delivery
+latency, or replace the aligned seven-day comparison.
+
 ## Limits
 
 Bucket metrics include browser/admin and other S3 callers. The observations do
