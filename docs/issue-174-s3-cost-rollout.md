@@ -985,8 +985,11 @@ AWS STS verified account `553490163883`. The region has five metric alarms,
 all for Gemini or image-generation metrics; none covers `AWS/SQS` or an SQS
 queue. All five report `OK`, have no alarm actions configured, and there are
 no composite alarms. The existing Operations queue panel is a manual,
-read-only status surface, not an alert notification. Therefore the proposed
-alternative of disabling the idle DLQ event-source mapping is not ready: no
-CloudWatch alarm or action currently replaces its failure visibility. Keep
-the existing mapping and do not claim alert coverage from the current alarm
-inventory.
+read-only status surface, not an alert notification. The DLQ mapping invokes
+`scouts-dlq-activity`, which records exhausted worker deliveries as durable
+`needs_attention` activity rows; it is failure-state ingestion, not an idle
+polling loop. No current CloudWatch alarm or action replaces either that
+activity write or a human notification. Disabling the mapping would leave
+those failures out of the Activity ledger, so keep it enabled until a tested
+replacement preserves the activity record, queue-depth visibility and manual
+redrive path.
