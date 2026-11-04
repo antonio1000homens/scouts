@@ -788,3 +788,29 @@ HEAD, 135 LIST, and 360 PUT; because those windows overlap heavily and have
 different boundaries, the counts are not a valid before/after comparison.
 Continue collecting aligned daily totals and a complete seven-day post-change
 window before claiming request or bill savings.
+
+## 24-hour S3 request attribution recheck (2026-11-04 08:30 UTC)
+
+The read-only collector verified AWS account `553490163883` and returned
+complete one-minute metric series for 2026-11-03 08:30 through 2026-11-04
+08:30 UTC. All six CloudWatch metric queries completed in one page; neither
+the SDK-operation nor per-refresh log search was truncated. The bucket-wide
+totals were 7,173 GET, 1,421 HEAD, 129 LIST, and 471 PUT requests. The `scouts`
+Lambda had 32 invocations and zero errors in the same window. These counts
+include browser/admin and other S3 callers; they do not identify which caller
+made each request.
+
+The six SDK summaries included five `scheduled-refresh` invocations and one
+`non-scheduled` invocation. The three scheduled summaries after the 19:42 UTC
+cutover were 177/38/2/1, 176/38/2/3, and 178/38/2/1 GET/HEAD/LIST/PUT calls.
+The per-refresh logs recorded 98–100 reused HEX reads and 35–36 image HEAD
+requests with six cache hits. These are invocation-level SDK counts, not
+billable wire-request totals.
+
+The shorter post-cutover bucket interval, 19:42–08:30 UTC, contained 923 GET,
+411 HEAD, 54 LIST, and 256 PUT requests across 45 nonzero metric bins. This is
+not a clean before/after comparison: the interval includes unrelated bucket
+traffic, S3 metrics are best-effort, and the window is shorter than a full
+post-change day. It does not establish savings or reconcile bucket counts to
+SDK counts. Continue to collect a mature seven-day window and compare with
+posted S3 charges before claiming bill-level savings.
