@@ -116,6 +116,14 @@ Parameters:
   ScoutsRequestActivityTableName:
     Type: String
     Default: scouts-request-activity
+  ApprovalIdempotencyBackend:
+    Type: String
+    AllowedValues:
+      - s3
+      - dual
+      - dynamodb
+    Default: s3
+    Description: Approval idempotency store; use dual during S3 import, then dynamodb after verification.
   ScheduledRefreshExpression:
     Type: String
     Default: rate(6 hours)
@@ -341,6 +349,10 @@ Resources:
                 Resource:
                   - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${GeminiEnrichmentStateTableName}
                   - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScoutsRequestActivityTableName}
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScoutsRequestActivityTableName}
               - !If
                 - ShouldEnableDeferredRefreshOutbox
                 - Effect: Allow
@@ -401,6 +413,7 @@ Resources:
           FULL_ENRICH_STATE_MACHINE_ARN: !Ref FullEnrichStateMachineArn
           GEMINI_ENRICHMENT_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
           SCOUTS_REQUEST_ACTIVITY_TABLE_NAME: !Ref ScoutsRequestActivityTableName
+          SCOUTS_APPROVAL_IDEMPOTENCY_BACKEND: !Ref ApprovalIdempotencyBackend
           SCOUTS_LEGACY_RUNTIME_SNAPSHOTS: !Ref LegacyRuntimeSnapshotsEnabled
           SCOUTS_SCHEDULE_EXPRESSION: !Ref ScheduledRefreshExpression
           SCOUTS_SCHEDULED_REFRESH_DEFAULT_ENABLED: !Ref ScheduledRefreshDefaultEnabled

@@ -76,6 +76,17 @@ Parameters:
   ScoutsConfigKey:
     Type: String
     Default: scouts.conf
+  ScoutsRequestActivityTableName:
+    Type: String
+    Default: scouts-request-activity
+  ApprovalIdempotencyBackend:
+    Type: String
+    AllowedValues:
+      - s3
+      - dual
+      - dynamodb
+    Default: s3
+    Description: Approval idempotency store; use dual during S3 import, then dynamodb after verification.
 
 Conditions:
   UseProvidedRole: !Not [!Equals [!Ref RoleArn, '']]
@@ -123,6 +134,12 @@ Resources:
                   - !Sub arn:aws:s3:::${TargetBucket}/runtime/approval-idempotency/*
               - Effect: Allow
                 Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScoutsRequestActivityTableName}
+              - Effect: Allow
+                Action:
                   - ssm:GetParameter
                 Resource:
                   - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/scouts/shared/slack-signing-secret
@@ -149,6 +166,8 @@ Resources:
           NFC_QUEUE_URL: !Ref NfcQueueUrl
           TARGET_BUCKET: !Ref TargetBucket
           SCOUTS_CONFIG_KEY: !Ref ScoutsConfigKey
+          SCOUTS_REQUEST_ACTIVITY_TABLE_NAME: !Ref ScoutsRequestActivityTableName
+          SCOUTS_APPROVAL_IDEMPOTENCY_BACKEND: !Ref ApprovalIdempotencyBackend
       Code:
         S3Bucket: !Ref CodeBucket
         S3Key: !Ref FunctionCodeKey
