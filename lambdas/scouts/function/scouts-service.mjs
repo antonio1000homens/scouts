@@ -555,6 +555,13 @@ function buildHexStorageKey(title) {
   return `events/${hex}.json`;
 }
 
+function rememberHexRead(hexReadCache, key, value) {
+  if (!(hexReadCache instanceof Map) || !key || !value || typeof value !== 'object') return;
+  if (hexReadCache.has(key) || hexReadCache.size < MAX_HEX_READ_CACHE_ENTRIES) {
+    hexReadCache.set(key, value);
+  }
+}
+
 function extractImageKeyDetails(imageUrl) {
   if (!imageUrl || typeof imageUrl !== 'string') {
     return { key: null, hadLeadingSlash: false, isLegacy: false, isPreferred: false, isAbsolute: false };
@@ -1225,17 +1232,20 @@ async function purgeEventFilesFromS3(bucket, prefix = 'events/') {
   return removed;
 }
 
-async function deleteOrphanedHexFiles(bucket, agendaData, hexReadCache = null) {
+async function deleteOrphanedHexFiles(bucket, agendaData, hexReadCache = null, cacheStats = null) {
   const removed = [];
   let continuationToken = undefined;
   
   // Build set of normalized titles from agenda for fast lookup
   const agendaTitles = new Set();
+  const agendaHexKeys = new Set();
   if (agendaData?.events) {
     for (const event of agendaData.events) {
       const title = event.summary || event.title;
       if (title) {
         agendaTitles.add(normalizeComparableText(title));
+        const hex = titleToHex(title);
+        if (hex) agendaHexKeys.add(`events/${hex}.json`);
       }
     }
   }
@@ -1257,21 +1267,33 @@ async function deleteOrphanedHexFiles(bucket, agendaData, hexReadCache = null) {
       const key = object?.Key;
       if (!key || !key.endsWith('.json')) continue;
 
+      // A canonical key for a current agenda title cannot be orphaned. Its
+      // agenda read is already in the per-run cache when available, so avoid
+      // fetching it again just to confirm that it is still in the agenda.
+      if (agendaHexKeys.has(key)) {
+        if (cacheStats && typeof cacheStats === 'object') {
+          cacheStats.agendaReadsSkipped = Number(cacheStats.agendaReadsSkipped || 0) + 1;
+        }
+        continue;
+      }
+
       let hexData = null;
       try {
-        hexData = await getJsonFromS3(bucket, key, `hex:${key}`);
+        hexData = hexReadCache?.get(key) || null;
+        if (hexData) {
+          if (cacheStats && typeof cacheStats === 'object') {
+            cacheStats.reusedReads = Number(cacheStats.reusedReads || 0) + 1;
+          }
+        } else {
+          hexData = await getJsonFromS3(bucket, key, `hex:${key}`);
+          rememberHexRead(hexReadCache, key, hexData);
+        }
       } catch (error) {
         console.warn(`[Cleanup] Unable to read s3://${bucket}/${key}:`, error?.message || String(error));
         continue;
       }
 
       if (!hexData || typeof hexData !== 'object') continue;
-      // The subsequent HEX verification would otherwise GET the same canonical
-      // event again in this invocation. Keep the memo bounded; a future run
-      // always reads S3 afresh so deleted and updated objects are detected.
-      if (hexReadCache instanceof Map && hexReadCache.size < MAX_HEX_READ_CACHE_ENTRIES) {
-        hexReadCache.set(key, hexData);
-      }
 
       const title = hexData.title || hexData.summary;
       if (!title) continue;
@@ -2227,9 +2249,11 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
   const maxScoutRequestLimit = hasScoutRequestLimit
     ? Math.max(0, Math.trunc(options.maxScoutRequests))
     : Infinity;
+  const hexReadCache = options?.hexReadCache instanceof Map ? options.hexReadCache : null;
   let newScoutRequestCount = 0;
   let sqsMessagesPublished = 0;
   let sqsPublishFailures = 0;
+  let hexReadCacheHits = 0;
 
   const firstFutureEventIndex = events.findIndex(e => e.start?.epochMillis > now);
   const startIndexForImages = firstFutureEventIndex === -1
@@ -2279,7 +2303,13 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
         titleHex = titleToHex(eventTitle);
         hexKey = buildHexStorageKey(eventTitle);
         hexLabel = `hex:${eventTitle}`;
-        existingHexFile = await getJsonFromS3(bucketName, hexKey, hexLabel);
+        existingHexFile = hexReadCache?.get(hexKey) || null;
+        if (existingHexFile) {
+          hexReadCacheHits += 1;
+        } else {
+          existingHexFile = await getJsonFromS3(bucketName, hexKey, hexLabel);
+          rememberHexRead(hexReadCache, hexKey, existingHexFile);
+        }
         if (existingHexFile) {
           hadPersistedHex = true;
           const canonicalHex = existingHexFile.metadata?.hex ?? titleHex;
@@ -2340,6 +2370,7 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
             try {
               await putJsonToS3(bucketName, hexKey, newHexData, hexLabel);
               existingHexFile = newHexData;
+              rememberHexRead(hexReadCache, hexKey, existingHexFile);
             } catch (err) {
               console.error(`[HEX] Failed to create new HEX file for ${titleHex}:`, err.message);
             }
@@ -2464,6 +2495,7 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
           if (!hadPersistedHex && !existingHexFile) {
             await putJsonToS3(bucketName, hexKey, hexFileData, hexLabel, true);
             existingHexFile = hexFileData;
+            rememberHexRead(hexReadCache, hexKey, existingHexFile);
           } else if (hadPersistedHex && hasChanges) {
             console.log(`[HEX] Create-only mode: skipping rewrite for existing HEX ${titleHex}`);
           }
@@ -2620,6 +2652,7 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
     deferredCount,
     sqsMessagesPublished,
     sqsPublishFailures,
+    hexReadCacheHits,
   };
 }
 
@@ -4037,7 +4070,13 @@ async function lambdaHandlerCore(event = {}) {
   try {
     // Per-run only: a later invocation must check for deleted/broken images again.
     const imageHeadMemo = createImageHeadMemo();
+    // Share existing canonical objects across enrichment, cleanup and verification
+    // within this refresh only; no cross-invocation state is retained.
     const hexReadCache = new Map();
+    let reusedHexReads = 0;
+    let enrichmentHexCacheHits = 0;
+    let verificationHexCacheHits = 0;
+    const cleanupHexCacheStats = { reusedReads: 0 };
     let dedupedNewEvents = [];
     const feedFailures = [];
     if (!isAgendaEnrichmentOnlyCommand) {
@@ -4125,18 +4164,19 @@ async function lambdaHandlerCore(event = {}) {
       enrichedAgenda = mergedAgenda.map(stripEventEnhancements);
       console.log('[Images] Reset requested: cleared tagline and image fields');
     } else {
-      const enrichmentOptions = maxScoutRequests !== null
-        ? {
-            maxScoutRequests,
-            deferExcess: DEFERRED_REFRESH_ENABLED && isInternalScheduledRefresh && bodyParams?.deferExcess === true,
-          }
-        : undefined;
+      const enrichmentOptions = {
+        ...(maxScoutRequests !== null ? { maxScoutRequests } : {}),
+        deferExcess: DEFERRED_REFRESH_ENABLED && isInternalScheduledRefresh && bodyParams?.deferExcess === true,
+        hexReadCache,
+      };
       const enrichmentResult = await enrichEventsWithAI(mergedAgenda, aiContext, 'agenda', enrichmentOptions);
       enrichmentQueueDiagnostics = {
         deferredCount: Number(enrichmentResult?.deferredCount || 0),
         sqsMessagesPublished: Number(enrichmentResult?.sqsMessagesPublished || 0),
         sqsPublishFailures: Number(enrichmentResult?.sqsPublishFailures || 0),
       };
+      enrichmentHexCacheHits = Number(enrichmentResult?.hexReadCacheHits || 0);
+      reusedHexReads += enrichmentHexCacheHits;
       enrichedAgenda = Array.isArray(enrichmentResult?.events) ? enrichmentResult.events : [];
       liveQueuedProcessingByHex = enrichmentResult?.liveQueuedProcessingByHex instanceof Map
         ? enrichmentResult.liveQueuedProcessingByHex
@@ -4202,7 +4242,9 @@ async function lambdaHandlerCore(event = {}) {
     // Clean up orphaned HEX files
     let orphanedHexFiles = [];
     try {
-      orphanedHexFiles = await deleteOrphanedHexFiles(bucket, agendaPayload, hexReadCache);
+      orphanedHexFiles = await deleteOrphanedHexFiles(bucket, agendaPayload, hexReadCache, cleanupHexCacheStats);
+      reusedHexReads += Number(cleanupHexCacheStats.reusedReads || 0)
+        + Number(cleanupHexCacheStats.agendaReadsSkipped || 0);
       if (orphanedHexFiles.length > 0) {
         console.log(`[Cleanup] Removed ${orphanedHexFiles.length} orphaned HEX files`);
       }
@@ -4214,7 +4256,6 @@ async function lambdaHandlerCore(event = {}) {
     let hexFilesRepaired = 0;
     let hexFilesWithBrokenImages = 0;
     let hexFilesMigrated = 0;
-    let reusedHexReads = 0;
     try {
       console.log('[HEX Image Verification] Starting image verification for HEX files...');
       let continuationToken = undefined;
@@ -4239,7 +4280,10 @@ async function lambdaHandlerCore(event = {}) {
           try {
             const cachedHex = hexReadCache.get(key);
             const hexData = cachedHex || await getJsonFromS3(bucket, key, `hex:${key}`);
-            if (cachedHex) reusedHexReads += 1;
+            if (cachedHex) {
+              reusedHexReads += 1;
+              verificationHexCacheHits += 1;
+            }
             if (!hexData || typeof hexData !== 'object') continue;
 
             const repairResult = await verifyAndRepairHexFile(bucket, key, hexData, imageHeadMemo);
@@ -4273,6 +4317,12 @@ async function lambdaHandlerCore(event = {}) {
 
     console.log('[S3 Request Reduction] Per-refresh avoided requests', {
       reusedHexReads,
+      hexReadCacheHits: {
+        enrichment: enrichmentHexCacheHits,
+        orphanCleanup: Number(cleanupHexCacheStats.reusedReads || 0),
+        orphanAgendaReadsSkipped: Number(cleanupHexCacheStats.agendaReadsSkipped || 0),
+        hexVerification: verificationHexCacheHits,
+      },
       imageHead: imageHeadMemo.stats(),
     });
 
