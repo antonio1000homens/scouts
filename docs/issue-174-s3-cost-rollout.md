@@ -1193,6 +1193,11 @@ mapping inventory showed the three existing Scouts SQS mappings but none for
 pipe for this queue. This does not rule out a consumer outside the inspected
 AWS services or account.
 
+`GetQueueAttributes` returned no queue resource policy or redrive policy, and
+`ListQueueTags` returned no tags. Same-account consumers remain possible, but
+there is no queue-level DLQ configuration; the configured 14-day retention is
+the visible expiry boundary for messages left unconsumed.
+
 The age metric is approximate and does not identify the oldest message or its
 consumer. No message bodies were read and no queue state was changed. This
 confirms the queue is not draining in the observed interval; preserve its
