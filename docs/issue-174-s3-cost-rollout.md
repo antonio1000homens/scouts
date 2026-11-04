@@ -386,8 +386,13 @@ not measure a change in bucket-wide S3 requests or charges.
 4. **Deduplicate per-invocation image HEAD checks** across agenda and
    canonical HEX verification. Failed checks are never cached; 404 means
    missing, while permission/throttle/service failures now propagate
-   rather than deleting potentially valid image URLs. A future refresh
-   still checks every referenced image, preserving deleted-image recovery.
+   rather than deleting potentially valid image URLs. PR #222 also adds a
+   bounded positive-only cache for scheduled refreshes on a warm Lambda
+   instance: confirmed image existence is rechecked after at most eight hours.
+   New keys, missing images, expired entries, cold starts and interactive
+   refreshes still check S3. This bounds stale image-deletion detection to
+   eight hours on a warm instance while reducing repeat HEAD checks. The
+   change is not yet deployed, so no production savings are claimed.
 5. **Reuse canonical HEX JSON within the same refresh**: orphan cleanup's
    successful reads are reused by the subsequent HEX verification pass,
    with a **500-entry upper bound** and invalidation on deletion.
