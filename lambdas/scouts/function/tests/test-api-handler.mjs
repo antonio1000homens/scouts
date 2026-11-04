@@ -15,14 +15,27 @@ function command(name) {
   };
 }
 
-async function loadService() {
+async function loadService({
+  imageEnrichStateMachineArn = '',
+  sfnSend = async () => ({ executions: [] }),
+  listActivity = async () => ({ requests: [] }),
+} = {}) {
   const sent = [];
   const activities = [];
   let s3Send = async () => ({});
+  let sendSfnRequest = sfnSend;
+  let loadActivity = listActivity;
   const S3Client = class { async send(request) { return s3Send(request); } };
   const SQSClient = class { async send(request) { sent.push(request.input); return { MessageId: 'message-fixture', MD5OfMessageBody: 'md5-fixture' }; } };
-  const SFNClient = class { async send() { return { executions: [] }; } };
-  const context = vm.createContext({ Buffer, URL, console: { ...console, log() {}, warn() {}, error() {} }, process, setTimeout, clearTimeout });
+  const SFNClient = class { async send(request) { return sendSfnRequest(request); } };
+  const context = vm.createContext({
+    Buffer,
+    URL,
+    console: { ...console, log() {}, warn() {}, error() {} },
+    process: { env: { ...process.env, IMAGE_ENRICH_STATE_MACHINE_ARN: imageEnrichStateMachineArn } },
+    setTimeout,
+    clearTimeout,
+  });
   const module = new vm.SourceTextModule(readFileSync(sourcePath, 'utf8'), { context, identifier: sourcePath });
   const modules = new Map();
   const synthetic = (specifier, exports) => {
@@ -41,7 +54,7 @@ async function loadService() {
     if (specifier === 'node:async_hooks') return synthetic(specifier, { AsyncLocalStorage });
     if (specifier === '/opt/nodejs/ssm-secrets.mjs') return synthetic(specifier, { getRequiredSecret: async () => 'fixture-key' });
     if (specifier === '/opt/nodejs/request-activity.mjs') return synthetic(specifier, {
-      listRequestActivity: async () => ({ requests: [] }),
+      listRequestActivity: async (...args) => loadActivity(...args),
       recordRequestActivity: async (entry) => { activities.push(entry); return entry; },
     });
     if (specifier === '/opt/nodejs/enrichment-state.mjs') return synthetic(specifier, { getEnrichmentState: async () => null, evaluateEnrichmentEligibility: async () => ({ eligible: true }), buildGenerationId: () => 'fixture-generation' });
@@ -76,12 +89,61 @@ async function loadService() {
   await module.evaluate();
   return {
     handler: module.namespace.lambdaHandler,
+    listActiveImageEnrichExecutions: module.namespace.listActiveImageEnrichExecutions,
     getFreshIcsFromS3: module.namespace.getFreshIcsFromS3,
     setS3Send(send) { s3Send = send; },
+    setSfnSend(send) { sendSfnRequest = send; },
+    setListActivity(load) { loadActivity = load; },
     sent,
     activities,
   };
 }
+
+test('live Step Functions execution remains visible with an empty Activity ledger', async () => {
+  const service = await loadService({
+    imageEnrichStateMachineArn: 'arn:aws:states:eu-west-2:553490163883:stateMachine:image-enrich',
+    sfnSend: async (request) => request.name === 'ListExecutionsCommand'
+      ? { executions: [{
+          executionArn: 'arn:aws:states:eu-west-2:553490163883:execution:image-enrich:run-1',
+          name: 'run-1',
+          status: 'RUNNING',
+          startDate: '2026-11-04T17:00:00Z',
+        }] }
+      : { input: JSON.stringify({ requestId: 'req-live-1', requestHex: HEX }) },
+    listActivity: async () => ({ requests: [] }),
+  });
+
+  const result = await service.listActiveImageEnrichExecutions();
+
+  assert.equal(result.activeExecutionCount, 1);
+  assert.equal(result.activeExecutions[0].status, 'RUNNING');
+  assert.equal(result.activeExecutions[0].requestId, 'req-live-1');
+  assert.equal(result.activeExecutions[0].hex, HEX);
+  assert.equal(result.activeExecutions[0].currentStage, null);
+});
+
+test('live Step Functions execution remains visible when Activity lookup fails', async () => {
+  const service = await loadService({
+    imageEnrichStateMachineArn: 'arn:aws:states:eu-west-2:553490163883:stateMachine:image-enrich',
+    sfnSend: async (request) => request.name === 'ListExecutionsCommand'
+      ? { executions: [{
+          executionArn: 'arn:aws:states:eu-west-2:553490163883:execution:image-enrich:run-2',
+          name: 'run-2',
+          status: 'RUNNING',
+          startDate: '2026-11-04T17:00:00Z',
+        }] }
+      : { input: JSON.stringify({ requestId: 'req-live-2', requestHex: HEX }) },
+    listActivity: async () => { throw new Error('DynamoDB unavailable'); },
+  });
+
+  const result = await service.listActiveImageEnrichExecutions();
+
+  assert.equal(result.activeExecutionCount, 1);
+  assert.equal(result.activeExecutions[0].status, 'RUNNING');
+  assert.equal(result.activeExecutions[0].requestId, 'req-live-2');
+  assert.equal(result.activeExecutions[0].hex, HEX);
+  assert.equal(result.activeExecutions[0].currentStage, null);
+});
 
 function request(body, apiKey = 'fixture-key') {
   return {

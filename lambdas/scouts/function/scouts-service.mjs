@@ -712,7 +712,7 @@ async function describeExecutionInput(executionArn) {
   }
 }
 
-async function listActiveImageEnrichExecutions() {
+export async function listActiveImageEnrichExecutions() {
   const stateMachineArn = trimOptionalText(IMAGE_ENRICH_STATE_MACHINE_ARN);
   if (!stateMachineArn) {
     return {
