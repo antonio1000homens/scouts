@@ -46,7 +46,7 @@ test('review manifest writer uses owner-only permissions and refuses overwrite',
     writeReviewManifest(path, { rows: [] });
     assert.equal(statSync(path).mode & 0o777, 0o600);
     assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), { rows: [] });
-    assert.throws(() => writeReviewManifest(path, { rows: ['replacement'] }), /EEXIST/);
+    assert.throws(() => writeReviewManifest(path, { rows: ['replacement'] }), /destination already exists/);
     assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), { rows: [] });
   } finally {
     rmSync(directory, { recursive: true, force: true });
