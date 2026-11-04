@@ -1189,7 +1189,9 @@ latest complete five-minute `ApproximateAgeOfOldestMessage` datapoint was
 64,878 seconds at 16:41 UTC. For 10:46–16:46 UTC, CloudWatch recorded two
 messages sent and zero received or deleted. A fresh Lambda event-source
 mapping inventory showed the three existing Scouts SQS mappings but none for
-`scoutsDecision`.
+`scoutsDecision`; an EventBridge Pipes source-prefix query also returned no
+pipe for this queue. This does not rule out a consumer outside the inspected
+AWS services or account.
 
 The age metric is approximate and does not identify the oldest message or its
 consumer. No message bodies were read and no queue state was changed. This
