@@ -2533,7 +2533,7 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
               });
               newScoutRequestCount += 1;
             } else if (options.deferExcess === true) {
-              const generationId = buildGenerationId(titleHex, updatedProcessingRealm, baseEvent);
+              const generationId = buildGenerationId(titleHex, updatedProcessingRealm, hexFileData);
               const queued = await enqueueDeferredRefresh({
                 hex: titleHex,
                 stage: updatedProcessingRealm,
@@ -2574,12 +2574,12 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
       if (retryCount >= maxScoutRequestLimit) {
         if (!options.deferExcess) break;
         const retryStage = deriveProcessingRealmFromEvent(item.hexFileData) || 'tagline';
-        const eligibility = await checkEnrichmentEligibility(item.hex, retryStage, { event: item.sourceEvent || item.hexFileData });
+        const eligibility = await checkEnrichmentEligibility(item.hex, retryStage, { event: item.hexFileData });
         if (!eligibility.eligible) continue;
         const deferred = await enqueueDeferredRefresh({
           hex: item.hex,
           stage: retryStage,
-          generationId: buildGenerationId(item.hex, retryStage, item.sourceEvent || item.hexFileData),
+          generationId: buildGenerationId(item.hex, retryStage, item.hexFileData),
           title: item.title,
           subject: item.hexFileData,
           sourceKey: item.sourceKey || deferredSourceKey(item.sourceEvent || item.hexFileData),

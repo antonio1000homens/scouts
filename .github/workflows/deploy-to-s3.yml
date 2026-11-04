@@ -41,6 +41,7 @@ env:
   CLOUDFORMATION_ROLE_ARN: ${{ vars.CLOUDFORMATION_ROLE_ARN }}
   CODE_BUCKET: ${{ vars.CODE_BUCKET }}
   LEGACY_RUNTIME_SNAPSHOTS_ENABLED: ${{ vars.LEGACY_RUNTIME_SNAPSHOTS_ENABLED || 'false' }}
+  SCOUTS_APPROVAL_IDEMPOTENCY_BACKEND: ${{ vars.SCOUTS_APPROVAL_IDEMPOTENCY_BACKEND || 's3' }}
   DEFERRED_REFRESH_OUTBOX_ENABLED: ${{ vars.DEFERRED_REFRESH_OUTBOX_ENABLED || 'false' }}
   DEFERRED_REFRESH_OUTBOX_TABLE_NAME: ${{ vars.DEFERRED_REFRESH_OUTBOX_TABLE_NAME || 'scouts-deferred-refresh' }}
   DEFERRED_REFRESH_OUTBOX_BILLING_MODE: ${{ vars.DEFERRED_REFRESH_OUTBOX_BILLING_MODE || 'PAY_PER_REQUEST' }}
@@ -735,6 +736,7 @@ jobs:
           CREATE_DATA_BUCKET: 'true'
           SCOUTS_REQUESTS_QUEUE_ARN: arn:aws:sqs:${{ env.AWS_REGION }}:${{ env.EXPECTED_AWS_ACCOUNT }}:scoutsRequests
           SCOUTS_REQUESTS_QUEUE_URL: https://sqs.${{ env.AWS_REGION }}.amazonaws.com/${{ env.EXPECTED_AWS_ACCOUNT }}/scoutsRequests
+          SCOUTS_APPROVAL_IDEMPOTENCY_BACKEND: ${{ env.SCOUTS_APPROVAL_IDEMPOTENCY_BACKEND }}
           # Configured calendar feeds are resolved from Bitwarden UID variables by
           # the preceding actions. Missing variables deliberately disable feeds.
         run: cd lambdas/scouts && bash ./deploy.sh
@@ -772,4 +774,5 @@ jobs:
           NFC_QUEUE_ARN: arn:aws:sqs:${{ env.AWS_REGION }}:${{ env.EXPECTED_AWS_ACCOUNT }}:scoutsRequests
           TARGET_BUCKET: ${{ env.WEBSITE_BUCKET }}
           SCOUTS_CONFIG_KEY: scouts.conf
+          SCOUTS_APPROVAL_IDEMPOTENCY_BACKEND: ${{ env.SCOUTS_APPROVAL_IDEMPOTENCY_BACKEND }}
         run: cd lambdas/scouts-slack-handler && bash ./deploy.sh
