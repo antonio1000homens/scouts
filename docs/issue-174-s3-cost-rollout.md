@@ -1499,3 +1499,27 @@ of the two processing mappings, while the DLQ mapping had no receives in this
 window. Keep all three mappings enabled: the existing processing mappings
 preserve asynchronous delivery and backpressure, and the DLQ mapping preserves
 automatic failure visibility. No queue, message, or mapping was changed.
+
+## Legacy snapshot API retirement verification (2026-11-04 17:29 UTC)
+
+AWS STS verified account `553490163883`. The `scouts-lambda` CloudFormation
+stack is `UPDATE_COMPLETE` with `LegacyRuntimeSnapshotsEnabled=false` and was
+last updated at 16:36:38 UTC. A fresh `ListExecutions` check found no `RUNNING`
+execution in `scouts-full-enrich`, `scouts-full-enrich-managed-poc`, or
+`scouts-image-enrich`.
+
+An authenticated production POST for `realm=runtime`, `subject=snapshot`,
+`action=get`, and `snapshot=queued` returned HTTP 410 with API status
+`retired` and directed operators to the Activity Centre and live queue/DLQ
+operations. The API key was used inside the local request process and is not
+recorded here. The check confirms the gated endpoint is active; it does not
+delete the three historical S3 snapshot objects or change the queue mappings.
+
+The deployed `website/admin/admin-script.js` object was also read from the
+verified Scouts bucket; it contains the explicit retired-snapshot notice and
+was last modified at 16:35:32 UTC. An unauthenticated GET of the public admin
+route returned HTTP 403, so this check confirms the deployed script contents
+but not the rendered viewer in an authenticated browser session.
+
+The reconstructed legacy field contract and current source inventory are in
+[`issue-174-runtime-snapshot-contract.md`](issue-174-runtime-snapshot-contract.md).
