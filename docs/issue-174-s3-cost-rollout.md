@@ -814,3 +814,18 @@ traffic, S3 metrics are best-effort, and the window is shorter than a full
 post-change day. It does not establish savings or reconcile bucket counts to
 SDK counts. Continue to collect a mature seven-day window and compare with
 posted S3 charges before claiming bill-level savings.
+
+## S3 Cost Explorer readback (2026-11-04 08:35 UTC)
+
+After verifying AWS account `553490163883`, Cost Explorer returned daily
+`UnblendedCost` grouped by S3 usage type for 2026-10-28 through 2026-11-03.
+The four complete days (Oct 28–31) totalled $0.04487695, averaging
+$0.01121924/day. The three latest days are marked estimated: Nov 1 $0.00856684,
+Nov 2 $0.00805174, and Nov 3 $0.00913628. Estimated figures are provisional;
+Cost Explorer has not returned a posted post-cutover day. The complete days
+precede the Nov 3 schedule and request-path changes, while the estimated days
+overlap the rollout and are account-wide S3 service costs across usage types,
+not costs isolated to this bucket. In particular, the lower estimated storage
+line items cannot be attributed to this code change. This readback therefore
+does not establish a charge reduction. Collect posted daily costs and a mature
+aligned seven-day post-change request window before evaluating savings.
