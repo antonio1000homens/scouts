@@ -4387,7 +4387,9 @@ async function lambdaHandlerCore(event = {}) {
       const imageHeadStats = imageHeadMemo.stats();
       console.log('[ScheduledRefresh] Completed calendar refresh.', {
         enabled: true,
-        status: 'ok',
+        status: feedFailures.length > 0 || enrichmentQueueDiagnostics.sqsPublishFailures > 0
+          ? 'partial'
+          : 'ok',
         calendarEventsDiscovered: dedupedNewEvents.length,
         calendarEventsExamined: mergedAgenda.length,
         calendarEventsChanged: modifiedEvents.length,
