@@ -1563,3 +1563,26 @@ deleted, and no queue configuration or event-source mapping was changed. SQS
 Free Tier usage remained at 90,811 actual requests and 681,082.5 forecast of
 the account-wide 1,000,000-request allowance at this readback; it is a forecast,
 not a final bill.
+
+## SQS usage recheck (2026-11-04 18:31 UTC)
+
+AWS STS verified account `553490163883`. The Free Tier API still reports
+90,811 actual SQS requests and 681,082.5 forecast against the account-wide
+1,000,000-request Always Free allowance. That leaves a forecast 318,917.5
+requests below the allowance. This is an account-wide forecast, not a per-queue
+bill or final charge.
+
+CloudWatch `AWS/SQS` metrics returned seven complete one-day bins from
+2026-10-28 18:00 through 2026-11-04 18:00 UTC. `NumberOfEmptyReceives` summed
+to 60,471 for `scoutsRequests`, 60,486 for `scoutsProcessing`, and 60,470 for
+`scoutsProcessingDLQ` (181,427 total). `NumberOfMessagesReceived` summed to 18,
+13, and 0 respectively (31 total). These receive counters can include repeated
+receives and are not unique-message counts. The latest one-day bin, timestamped
+2026-11-03 18:00 UTC, contained 18 request-queue receives and 13 processing
+queue receives; the earlier six bins had zero message receives.
+
+The three processing queues each had zero visible, in-flight, and delayed
+messages at readback, with 14-day retention. Their Lambda event-source mappings
+remain enabled, and `scoutsDecision` still has no mapping. The notification
+queue had four visible messages and zero in flight or delayed, also with
+14-day retention. No messages, mappings, or queue settings were changed.
