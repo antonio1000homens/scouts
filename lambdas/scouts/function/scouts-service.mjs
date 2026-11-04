@@ -555,10 +555,11 @@ function buildHexStorageKey(title) {
   return `events/${hex}.json`;
 }
 
-function rememberHexRead(cache, key, value) {
-  if (!(cache instanceof Map) || !key || !value || typeof value !== 'object') return;
-  if (!cache.has(key) && cache.size >= MAX_HEX_READ_CACHE_ENTRIES) return;
-  cache.set(key, value);
+function rememberHexRead(hexReadCache, key, value) {
+  if (!(hexReadCache instanceof Map) || !key || !value || typeof value !== 'object') return;
+  if (hexReadCache.has(key) || hexReadCache.size < MAX_HEX_READ_CACHE_ENTRIES) {
+    hexReadCache.set(key, value);
+  }
 }
 
 function extractImageKeyDetails(imageUrl) {
