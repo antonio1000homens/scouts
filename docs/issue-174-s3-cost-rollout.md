@@ -813,3 +813,44 @@ before a conditional activity put, omits TTL for both categories, and never
 reads or copies snapshot task tokens. Do not run it in apply mode until the
 dry-run classification has been owner-reviewed; no migration writes have been
 performed. The dry-run classification still requires owner review before apply.
+
+## 24-hour S3 request attribution recheck (2026-11-04 08:30 UTC)
+
+The read-only collector verified AWS account `553490163883` and returned
+complete one-minute metric series for 2026-11-03 08:30 through 2026-11-04
+08:30 UTC. All six CloudWatch metric queries completed in one page; neither
+the SDK-operation nor per-refresh log search was truncated. The bucket-wide
+totals were 7,173 GET, 1,421 HEAD, 129 LIST, and 471 PUT requests. The `scouts`
+Lambda had 32 invocations and zero errors in the same window. These counts
+include browser/admin and other S3 callers; they do not identify which caller
+made each request.
+
+The six SDK summaries included five `scheduled-refresh` invocations and one
+`non-scheduled` invocation. The three scheduled summaries after the 19:42 UTC
+cutover were 177/38/2/1, 176/38/2/3, and 178/38/2/1 GET/HEAD/LIST/PUT calls.
+The per-refresh logs recorded 98–100 reused HEX reads and 35–36 image HEAD
+requests with six cache hits. These are invocation-level SDK counts, not
+billable wire-request totals.
+
+The shorter post-cutover bucket interval, 19:42–08:30 UTC, contained 923 GET,
+411 HEAD, 54 LIST, and 256 PUT requests across 45 nonzero metric bins. This is
+not a clean before/after comparison: the interval includes unrelated bucket
+traffic, S3 metrics are best-effort, and the window is shorter than a full
+post-change day. It does not establish savings or reconcile bucket counts to
+SDK counts. Continue to collect a mature seven-day window and compare with
+posted S3 charges before claiming bill-level savings.
+
+## S3 Cost Explorer readback (2026-11-04 08:35 UTC)
+
+After verifying AWS account `553490163883`, Cost Explorer returned daily
+`UnblendedCost` grouped by S3 usage type for 2026-10-28 through 2026-11-03.
+The four complete days (Oct 28–31) totalled $0.04487695, averaging
+$0.01121924/day. The three latest days are marked estimated: Nov 1 $0.00856684,
+Nov 2 $0.00805174, and Nov 3 $0.00913628. Estimated figures are provisional;
+Cost Explorer has not returned a posted post-cutover day. The complete days
+precede the Nov 3 schedule and request-path changes, while the estimated days
+overlap the rollout and are account-wide S3 service costs across usage types,
+not costs isolated to this bucket. In particular, the lower estimated storage
+line items cannot be attributed to this code change. This readback therefore
+does not establish a charge reduction. Collect posted daily costs and a mature
+aligned seven-day post-change request window before evaluating savings.
