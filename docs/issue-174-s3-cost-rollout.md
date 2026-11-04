@@ -879,3 +879,28 @@ external/manual consumer or prove what the notifications represent. No
 messages were received, deleted, or otherwise changed. Review the notification
 queue's operational consumer and alerting before treating zero age or prompt
 notification delivery as established.
+
+## Notification queue status rollout (2026-11-04 09:02–09:07 UTC)
+
+PR #209 merged as `0bebf49`, and deployment workflow
+[`41804025794`](https://github.com/antonio1000homens/scouts/actions/runs/41804025794)
+completed successfully. AWS STS verified account `553490163883`. The
+`scouts-lambda` stack reached `UPDATE_COMPLETE` at 09:02:24 UTC; the `scouts`
+Lambda reports `LastUpdateStatus=Successful` and `LastModified=09:02:52 UTC`.
+Its `SCOUTS_DECISION_QUEUE_URL` resolves to the intended
+`scoutsDecision` queue.
+
+The deployed `scouts-lambda-role` policy grants `sqs:GetQueueAttributes` for
+`scoutsDecision`. IAM policy simulation allowed that read and returned
+`implicitDeny` for both `sqs:ReceiveMessage` and `sqs:DeleteMessage`. The full
+regional inventory still contains only the three existing enabled
+event-source mappings; no decision-queue mapping was added. No queue messages
+were received, deleted, or otherwise changed by this rollout.
+
+The website deployment completed and invalidated CloudFront. The S3 object
+`website/admin/admin-diagnostics-enhancements.js` was last modified at
+09:02:13 UTC with `max-age=0, no-cache, no-store, must-revalidate`; its
+SHA-256 matched the master asset. An unauthenticated request to the protected
+admin asset redirected to Cloudflare Access. The authenticated Operations UI
+and its live five-queue payload have therefore not been directly exercised;
+the stack, IAM policy and published asset are verified independently.
