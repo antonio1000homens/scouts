@@ -1478,6 +1478,25 @@ roughly 30-hour nominal bound and keep that acceptance distinction explicit;
 do not describe six-hour cadence as six-hour calendar freshness. Feed errors
 can extend staleness and remain visible through per-feed failure diagnostics.
 
+## S3 Cost Explorer recheck (2026-11-04 18:17 UTC)
+
+AWS STS verified account `553490163883` before the Cost Explorer query. The
+account-wide S3 results remain marked `Estimated` for every returned day:
+
+| Date (UTC) | S3 service estimate | Tier 1 + Tier 2 requests | Request charge estimate |
+| --- | ---: | ---: | ---: |
+| Nov 1 | $0.00856684 | 16,092 | $0.00842722 |
+| Nov 2 | $0.00805174 | 16,028 | $0.00791212 |
+| Nov 3 | $0.01009651 | 15,039 | $0.00995174 |
+| Nov 4 (partial at query time) | $0.00022300 | 438 | $0.00022300 |
+
+These are account-wide service totals grouped by usage type, not charges
+isolated to the Scouts website bucket or a specific caller. Nov 3 includes
+mostly pre-cutover hours, and Nov 4 was partial. They are not a valid
+before/after comparison and do not establish savings. Keep the aligned S3
+request-metric window and posted charges as the acceptance evidence; the
+complete seven-day post-cutover interval ends 2026-11-10 19:42 UTC.
+
 ## SQS request and free-tier recheck (2026-11-04 14:02 UTC)
 
 AWS STS again verified account `553490163883`. The Free Tier API continues to
