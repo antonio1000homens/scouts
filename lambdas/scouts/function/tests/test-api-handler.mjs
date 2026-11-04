@@ -19,6 +19,7 @@ async function loadService({
   imageEnrichStateMachineArn = '',
   sfnSend = async () => ({ executions: [] }),
   listActivity = async () => ({ requests: [] }),
+  recordActivity = async (entry) => entry,
 } = {}) {
   const sent = [];
   const activities = [];
@@ -55,7 +56,7 @@ async function loadService({
     if (specifier === '/opt/nodejs/ssm-secrets.mjs') return synthetic(specifier, { getRequiredSecret: async () => 'fixture-key' });
     if (specifier === '/opt/nodejs/request-activity.mjs') return synthetic(specifier, {
       listRequestActivity: async (...args) => loadActivity(...args),
-      recordRequestActivity: async (entry) => { activities.push(entry); return entry; },
+      recordRequestActivity: async (entry) => { activities.push(entry); return recordActivity(entry); },
     });
     if (specifier === '/opt/nodejs/enrichment-state.mjs') return synthetic(specifier, { getEnrichmentState: async () => null, evaluateEnrichmentEligibility: async () => ({ eligible: true }), buildGenerationId: () => 'fixture-generation' });
     if (specifier === '/opt/nodejs/occurrence-identity.mjs') return synthetic(specifier, { resolveOccurrenceId: () => OCCURRENCE, occurrenceStorageKey: (id) => `occurrences/${id}.json` });
@@ -229,6 +230,19 @@ test('real Scouts API handler publishes full-enrich and HEX-canonical mutations'
   const unhideMessage = JSON.parse(service.sent[3].MessageBody);
   assert.deepEqual(unhideMessage.subject, { hex: HEX, isHidden: false });
   assert.equal(unhideMessage.visibilityIntent, 'unhide');
+});
+
+test('real Scouts API handler keeps a successful enqueue when Activity recording fails', async () => {
+  const service = await loadService({
+    recordActivity: async () => { throw new Error('DynamoDB unavailable'); },
+  });
+
+  const response = await service.handler(request({ realm: 'scouts', action: 'generateFull', subject: { hex: HEX } }));
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(service.sent.length, 1);
+  assert.equal(JSON.parse(service.sent[0].MessageBody).subject.hex, HEX);
+  assert.equal(service.activities.length, 1);
 });
 
 test('real Scouts API handler accepts HEX-wide visibility without an occurrence selector', async () => {
