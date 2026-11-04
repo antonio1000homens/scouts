@@ -255,3 +255,32 @@ or GSIs. The planned 2 RCU/2 WCU allocation therefore fits the recorded 25/25
 allowance. No DynamoDB table was created and no synthetic writes were made.
 The apply mode remains unexecuted and still requires explicit owner
 authorization for production-account table creation and synthetic writes.
+
+## Latest seven-day DynamoDB capacity recheck (2026-11-04 18:15 UTC)
+
+AWS STS verified account `553490163883`. A read-only CloudWatch query covered
+2026-10-28 18:00 through 2026-11-04 18:00 UTC. All eight 60-second table/GSI
+series returned `Complete` with 10,080 points each and no pagination token.
+The later window supersedes the earlier capacity totals above:
+
+| Resource | Read units | Read nonzero minutes / peak | Write units | Write nonzero minutes / peak |
+| --- | ---: | --- | ---: | --- |
+| `scouts-enrichment-state` | 20,283 | 341 / 1,270 at Nov 4 10:58 UTC | 866 | 5 / 465 at Nov 4 12:41 UTC |
+| `scouts-gemini-usage` | 8 | 5 / 2 at Nov 1 23:00 UTC | 0 | 0 / 0 |
+| `scouts-request-activity` | 170 | 12 / 37 at Nov 4 11:00 UTC | 86 | 7 / 52 at Nov 4 13:25 UTC |
+| `scouts-request-activity/activity-feed` GSI | 3.5 | 5 / 1.5 at Nov 3 19:23 UTC | 81 | 7 / 26 at Nov 4 13:25 UTC |
+
+These maxima are one-minute sums, not per-second peaks. Uniform-rate equivalents
+would be about 21.2 read units/s and 7.75 write units/s for the enrichment
+table, but the data does not prove uniform consumption or bound sub-minute
+bursts. The activity-table and GSI write points are now nonzero, unlike the
+earlier window; do not extrapolate them to a steady rate. The deferred outbox
+remains absent and disabled, so these real workload metrics still do not
+measure its GSI query/write mix, retry amplification, or concurrent dispatcher
+behavior.
+
+The benchmark dry run still finds no provisioned table/GSI capacity in the
+single-account payer and confirms the planned synthetic 2 RCU/2 WCU allocation
+fits the nominal 25/25 allowance. This is eligibility, not a safe capacity
+result. Keep the outbox disabled until the separately authorized benchmark and
+live backlog/drain acceptance are complete.
