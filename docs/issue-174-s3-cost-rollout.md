@@ -1136,6 +1136,32 @@ This confirms an old outstanding notification, but the approximation alone
 does not identify which message is oldest or whether the consumer contract
 changed. No message body was read and no queue operation changed state.
 
+## Decision-queue backlog recheck (2026-11-04 14:59 UTC)
+
+AWS STS verified account `553490163883` before the read-only check. The
+`scoutsDecision` queue now reports four visible messages, zero in-flight or
+delayed messages, and 14-day retention. Its latest five-minute
+`ApproximateAgeOfOldestMessage` maximum was 58,456 seconds at 14:54 UTC. No
+Lambda event-source mapping is configured for this queue. The visible backlog
+has increased from two messages at 10:34 UTC; metric age is approximate and
+does not establish which messages are oldest or identify their consumer.
+No message body was read, and no queue operation changed state. Preserve the
+messages and retention until the notification contract and replacement
+consumer/alert behavior are confirmed.
+
+## Decision-queue backlog recheck (2026-11-04 16:08 UTC)
+
+AWS STS again verified account `553490163883`. `scoutsDecision` still reports
+four visible messages and zero in-flight or delayed messages, with 14-day
+retention. Its latest five-minute `ApproximateAgeOfOldestMessage` maximum was
+62,592 seconds at 16:07 UTC. For the six hours ending 16:08 UTC, the queue's
+CloudWatch series recorded two sent messages and zero received or deleted
+messages. No Lambda event-source mapping targets this queue. The age has
+continued rising since the 14:59 check, but it is approximate and does not
+identify a message's consumer or delivery contract. No message body was read
+and no queue operation changed state. Preserve the messages and retention
+pending owner confirmation of the consumer and alerting behavior.
+
 ## CloudWatch queue-alert coverage (2026-11-04 10:51 UTC)
 
 AWS STS verified account `553490163883`. The region has five metric alarms,
