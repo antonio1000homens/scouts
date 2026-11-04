@@ -976,6 +976,42 @@ changed. The intended notification consumer and alerting remain unverified;
 preserve the queue and its messages
 until that contract is confirmed.
 
+## Live regression canary rerun and cleanup correction (2026-11-04 12:40–12:51 UTC)
+
+The authorized rerun, workflow
+[`41831345941`](https://github.com/antonio1000homens/scouts/actions/runs/41831345941),
+used master commit `8969304b`. It verified AWS account `553490163883` and the
+deployed public-event exclusion guard. Full enrichment, tagline and image-theme
+enrichment, approval, hide, and same-HEX sibling-hide checks passed. The
+post-hide command used `maxEvents=0`; runtime logs show this skips calendar-feed
+fetch and runs enrichment against the existing agenda. The canary timed out
+waiting for both siblings to remain hidden after that pass.
+
+The failure exposed a fixture defect: stage regeneration changed the synthetic
+event title to vary the enrichment generation ID. Title is also the canonical
+HEX identity, so image-theme processing wrote a second `events/{HEX}.json`
+document and changed the agenda entry's HEX. The workflow cleanup matched only
+the original HEX and left one canary sibling plus that second event document.
+The generated image and original event object were removed by workflow cleanup.
+I then removed the remaining sibling using an ETag-conditional agenda write
+guarded by its exact synthetic UID, occurrence ID, title and HEX, and deleted
+the exact staged event object with an ETag condition. Readbacks confirmed no
+canary UID remains in `agenda.json`, no event document remains under the run's
+unique HEX prefix, and the run's generated-image prefix is empty. The workflow's
+agenda recovery backup remains in `migration-backups/live-regression/`.
+
+A follow-up source change varies `location` (an agenda-only generation input)
+while preserving title/HEX and strengthens cleanup to enumerate all canary
+event documents and generated-image prefixes. It is not yet merged or rerun;
+the live post-hide check remains unverified.
+
+An attempt to run the corrected workflow from PR #228
+([`41834015634`](https://github.com/antonio1000homens/scouts/actions/runs/41834015634))
+was rejected at OIDC role assumption because the production role does not
+authorize feature-branch refs. It failed before AWS account verification and
+made no production calls. Keep the trust policy intact; the corrected canary
+must run from an authorized ref after the source change is merged.
+
 ## S3 request attribution recheck (2026-11-04 09:24 UTC)
 
 AWS STS verified account `553490163883` before running the read-only collector.
