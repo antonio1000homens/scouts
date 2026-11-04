@@ -1370,3 +1370,24 @@ has not set a numeric maximum source-to-agenda staleness target. Record the
 roughly 30-hour nominal bound and keep that acceptance distinction explicit;
 do not describe six-hour cadence as six-hour calendar freshness. Feed errors
 can extend staleness and remain visible through per-feed failure diagnostics.
+
+## `scoutsDecision` producer and consumer source audit (2026-11-04 14:43 UTC)
+
+Repository review of `approval-lifecycle-adapter.mjs` and
+`persistence-processor.mjs` found two best-effort producers and no in-repository
+consumer. Both send notifications after canonical event persistence and
+publication. The adapter emits `action=persisted` for both `awaiting_image` and
+`approved` states, so that action alone does not mean final approval. The
+processor emits `hidden` when its reconciled Slack decision is `HIDDEN`, and
+`persisted` otherwise. Payloads include request identifiers and event identity;
+the adapter includes title, while the processor may also include UID. Both
+producers log a warning on `SendMessage` failure without rolling back the
+canonical event write.
+
+`scouts` Operations only reads queue attributes and metrics. No Lambda mapping
+or repository consumer receives or deletes these messages. The recent live
+readback showed a visible backlog, but its message bodies were not read and no
+external consumer was identified. Keep the queue and messages intact pending
+owner review of any external consumer and notification-retention contract.
+The source-level detail is in
+[`SCOUTS-DECISION-QUEUE-REALMS.md`](../lambdas/scouts/SCOUTS-DECISION-QUEUE-REALMS.md).
