@@ -1522,3 +1522,25 @@ but not the rendered viewer in an authenticated browser session.
 
 The reconstructed legacy field contract and current source inventory are in
 [`issue-174-runtime-snapshot-contract.md`](issue-174-runtime-snapshot-contract.md).
+
+## Decision notification producer removal deployment verification (2026-11-04 17:55–17:57 UTC)
+
+AWS STS verified account `553490163883` before the readback. PR #242 merged as
+`26de80a`; Deploy Scouts run
+[`41881622108`](https://github.com/antonio1000homens/scouts/actions/runs/41881622108)
+completed successfully. The `sqs2scouts` Lambda is Active with a successful
+update, `LastModified=17:55:56 UTC`, and code SHA-256
+`kG6FNViXbwQfqbCcIGcatqpKrVPMEpPLt32HKQGYOgo=`. I downloaded the deployed
+package in-process and verified that neither `persistence-processor.mjs` nor
+`approval-lifecycle-adapter.mjs` contains a `scoutsDecision` reference or
+decision notification function.
+
+The queue readback showed four visible, zero in-flight and zero delayed
+`scoutsDecision` messages; `scoutsRequests`, `scoutsProcessing`, and
+`scoutsProcessingDLQ` each had zero visible, in-flight and delayed messages.
+All four queues retain 14-day message retention. The owner confirmed there is
+no external consumer. The existing decision messages were not received or
+deleted, and no queue configuration or event-source mapping was changed. SQS
+Free Tier usage remained at 90,811 actual requests and 681,082.5 forecast of
+the account-wide 1,000,000-request allowance at this readback; it is a forecast,
+not a final bill.
