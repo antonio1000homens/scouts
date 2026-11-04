@@ -1,5 +1,10 @@
 # Issue #174 — staged Scouts S3/SQS cost optimisation
 
+The partial post-change S3 request samples collected on 2026-11-04 are recorded
+in [the S3 attribution recheck note](issue-174-s3-attribution-2026-11-04.md).
+They are interim observations and do not replace the aligned seven-day
+acceptance window.
+
 The staged implementation is in [PR #175](https://github.com/antonio1000homens/scouts/pull/175),
 [PR #176](https://github.com/antonio1000homens/scouts/pull/176), and
 [PR #177](https://github.com/antonio1000homens/scouts/pull/177). This document
@@ -1370,56 +1375,3 @@ has not set a numeric maximum source-to-agenda staleness target. Record the
 roughly 30-hour nominal bound and keep that acceptance distinction explicit;
 do not describe six-hour cadence as six-hour calendar freshness. Feed errors
 can extend staleness and remain visible through per-feed failure diagnostics.
-
-## Partial post-cutover S3 attribution recheck (2026-11-04 14:05 UTC)
-
-The read-only collector verified account `553490163883` and queried the
-interval from 2026-11-03 19:42 UTC through 2026-11-04 14:03 UTC. All six
-CloudWatch metric series returned `Complete` in one page; neither the SDK
-operation-log search nor the per-refresh search was truncated. In the
-bucket-wide `CodexRequestCostAudit` metrics, 79 nonzero minute bins contained
-1,601 GET, 789 HEAD, 92 LIST, and 433 PUT requests. The `scouts` Lambda had 16
-invocations and zero errors over the same range.
-
-The SDK summaries included four `scheduled-refresh` and two `non-scheduled`
-invocations. Scheduled summaries recorded 176–178 GET, 38 HEAD, 1–3 PUT, and
-2 LIST SDK calls per run. Their per-refresh summaries recorded 98–100 reused
-HEX reads and 35–36 image HEAD calls with six cache hits. The two
-non-scheduled summaries recorded 167 and 170 GET calls. These are
-invocation-level SDK call counts, not billable S3 wire requests. Bucket metrics
-include browser/admin and other S3 callers, and cannot attribute each request
-to a caller. This partial window is not a full-day or seven-day comparison and
-does not establish a savings or bill reduction; continue the aligned
-seven-day collection before making that claim.
-
-## Six-hour post-cutover S3 attribution check (2026-11-04 15:32 UTC)
-
-After verifying Scouts account `553490163883`, the read-only collector queried
-2026-11-04 09:32–15:32 UTC. All six CloudWatch metric series returned
-`Complete` in one page; neither the SDK-operation search nor the per-refresh
-search was truncated. The bucket-wide metrics contained 726 GET, 376 HEAD, 24
-LIST, and 101 PUT requests across 34 nonzero minute bins. The `scouts` Lambda
-had 7 invocations and zero errors in the same window. The SDK and per-refresh
-searches each returned two aggregate log entries.
-
-This shorter interim window does not identify the callers responsible for the
-bucket-wide requests, and the request metrics may be delayed. It is not a
-full-day or seven-day comparison and does not establish savings or bill
-reduction. Keep the aligned seven-day comparison as the acceptance gate.
-
-## Recheck of six-hour S3 metrics (2026-11-04 16:02 UTC)
-
-The read-only collector again verified account `553490163883` and queried
-2026-11-04 10:02–16:02 UTC. All six metric series were `Complete`; the SDK
-operation and per-refresh log searches were untruncated. The totals were
-unchanged from the 15:32 check: 726 GET, 376 HEAD, 24 LIST, and 101 PUT across
-34 populated minute bins; the `scouts` Lambda had 7 invocations and zero
-errors. Within this query, populated S3 request bins ran from 10:59 through
-15:18 UTC. Since the previous query returned the same totals, no later
-populated S3 request datapoints were visible at 16:02. S3 metrics can be
-delayed, so this is not proof that no requests occurred after 15:18.
-
-The SDK log search returned two aggregate entries, one scheduled refresh and
-one non-scheduled invocation. Their call counts are not a complete attribution
-of the bucket-wide metrics. This recheck does not extend the seven-day window
-to maturity and does not support a savings or bill-reduction claim.
