@@ -1132,17 +1132,17 @@ async function downloadImageToS3(imageUrl, bucket, eventTitle) {
  * Return the ICS body from S3 if the object's LastModified is within freshnessMs.
  * Returns the body string when fresh, or null when stale/missing/error.
  */
-async function getFreshIcsFromS3(bucket, key, freshnessMs = 60 * 60 * 1000) {
+async function getFreshIcsFromS3(bucket, key, freshnessMs = 60 * 60 * 1000, nowMs = Date.now()) {
   try {
-    const headCmd = new HeadObjectCommand({ Bucket: bucket, Key: key });
-    const head = await sendS3Command(s3, headCmd, 'calendar-cache');
-    const lastModified = head?.LastModified ? new Date(head.LastModified).getTime() : null;
-    if (lastModified && Date.now() - lastModified <= freshnessMs) {
-      // Read the object content and return it
-      const getCmd = new GetObjectCommand({ Bucket: bucket, Key: key });
-      const resp = await sendS3Command(s3, getCmd, 'calendar-cache');
-      const body = await resp.Body.transformToString();
-      console.log(`Using cached ICS from s3://${bucket}/${key} (LastModified=${head.LastModified})`);
+    const getCmd = new GetObjectCommand({ Bucket: bucket, Key: key });
+    const response = await sendS3Command(s3, getCmd, 'calendar-cache');
+    // GetObject includes LastModified, so read the object once instead of
+    // issuing HEAD and then GET for every fresh calendar cache. Always consume
+    // the stream, including when the cached copy is stale.
+    const body = await response.Body.transformToString();
+    const lastModified = response?.LastModified ? new Date(response.LastModified).getTime() : null;
+    if (lastModified && nowMs - lastModified <= freshnessMs) {
+      console.log(`Using cached ICS from s3://${bucket}/${key} (LastModified=${response.LastModified})`);
       return body;
     }
     return null;
@@ -4478,4 +4478,5 @@ export {
   stableOsmEventIdentity,
   dedupeSectionedEvents,
   mergeEvents,
+  getFreshIcsFromS3,
 };

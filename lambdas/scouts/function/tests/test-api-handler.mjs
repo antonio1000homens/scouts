@@ -18,7 +18,8 @@ function command(name) {
 async function loadService() {
   const sent = [];
   const activities = [];
-  const S3Client = class { async send() { return {}; } };
+  let s3Send = async () => ({});
+  const S3Client = class { async send(request) { return s3Send(request); } };
   const SQSClient = class { async send(request) { sent.push(request.input); return { MessageId: 'message-fixture', MD5OfMessageBody: 'md5-fixture' }; } };
   const SFNClient = class { async send() { return { executions: [] }; } };
   const context = vm.createContext({ Buffer, URL, console: { ...console, log() {}, warn() {}, error() {} }, process, setTimeout, clearTimeout });
@@ -73,7 +74,13 @@ async function loadService() {
   };
   await module.link(linker);
   await module.evaluate();
-  return { handler: module.namespace.lambdaHandler, sent, activities };
+  return {
+    handler: module.namespace.lambdaHandler,
+    getFreshIcsFromS3: module.namespace.getFreshIcsFromS3,
+    setS3Send(send) { s3Send = send; },
+    sent,
+    activities,
+  };
 }
 
 function request(body, apiKey = 'fixture-key') {
@@ -83,6 +90,54 @@ function request(body, apiKey = 'fixture-key') {
     body: JSON.stringify(body),
   };
 }
+
+test('fresh calendar cache reads use one GetObject and retain the 24-hour freshness decision', async () => {
+  const service = await loadService();
+  const commands = [];
+  service.setS3Send(async (command) => {
+    commands.push(command);
+    return {
+      LastModified: new Date('2026-11-04T12:00:00Z'),
+      Body: { transformToString: async () => 'BEGIN:VCALENDAR\nEND:VCALENDAR' },
+    };
+  });
+
+  const body = await service.getFreshIcsFromS3(
+    'fixture-bucket',
+    'calendar/cubs-events.ics',
+    24 * 60 * 60 * 1000,
+    Date.parse('2026-11-04T13:00:00Z'),
+  );
+
+  assert.equal(body, 'BEGIN:VCALENDAR\nEND:VCALENDAR');
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0].name, 'GetObjectCommand');
+});
+
+test('stale calendar cache consumes one GetObject body then returns null for remote refresh', async () => {
+  const service = await loadService();
+  const commands = [];
+  let consumed = false;
+  service.setS3Send(async (command) => {
+    commands.push(command);
+    return {
+      LastModified: new Date('2026-11-03T12:00:00Z'),
+      Body: { transformToString: async () => { consumed = true; return 'stale-calendar'; } },
+    };
+  });
+
+  const body = await service.getFreshIcsFromS3(
+    'fixture-bucket',
+    'calendar/cubs-events.ics',
+    24 * 60 * 60 * 1000,
+    Date.parse('2026-11-04T13:00:00Z'),
+  );
+
+  assert.equal(body, null);
+  assert.equal(consumed, true);
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0].name, 'GetObjectCommand');
+});
 
 test('real Scouts API handler publishes full-enrich and HEX-canonical mutations', async () => {
   const service = await loadService();
