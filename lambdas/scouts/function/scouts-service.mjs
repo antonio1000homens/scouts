@@ -1238,11 +1238,14 @@ async function deleteOrphanedHexFiles(bucket, agendaData, hexReadCache = null, c
   
   // Build set of normalized titles from agenda for fast lookup
   const agendaTitles = new Set();
+  const agendaHexKeys = new Set();
   if (agendaData?.events) {
     for (const event of agendaData.events) {
       const title = event.summary || event.title;
       if (title) {
         agendaTitles.add(normalizeComparableText(title));
+        const hex = titleToHex(title);
+        if (hex) agendaHexKeys.add(`events/${hex}.json`);
       }
     }
   }
@@ -1263,6 +1266,16 @@ async function deleteOrphanedHexFiles(bucket, agendaData, hexReadCache = null, c
     for (const object of objects) {
       const key = object?.Key;
       if (!key || !key.endsWith('.json')) continue;
+
+      // A canonical key for a current agenda title cannot be orphaned. Its
+      // agenda read is already in the per-run cache when available, so avoid
+      // fetching it again just to confirm that it is still in the agenda.
+      if (agendaHexKeys.has(key)) {
+        if (cacheStats && typeof cacheStats === 'object') {
+          cacheStats.agendaReadsSkipped = Number(cacheStats.agendaReadsSkipped || 0) + 1;
+        }
+        continue;
+      }
 
       let hexData = null;
       try {
@@ -4230,7 +4243,8 @@ async function lambdaHandlerCore(event = {}) {
     let orphanedHexFiles = [];
     try {
       orphanedHexFiles = await deleteOrphanedHexFiles(bucket, agendaPayload, hexReadCache, cleanupHexCacheStats);
-      reusedHexReads += Number(cleanupHexCacheStats.reusedReads || 0);
+      reusedHexReads += Number(cleanupHexCacheStats.reusedReads || 0)
+        + Number(cleanupHexCacheStats.agendaReadsSkipped || 0);
       if (orphanedHexFiles.length > 0) {
         console.log(`[Cleanup] Removed ${orphanedHexFiles.length} orphaned HEX files`);
       }
@@ -4306,6 +4320,7 @@ async function lambdaHandlerCore(event = {}) {
       hexReadCacheHits: {
         enrichment: enrichmentHexCacheHits,
         orphanCleanup: Number(cleanupHexCacheStats.reusedReads || 0),
+        orphanAgendaReadsSkipped: Number(cleanupHexCacheStats.agendaReadsSkipped || 0),
         hexVerification: verificationHexCacheHits,
       },
       imageHead: imageHeadMemo.stats(),
