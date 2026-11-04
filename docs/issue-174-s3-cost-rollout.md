@@ -1144,3 +1144,32 @@ S3 charges before claiming savings.
 The read-only result was saved locally at
 `/tmp/scouts-174-attribution-7d-20261104.json`; it is not part of this
 repository change. The collector made no AWS writes.
+
+## First deployed per-category scheduled-refresh sample (2026-11-04 12:20 UTC)
+
+After STS verified account `553490163883`, the bounded collector read the
+12:20–12:23:50 UTC window. The `scouts` Lambda had `LastUpdateStatus=Successful`
+and `LastModified=2026-11-04 10:22:35 UTC`, preceding this scheduled run. All
+six metric queries completed in one page. Both hourly log searches completed
+without truncation and found one scheduled SDK summary plus its matching
+per-refresh summary.
+
+The invocation counted 178 SDK `GetObject` calls: 168 for canonical events,
+6 for calendar caches, 3 for `agenda.json`, and 1 for runtime state. It also
+counted 38 `HeadObject` calls: 36 for event images and 2 for calendar-cache
+freshness checks; one agenda `PutObject`; and 2 canonical-event `ListObjectsV2`
+calls. The per-refresh diagnostic recorded 99 reused HEX reads and 36 image
+HEAD requests with six in-invocation cache hits. With the live schedule at
+four runs per day, this sample identifies the callsite mix and the per-run
+reuse behavior at the deployed six-hour cadence.
+
+These are invocation-level SDK calls, not billable S3 wire counts; retries
+and unrelated bucket callers are not attributed by this summary. The
+3-minute-50-second bucket metric slice is too short and best-effort for a
+reliable reconciliation. The sample does not establish charge savings, but
+it confirms that canonical-event reads dominate scheduled SDK GETs and that
+image checks remain active for broken-image detection.
+
+The read-only result was saved locally at
+`/tmp/scouts-174-attribution-post-deploy-20261104.json` with owner-only
+permissions. No AWS writes were made.
