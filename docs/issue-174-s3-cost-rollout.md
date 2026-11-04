@@ -978,3 +978,15 @@ present in the stack, and a direct read-only `DescribeTable` confirmed that
 implementation is therefore not active in production, and there is no live
 backlog or drain-lag sample. No AWS resources were changed during this
 readback.
+
+## CloudWatch queue-alert coverage (2026-11-04 10:51 UTC)
+
+AWS STS verified account `553490163883`. The region has five metric alarms,
+all for Gemini or image-generation metrics; none covers `AWS/SQS` or an SQS
+queue. All five report `OK`, have no alarm actions configured, and there are
+no composite alarms. The existing Operations queue panel is a manual,
+read-only status surface, not an alert notification. Therefore the proposed
+alternative of disabling the idle DLQ event-source mapping is not ready: no
+CloudWatch alarm or action currently replaces its failure visibility. Keep
+the existing mapping and do not claim alert coverage from the current alarm
+inventory.
