@@ -1005,6 +1005,13 @@ while preserving title/HEX and strengthens cleanup to enumerate all canary
 event documents and generated-image prefixes. It is not yet merged or rerun;
 the live post-hide check remains unverified.
 
+An attempt to run the corrected workflow from PR #228
+([`41834015634`](https://github.com/antonio1000homens/scouts/actions/runs/41834015634))
+was rejected at OIDC role assumption because the production role does not
+authorize feature-branch refs. It failed before AWS account verification and
+made no production calls. Keep the trust policy intact; the corrected canary
+must run from an authorized ref after the source change is merged.
+
 ## S3 request attribution recheck (2026-11-04 09:24 UTC)
 
 AWS STS verified account `553490163883` before running the read-only collector.
