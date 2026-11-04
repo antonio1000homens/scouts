@@ -922,3 +922,26 @@ manual consumer. No message body was read, and no message was received or
 changed. The intended notification consumer and alerting remain unverified;
 preserve the queue and its messages
 until that contract is confirmed.
+
+## S3 request attribution recheck (2026-11-04 09:24 UTC)
+
+AWS STS verified account `553490163883` before running the read-only collector.
+The complete CloudWatch query covered 2026-11-03 19:42 through 2026-11-04
+09:20 UTC, returned all six metric statuses in one page, and searched the
+Lambda logs without truncation. The bucket-wide request metrics contained 922
+GET, 408 HEAD, 65 LIST and 331 PUT requests across 50 nonzero minute bins.
+The final nonzero S3 bin was 09:07, about 13 minutes behind the query end.
+Several bursts do not line up with scheduled refreshes, including a PUT/LIST
+burst around 09:02–09:03 during the website deployment; bucket metrics remain
+best-effort and cannot identify callers.
+
+Four SDK summaries were recovered: three scheduled refreshes at 19:44, 00:20
+and 06:20, with respectively 177/38/2/1, 176/38/2/3, and 178/38/2/1
+Get/Head/List/Put SDK calls, all classified to the data bucket. A non-scheduled
+invocation at 22:44 recorded 167/35/2/2 calls. Per-refresh summaries recorded
+98–99 reused HEX reads and 35–36 image HEAD requests with six cache hits. SDK
+calls are not billable wire counts because retries may add requests; the
+non-scheduled canary and website deployment also contaminate this short
+window. It is not a clean before/after comparison and does not establish
+savings. Continue the aligned seven-day collection and compare against posted
+S3 charges before making a cost claim.
