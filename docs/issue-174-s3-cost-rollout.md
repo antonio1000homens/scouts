@@ -1587,6 +1587,21 @@ remain enabled, and `scoutsDecision` still has no mapping. The notification
 queue had four visible messages and zero in flight or delayed, also with
 14-day retention. No messages, mappings, or queue settings were changed.
 
+## Current refresh and capacity rollout state (2026-11-04 18:37 UTC)
+
+AWS STS verified account `553490163883`. The `scouts-lambda` stack is
+`UPDATE_COMPLETE`; its last update was 18:33:37 UTC. The schedule parameter and
+enabled EventBridge rule both remain `rate(6 hours)`. The deployed parameters
+remain `DeferredRefreshOutboxEnabled=false` and
+`LegacyRuntimeSnapshotsEnabled=false`.
+
+The account currently has only `scouts-enrichment-state`, `scouts-gemini-usage`,
+and `scouts-request-activity` DynamoDB tables. All three are `ACTIVE` and
+`PAY_PER_REQUEST`; the Activity table's `activity-feed` GSI is also on-demand.
+No deferred-outbox table exists. This readback confirms the outbox has not been
+enabled or capacity-converted; it does not replace the isolated throughput
+benchmark or a later staged live backlog/drain acceptance.
+
 ## Partial post-cutover S3 attribution readback (2026-11-04 18:33 UTC)
 
 The aligned observation began at the schedule change, 2026-11-03 19:42 UTC.
