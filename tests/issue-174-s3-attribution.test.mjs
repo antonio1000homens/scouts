@@ -141,6 +141,16 @@ test('audit returns bounded aggregate logs without exposing Lambda request IDs',
   assert.equal(result.account, '553490163883');
   assert.deepEqual(result.timeline[0].s3, { GetRequests: 7 });
   assert.deepEqual(result.timeline[0].scoutsLambda, { Invocations: 1 });
+  assert.deepEqual(result.timelineSummary, {
+    s3RequestTotals: { GetRequests: 7, HeadRequests: 0, ListRequests: 0, PutRequests: 0, TotalRequests: 7 },
+    scoutsLambdaTotals: { Invocations: 1, Errors: 0 },
+    s3MetricDataMinuteBins: 1,
+    s3RequestMinuteBins: 1,
+    s3RequestMinuteBinsWithLambdaInvocations: 1,
+    s3RequestMinuteBinsWithoutLambdaInvocations: 0,
+    latestS3RequestMinute: new Date(START).toISOString(),
+    latestScoutsLambdaInvocationMinute: new Date(START).toISOString(),
+  });
   assert.equal(result.sdkOperationLogs.length, 2);
   assert.ok(result.sdkOperationLogs.every((event) => /SDK calls by operation/.test(event.summary)));
   assert.doesNotMatch(JSON.stringify(result), /private-request-id/);
