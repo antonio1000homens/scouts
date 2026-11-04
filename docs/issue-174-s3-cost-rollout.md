@@ -1370,37 +1370,3 @@ has not set a numeric maximum source-to-agenda staleness target. Record the
 roughly 30-hour nominal bound and keep that acceptance distinction explicit;
 do not describe six-hour cadence as six-hour calendar freshness. Feed errors
 can extend staleness and remain visible through per-feed failure diagnostics.
-
-## Legacy snapshot retirement readback (2026-11-04 14:30 UTC)
-
-AWS STS verified account `553490163883` in `eu-west-2`. A fresh
-`DescribeStacks` read reports `scouts-lambda` as `UPDATE_COMPLETE`, last
-updated at 13:52:36 UTC, with `LegacyRuntimeSnapshotsEnabled=false`,
-`DeferredRefreshOutboxEnabled=false`, and the six-hour scheduled refresh still
-configured. `GetFunctionConfiguration` reports the `scouts` Lambda active,
-`LastUpdateStatus=Successful`, last modified at 13:52:41 UTC, and
-`SCOUTS_LEGACY_RUNTIME_SNAPSHOTS=false`.
-
-The deployed handler's snapshot command checks this flag before looking up or
-reading a legacy S3 object and returns HTTP 410 when disabled. The authenticated
-HTTP response was not exercised because that route requires the admin API key;
-the stack and Lambda configuration readbacks prove the retirement gate is
-deployed, not the end-to-end response. Historical snapshot objects remain
-untouched, and the deferred-refresh outbox remains disabled.
-
-## S3 attribution window recheck (2026-11-04 14:35 UTC)
-
-After verifying the Scouts account, the read-only attribution collector
-re-queried the aligned window from 2026-11-03 19:42 UTC through 2026-11-04
-14:30 UTC. All six CloudWatch metric series completed in one page. The visible
-bucket-wide totals remain 1,601 GET, 789 HEAD, 92 LIST, and 433 PUT requests;
-the Scouts Lambda series remains 16 invocations and zero errors. These totals
-match the earlier read ending at 14:03 UTC, so the extra 27 minutes added no
-visible metric counts. Since S3 request metrics may be delayed, this does not
-establish that no requests occurred after the earlier read.
-
-The collector found six SDK-operation summaries and six per-refresh summaries;
-both searches completed without truncation. This remains partial attribution:
-it does not assign every bucket request to a caller, establish a mature
-seven-day post-change trend, or prove bill-level savings. No AWS writes were
-made.
