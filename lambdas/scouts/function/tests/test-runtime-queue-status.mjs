@@ -14,6 +14,7 @@ const queueNames = [
   'scoutsProcessing',
   'scoutsRequestsDLQ',
   'scoutsProcessingDLQ',
+  'scoutsDecision',
 ];
 
 function mockSqs(send) {
@@ -55,18 +56,22 @@ test('queue status reads counts from SQS and age from CloudWatch', async () => {
   try {
     const result = await getRuntimeQueueStatus();
     assert.ok(metricCommand instanceof GetMetricDataCommand);
-    assert.equal(metricCommand.input.MetricDataQueries.length, 4);
+    assert.equal(metricCommand.input.MetricDataQueries.length, 5);
     assert.ok(metricCommand.input.MetricDataQueries.every(({ MetricStat }) => (
       MetricStat.Metric.Namespace === 'AWS/SQS'
       && MetricStat.Metric.MetricName === 'ApproximateAgeOfOldestMessage'
       && MetricStat.Metric.Dimensions.some(({ Name, Value }) => Name === 'QueueName' && queueNames.includes(Value))
     )));
-    assert.equal(sqs.commands.length, 4);
+    assert.equal(sqs.commands.length, 5);
+    assert.ok(sqs.commands.every((command) => command instanceof GetQueueAttributesCommand));
     assert.equal(result.queues[0].visible, 2);
     assert.equal(result.queues[0].inFlight, 1);
     assert.equal(result.queues[0].oldestMessageAgeSeconds, 3);
     assert.equal(result.queues[0].oldestMessageAgeAt, '2026-11-03T19:55:00.000Z');
     assert.equal(result.queues[0].oldestMessageAgeStatus, 'available');
+    assert.equal(result.queues[4].name, 'scoutsDecision');
+    assert.equal(result.queues[4].role, 'notification-only');
+    assert.equal(sqs.commands[4].input.QueueUrl, 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsDecision');
   } finally {
     resetRuntimeDlqClientsForTests();
   }

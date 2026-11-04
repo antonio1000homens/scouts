@@ -11,6 +11,7 @@ const REQUESTS_QUEUE_URL = process.env.SCOUTS_REQUESTS_QUEUE_URL || 'https://sqs
 const PROCESSING_QUEUE_URL = process.env.SCOUTS_PROCESSING_QUEUE_URL || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing';
 const REQUESTS_DLQ_URL = process.env.SCOUTS_REQUESTS_DLQ_URL || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsRequestsDLQ';
 const PROCESSING_DLQ_URL = process.env.SCOUTS_PROCESSING_DLQ_URL || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessingDLQ';
+const DECISION_QUEUE_URL = process.env.SCOUTS_DECISION_QUEUE_URL || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsDecision';
 const MAX_SAMPLE_MESSAGES = 10;
 const MAX_BODY_PREVIEW_CHARS = 12_000;
 const REDRIVE_RATE_PER_SECOND = 1;
@@ -38,6 +39,7 @@ const QUEUE_STATUS_TARGETS = Object.freeze([
   { name: 'scoutsProcessing', queueUrl: PROCESSING_QUEUE_URL },
   { name: 'scoutsRequestsDLQ', queueUrl: REQUESTS_DLQ_URL },
   { name: 'scoutsProcessingDLQ', queueUrl: PROCESSING_DLQ_URL },
+  { name: 'scoutsDecision', queueUrl: DECISION_QUEUE_URL, role: 'notification-only' },
 ]);
 
 function text(value) {
@@ -231,7 +233,7 @@ async function queueAttributes(queueUrl) {
 export async function getRuntimeQueueStatus() {
   const [ageSnapshot, queues] = await Promise.all([
     queueAgeMetrics(QUEUE_STATUS_TARGETS).catch((error) => ({ byQueue: new Map(), error })),
-    Promise.all(QUEUE_STATUS_TARGETS.map(async ({ name, queueUrl }) => {
+    Promise.all(QUEUE_STATUS_TARGETS.map(async ({ name, queueUrl, role }) => {
       try {
         const attributes = await queueAttributes(queueUrl);
         return {
@@ -239,6 +241,7 @@ export async function getRuntimeQueueStatus() {
           visible: attributes.visible,
           inFlight: attributes.inFlight,
           delayed: attributes.delayed,
+          ...(role ? { role } : {}),
           ok: true,
         };
       } catch (error) {
@@ -247,6 +250,7 @@ export async function getRuntimeQueueStatus() {
           visible: null,
           inFlight: null,
           delayed: null,
+          ...(role ? { role } : {}),
           ok: false,
           error: error?.name || 'QueueStatusUnavailable',
         };

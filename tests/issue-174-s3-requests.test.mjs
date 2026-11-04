@@ -162,14 +162,22 @@ test('calendar refresh never reads or republishes legacy runtime snapshots', () 
   assert.match(adminOperations, /Live queue depth/);
   assert.match(adminOperations, /Oldest message age/);
   assert.match(adminOperations, /Age metric sample/);
+  assert.match(adminOperations, /Notification-only; no automatic Scouts consumer/);
   const queueStatus = source('../lambdas/scouts/function/runtime-dlq.mjs');
   assert.match(queueStatus, /export async function getRuntimeQueueStatus/);
+  assert.match(queueStatus, /name: 'scoutsDecision', queueUrl: DECISION_QUEUE_URL, role: 'notification-only'/);
   assert.match(queueStatus, /sqs:GetQueueAttributes/);
   assert.match(queueStatus, /cloudwatch:GetMetricData/);
   assert.match(queueStatus, /Namespace: 'AWS\/SQS'/);
   assert.match(queueStatus, /MetricName: 'ApproximateAgeOfOldestMessage'/);
   assert.doesNotMatch(queueStatus, /AttributeNames:[^\]]*ApproximateAgeOfOldestMessage/);
   assert.doesNotMatch(queueStatus.slice(queueStatus.indexOf('export async function getRuntimeQueueStatus'), queueStatus.indexOf('export async function inspectRuntimeDlq')), /ReceiveMessageCommand/);
+  const stack = source('../lambdas/cloudformation/templates/scouts.yaml');
+  assert.match(stack, /SCOUTS_DECISION_QUEUE_URL: !Sub https:\/\/sqs\.\$\{AWS::Region\}\.amazonaws\.com\/\$\{AWS::AccountId\}\/scoutsDecision/);
+  const queueReadPermissions = stack.match(/- Effect: Allow\n\s+Action:\n\s+- sqs:GetQueueAttributes\n\s+Resource:\n([\s\S]*?)\n\s+# CloudWatch metric reads/);
+  assert.ok(queueReadPermissions, 'queue status policy should remain a separate read-only IAM statement');
+  assert.match(queueReadPermissions[1], /scoutsDecision/);
+  assert.doesNotMatch(queueReadPermissions[1], /ReceiveMessage|DeleteMessage/);
   for (const path of [
     '../lambdas/scouts/function/agenda-hex-repair.mjs',
     '../lambdas/scouts/function/runtime-schedule.mjs',

@@ -192,6 +192,9 @@
             count.textContent = queue.ok === false ? 'unavailable' : `${queue.visible ?? 'n/a'} visible`;
             heading.append(name, count);
             panel.appendChild(heading);
+            if (queue.role === 'notification-only') {
+                renderDefinition(panel, 'Role', 'Notification-only; no automatic Scouts consumer');
+            }
             if (queue.error) renderDefinition(panel, 'Read error', queue.error);
             renderDefinition(panel, 'In flight / delayed', `${queue.inFlight ?? 'n/a'} / ${queue.delayed ?? 'n/a'}`);
             renderDefinition(panel, 'Oldest message age', queue.oldestMessageAgeSeconds === null || queue.oldestMessageAgeSeconds === undefined
