@@ -43,6 +43,17 @@ The SDK log search returned one scheduled-refresh and one non-scheduled
 aggregate entry. Those invocation summaries do not attribute every
 bucket-wide request.
 
+## One-hour sample (16:32 UTC)
+
+The read-only collector verified account `553490163883` and queried
+2026-11-04 15:32–16:32 UTC. All six CloudWatch metric series returned
+`Complete`; the SDK-operation and per-refresh searches were untruncated and
+returned no aggregate entries. The only observed S3 request metric was 24 GET
+requests across two populated minute bins, at 16:20 and 16:21 UTC. No later
+request bins were visible at collection time; the latest observed GET bin was
+11 minutes before the query ended. This single sample does not establish a
+general delivery-latency bound or identify the caller.
+
 ## Limits
 
 Bucket metrics include browser/admin and other S3 callers. The observations do
