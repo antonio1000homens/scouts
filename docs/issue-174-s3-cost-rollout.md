@@ -1386,9 +1386,11 @@ refresh rule remained enabled at `rate(6 hours)`. No historical snapshot S3
 objects were deleted.
 
 The implementation returns HTTP 410 for `subject=snapshot` before reaching
-the snapshot S3 read when disabled. The authenticated live HTTP response was
-not independently exercised because no authenticated admin session was
-available; the stack parameter and Lambda environment are the live readback.
+the snapshot S3 read when disabled. The authenticated live HTTP response is
+still unverified: current-browser requests to `/admin/` and
+`/admin/index.html` returned HTTP 403, so no authenticated admin API request
+could be made. The stack parameter and Lambda environment are the live
+readback.
 Future deployments now default the flag to false in the workflow, deploy
 script, template, and handler fallback so an unrelated deploy cannot silently
 re-enable the API. Set `LEGACY_RUNTIME_SNAPSHOTS_ENABLED=true` explicitly for
