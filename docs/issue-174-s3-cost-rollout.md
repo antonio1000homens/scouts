@@ -939,3 +939,15 @@ that the two notifications remain unacknowledged in SQS. It still does not
 identify an expected external or manual consumer. Keep the messages and
 retention intact until an owner confirms the consumer contract and alerting;
 do not claim prompt notification delivery from the successful producer send.
+
+## SQS Cost Explorer readback (2026-11-04 10:16 UTC)
+
+AWS STS again verified account `553490163883`. Cost Explorer returned
+estimated SQS `UnblendedCost` of $0 for Nov 1, Nov 2 and Nov 3; usage was
+27,542, 27,540 and 25,322 `EUW2-Requests-Tier1` requests respectively, with
+three requests in `EUC1-Requests-Tier1` and two `Requests-RBP` on Nov 3. Nov 4
+has no posted usage data yet. These service-level daily estimates show no SQS
+charge in the returned period, but do not establish full-month free-tier
+headroom or the delivery contract for the two pending notifications. Keep the
+existing processing mappings until a tested replacement preserves failure
+activity and the free-tier projection or actual charges justify a change.
