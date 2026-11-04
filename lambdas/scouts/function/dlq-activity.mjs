@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 function text(value) {
   return value === undefined || value === null ? '' : String(value).trim();
 }
@@ -19,34 +21,45 @@ function subjectHex(subject) {
 }
 
 export function activityInputFromDlqRecord(record = {}) {
-  const payload = parseJson(record.body || record.Body);
-  if (!payload || typeof payload !== 'object') return null;
+  const messageId = text(record.messageId || record.messageID);
+  if (!messageId) return null;
 
-  const subject = payload.subject;
+  const payload = parseJson(record.body || record.Body);
+  const validPayload = Boolean(payload && typeof payload === 'object' && !Array.isArray(payload));
+
+  const subject = validPayload ? payload.subject : null;
   const requestId = text(
-    payload.requestId || payload.metadata?.requestId || subject?.requestId || payload.message?.requestId,
+    payload?.requestId || payload?.metadata?.requestId || subject?.requestId || payload?.message?.requestId,
   );
-  if (!requestId) return null;
+  const trackableRequestId = requestId || `dlq-malformed#${createHash('sha256').update(messageId).digest('hex')}`;
 
   const hex = text(
-    payload.hex || payload.hexId || payload.requestHex || payload.metadata?.hex || subjectHex(subject),
+    payload?.hex || payload?.hexId || payload?.requestHex || payload?.metadata?.hex || subjectHex(subject),
   ).toLowerCase();
   const title = text(
-    payload.title || payload.summary || subject?.title || subject?.summary || subject?.name,
+    payload?.title || payload?.summary || subject?.title || subject?.summary || subject?.name,
   );
-  const action = text(payload.action || payload.operation || payload.message?.action);
+  const action = text(payload?.action || payload?.operation || payload?.message?.action);
+  const failureType = requestId
+    ? 'WORKER_DELIVERY_EXHAUSTED'
+    : (validPayload ? 'WORKER_DELIVERY_MISSING_REQUEST_ID' : 'WORKER_DELIVERY_INVALID_PAYLOAD');
+  const failureMessage = requestId
+    ? 'Delivery to the Scouts worker exhausted its retry limit. Inspect Operations before redriving this request.'
+    : (validPayload
+      ? 'Delivery to the Scouts worker exhausted its retry limit, but the message had no request ID. Inspect Operations using the DLQ message ID.'
+      : 'Delivery to the Scouts worker exhausted its retry limit, but the message payload was invalid. Inspect Operations using the DLQ message ID.');
 
   return {
-    requestId,
+    requestId: trackableRequestId,
     hex: /^[0-9a-f]+$/i.test(hex) ? hex : null,
     title: title || null,
-    action: action || null,
+    action: requestId ? (action || null) : null,
     state: 'needs_attention',
     stage: 'scoutsProcessingDLQ',
     publication: 'failed',
     failure: {
-      type: 'WORKER_DELIVERY_EXHAUSTED',
-      message: 'Delivery to the Scouts worker exhausted its retry limit. Inspect Operations before redriving this request.',
+      type: failureType,
+      message: failureMessage,
     },
   };
 }
