@@ -1370,3 +1370,24 @@ has not set a numeric maximum source-to-agenda staleness target. Record the
 roughly 30-hour nominal bound and keep that acceptance distinction explicit;
 do not describe six-hour cadence as six-hour calendar freshness. Feed errors
 can extend staleness and remain visible through per-feed failure diagnostics.
+
+## Partial post-cutover S3 attribution recheck (2026-11-04 14:05 UTC)
+
+The read-only collector verified account `553490163883` and queried the
+interval from 2026-11-03 19:42 UTC through 2026-11-04 14:03 UTC. All six
+CloudWatch metric series returned `Complete` in one page; neither the SDK
+operation-log search nor the per-refresh search was truncated. In the
+bucket-wide `CodexRequestCostAudit` metrics, 79 nonzero minute bins contained
+1,601 GET, 789 HEAD, 92 LIST, and 433 PUT requests. The `scouts` Lambda had 16
+invocations and zero errors over the same range.
+
+The SDK summaries included four `scheduled-refresh` and two `non-scheduled`
+invocations. Scheduled summaries recorded 176–178 GET, 38 HEAD, 1–3 PUT, and
+2 LIST SDK calls per run. Their per-refresh summaries recorded 98–100 reused
+HEX reads and 35–36 image HEAD calls with six cache hits. The two
+non-scheduled summaries recorded 167 and 170 GET calls. These are
+invocation-level SDK call counts, not billable S3 wire requests. Bucket metrics
+include browser/admin and other S3 callers, and cannot attribute each request
+to a caller. This partial window is not a full-day or seven-day comparison and
+does not establish a savings or bill reduction; continue the aligned
+seven-day collection before making that claim.
