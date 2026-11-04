@@ -1025,3 +1025,74 @@ The bucket-wide interval grew only slightly from the prior 09:24 readback
 with bucket metrics or identify browser/CDN callers. This short interval
 remains insufficient for a seven-day post-change trend or a posted-charge
 comparison; it does not prove bill-level savings.
+
+## Decision-queue backlog recheck (2026-11-04 10:11 UTC)
+
+AWS STS verified account `553490163883` before this read-only check. The
+`scoutsDecision` queue still has two visible messages, zero in-flight and
+delayed messages, and a 14-day retention period. The latest hourly
+`ApproximateAgeOfOldestMessage` maximum was 41,180 seconds at 09:11 UTC. The
+age has continued increasing since the first nonzero hourly datapoint, while
+the regional Lambda event-source mapping query for this queue returned no
+mappings. No message body was read, and no receive, delete, or other queue
+mutation was performed.
+
+This confirms the queue is not automatically consumed by a Lambda mapping and
+that the two notifications remain unacknowledged in SQS. It still does not
+identify an expected external or manual consumer. Keep the messages and
+retention intact until an owner confirms the consumer contract and alerting;
+do not claim prompt notification delivery from the successful producer send.
+
+## SQS Cost Explorer readback (2026-11-04 10:16 UTC)
+
+AWS STS again verified account `553490163883`. Cost Explorer returned
+estimated SQS `UnblendedCost` of $0 for Nov 1, Nov 2 and Nov 3; usage was
+27,542, 27,540 and 25,322 `EUW2-Requests-Tier1` requests respectively, with
+three requests in `EUC1-Requests-Tier1` and two `Requests-RBP` on Nov 3. Nov 4
+has no posted usage data yet. These service-level daily estimates show no SQS
+charge in the returned period, but do not establish full-month free-tier
+headroom or the delivery contract for the two pending notifications. Keep the
+existing processing mappings until a tested replacement preserves failure
+activity and the free-tier projection or actual charges justify a change.
+
+## Deferred-refresh production configuration (2026-11-04 10:22 UTC)
+
+AWS STS verified account `553490163883`. The `scouts-lambda` stack was
+`UPDATE_COMPLETE`; its scheduled refresh rule was enabled at `rate(6 hours)`.
+The `scouts` Lambda reported `LastUpdateStatus=Successful`, with
+`SCOUTS_DEFERRED_REFRESH_ENABLED=false`, an empty
+`SCOUTS_DEFERRED_REFRESH_TABLE_NAME`, and
+`SCOUTS_SCHEDULED_REFRESH_MAX_EVENTS=0`. CloudFormation also reported
+`DeferredRefreshOutboxEnabled=false`; no deferred-outbox table resource was
+present in the stack, and a direct read-only `DescribeTable` confirmed that
+`scouts-deferred-refresh` does not exist in `eu-west-2`. The outbox
+implementation is therefore not active in production, and there is no live
+backlog or drain-lag sample. No AWS resources were changed during this
+readback.
+
+## Decision-queue age sample (2026-11-04 10:34 UTC)
+
+AWS STS verified account `553490163883`. A read-only attribute request still
+returned two visible `scoutsDecision` messages, zero in-flight and delayed
+messages, and 14-day retention. The latest five-minute
+`ApproximateAgeOfOldestMessage` maximum was 42,553 seconds at 10:30 UTC. The
+intervening five-minute datapoints since 09:55 ranged from 40,514 to 42,553
+seconds, so the metric did not rise monotonically across the full interval.
+This confirms an old outstanding notification, but the approximation alone
+does not identify which message is oldest or whether the consumer contract
+changed. No message body was read and no queue operation changed state.
+
+## CloudWatch queue-alert coverage (2026-11-04 10:51 UTC)
+
+AWS STS verified account `553490163883`. The region has five metric alarms,
+all for Gemini or image-generation metrics; none covers `AWS/SQS` or an SQS
+queue. All five report `OK`, have no alarm actions configured, and there are
+no composite alarms. The existing Operations queue panel is a manual,
+read-only status surface, not an alert notification. The DLQ mapping invokes
+`scouts-dlq-activity`, which records exhausted worker deliveries as durable
+`needs_attention` activity rows; it is failure-state ingestion, not an idle
+polling loop. No current CloudWatch alarm or action replaces either that
+activity write or a human notification. Disabling the mapping would leave
+those failures out of the Activity ledger, so keep it enabled until a tested
+replacement preserves the activity record, queue-depth visibility and manual
+redrive path.
