@@ -224,6 +224,7 @@ test('real persistence handler merges canonical sparse field saves without clear
   assert.equal(persisted.metadata.image.theme, 'calendar');
   assert.equal(persisted.metadata.image.url, '/website/eventImages/holiday.webp');
   assert.deepEqual(eventObjectCalls, ['GetObjectCommand', 'PutObjectCommand']);
+  assert.deepEqual(sentMessages, []);
 });
 
 test('persistence rejects a mismatched S3 checksum before publishing the event', async () => {
@@ -384,13 +385,13 @@ test('real persistence handler treats legacy occurrence selectors as HEX-wide vi
   assert.equal(store[`events/${HEX}.json`].metadata.status.isHidden, false);
   assert.equal(store['agenda.json'].events.every((entry) => entry.metadata.status.isHidden === false), true);
   assert.equal(activity.at(-1).state, 'completed');
-  assert.equal(sentMessages.length, 3);
+  assert.deepEqual(sentMessages, []);
 
   await invoke('request-hide-wide', undefined, true);
   assert.equal(store[`events/${HEX}.json`].metadata.status.isHidden, true);
   assert.equal(store['agenda.json'].events.every((entry) => entry.metadata.status.isHidden === true), true);
   assert.equal(activity.at(-1).state, 'completed');
-  assert.equal(sentMessages.length, 4);
+  assert.deepEqual(sentMessages, []);
 
   await invoke('request-stale-false', undefined, false, null);
   assert.equal(store[`events/${HEX}.json`].metadata.status.isHidden, true);

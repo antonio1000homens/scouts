@@ -6,7 +6,7 @@ Lambda function that processes messages from the scoutsProcessing SQS queue and 
 
 - `sqs2scouts` must be triggered by `scoutsProcessing`.
 - `scouts2sqs` must be triggered by `scoutsRequests`.
-- `scoutsDecision` is notification-only and must not be configured as an event source for `scouts`.
+- `scoutsDecision` is retained for read-only Operations visibility. No consumer or acknowledgement contract exists, so `sqs2scouts` does not publish to it.
 - Do not add a `scoutsDecision -> scouts` Lambda event source mapping. That feedback path can re-enter the pipeline and create loops.
 
 ## Structure
