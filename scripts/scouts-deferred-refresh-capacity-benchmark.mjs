@@ -276,6 +276,24 @@ async function queryState(aws, report, tableName, state, at) {
   return output.Items || [];
 }
 
+async function countState(aws, report, tableName, state, at) {
+  const output = await aws([
+    'dynamodb', 'query',
+    '--table-name', tableName,
+    '--index-name', 'state-nextAttemptAt-index',
+    '--key-condition-expression', '#state = :state AND nextAttemptAt <= :due',
+    '--expression-attribute-names', JSON.stringify({ '#state': 'state' }),
+    '--expression-attribute-values', JSON.stringify({
+      ':state': { S: state },
+      ':due': { S: `${at.toISOString()}#~` },
+    }),
+    '--select', 'COUNT',
+    '--return-consumed-capacity', 'INDEXES',
+  ]);
+  addCapacity(report, `count-${state}`, output);
+  return Number(output.Count || 0);
+}
+
 async function recoverExpiredLease(aws, report, tableName, indexedItem, at) {
   const workKey = indexedItem.workKey?.S;
   if (!workKey) return false;
@@ -460,8 +478,8 @@ async function runBenchmark(aws, report, tableName, startedAt) {
     }
   }
   const finalAt = new Date(startedAt.getTime() + (maxRuns + 1) * DISPATCH_INTERVAL_MS);
-  report.dispatch.remainingReady = (await queryState(aws, report, tableName, 'ready', finalAt)).length;
-  report.dispatch.remainingLeased = (await queryState(aws, report, tableName, 'leased', finalAt)).length;
+  report.dispatch.remainingReady = await countState(aws, report, tableName, 'ready', finalAt);
+  report.dispatch.remainingLeased = await countState(aws, report, tableName, 'leased', finalAt);
 }
 
 async function main() {

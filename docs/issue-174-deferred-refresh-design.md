@@ -240,6 +240,9 @@ the capacity envelope for its synthetic workload, not production queue age or
 representativeness of the real work mix. Do not treat it as the staged live
 outbox acceptance gate.
 
+Final ready/leased backlog fields use unbounded paginated `COUNT` queries so
+they do not inherit the dispatcher's 10-item batch limit.
+
 The read-only dry run completed on 2026-11-04 after STS verified account
 `553490163883`. Organizations reported this as the only active account in its
 organization, and the regional DynamoDB inventory found no provisioned tables
