@@ -619,7 +619,11 @@ async function handleScheduledInvocation() {
   try {
     const schedule = await getScheduledRefreshSettings();
     if (!schedule.enabled) {
-      console.log('[ScheduledRefresh] EventBridge invocation skipped because scheduled refresh is disabled.');
+      console.log('[ScheduledRefresh] EventBridge invocation skipped because scheduled refresh is disabled.', {
+        enabled: false,
+        scheduleExpression: schedule.scheduleExpression,
+        maxQueuePublishesPerRun: schedule.maxQueuePublishesPerRun,
+      });
       return {
         status: 'disabled',
         scheduledRefresh: schedule,
@@ -642,6 +646,7 @@ async function handleScheduledInvocation() {
     };
 
     console.log('[ScheduledRefresh] Running EventBridge calendar refresh.', {
+      enabled: true,
       scheduleExpression: schedule.scheduleExpression,
       maxQueuePublishesPerRun: schedule.maxQueuePublishesPerRun,
     });

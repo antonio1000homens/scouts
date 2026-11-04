@@ -2228,6 +2228,8 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
     ? Math.max(0, Math.trunc(options.maxScoutRequests))
     : Infinity;
   let newScoutRequestCount = 0;
+  let sqsMessagesPublished = 0;
+  let sqsPublishFailures = 0;
 
   const firstFutureEventIndex = events.findIndex(e => e.start?.epochMillis > now);
   const startIndexForImages = firstFutureEventIndex === -1
@@ -2571,12 +2573,14 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
           },
           'Enrichment:Retry',
         );
+        sqsMessagesPublished += 1;
         const retryProcessingRealm = deriveProcessingRealmFromEvent(item.hexFileData);
         if (retryProcessingRealm && item.hex) {
           addProcessingRealmToIndex(liveQueuedProcessingByHex, item.hex, retryProcessingRealm);
         }
         retryCount++;
       } catch (queueError) {
+        sqsPublishFailures += 1;
         console.error(`[SQS] Failed to send retry message for ${item.title}:`, queueError.message);
       }
     }
@@ -2596,11 +2600,13 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
             },
             'Enrichment:New',
           );
+          sqsMessagesPublished += 1;
           if (notificationData.processingRealm && hexValue) {
             addProcessingRealmToIndex(liveQueuedProcessingByHex, hexValue, notificationData.processingRealm);
           }
           // Create-only mode: do not rewrite existing HEX files for notification timestamps.
         } catch (queueError) {
+          sqsPublishFailures += 1;
           console.error(`[SQS] Failed to send new message for ${notificationData.hexData.title}:`, queueError.message);
         }
     }
@@ -2612,6 +2618,8 @@ async function enrichEventsWithAI(events, context, collectionName, options = {})
     events: enrichedEvents,
     liveQueuedProcessingByHex,
     deferredCount,
+    sqsMessagesPublished,
+    sqsPublishFailures,
   };
 }
 
@@ -3992,6 +4000,7 @@ async function lambdaHandlerCore(event = {}) {
     && commandSubjectString === 'agenda'
     && typeof structuredCommand.action === 'number'
   );
+  const isInternalScheduledRefresh = event?._scheduledRefresh === true;
 
   if (resetRequested) {
     try {
@@ -4106,12 +4115,16 @@ async function lambdaHandlerCore(event = {}) {
     let aiContext = { processedEvent: null };
     let enrichedAgenda;
     let liveQueuedProcessingByHex = new Map();
+    let enrichmentQueueDiagnostics = {
+      deferredCount: 0,
+      sqsMessagesPublished: 0,
+      sqsPublishFailures: 0,
+    };
 
     if (resetRequested) {
       enrichedAgenda = mergedAgenda.map(stripEventEnhancements);
       console.log('[Images] Reset requested: cleared tagline and image fields');
     } else {
-      const isInternalScheduledRefresh = event?._scheduledRefresh === true;
       const enrichmentOptions = maxScoutRequests !== null
         ? {
             maxScoutRequests,
@@ -4119,6 +4132,11 @@ async function lambdaHandlerCore(event = {}) {
           }
         : undefined;
       const enrichmentResult = await enrichEventsWithAI(mergedAgenda, aiContext, 'agenda', enrichmentOptions);
+      enrichmentQueueDiagnostics = {
+        deferredCount: Number(enrichmentResult?.deferredCount || 0),
+        sqsMessagesPublished: Number(enrichmentResult?.sqsMessagesPublished || 0),
+        sqsPublishFailures: Number(enrichmentResult?.sqsPublishFailures || 0),
+      };
       enrichedAgenda = Array.isArray(enrichmentResult?.events) ? enrichmentResult.events : [];
       liveQueuedProcessingByHex = enrichmentResult?.liveQueuedProcessingByHex instanceof Map
         ? enrichmentResult.liveQueuedProcessingByHex
@@ -4363,6 +4381,28 @@ async function lambdaHandlerCore(event = {}) {
           action: inc.action,
         })),
       };
+    }
+
+    if (isInternalScheduledRefresh) {
+      const imageHeadStats = imageHeadMemo.stats();
+      console.log('[ScheduledRefresh] Completed calendar refresh.', {
+        enabled: true,
+        status: feedFailures.length > 0 || enrichmentQueueDiagnostics.sqsPublishFailures > 0
+          ? 'partial'
+          : 'ok',
+        calendarEventsDiscovered: dedupedNewEvents.length,
+        calendarEventsExamined: mergedAgenda.length,
+        calendarEventsChanged: modifiedEvents.length,
+        agendaImageUrlsRemoved: brokenImages.length,
+        hexFilesWithBrokenImagesDetected: hexFilesWithBrokenImages,
+        hexFileImageRepairWrites: hexFilesRepaired,
+        imageHeadRequests: Number(imageHeadStats.requests || 0),
+        imageHeadCacheHits: Number(imageHeadStats.cacheHits || 0),
+        queueMessagesPublished: enrichmentQueueDiagnostics.sqsMessagesPublished,
+        queuePublishFailures: enrichmentQueueDiagnostics.sqsPublishFailures,
+        deferredRefreshItemsEnqueued: enrichmentQueueDiagnostics.deferredCount,
+        calendarFeedFailures: feedFailures.length,
+      });
     }
 
     return respond(200, responseBody);
