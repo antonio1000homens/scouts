@@ -1125,3 +1125,12 @@ limit, with 681,082.5 forecast for the current month. This account-wide
 forecast supports keeping the existing processing mappings without a cost
 driven shutdown at this time. It is a forecast rather than a final bill and
 does not identify which queue or operation consumes the requests.
+
+The same API reports CloudWatch `CW:MetricMonitorUsage` at 1.0986 actual and
+8.2396 forecast against the 10-metric Always Free allowance, and
+`CW:AlarmMonitorUsage` at 0.5486 actual and 4.1146 forecast against the
+10-alarm allowance. CloudWatch `DataProcessing-Bytes` is 0.000904 GB actual
+and 0.006780 GB forecast against 5 GB. These are account-wide forecasts; they
+show current usage within the listed allowances, but leave limited metric
+headroom. Keep the scheduled-refresh diagnostics in structured logs and avoid
+adding custom metric dimensions or series.
