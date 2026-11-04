@@ -1096,3 +1096,22 @@ activity write or a human notification. Disabling the mapping would leave
 those failures out of the Activity ledger, so keep it enabled until a tested
 replacement preserves the activity record, queue-depth visibility and manual
 redrive path.
+
+## Decision-queue age recheck (2026-11-04 13:02 UTC)
+
+`AWS_PROFILE=scouts` again verified account `553490163883` in `eu-west-2`.
+The `scoutsDecision` queue reports four visible messages, zero in flight, zero
+delayed, and 14-day retention. The complete regional Lambda event-source
+mapping inventory still contains only the enabled `scoutsRequests`,
+`scoutsProcessing`, and `scoutsProcessingDLQ` mappings; none targets
+`scoutsDecision`.
+
+For the 24 hours ending 13:00 UTC, hourly `NumberOfMessagesSent` datapoints show
+two messages in the 22:00 UTC bin on Nov 3 and two in the 12:00 UTC bin on Nov
+4. `NumberOfMessagesReceived` and `NumberOfMessagesDeleted` remain zero in all
+returned bins. The latest hourly `ApproximateAgeOfOldestMessage` maximum is
+51,286 seconds at 12:00 UTC. These queue attributes and approximate metrics
+confirm an accumulating notification backlog but do not identify the intended
+consumer or message contents. No message body was read and no message or
+queue configuration was changed. Keep the queue and messages intact until the
+owner confirms the consumer and alerting contract.
