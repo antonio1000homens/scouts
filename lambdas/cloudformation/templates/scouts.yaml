@@ -301,6 +301,7 @@ Resources:
                   - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsProcessing
                   - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsRequestsDLQ
                   - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsProcessingDLQ
+                  - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:scoutsDecision
               # CloudWatch metric reads use the SQS QueueName dimension and
               # cannot be scoped to the underlying queue ARN.
               - Effect: Allow
@@ -395,6 +396,7 @@ Resources:
           BEAVERS_PROGRAMME_CALENDAR_URL: !Ref BeaversProgrammeCalendarUrl
           TARGET_BUCKET: !Ref DataBucketName
           SCOUTS_REQUESTS_QUEUE_URL: !Ref ScoutsRequestsQueueUrl
+          SCOUTS_DECISION_QUEUE_URL: !Sub https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/scoutsDecision
           SCOUTS2SQS_FUNCTION_URL: !Ref Scouts2SqsFunctionUrl
           FULL_ENRICH_STATE_MACHINE_ARN: !Ref FullEnrichStateMachineArn
           GEMINI_ENRICHMENT_STATE_TABLE_NAME: !Ref GeminiEnrichmentStateTableName
