@@ -143,6 +143,14 @@ test('calendar refresh never reads or republishes legacy runtime snapshots', () 
   assert.match(entry, /status: 'retired'/);
   assert.match(entry, /\[RuntimeSnapshot\] Legacy snapshot request blocked by retirement gate/);
   assert.match(entry, /Object\.hasOwn\(PRIVATE_RUNTIME_SNAPSHOT_KEYS, snapshotName\)/);
+  const snapshotCommandIndex = entry.indexOf("if (command.subject === 'snapshot')");
+  const retirementGuardIndex = entry.indexOf('if (!LEGACY_RUNTIME_SNAPSHOTS_ENABLED)', snapshotCommandIndex);
+  const retiredResponseIndex = entry.indexOf('return response(410', retirementGuardIndex);
+  const snapshotReadIndex = entry.indexOf('readPrivateJsonObject(key)', snapshotCommandIndex);
+  assert.ok(snapshotCommandIndex >= 0, 'snapshot request handler exists');
+  assert.ok(retirementGuardIndex > snapshotCommandIndex, 'retirement flag is checked inside the snapshot handler');
+  assert.ok(retiredResponseIndex > retirementGuardIndex, 'disabled snapshots return HTTP 410');
+  assert.ok(snapshotReadIndex > retiredResponseIndex, 'the 410 path exits before any S3 snapshot read');
   const adminScript = source('../website/admin/admin-script.js');
   assert.match(adminScript, /LEGACY_RUNTIME_SNAPSHOTS_ENABLED=true \(CloudFormation parameter LegacyRuntimeSnapshotsEnabled=true\)/);
   assert.match(entry, /getRuntimeQueueStatus/);
@@ -203,8 +211,8 @@ test('low-frequency schedule is configurable and the previous cadence can be res
   assert.match(deploy, /LegacyRuntimeSnapshotsEnabled="\$\{LEGACY_RUNTIME_SNAPSHOTS_ENABLED\}"/);
   assert.match(schedule, /rate\(6 hours\)/);
   assert.match(stack, /ScoutsScheduledRefreshRule:[\s\S]*?ScheduleExpression: !Ref ScheduledRefreshExpression/);
-  assert.match(stack, /LegacyRuntimeSnapshotsEnabled:\n\s+Type: String\n\s+AllowedValues:\n\s+- 'true'\n\s+- 'false'\n\s+Default: 'true'/);
-  assert.match(deploy, /LEGACY_RUNTIME_SNAPSHOTS_ENABLED=\"\$\{LEGACY_RUNTIME_SNAPSHOTS_ENABLED:-true\}\"/);
+  assert.match(stack, /LegacyRuntimeSnapshotsEnabled:\n\s+Type: String\n\s+AllowedValues:\n\s+- 'true'\n\s+- 'false'\n\s+Default: 'false'/);
+  assert.match(deploy, /LEGACY_RUNTIME_SNAPSHOTS_ENABLED=\"\$\{LEGACY_RUNTIME_SNAPSHOTS_ENABLED:-false\}\"/);
   assert.match(stack, /SCOUTS_LEGACY_RUNTIME_SNAPSHOTS: !Ref LegacyRuntimeSnapshotsEnabled/);
   assert.match(schedule, /setScheduledRefreshEnabled/);
   assert.match(deploy, /aws sts get-caller-identity/);

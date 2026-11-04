@@ -385,8 +385,11 @@ not measure a change in bucket-wide S3 requests or charges.
    without reading S3 and emits one structured `RuntimeSnapshot` log for each
    admin request, allowing usage to be observed without adding a paid custom
    metric. The Admin viewer directs users to Activity and Operations; rollback
-   is `LEGACY_RUNTIME_SNAPSHOTS_ENABLED=true`. No AWS parameter or snapshot
-   object was changed by this code update.
+   is `LEGACY_RUNTIME_SNAPSHOTS_ENABLED=true`. The production flag was later
+   disabled after owner authorization and the reviewed backfill (see the
+   production retirement readback below). Future deployments now default the
+   flag to false; setting the GitHub Actions variable or deploy environment to
+   true is an explicit rollback. No snapshot objects were deleted.
 3. **Add on-demand live queue status**: Operations can request approximate
    visible, in-flight and delayed counts from SQS `GetQueueAttributes`, plus
    oldest-message age from the `AWS/SQS` CloudWatch metric. Age can be absent
@@ -1343,6 +1346,31 @@ The template's explicit rollback cadence remains `rate(30 minutes)`.
 `LegacyRuntimeSnapshotsEnabled=true` and `DeferredRefreshOutboxEnabled=false`
 remain deployed. This is a configuration readback; it does not substitute for
 a mature post-change S3 request comparison.
+
+## Production legacy snapshot API retirement (2026-11-04 13:52 UTC)
+
+After the reviewed migration created and consistently read back 27 Activity
+rows (14 retryable `manual_review`, 13 non-retryable `needs_attention`), the
+owner authorized disabling the legacy snapshot API. In verified AWS account
+`553490163883`, CloudFormation completed with
+`LegacyRuntimeSnapshotsEnabled=false`; the `scouts` Lambda was Active with a
+successful update and `SCOUTS_LEGACY_RUNTIME_SNAPSHOTS=false`. The EventBridge
+refresh rule remained enabled at `rate(6 hours)`. No historical snapshot S3
+objects were deleted.
+
+The implementation returns HTTP 410 for `subject=snapshot` before reaching
+the snapshot S3 read when disabled. The authenticated live HTTP response is
+still unverified: current-browser requests to `/admin/` and
+`/admin/index.html` returned HTTP 403, so no authenticated admin API request
+could be made. The stack parameter and Lambda environment are the live
+readback.
+
+Future deployments now default the flag to false in the workflow, deploy
+script, template, and handler fallback so an unrelated deploy cannot silently
+re-enable the API. Set `LEGACY_RUNTIME_SNAPSHOTS_ENABLED=true` explicitly for
+rollback. This does not prove historical task-token reconstruction or a
+seven-day post-change S3 request/cost comparison; those remain open issue
+criteria.
 
 ## Calendar-feed staleness budget under six-hour cadence (2026-11-04)
 
