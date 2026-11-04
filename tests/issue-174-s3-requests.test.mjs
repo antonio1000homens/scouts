@@ -141,6 +141,10 @@ test('calendar refresh never reads or republishes legacy runtime snapshots', () 
   const entry = source('../lambdas/scouts/function/scouts-entry.mjs');
   assert.match(entry, /command\.subject === 'snapshot'/);
   assert.match(entry, /status: 'retired'/);
+  assert.match(entry, /\[RuntimeSnapshot\] Legacy snapshot request blocked by retirement gate/);
+  assert.match(entry, /Object\.hasOwn\(PRIVATE_RUNTIME_SNAPSHOT_KEYS, snapshotName\)/);
+  const adminScript = source('../website/admin/admin-script.js');
+  assert.match(adminScript, /LEGACY_RUNTIME_SNAPSHOTS_ENABLED=true \(CloudFormation parameter LegacyRuntimeSnapshotsEnabled=true\)/);
   assert.match(entry, /getRuntimeQueueStatus/);
   assert.match(entry, /'x-scheduled-refresh': 'true'/);
   assert.match(entry, /runWithS3RequestMetrics\(source/);

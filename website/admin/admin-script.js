@@ -792,7 +792,7 @@ async function renderRuntimeSnapshotViewerContent(snapshotKey, force = false) {
     }
 
     if (!snapshot) {
-        contentEl.textContent = 'Legacy S3 snapshots are disabled. Use the Activity Centre for request lifecycle and Operations for live queue or DLQ actions. To roll back temporarily, deploy with LEGACY_RUNTIME_SNAPSHOTS_ENABLED=true.';
+        contentEl.textContent = 'Legacy S3 snapshots are disabled. Use the Activity Centre for request lifecycle and Operations for live queue or DLQ actions. To roll back temporarily, deploy with LEGACY_RUNTIME_SNAPSHOTS_ENABLED=true (CloudFormation parameter LegacyRuntimeSnapshotsEnabled=true).';
         return;
     }
 

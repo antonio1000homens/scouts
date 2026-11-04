@@ -762,13 +762,16 @@ async function handlerCore(event = {}) {
     }
 
     if (command.subject === 'snapshot') {
+      const snapshotName = text(command.body?.snapshot).toLowerCase();
       if (!LEGACY_RUNTIME_SNAPSHOTS_ENABLED) {
+        console.info('[RuntimeSnapshot] Legacy snapshot request blocked by retirement gate', {
+          snapshot: Object.hasOwn(PRIVATE_RUNTIME_SNAPSHOT_KEYS, snapshotName) ? snapshotName : 'unknown',
+        });
         return response(410, {
           status: 'retired',
           error: 'Legacy S3 runtime snapshots are disabled. Use the Activity Centre and live queue/DLQ operations.',
         });
       }
-      const snapshotName = text(command.body?.snapshot).toLowerCase();
       const key = PRIVATE_RUNTIME_SNAPSHOT_KEYS[snapshotName];
       if (!key) {
         return response(400, { status: 'error', error: 'Unsupported runtime snapshot' });

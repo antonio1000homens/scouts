@@ -377,6 +377,16 @@ not measure a change in bucket-wide S3 requests or charges.
    from that API; setting it true restores the viewer. No snapshot objects are
    deleted. Active Step Functions executions remain authoritative; stage
    labels are enriched from at most 100 active DynamoDB activity rows.
+   The compatibility flag is not changed in this source update. Once the
+   row-level legacy review manifest and historical task-token requirements
+   have been owner-reviewed, a controlled rollout can set
+   `LEGACY_RUNTIME_SNAPSHOTS_ENABLED=false` (CloudFormation parameter
+   `LegacyRuntimeSnapshotsEnabled=false`). The gated API then returns HTTP 410
+   without reading S3 and emits one structured `RuntimeSnapshot` log for each
+   admin request, allowing usage to be observed without adding a paid custom
+   metric. The Admin viewer directs users to Activity and Operations; rollback
+   is `LEGACY_RUNTIME_SNAPSHOTS_ENABLED=true`. No AWS parameter or snapshot
+   object was changed by this code update.
 3. **Add on-demand live queue status**: Operations can request approximate
    visible, in-flight and delayed counts from SQS `GetQueueAttributes`, plus
    oldest-message age from the `AWS/SQS` CloudWatch metric. Age can be absent
