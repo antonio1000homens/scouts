@@ -103,6 +103,15 @@ measured bill reduction. It excludes other S3 request changes and must not be
 used as evidence of a month-over-month saving; compare the complete aligned
 seven-day request window and posted charges before making that claim.
 
+The rollout's Cost Explorer attribution recorded **$0.20363** in October for
+the `CodexRequestCostAudit` CloudWatch S3 request metrics. That historical
+charge is about 38 times this illustrative monthly request saving. It is an
+audit cost, not a permanent application cost; retain the metrics only long
+enough to complete the aligned seven-day comparison, then remove the temporary
+configuration if the data is no longer needed and verify the resulting bill
+change. The two figures are not a net monthly comparison because one is an
+October posted charge and the other is a four-run projection.
+
 ## Limits
 
 Bucket metrics include browser/admin and other S3 callers. The observations do
