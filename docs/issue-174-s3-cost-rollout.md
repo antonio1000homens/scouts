@@ -904,3 +904,21 @@ SHA-256 matched the master asset. An unauthenticated request to the protected
 admin asset redirected to Cloudflare Access. The authenticated Operations UI
 and its live five-queue payload have therefore not been directly exercised;
 the stack, IAM policy and published asset are verified independently.
+
+## Decision-queue consumer audit (2026-11-04 09:10 UTC)
+
+AWS STS again verified account `553490163883`. The live `scoutsDecision`
+queue had two visible messages, zero in-flight or delayed messages, and
+14-day retention. Its latest hourly oldest-message maximum was 37,514 seconds
+at 08:10 UTC; the 09:10 query had no newer datapoint. The daily SQS counters
+still show two messages sent on Nov 3 and zero receives or deletes through the
+partial Nov 4 day.
+
+The regional Lambda event-source mapping inventory still contains only the
+three documented processing mappings. `list-pipes` returned no EventBridge
+Pipe sourced from `scoutsDecision`, and a workspace source search found no
+consumer outside the Scouts repository. This does not exclude an external or
+manual consumer. No message body was read, and no message was received or
+changed. The intended notification consumer and alerting remain unverified;
+preserve the queue and its messages
+until that contract is confirmed.
