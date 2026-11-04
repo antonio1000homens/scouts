@@ -1181,6 +1181,22 @@ identify a message's consumer or delivery contract. No message body was read
 and no queue operation changed state. Preserve the messages and retention
 pending owner confirmation of the consumer and alerting behavior.
 
+## Decision-queue backlog recheck (2026-11-04 16:46 UTC)
+
+AWS STS verified account `553490163883`. The `scoutsDecision` queue still has
+four visible messages, zero in flight or delayed, and 14-day retention. The
+latest complete five-minute `ApproximateAgeOfOldestMessage` datapoint was
+64,878 seconds at 16:41 UTC. For 10:46–16:46 UTC, CloudWatch recorded two
+messages sent and zero received or deleted. A fresh Lambda event-source
+mapping inventory showed the three existing Scouts SQS mappings but none for
+`scoutsDecision`.
+
+The age metric is approximate and does not identify the oldest message or its
+consumer. No message bodies were read and no queue state was changed. This
+confirms the queue is not draining in the observed interval; preserve its
+messages and retention until the notification consumer and alerting contract
+are confirmed.
+
 ## CloudWatch queue-alert coverage (2026-11-04 10:51 UTC)
 
 AWS STS verified account `553490163883`. The region has five metric alarms,
