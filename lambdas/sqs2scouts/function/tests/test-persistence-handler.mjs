@@ -177,13 +177,17 @@ test('field-level persist aliases update canonical metadata instead of being ove
   assert.equal(imageUrl.metadata.image.url, 'https://example.test/new.jpg');
 });
 
-test('real persistence handler merges canonical sparse field saves without clearing unrelated metadata', async () => {
+test('real persistence handler preserves sparse fields when Activity ledger writes fail', async () => {
   const store = fixtureStore();
   const sentMessages = [];
   const eventObjectCalls = [];
+  let activityWriteAttempts = 0;
   const { createPersistenceHandler } = await loadPersistenceModule(store, sentMessages);
   const handler = createPersistenceHandler({
-    recordRequestActivity: async () => null,
+    recordRequestActivity: async () => {
+      activityWriteAttempts += 1;
+      throw new Error('DynamoDB unavailable');
+    },
     s3Client: { send: async (request) => {
       const { Key } = request.input;
       if (Key === `events/${HEX}.json`) eventObjectCalls.push(request.name);
@@ -219,6 +223,7 @@ test('real persistence handler merges canonical sparse field saves without clear
   }) }] });
 
   assert.equal(result.statusCode, 200, result.body);
+  assert.equal(activityWriteAttempts, 2, 'worker start and outcome are both attempted');
   const persisted = store[`events/${HEX}.json`];
   assert.equal(persisted.metadata.tagline, 'Updated through handler');
   assert.equal(persisted.metadata.image.theme, 'calendar');
