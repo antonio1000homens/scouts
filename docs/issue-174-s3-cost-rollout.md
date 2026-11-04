@@ -1370,3 +1370,20 @@ has not set a numeric maximum source-to-agenda staleness target. Record the
 roughly 30-hour nominal bound and keep that acceptance distinction explicit;
 do not describe six-hour cadence as six-hour calendar freshness. Feed errors
 can extend staleness and remain visible through per-feed failure diagnostics.
+
+## Legacy snapshot retirement readback (2026-11-04 14:30 UTC)
+
+AWS STS verified account `553490163883` in `eu-west-2`. A fresh
+`DescribeStacks` read reports `scouts-lambda` as `UPDATE_COMPLETE`, last
+updated at 13:52:36 UTC, with `LegacyRuntimeSnapshotsEnabled=false`,
+`DeferredRefreshOutboxEnabled=false`, and the six-hour scheduled refresh still
+configured. `GetFunctionConfiguration` reports the `scouts` Lambda active,
+`LastUpdateStatus=Successful`, last modified at 13:52:41 UTC, and
+`SCOUTS_LEGACY_RUNTIME_SNAPSHOTS=false`.
+
+The deployed handler's snapshot command checks this flag before looking up or
+reading a legacy S3 object and returns HTTP 410 when disabled. The authenticated
+HTTP response was not exercised because that route requires the admin API key;
+the stack and Lambda configuration readbacks prove the retirement gate is
+deployed, not the end-to-end response. Historical snapshot objects remain
+untouched, and the deferred-refresh outbox remains disabled.
