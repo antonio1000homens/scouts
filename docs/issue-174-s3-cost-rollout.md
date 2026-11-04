@@ -930,3 +930,53 @@ manual consumer. No message body was read, and no message was received or
 changed. The intended notification consumer and alerting remain unverified;
 preserve the queue and its messages
 until that contract is confirmed.
+
+## S3 request attribution recheck (2026-11-04 09:24 UTC)
+
+AWS STS verified account `553490163883` before running the read-only collector.
+The complete CloudWatch query covered 2026-11-03 19:42 through 2026-11-04
+09:20 UTC, returned all six metric statuses in one page, and searched the
+Lambda logs without truncation. The bucket-wide request metrics contained 922
+GET, 408 HEAD, 65 LIST and 331 PUT requests across 50 nonzero minute bins.
+The final nonzero S3 bin was 09:07, about 13 minutes behind the query end.
+Several bursts do not line up with scheduled refreshes, including a PUT/LIST
+burst around 09:02–09:03 during the website deployment; bucket metrics remain
+best-effort and cannot identify callers.
+
+Four SDK summaries were recovered: three scheduled refreshes at 19:44, 00:20
+and 06:20, with respectively 177/38/2/1, 176/38/2/3, and 178/38/2/1
+Get/Head/List/Put SDK calls, all classified to the data bucket. A non-scheduled
+invocation at 22:44 recorded 167/35/2/2 calls. Per-refresh summaries recorded
+98–99 reused HEX reads and 35–36 image HEAD requests with six cache hits. SDK
+calls are not billable wire counts because retries may add requests; the
+non-scheduled canary and website deployment also contaminate this short
+window. It is not a clean before/after comparison and does not establish
+savings. Continue the aligned seven-day collection and compare against posted
+S3 charges before making a cost claim.
+
+## S3 request attribution readback (2026-11-04 09:58 UTC)
+
+AWS STS verified account `553490163883` before the read-only queries. A direct
+CloudWatch statistics query returned seven complete daily bins from Oct 28
+through Nov 3: 93,597 GET, 14,737 HEAD, 750 LIST and 1,476 PUT requests for
+the whole bucket metric filter. The Nov 3 bin alone contained 11,631 GET,
+2,065 HEAD, 159 LIST and 520 PUT requests. These are bucket-wide counts and
+the Nov 3 bin straddles the 19:42 schedule cutover; the PUT burst also overlaps
+deployments and the synthetic canary, so it cannot be assigned to refresh
+code.
+
+For the 19:42–09:58 post-cutover interval, one-minute bucket metrics reported
+925 GET, 413 HEAD, 68 LIST and 332 PUT requests, alongside nine `scouts`
+Lambda invocations and zero errors. The collector returned all six metric
+series in one page. Its hourly-partitioned CloudWatch Logs filter searches were
+complete and not truncated. They found three scheduled refresh summaries at
+19:44, 00:20 and 06:20 with 177/38/2/1, 176/38/2/3 and 178/38/2/1 Get/Head/
+List/Put SDK calls respectively, plus one non-scheduled invocation at 22:44
+with 167/35/2/2 calls. Per-refresh summaries recorded 98–100 reused HEX reads
+and 35–36 image HEAD requests with six cache hits.
+
+The bucket-wide interval grew only slightly from the prior 09:24 readback
+(922/408/65/331), while invocation-level SDK activity still does not reconcile
+with bucket metrics or identify browser/CDN callers. This short interval
+remains insufficient for a seven-day post-change trend or a posted-charge
+comparison; it does not prove bill-level savings.
