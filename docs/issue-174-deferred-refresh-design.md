@@ -216,3 +216,41 @@ PR #206 adds focused concurrency regressions for two same-generation
 discoveries coalescing on one work key and two dispatchers competing for one
 conditional lease. They exercise the DynamoDB command contract through the
 hermetic client; they do not replace a live throughput or backlog benchmark.
+
+## Isolated capacity benchmark runner
+
+`scripts/scouts-deferred-refresh-capacity-benchmark.mjs` prepares a bounded
+benchmark against a uniquely named temporary table with the production outbox
+key and GSI schema. Its default mode is read-only: it verifies the Scouts
+account and single-account payer scope, inventories existing provisioned table
+and GSI capacity, checks the proposed allocation against the 25/25 allowance,
+and prints the planned table name and workload. It refuses to execute unless
+both `--apply` and `--confirm-account 553490163883` are supplied.
+
+The approved run uses 1 RCU/1 WCU for the base table and the same for its GSI,
+creates 100 synthetic work items at concurrency 10, and simulates dispatcher
+batches of 10 every 15 minutes. It captures per-operation consumed capacity,
+throttles, successful enqueue/dispatch counts, remaining backlog, and simulated
+maximum queue age. It uses no real event content and a no-op publisher: it does
+not send SQS messages, invoke enrichment providers, read S3, enable the
+production outbox, or change a production stack. The script attempts to delete
+its temporary table in `finally` and verifies unique run tags before deletion;
+if cleanup fails or the process is forcibly terminated, inspect the printed
+table name and tags before retrying or deleting it. This benchmark reports
+the capacity envelope for its synthetic workload, not production queue age or
+representativeness of the real work mix. Do not treat it as the staged live
+outbox acceptance gate. Apply mode exits nonzero if any operation throttles,
+enqueue or dispatch is incomplete, backlog remains, or backlog could not be
+measured; only a fully drained, unthrottled run is marked as a capacity pass.
+
+Final ready/leased backlog fields sum explicit paginated `COUNT` queries, up to
+100 pages; they do not inherit the dispatcher's 10-item batch limit and fail
+the run if that page bound is reached.
+
+The read-only dry run completed on 2026-11-04 after STS verified account
+`553490163883`. Organizations reported this as the only active account in its
+organization, and the regional DynamoDB inventory found no provisioned tables
+or GSIs. The planned 2 RCU/2 WCU allocation therefore fits the recorded 25/25
+allowance. No DynamoDB table was created and no synthetic writes were made.
+The apply mode remains unexecuted and still requires explicit owner
+authorization for production-account table creation and synthetic writes.
