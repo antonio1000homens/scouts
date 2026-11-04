@@ -1406,3 +1406,20 @@ This shorter interim window does not identify the callers responsible for the
 bucket-wide requests, and the request metrics may be delayed. It is not a
 full-day or seven-day comparison and does not establish savings or bill
 reduction. Keep the aligned seven-day comparison as the acceptance gate.
+
+## Recheck of six-hour S3 metrics (2026-11-04 16:02 UTC)
+
+The read-only collector again verified account `553490163883` and queried
+2026-11-04 10:02–16:02 UTC. All six metric series were `Complete`; the SDK
+operation and per-refresh log searches were untruncated. The totals were
+unchanged from the 15:32 check: 726 GET, 376 HEAD, 24 LIST, and 101 PUT across
+34 populated minute bins; the `scouts` Lambda had 7 invocations and zero
+errors. Within this query, populated S3 request bins ran from 10:59 through
+15:18 UTC. Since the previous query returned the same totals, no later
+populated S3 request datapoints were visible at 16:02. S3 metrics can be
+delayed, so this is not proof that no requests occurred after 15:18.
+
+The SDK log search returned two aggregate entries, one scheduled refresh and
+one non-scheduled invocation. Their call counts are not a complete attribution
+of the bucket-wide metrics. This recheck does not extend the seven-day window
+to maturity and does not support a savings or bill-reduction claim.
