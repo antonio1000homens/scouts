@@ -1181,6 +1181,36 @@ identify a message's consumer or delivery contract. No message body was read
 and no queue operation changed state. Preserve the messages and retention
 pending owner confirmation of the consumer and alerting behavior.
 
+## Decision-queue backlog recheck (2026-11-04 16:46 UTC)
+
+AWS STS verified account `553490163883`. The `scoutsDecision` queue still has
+four visible messages, zero in flight or delayed, and 14-day retention. The
+latest complete five-minute `ApproximateAgeOfOldestMessage` datapoint was
+64,878 seconds at 16:41 UTC. For 10:46–16:46 UTC, CloudWatch recorded two
+messages sent and zero received or deleted. A fresh Lambda event-source
+mapping inventory showed the three existing Scouts SQS mappings but none for
+`scoutsDecision`; an EventBridge Pipes source-prefix query also returned no
+pipe for this queue. This does not rule out a consumer outside the inspected
+AWS services or account.
+
+`GetQueueAttributes` returned no queue resource policy or redrive policy, and
+`ListQueueTags` returned no tags. Same-account consumers remain possible, but
+there is no queue-level DLQ configuration; the configured 14-day retention is
+the visible expiry boundary for messages left unconsumed.
+
+The repository contract identifies two `sqs2scouts` producers and no
+in-repository consumer or acknowledgement/retry contract. The
+`approval-lifecycle-adapter` emits `persisted` for both `awaiting_image` and
+`approved` states, so consumers cannot treat that action alone as final
+approval. Both producers treat `SendMessage` as best-effort after persistence.
+See [`SCOUTS-DECISION-QUEUE-REALMS.md`](../lambdas/scouts/SCOUTS-DECISION-QUEUE-REALMS.md).
+
+The age metric is approximate and does not identify the oldest message or its
+consumer. No message bodies were read and no queue state was changed. This
+confirms the queue is not draining in the observed interval; preserve its
+messages and retention until the notification consumer and alerting contract
+are confirmed.
+
 ## CloudWatch queue-alert coverage (2026-11-04 10:51 UTC)
 
 AWS STS verified account `553490163883`. The region has five metric alarms,
