@@ -1,12 +1,17 @@
+const MAX_POSITIVE_CACHE_ENTRIES = 512;
+
 /**
- * Deduplicate S3 image HEAD checks within one calendar refresh invocation.
- * A subsequent invocation always rechecks: objects may have been deleted or
- * restored. A resolved false (404) is safe to reuse only within this run.
- *
- * Failed checks are evicted; do not mistake transient AWS errors for missing
- * images. The aggregate counters are bounded and contain no S3 object keys.
+ * Deduplicate S3 image HEAD checks within an invocation and optionally reuse
+ * recent positive checks from a bounded warm-instance cache. Only object
+ * existence is cached across invocations; missing objects are rechecked on
+ * every later invocation. Failed checks are evicted rather than treated as
+ * evidence of a missing image.
  */
-export function createImageHeadMemo() {
+export function createImageHeadMemo({
+  positiveCache = null,
+  positiveCacheTtlMs = 0,
+  now = Date.now,
+} = {}) {
   const checks = new Map();
   let cacheHits = 0;
   let requests = 0;
@@ -16,11 +21,41 @@ export function createImageHeadMemo() {
       cacheHits += 1;
       return checks.get(cacheKey);
     }
+
+    if (positiveCache && positiveCacheTtlMs > 0) {
+      const cached = positiveCache.get(cacheKey);
+      const ageMs = cached ? now() - cached.checkedAt : Number.POSITIVE_INFINITY;
+      if (cached && ageMs >= 0 && ageMs < positiveCacheTtlMs && cached.exists === true) {
+        // Touch insertion order for bounded LRU eviction without extending the
+        // verification deadline.
+        positiveCache.delete(cacheKey);
+        positiveCache.set(cacheKey, cached);
+        cacheHits += 1;
+        const resolved = Promise.resolve(true);
+        checks.set(cacheKey, resolved);
+        return resolved;
+      }
+      if (cached) positiveCache.delete(cacheKey);
+    }
+
     requests += 1;
     const pending = Promise.resolve()
       .then(check)
+      .then((exists) => {
+        if (positiveCache) {
+          positiveCache.delete(cacheKey);
+          if (exists === true && positiveCacheTtlMs > 0) {
+            positiveCache.set(cacheKey, { checkedAt: now(), exists: true });
+            while (positiveCache.size > MAX_POSITIVE_CACHE_ENTRIES) {
+              positiveCache.delete(positiveCache.keys().next().value);
+            }
+          }
+        }
+        return exists;
+      })
       .catch((error) => {
         checks.delete(cacheKey);
+        positiveCache?.delete(cacheKey);
         throw error;
       });
     checks.set(cacheKey, pending);

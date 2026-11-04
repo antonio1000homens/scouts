@@ -72,8 +72,47 @@ test('missing object is cached for this invocation but rechecked on the next', a
   assert.equal(checks, 2, 'deleted or restored files must be reevaluated on later refreshes');
 });
 
+test('warm image cache reuses only recent positive checks and revalidates after eight hours', async () => {
+  const positiveCache = new Map();
+  let now = 1_000;
+  let checks = 0;
+  const check = async () => { checks += 1; return true; };
+  const first = createImageHeadMemo({ positiveCache, positiveCacheTtlMs: 8 * 60 * 60 * 1000, now: () => now });
+  assert.equal(await first('bucket', 'existing.jpg', check), true);
+  assert.equal(checks, 1);
+
+  now += 6 * 60 * 60 * 1000;
+  const warm = createImageHeadMemo({ positiveCache, positiveCacheTtlMs: 8 * 60 * 60 * 1000, now: () => now });
+  assert.equal(await warm('bucket', 'existing.jpg', check), true);
+  assert.equal(checks, 1, 'a recent positive check should avoid a repeat HEAD');
+  assert.deepEqual(warm.stats(), { requests: 0, cacheHits: 1 });
+
+  now += 3 * 60 * 60 * 1000;
+  const expired = createImageHeadMemo({ positiveCache, positiveCacheTtlMs: 8 * 60 * 60 * 1000, now: () => now });
+  assert.equal(await expired('bucket', 'existing.jpg', check), true);
+  assert.equal(checks, 2, 'an expired positive check must be revalidated');
+});
+
+test('warm image cache does not retain missing objects and is bounded', async () => {
+  const positiveCache = new Map();
+  let checks = 0;
+  const missing = async () => { checks += 1; return false; };
+  const first = createImageHeadMemo({ positiveCache, positiveCacheTtlMs: 10_000 });
+  assert.equal(await first('bucket', 'missing.jpg', missing), false);
+  const nextInvocation = createImageHeadMemo({ positiveCache, positiveCacheTtlMs: 10_000 });
+  assert.equal(await nextInvocation('bucket', 'missing.jpg', missing), false);
+  assert.equal(checks, 2, 'missing objects must be checked again on later invocations');
+
+  for (let index = 0; index < 513; index += 1) {
+    const memo = createImageHeadMemo({ positiveCache, positiveCacheTtlMs: 10_000 });
+    await memo('bucket', `image-${index}.jpg`, async () => true);
+  }
+  assert.equal(positiveCache.size, 512, 'warm cache memory must remain bounded');
+});
+
 test('transient HEAD failures are evicted and can be retried', async () => {
-  const memo = createImageHeadMemo();
+  const positiveCache = new Map();
+  const memo = createImageHeadMemo({ positiveCache, positiveCacheTtlMs: 10_000 });
   let attempts = 0;
   const check = () => {
     attempts += 1;
@@ -81,13 +120,16 @@ test('transient HEAD failures are evicted and can be retried', async () => {
     return true;
   };
   await assert.rejects(memo('bucket', 'image.jpg', check), /SlowDown/);
+  assert.equal(positiveCache.size, 0, 'transient failures must not populate the warm cache');
   assert.equal(await memo('bucket', 'image.jpg', check), true);
   assert.equal(attempts, 2);
 });
 
 test('Scouts image verification shares the per-invocation HEAD cache without masking AWS errors', () => {
   const scouts = source('../lambdas/scouts/function/scouts-service.mjs');
-  assert.match(scouts, /const imageHeadMemo = createImageHeadMemo\(\)/);
+  assert.match(scouts, /const warmImageHeadCache = new Map\(\)/);
+  assert.match(scouts, /IMAGE_HEAD_POSITIVE_CACHE_TTL_MS = 8 \* 60 \* 60 \* 1000/);
+  assert.match(scouts, /event\?\._scheduledRefresh === true\s*\? createImageHeadMemo\(\{[\s\S]*?positiveCache: warmImageHeadCache,[\s\S]*?positiveCacheTtlMs: IMAGE_HEAD_POSITIVE_CACHE_TTL_MS/);
   assert.match(scouts, /verifyAndRepairEventImages\(enrichedAgenda, bucket, imageHeadMemo\)/);
   assert.match(scouts, /verifyAndRepairHexFile\(bucket, key, hexData, imageHeadMemo\)/);
   assert.match(scouts, /imageHeadMemo\(bucket, key, check\)/);

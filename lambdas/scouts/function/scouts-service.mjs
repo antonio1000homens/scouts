@@ -52,6 +52,8 @@ const SECTION_ALL = 'all';
 const EVENT_IMAGE_PREFIX = 'website/eventImages/';
 const LEGACY_EVENT_IMAGE_PREFIX = 'website/images/';
 const RELATIVE_IMAGE_PREFIXES = [EVENT_IMAGE_PREFIX, LEGACY_EVENT_IMAGE_PREFIX];
+const IMAGE_HEAD_POSITIVE_CACHE_TTL_MS = 8 * 60 * 60 * 1000;
+const warmImageHeadCache = new Map();
 
 function normaliseApiKeyCandidate(value) {
   if (value === undefined || value === null) return '';
@@ -4026,8 +4028,15 @@ async function lambdaHandlerCore(event = {}) {
   }
 
   try {
-    // Per-run only: a later invocation must check for deleted/broken images again.
-    const imageHeadMemo = createImageHeadMemo();
+    // Scheduled refreshes reuse successful checks on warm Lambda instances
+    // for at most eight hours. Interactive refreshes, new keys, missing
+    // objects, cold starts, and expired entries still HEAD.
+    const imageHeadMemo = event?._scheduledRefresh === true
+      ? createImageHeadMemo({
+          positiveCache: warmImageHeadCache,
+          positiveCacheTtlMs: IMAGE_HEAD_POSITIVE_CACHE_TTL_MS,
+        })
+      : createImageHeadMemo();
     const hexReadCache = new Map();
     let dedupedNewEvents = [];
     const feedFailures = [];
