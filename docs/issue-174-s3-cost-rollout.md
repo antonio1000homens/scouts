@@ -1143,6 +1143,82 @@ those failures out of the Activity ledger, so keep it enabled until a tested
 replacement preserves the activity record, queue-depth visibility and manual
 redrive path.
 
+## Seven-day S3 request attribution readback (2026-11-04 11:26 UTC)
+
+The bounded read-only collector verified AWS account `553490163883` and queried
+the complete window 2026-10-28 11:26–2026-11-04 11:26 UTC. All six CloudWatch
+metric queries completed in one page; both hourly CloudWatch Logs passes
+completed without truncation. The 60-second metric series contained 712
+nonempty timestamp bins. The S3 totals below are bucket-wide and include
+browser/admin and other callers; they do not identify a request's caller.
+
+| UTC day | GET | HEAD | LIST | PUT | Scouts Lambda invocations | Errors |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Oct 28 (partial) | 7,024 | 1,100 | 50 | 81 | 25 | 0 |
+| Oct 29 | 13,637 | 2,112 | 96 | 146 | 48 | 0 |
+| Oct 30 | 13,887 | 2,112 | 96 | 146 | 48 | 0 |
+| Oct 31 | 13,670 | 2,112 | 96 | 146 | 48 | 0 |
+| Nov 1 | 13,633 | 2,112 | 111 | 224 | 48 | 0 |
+| Nov 2 | 13,674 | 2,112 | 96 | 144 | 48 | 0 |
+| Nov 3 | 11,631 | 2,065 | 159 | 520 | 47 | 0 |
+| Nov 4 (partial) | 398 | 160 | 18 | 80 | 2 | 0 |
+
+The five complete pre-cutover days (Oct 29–Nov 2) averaged 13,700 GET,
+2,112 HEAD, 99 LIST and 161 PUT requests per day. The change was deployed on
+Nov 3 at approximately 19:42 UTC, so Nov 3 is a mixed day and is excluded from
+that baseline. From 19:42 UTC Nov 3 through 11:26 UTC Nov 4, the bucket recorded
+953 GET, 467 HEAD, 68 LIST and 332 PUT requests, across 54 nonzero minute bins;
+Scouts recorded nine Lambda invocations and zero errors in that interval.
+This shorter post-cutover interval is neither a full-day comparison nor
+caller-specific evidence. Its HEAD/PUT counts do not establish regression or
+savings: the interval is shorter than the baseline days, includes unrelated
+bucket traffic, and may reflect best-effort metric delivery and a different
+workload mix.
+
+Six SDK summaries were captured: five `scheduled-refresh` and one
+`non-scheduled`. The three summaries timestamped after the cutover report
+177–178 `GetObject`, 38 `HeadObject`, 2 `ListObjectsV2`, and 1–3 `PutObject`
+calls per invocation. Their matching per-refresh summaries show 98–99 reused
+HEX reads and 35–36 image HEAD requests with six in-invocation cache hits.
+These are SDK operation counts, not billable S3 wire-request totals; they
+cannot be reconciled one-to-one with the bucket metrics. The evidence confirms
+the instrumented call-site mix and a continuing per-refresh reuse effect, but
+does not yet prove a seven-day post-change reduction or bill-level savings.
+Collect a mature seven-day window after the cutover and compare it with posted
+S3 charges before claiming savings.
+
+The read-only result was saved locally at
+`/tmp/scouts-174-attribution-7d-20261104.json`; it is not part of this
+repository change. The collector made no AWS writes.
+
+## First deployed per-category scheduled-refresh sample (2026-11-04 12:20 UTC)
+
+After STS verified account `553490163883`, the bounded collector read the
+12:20–12:23:50 UTC window. The `scouts` Lambda had `LastUpdateStatus=Successful`
+and `LastModified=2026-11-04 10:22:35 UTC`, preceding this scheduled run. All
+six metric queries completed in one page. Both hourly log searches completed
+without truncation and found one scheduled SDK summary plus its matching
+per-refresh summary.
+
+The invocation counted 178 SDK `GetObject` calls: 168 for canonical events,
+6 for calendar caches, 3 for `agenda.json`, and 1 for runtime state. It also
+counted 38 `HeadObject` calls: 36 for event images and 2 for calendar-cache
+freshness checks; one agenda `PutObject`; and 2 canonical-event `ListObjectsV2`
+calls. The per-refresh diagnostic recorded 99 reused HEX reads and 36 image
+HEAD requests with six in-invocation cache hits. With the live schedule at
+four runs per day, this sample identifies the callsite mix and the per-run
+reuse behavior at the deployed six-hour cadence.
+
+These are invocation-level SDK calls, not billable S3 wire counts; retries
+and unrelated bucket callers are not attributed by this summary. The
+3-minute-50-second bucket metric slice is too short and best-effort for a
+reliable reconciliation. The sample does not establish charge savings, but
+it confirms that canonical-event reads dominate scheduled SDK GETs and that
+image checks remain active for broken-image detection.
+
+The read-only result was saved locally at
+`/tmp/scouts-174-attribution-post-deploy-20261104.json` with owner-only
+permissions. No AWS writes were made.
 ## Decision-queue age recheck (2026-11-04 13:02 UTC)
 
 `AWS_PROFILE=scouts` again verified account `553490163883` in `eu-west-2`.
@@ -1180,3 +1256,117 @@ and 0.006780 GB forecast against 5 GB. These are account-wide forecasts; they
 show current usage within the listed allowances, but leave limited metric
 headroom. Keep the scheduled-refresh diagnostics in structured logs and avoid
 adding custom metric dimensions or series.
+
+## Legacy manual-review Activity backfill (2026-11-04)
+
+After explicit owner review and authorization, the bounded migration was run
+against Scouts account `553490163883` in `eu-west-2`. Before applying writes, a
+fresh complete scan evaluated 164 source items and consumed 2,001 RCUs. Its 27
+candidate rows matched the reviewed owner-only manifest exactly, including
+source timestamps and canonical-event classifications: 14 event-backed,
+retryable `manual_review` records and 13 missing-event, non-retryable
+`needs_attention` records. No corresponding Activity item existed for any
+candidate at preflight.
+
+The apply repeated the complete scan and canonical-event checks, then created
+all 27 Activity rows using a transaction that condition-checks the source
+state and `updatedAt` while conditionally inserting the destination item. It
+reported zero conditional conflicts. A consistent readback of all approved
+request IDs found 14 `manual_review` and 13 `needs_attention` rows, all with
+the expected migration source and failure metadata, and no TTL field. The
+backfill preserves the underlying enrichment rows and canonical event objects;
+it does not validate historical task-token state or establish snapshot/admin
+viewer parity. Those remain separate cutover gates.
+
+## Step Functions and retirement-flag recheck (2026-11-04 13:29 UTC)
+
+AWS STS verified account `553490163883` before the read-only check. The
+`scouts-lambda` stack was `UPDATE_COMPLETE` (last updated 13:20:22 UTC), with
+`LegacyRuntimeSnapshotsEnabled=true` and `DeferredRefreshOutboxEnabled=false`.
+A fresh `ListExecutions` read found zero `RUNNING` executions in each of
+`scouts-full-enrich`, `scouts-full-enrich-managed-poc`, and
+`scouts-image-enrich`.
+
+This shows no currently running execution in those state machines depends on
+a legacy snapshot task token at the time of the read. It does not establish a
+retention or support contract for historical snapshot rows or the legacy admin
+viewer. Keep the compatibility flag enabled pending that owner decision; no
+AWS configuration or S3 object was changed.
+
+## Static website cache-policy review (2026-11-04 13:39 UTC)
+
+AWS STS verified account `553490163883` before the read-only CloudFront
+inspection of distribution `E3INLSADL3AN6C`. The live distribution matches the
+repository template: the default behavior uses AWS managed
+`Managed-CachingOptimized` (minimum TTL 1 second, default 24 hours, maximum 365
+days; query strings, cookies, and viewer headers are not cache-key inputs).
+`/agenda.json`, `/runtime/*`, and `/events/*` use `Managed-CachingDisabled`.
+
+The website deploy currently assigns
+`Cache-Control: max-age=0, no-cache, no-store, must-revalidate` to website
+objects and invalidates `/website/*` after deploy. The static assets have a
+mixture of stable filenames and a small number of query-versioned references;
+CloudFront ignores those query strings, and there is no path-level origin
+request attribution for static assets in the available bucket metrics.
+CloudFront's one-second minimum TTL means the default behavior can retain an
+object briefly despite `no-store`; browsers still honor `no-store`. No broad
+cache-header change is justified by the available cost evidence. Revisit a
+targeted long browser TTL after static asset URLs are consistently
+content-versioned and request attribution shows material repeat origin
+traffic. Dynamic agenda, runtime, and canonical-event paths remain uncached.
+No CloudFront configuration, website object metadata, or cache invalidation
+was changed by this review.
+
+## Object-level request-attribution configuration audit (2026-11-04 13:44 UTC)
+
+AWS STS verified account `553490163883`. A read-only configuration audit found
+no CloudTrail trails or event data stores, S3 server-access logging disabled
+for `scouts-2ndtolworth-prod-553490163883`, and standard logging disabled on
+CloudFront distribution `E3INLSADL3AN6C`. The existing S3 request metric
+configuration `CodexRequestCostAudit` is bucket-wide and has no prefix filter.
+
+The available evidence therefore attributes SDK calls inside the instrumented
+`scouts` Lambda to safe object categories, and measures aggregate bucket
+requests, but cannot assign every billable request to a caller or object path.
+Do not claim full caller attribution from the bucket metric and Lambda logs
+alone. No object-level logging or CloudTrail data events were enabled; any
+such instrumentation needs a separate cost and retention estimate before
+approval.
+
+## Live scheduled-refresh cadence and rollback recheck (2026-11-04 13:44 UTC)
+
+AWS STS verified account `553490163883`. The enabled EventBridge rule
+`scouts-lambda-ScoutsScheduledRefreshRule-rLtLrT9JSxRn` has schedule
+`rate(6 hours)` and targets the `scouts` Lambda. CloudFormation reports
+`ScheduledRefreshExpression=rate(6 hours)` and stack status `UPDATE_COMPLETE`.
+The template's explicit rollback cadence remains `rate(30 minutes)`.
+`LegacyRuntimeSnapshotsEnabled=true` and `DeferredRefreshOutboxEnabled=false`
+remain deployed. This is a configuration readback; it does not substitute for
+a mature post-change S3 request comparison.
+
+## Calendar-feed staleness budget under six-hour cadence (2026-11-04)
+
+The deployed six-hour EventBridge cadence is not the calendar-source freshness
+bound. `scouts-service.mjs` reuses an S3 ICS cache while its `LastModified` age
+is at most 24 hours. With nominal six-hour invocations, a source update just
+after a successful feed fetch can therefore remain unseen until the next run
+after that cache crosses 24 hours: roughly 30 hours in the no-error case. This
+is about 5.5 hours longer than the previous nominal 30-minute schedule with
+the same 24-hour cache. It is a timing bound under successful invocations and
+successful source fetches, not a guarantee during feed failures; on a feed
+error, merge logic retains existing agenda entries until a later successful
+fetch.
+
+The Admin “Run refresh now” control sends `refreshAllCalendars` with
+`maxEvents: 0`, so it performs calendar/agenda work without publishing new
+enrichment jobs. The ordinary Admin “Sync calendars & agenda” control sends
+the same calendar action. Neither sets a cache-bypass option: both reuse an
+ICS object still within the 24-hour freshness window and fetch from the source
+only when the cache is stale or missing. This preserves current manual behavior
+but means “run now” is not a force-refresh of an upstream feed.
+
+The owner has confirmed that scheduled refreshes are non-time-critical, but
+has not set a numeric maximum source-to-agenda staleness target. Record the
+roughly 30-hour nominal bound and keep that acceptance distinction explicit;
+do not describe six-hour cadence as six-hour calendar freshness. Feed errors
+can extend staleness and remain visible through per-feed failure diagnostics.
