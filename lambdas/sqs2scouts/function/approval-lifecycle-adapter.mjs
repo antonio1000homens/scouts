@@ -1,5 +1,4 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { buildEventReviewSnapshot } from '/opt/nodejs/event-review.mjs';
 import { recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
@@ -8,13 +7,11 @@ import { publishCanonicalEventToAgenda } from './agenda-publisher.mjs';
 
 const AWS_REGION = process.env.AWS_REGION || 'eu-west-2';
 const TARGET_BUCKET = process.env.TARGET_BUCKET || 'scouts-2ndtolworth-prod-553490163883';
-const SCOUTS_DECISION_QUEUE_URL = String(process.env.SCOUTS_DECISION_QUEUE_URL || '').trim();
 const APPROVAL_METADATA_PREFIX = String(process.env.APPROVAL_METADATA_PREFIX || 'approvals').trim() || 'approvals';
 const SLACK_CHAT_UPDATE_URL = String(process.env.SLACK_CHAT_UPDATE_URL || 'https://slack.com/api/chat.update').trim();
 const S3_WEBSITE_BASE_URL = String(process.env.S3_WEBSITE_BASE_URL || `https://${TARGET_BUCKET}.s3.${AWS_REGION}.amazonaws.com`).replace(/\/$/, '');
 const APPROVAL_PERSISTENCE_ENABLED = !['false', '0', 'off', 'disabled'].includes(String(process.env.APPROVAL_PERSISTENCE ?? process.env.APPROVAL_METADATA_PERSISTENCE ?? 'true').trim().toLowerCase());
 const s3 = new S3Client({ region: AWS_REGION });
-const sqs = new SQSClient({ region: AWS_REGION });
 
 function text(value) {
   if (value === undefined || value === null) return '';
@@ -331,29 +328,6 @@ async function recordRoot(message, hex, event, state, stage, publication = null,
   });
 }
 
-async function notifyDecision(message, hex, event) {
-  if (!SCOUTS_DECISION_QUEUE_URL) return;
-  try {
-    await sqs.send(new SendMessageCommand({
-      QueueUrl: SCOUTS_DECISION_QUEUE_URL,
-      MessageBody: JSON.stringify({
-        realm: 'sqs2scouts',
-        action: 'persisted',
-        subject: {
-          hex,
-          title: event?.title || event?.summary || null,
-        },
-        source: 'approval-lifecycle-adapter',
-        requestId: message.requestId,
-        rootRequestId: message.rootRequestId,
-        requestHex: hex,
-      }),
-    }));
-  } catch (error) {
-    console.warn('[ApprovalPersist] scoutsDecision notification failed', error?.message || error);
-  }
-}
-
 function markWorkflow(event, message, state) {
   const now = new Date().toISOString();
   const rootRequestId = text(message.rootRequestId);
@@ -465,7 +439,6 @@ export async function handleRevisionedPersist(message) {
 
   await publishEvent(hex, accepted);
   await reconcileApprovalSlack(message, hex, accepted, approvalState);
-  await notifyDecision(message, hex, accepted);
   await recordActivity({
     ...message,
     hex,

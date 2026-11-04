@@ -141,6 +141,12 @@ test('issue 91 root correlation is carried through full-enrich and persist contr
   assert.match(requestRouter, /rootRequestId: payload\.rootRequestId \|\| null/);
 });
 
+test('issue 174 decision notifications have no producer without a consumer contract', () => {
+  assert.doesNotMatch(persistenceProcessor, /SCOUTS_DECISION_QUEUE_URL|sendToScoutsDecisionQueue|scoutsDecision/);
+  assert.doesNotMatch(approvalLifecycleAdapter, /SendMessageCommand|SCOUTS_DECISION_QUEUE_URL|scoutsDecision/);
+  assert.doesNotMatch(sqs2scoutsTemplate, /ScoutsDecisionQueue(?:Arn|Url)|SCOUTS_DECISION_QUEUE_URL/);
+});
+
 test('issue 91 review revision rejects stale state and missing-image approval stays pending', () => {
   const canonical = {
     uid: 'osm-123',
@@ -236,7 +242,7 @@ test('issue 91 root activity remains authoritative over child terminal states', 
 });
 
 test('issue 91 least privilege allows only required approval retries and Slack canonical reads', () => {
-  assert.match(sqs2scoutsTemplate, /sqs:SendMessage[\s\S]*?- !Ref QueueArn[\s\S]*?- !Ref ScoutsDecisionQueueArn/);
+  assert.match(sqs2scoutsTemplate, /sqs:SendMessage[\s\S]*?- !Ref QueueArn[\s\S]*?- !Ref DlqArn/);
   assert.match(slackTemplate, /s3:GetObject[\s\S]*?\/events\/\*/);
   assert.match(slackTemplate, /runtime\/approval-idempotency\/\*/);
   assert.match(slackTemplate, /s3:PutObject[\s\S]*?runtime\/approval-idempotency\/\*/);

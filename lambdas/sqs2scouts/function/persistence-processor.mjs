@@ -55,7 +55,6 @@ const sqsClient = { send: (command) => (persistenceDependencyContext.getStore()?
 const sfnClient = { send: (command) => (persistenceDependencyContext.getStore()?.sfnClient || defaultSfnClient).send(command) };
 const recordRequestActivity = (...args) => (persistenceDependencyContext.getStore()?.recordRequestActivity || defaultRecordRequestActivity)(...args);
 const publishCanonicalEventToAgenda = (...args) => (persistenceDependencyContext.getStore()?.publishCanonicalEventToAgenda || defaultPublishCanonicalEventToAgenda)(...args);
-const SCOUTS_DECISION_QUEUE_URL = process.env.SCOUTS_DECISION_QUEUE_URL || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsDecision';
 const SCOUTS_PROCESSING_QUEUE_URL_FALLBACK =
     process.env.SCOUTS_PROCESSING_QUEUE_URL
     || 'https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsProcessing';
@@ -2905,20 +2904,6 @@ function buildSimpleMessage(event, actionLabel) {
     };
 }
 
-async function sendToScoutsDecisionQueue(payload) {
-    try {
-        const command = new SendMessageCommand({
-            QueueUrl: SCOUTS_DECISION_QUEUE_URL,
-            MessageBody: JSON.stringify(payload)
-        });
-        await sqsClient.send(command);
-        console.log('[SQS] Message sent to scoutsDecision queue successfully');
-    } catch (error) {
-        console.error('[SQS] Failed to send message to scoutsDecision queue:', error.message);
-        throw error;
-    }
-}
-
 async function postSlackMessage(message) {
     const slackBotToken = await getRequiredSecret('SLACK_BOT_TOKEN_PARAMETER');
     if (!SLACK_FEATURE_ENABLED) {
@@ -3851,7 +3836,7 @@ async function lambdaHandlerWithDependencies(event) {
             // Reconcile the existing review card with canonical persisted state.
             // This is deliberately best-effort: Slack failures must never roll back a successful event write.
             const eventTitle = event.title || event.summary || event.name || 'Unknown Event';
-            const slackSyncResult = await reconcileSlackDecision({
+            await reconcileSlackDecision({
                 event,
                 messageBody,
                 identifiers: deriveApprovalIdentifiers(event),
@@ -3864,33 +3849,6 @@ async function lambdaHandlerWithDependencies(event) {
             });
 
             console.log(`[Persist] Successfully persisted HEX file for ${eventTitle}`);
-            const decisionAction = slackSyncResult.decision.status === 'HIDDEN' ? 'hidden' : 'persisted';
-            const decisionSubject = {
-                hex: hexValue,
-                title: eventTitle,
-            };
-            if (event.uid) {
-                decisionSubject.uid = event.uid;
-            }
-
-            try {
-                const decisionPayload = {
-                    realm: 'sqs2scouts',
-                    action: decisionAction,
-                    subject: decisionSubject,
-                    source: 'sqs2scouts',
-                    requestId: requestContext.requestId,
-                    requestHex: requestContext.hex ?? hexValue,
-                };
-                console.log('[Persist] Sending decision notification', {
-                    action: decisionPayload?.action ?? null,
-                    hasSubject: decisionPayload?.subject !== undefined && decisionPayload?.subject !== null,
-                });
-                await sendToScoutsDecisionQueue(decisionPayload);
-            } catch (queueErr) {
-                console.warn('[Persist] Failed to notify scoutsDecision queue:', queueErr?.message || queueErr);
-            }
-
             runtimeOutcome = { status: 'completed' };
             return {
                 statusCode: 200,

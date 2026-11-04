@@ -41,12 +41,6 @@ Parameters:
   QueueArn:
     Type: String
     Description: SQS queue ARN used as event source.
-  ScoutsDecisionQueueArn:
-    Type: String
-    Default: arn:aws:sqs:eu-west-2:553490163883:scoutsDecision
-  ScoutsDecisionQueueUrl:
-    Type: String
-    Default: https://sqs.eu-west-2.amazonaws.com/553490163883/scoutsDecision
   DlqArn:
     Type: String
     Default: arn:aws:sqs:eu-west-2:553490163883:scoutsProcessingDLQ
@@ -260,7 +254,6 @@ Resources:
                   - sqs:SendMessage
                 Resource:
                   - !Ref QueueArn
-                  - !Ref ScoutsDecisionQueueArn
                   - !Ref DlqArn
               - Effect: Allow
                 Action:
@@ -337,7 +330,6 @@ Resources:
           SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
           SCOUTS_NOTIFICATION_CHANNEL: !Ref ScoutsNotificationChannel
           SCOUTS2SQS_FUNCTION_URL: !Ref Scouts2SqsFunctionUrl
-          SCOUTS_DECISION_QUEUE_URL: !Ref ScoutsDecisionQueueUrl
           SCOUTS_PROCESSING_QUEUE_URL: !Ref ProcessingQueueUrl
           DLQ_URL: !Ref DlqUrl
           TARGET_BUCKET: !Ref TargetBucket
