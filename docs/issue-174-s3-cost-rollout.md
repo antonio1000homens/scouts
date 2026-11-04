@@ -922,3 +922,20 @@ manual consumer. No message body was read, and no message was received or
 changed. The intended notification consumer and alerting remain unverified;
 preserve the queue and its messages
 until that contract is confirmed.
+
+## Decision-queue backlog recheck (2026-11-04 10:11 UTC)
+
+AWS STS verified account `553490163883` before this read-only check. The
+`scoutsDecision` queue still has two visible messages, zero in-flight and
+delayed messages, and a 14-day retention period. The latest hourly
+`ApproximateAgeOfOldestMessage` maximum was 41,180 seconds at 09:11 UTC. The
+age has continued increasing since the first nonzero hourly datapoint, while
+the regional Lambda event-source mapping query for this queue returned no
+mappings. No message body was read, and no receive, delete, or other queue
+mutation was performed.
+
+This confirms the queue is not automatically consumed by a Lambda mapping and
+that the two notifications remain unacknowledged in SQS. It still does not
+identify an expected external or manual consumer. Keep the messages and
+retention intact until an owner confirms the consumer contract and alerting;
+do not claim prompt notification delivery from the successful producer send.
