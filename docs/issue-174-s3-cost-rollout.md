@@ -1439,18 +1439,17 @@ refresh rule remained enabled at `rate(6 hours)`. No historical snapshot S3
 objects were deleted.
 
 The implementation returns HTTP 410 for `subject=snapshot` before reaching
-the snapshot S3 read when disabled. The authenticated live HTTP response is
-still unverified: current-browser requests to `/admin/` and
-`/admin/index.html` returned HTTP 403, so no authenticated admin API request
-could be made. The stack parameter and Lambda environment are the live
-readback.
+the snapshot S3 read when disabled. At this 13:52 check, the authenticated HTTP
+response was not yet verified: current-browser requests to `/admin/` and
+`/admin/index.html` returned HTTP 403. The stack parameter and Lambda
+environment were the available live readback then; the later authenticated
+API probe is recorded below.
 
-Future deployments now default the flag to false in the workflow, deploy
-script, template, and handler fallback so an unrelated deploy cannot silently
-re-enable the API. Set `LEGACY_RUNTIME_SNAPSHOTS_ENABLED=true` explicitly for
-rollback. This does not prove historical task-token reconstruction or a
-seven-day post-change S3 request/cost comparison; those remain open issue
-criteria.
+The CloudFormation template, deploy script, and handler fallback now default
+the flag to false, so an unrelated deployment cannot silently re-enable the
+API. Set `LEGACY_RUNTIME_SNAPSHOTS_ENABLED=true` explicitly for rollback. This
+does not prove historical task-token reconstruction or a seven-day post-change
+S3 request/cost comparison; those remain open issue criteria.
 
 ## Calendar-feed staleness budget under six-hour cadence (2026-11-04)
 
