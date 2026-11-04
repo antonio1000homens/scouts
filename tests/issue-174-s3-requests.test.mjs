@@ -24,7 +24,7 @@ test('image HEAD checks are shared across duplicate events in one invocation', a
   await memo('website-bucket', 'website/eventImages/other.jpg', check);
   await memo('other-bucket', 'website/eventImages/shared.jpg', check);
   assert.equal(checks, 3, 'cache keys must include both bucket and object');
-  assert.deepEqual(memo.stats(), { requests: 3, cacheHits: 19 });
+  assert.deepEqual(memo.stats(), { requests: 3, cacheHits: 19, warmCacheHits: 0 });
 });
 
 test('public image CDN routing leaves fresh agenda reads on the disabled-cache behavior', () => {
@@ -85,7 +85,7 @@ test('warm image cache reuses only recent positive checks and revalidates after 
   const warm = createImageHeadMemo({ positiveCache, positiveCacheTtlMs: 8 * 60 * 60 * 1000, now: () => now });
   assert.equal(await warm('bucket', 'existing.jpg', check), true);
   assert.equal(checks, 1, 'a recent positive check should avoid a repeat HEAD');
-  assert.deepEqual(warm.stats(), { requests: 0, cacheHits: 1 });
+  assert.deepEqual(warm.stats(), { requests: 0, cacheHits: 1, warmCacheHits: 1 });
 
   now += 3 * 60 * 60 * 1000;
   const expired = createImageHeadMemo({ positiveCache, positiveCacheTtlMs: 8 * 60 * 60 * 1000, now: () => now });

@@ -399,7 +399,8 @@ not measure a change in bucket-wide S3 requests or charges.
    The image verifier is create-only and canonical event objects are not
    removed or replaced by DynamoDB.
 6. Emit **one aggregate log per refresh** for `reusedHexReads`,
-   `imageHead.requests` and `imageHead.cacheHits`. No custom
+   `imageHead.requests`, `imageHead.cacheHits` and
+   `imageHead.warmCacheHits` (cross-invocation positive checks reused). No custom
    CloudWatch metrics, high-cardinality object-key logging, or new
    paid monitoring were added.
 7. Emit low-cardinality per-invocation S3 SDK call counts by operation, with

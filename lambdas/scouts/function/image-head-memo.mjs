@@ -14,6 +14,7 @@ export function createImageHeadMemo({
 } = {}) {
   const checks = new Map();
   let cacheHits = 0;
+  let warmCacheHits = 0;
   let requests = 0;
   function imageHead(bucket, key, check) {
     const cacheKey = JSON.stringify([bucket, key]);
@@ -31,6 +32,7 @@ export function createImageHeadMemo({
         positiveCache.delete(cacheKey);
         positiveCache.set(cacheKey, cached);
         cacheHits += 1;
+        warmCacheHits += 1;
         const resolved = Promise.resolve(true);
         checks.set(cacheKey, resolved);
         return resolved;
@@ -61,6 +63,6 @@ export function createImageHeadMemo({
     checks.set(cacheKey, pending);
     return pending;
   }
-  imageHead.stats = () => ({ requests, cacheHits });
+  imageHead.stats = () => ({ requests, cacheHits, warmCacheHits });
   return imageHead;
 }
