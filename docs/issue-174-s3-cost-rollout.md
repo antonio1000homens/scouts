@@ -887,6 +887,27 @@ that readback, remove it if the data is no longer needed and record the
 resulting CloudWatch cost change. No CloudWatch or S3 configuration was
 changed during this read-only check.
 
+## Image HEAD cache cost assessment (2026-11-04)
+
+The deployed scheduled refresh cadence is six hours (four runs/day). The
+post-change SDK summaries recorded 35–36 image HEAD calls per scheduled run.
+At most, a perfectly warm Lambda execution environment with stable image keys
+and an eight-hour positive cache would reuse checks on every other run: about
+2,160 fewer SDK calls over a 30-day month. The October eu-west-2 S3 Cost
+Explorer line was $0.20060 for 477,611 Tier-2 requests, an observed effective
+rate of about $0.00042 per 1,000 requests. Applying that rate gives an
+illustrative maximum saving of **about $0.00091/month** if each avoided SDK
+call maps to one billable request. This is not a bill-level attribution: SDK
+counts and best-effort bucket metrics have not reconciled, and cold starts,
+new image keys, or environment replacement would reduce warm-cache hits.
+
+That potential saving is below one tenth of a cent per month and does not
+justify delaying detection of a deleted image by up to eight hours. Keep the
+existing per-invocation deduplication, which has no cross-refresh staleness,
+and do not deploy the additional warm-instance cache proposed in PR #222.
+This is a measured no-change decision for this optimization, not evidence that
+the broader S3 request work has no savings.
+
 ## SQS queue recheck (2026-11-04 08:48 UTC)
 
 AWS STS verified account `553490163883`. A read-only inventory found five
