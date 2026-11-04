@@ -963,3 +963,16 @@ seconds, so the metric did not rise monotonically across the full interval.
 This confirms an old outstanding notification, but the approximation alone
 does not identify which message is oldest or whether the consumer contract
 changed. No message body was read and no queue operation changed state.
+
+## Deferred-refresh production configuration (2026-11-04 10:22 UTC)
+
+AWS STS verified account `553490163883`. The `scouts-lambda` stack was
+`UPDATE_COMPLETE`; its scheduled refresh rule was enabled at `rate(6 hours)`.
+The `scouts` Lambda reported `LastUpdateStatus=Successful`, with
+`SCOUTS_DEFERRED_REFRESH_ENABLED=false`, an empty
+`SCOUTS_DEFERRED_REFRESH_TABLE_NAME`, and
+`SCOUTS_SCHEDULED_REFRESH_MAX_EVENTS=0`. CloudFormation also reported
+`DeferredRefreshOutboxEnabled=false`; no deferred-outbox table resource was
+present in the stack. The outbox implementation is therefore not active in
+production, and there is no live backlog or drain-lag sample. No AWS resources
+were changed during this readback.
