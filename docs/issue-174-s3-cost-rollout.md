@@ -973,6 +973,8 @@ The `scouts` Lambda reported `LastUpdateStatus=Successful`, with
 `SCOUTS_DEFERRED_REFRESH_TABLE_NAME`, and
 `SCOUTS_SCHEDULED_REFRESH_MAX_EVENTS=0`. CloudFormation also reported
 `DeferredRefreshOutboxEnabled=false`; no deferred-outbox table resource was
-present in the stack. The outbox implementation is therefore not active in
-production, and there is no live backlog or drain-lag sample. No AWS resources
-were changed during this readback.
+present in the stack, and a direct read-only `DescribeTable` confirmed that
+`scouts-deferred-refresh` does not exist in `eu-west-2`. The outbox
+implementation is therefore not active in production, and there is no live
+backlog or drain-lag sample. No AWS resources were changed during this
+readback.
