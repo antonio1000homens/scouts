@@ -51,8 +51,11 @@ function awsRaw(args, { maxBuffer = 1024 * 1024 } = {}) {
   }
 }
 
-function awsJson(args) {
+function awsJson(args, { allowEmpty = false } = {}) {
   const output = awsRaw([...args, '--output', 'json']);
+  // AWS CLI emits no bytes for an empty DynamoDB GetItem response in some
+  // CLI versions. That is a valid “not found” result for this preflight.
+  if (allowEmpty && !output.trim()) return {};
   return JSON.parse(output);
 }
 
@@ -211,7 +214,7 @@ for (const candidate of candidates) {
     'dynamodb', 'get-item', '--table-name', ACTIVITY_TABLE,
     '--key', JSON.stringify({ requestId: { S: planned.id } }),
     '--consistent-read', '--projection-expression', 'requestId',
-  ]).Item;
+  ], { allowEmpty: true }).Item;
   plans.push({ ...planned, alreadyExists: Boolean(existing) });
 }
 
