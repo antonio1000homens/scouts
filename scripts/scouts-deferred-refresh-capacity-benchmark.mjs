@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -170,6 +171,22 @@ function addThrottle(report, operation, error) {
   report.throttles.byOperation[operation] = (report.throttles.byOperation[operation] || 0) + 1;
   const errorName = getErrorName(error);
   report.throttles.byError[errorName] = (report.throttles.byError[errorName] || 0) + 1;
+}
+
+export function assessBenchmark(report) {
+  const expected = Math.max(0, Math.trunc(Number(report?.benchmark?.syntheticItems) || 0));
+  const blockers = [];
+  if (expected === 0) blockers.push('synthetic_workload_missing');
+  if (Number(report?.throttles?.total || 0) > 0) blockers.push('throttled_operations');
+  if (Number(report?.enqueue?.succeeded || 0) !== expected) blockers.push('enqueue_incomplete');
+  if (Number(report?.dispatch?.dispatched || 0) !== expected) blockers.push('dispatch_incomplete');
+  if (report?.dispatch?.remainingReady !== 0) blockers.push(
+    report?.dispatch?.remainingReady == null ? 'ready_backlog_unmeasured' : 'ready_backlog_remaining',
+  );
+  if (report?.dispatch?.remainingLeased !== 0) blockers.push(
+    report?.dispatch?.remainingLeased == null ? 'leased_backlog_unmeasured' : 'leased_backlog_remaining',
+  );
+  return { status: blockers.length === 0 ? 'pass' : 'fail', blockers };
 }
 
 async function tableInventory(aws) {
@@ -594,11 +611,14 @@ async function main() {
       }
     }
   }
+  report.capacityAssessment = assessBenchmark(report);
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-  if (failed || !report.cleanup.deleted) process.exitCode = 1;
+  if (failed || !report.cleanup.deleted || report.capacityAssessment.status !== 'pass') process.exitCode = 1;
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error.message || error}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    process.stderr.write(`${error.message || error}\n`);
+    process.exitCode = 1;
+  });
+}

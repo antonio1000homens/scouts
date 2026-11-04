@@ -238,7 +238,9 @@ its temporary table in `finally`; if the process is forcibly terminated,
 inspect/delete the printed table name before retrying. This benchmark reports
 the capacity envelope for its synthetic workload, not production queue age or
 representativeness of the real work mix. Do not treat it as the staged live
-outbox acceptance gate.
+outbox acceptance gate. Apply mode exits nonzero if any operation throttles,
+enqueue or dispatch is incomplete, backlog remains, or backlog could not be
+measured; only a fully drained, unthrottled run is marked as a capacity pass.
 
 Final ready/leased backlog fields sum explicit paginated `COUNT` queries, up to
 100 pages; they do not inherit the dispatcher's 10-item batch limit and fail
