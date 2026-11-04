@@ -1096,3 +1096,51 @@ activity write or a human notification. Disabling the mapping would leave
 those failures out of the Activity ledger, so keep it enabled until a tested
 replacement preserves the activity record, queue-depth visibility and manual
 redrive path.
+
+## Seven-day S3 request attribution readback (2026-11-04 11:26 UTC)
+
+The bounded read-only collector verified AWS account `553490163883` and queried
+the complete window 2026-10-28 11:26–2026-11-04 11:26 UTC. All six CloudWatch
+metric queries completed in one page; both hourly CloudWatch Logs passes
+completed without truncation. The 60-second metric series contained 712
+nonempty timestamp bins. The S3 totals below are bucket-wide and include
+browser/admin and other callers; they do not identify a request's caller.
+
+| UTC day | GET | HEAD | LIST | PUT | Scouts Lambda invocations | Errors |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Oct 28 (partial) | 7,024 | 1,100 | 50 | 81 | 25 | 0 |
+| Oct 29 | 13,637 | 2,112 | 96 | 146 | 48 | 0 |
+| Oct 30 | 13,887 | 2,112 | 96 | 146 | 48 | 0 |
+| Oct 31 | 13,670 | 2,112 | 96 | 146 | 48 | 0 |
+| Nov 1 | 13,633 | 2,112 | 111 | 224 | 48 | 0 |
+| Nov 2 | 13,674 | 2,112 | 96 | 144 | 48 | 0 |
+| Nov 3 | 11,631 | 2,065 | 159 | 520 | 47 | 0 |
+| Nov 4 (partial) | 398 | 160 | 18 | 80 | 2 | 0 |
+
+The five complete pre-cutover days (Oct 29–Nov 2) averaged 13,700 GET,
+2,112 HEAD, 99 LIST and 161 PUT requests per day. The change was deployed on
+Nov 3 at approximately 19:42 UTC, so Nov 3 is a mixed day and is excluded from
+that baseline. From 19:42 UTC Nov 3 through 11:26 UTC Nov 4, the bucket recorded
+953 GET, 467 HEAD, 68 LIST and 332 PUT requests, across 54 nonzero minute bins;
+Scouts recorded nine Lambda invocations and zero errors in that interval.
+This shorter post-cutover interval is neither a full-day comparison nor
+caller-specific evidence. Its HEAD/PUT counts do not establish regression or
+savings: the interval is shorter than the baseline days, includes unrelated
+bucket traffic, and may reflect best-effort metric delivery and a different
+workload mix.
+
+Six SDK summaries were captured: five `scheduled-refresh` and one
+`non-scheduled`. The three summaries timestamped after the cutover report
+177–178 `GetObject`, 38 `HeadObject`, 2 `ListObjectsV2`, and 1–3 `PutObject`
+calls per invocation. Their matching per-refresh summaries show 98–99 reused
+HEX reads and 35–36 image HEAD requests with six in-invocation cache hits.
+These are SDK operation counts, not billable S3 wire-request totals; they
+cannot be reconciled one-to-one with the bucket metrics. The evidence confirms
+the instrumented call-site mix and a continuing per-refresh reuse effect, but
+does not yet prove a seven-day post-change reduction or bill-level savings.
+Collect a mature seven-day window after the cutover and compare it with posted
+S3 charges before claiming savings.
+
+The read-only result was saved locally at
+`/tmp/scouts-174-attribution-7d-20261104.json`; it is not part of this
+repository change. The collector made no AWS writes.
