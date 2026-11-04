@@ -1,84 +1,29 @@
-# Scouts.mjs - scoutsDecision Queue Realm Support
+# `scoutsDecision` queue: current contract
 
-## Overview
-The `scouts.mjs` Lambda function receives messages from the `scoutsDecision` SQS queue and processes them based on their realm.
+> This file previously described an automatic SQS consumer in the `scouts`
+> Lambda. That description is obsolete. The current repository has no
+> `scoutsDecision` Lambda event-source mapping, and `scouts` does not process
+> queue records as an invocation path.
 
-## Supported Realms from scoutsDecision Queue
+## Current behavior
 
-### 1. **sqs2scouts** Realm
-**Purpose**: React to persistence outcomes reported by the `sqs2scouts` lambda.
+Producers send terminal decision notifications to `scoutsDecision`. The
+`scouts` Operations view reads queue attributes and CloudWatch queue metrics;
+it does not receive or delete messages. No in-repository automatic consumer
+for this queue is configured. Any external consumer must be identified and
+reviewed before changing message retention, payloads, or queue ownership.
 
-**Actions**:
-- `persisted`: HEX file saved successfully. Scouts lambda checks whether the HEX is complete (tagline + stored image theme + image URL). `imagePrompt` may still appear as a derived/compatibility prompt concept, but it is not intended to be a separately stored completion field. If anything is missing it does not requeue from this callback path; otherwise the agenda entry is updated with the final AI/image data.
-- `hidden`: Event status is `hidden`. Scouts lambda updates `agenda.json` so the event disappears from the public feed.
+The CloudFormation mapping inventory is in
+[`SCOUTS-REQUEST-PIPELINE.md`](docs/SCOUTS-REQUEST-PIPELINE.md), and the
+Operations read-only behavior is in
+[`SQS-MESSAGE-LIMITS.md`](docs/SQS-MESSAGE-LIMITS.md). Keep
+`scoutsDecision` unmapped to `scouts`; adding that mapping would create a
+feedback path from terminal notifications into request discovery.
 
-**Code Location**: `scouts.mjs` around the `structuredCommand.realm === 'sqs2scouts'` branch (~2090 onwards).
+## Historical context
 
-**Example Message**:
-```json
-{
-  "realm": "sqs2scouts",
-  "action": "persisted",
-  "subject": {
-    "hex": "776f726b696e6720646f6773",
-    "title": "Working dogs"
-  },
-  "source": "sqs2scouts"
-}
-```
-
-Hidden event notifications look similar but include `action: "hidden"` and, when available, a `uid` in the subject so agenda updates can match either UID or HEX.
-
-### 2. **scouts** Realm (commands)
-**Purpose**: Internal triggers initiated by scouts.mjs itself (e.g. fresh fetches, reset, or manual resume requests).
-
-**Supported Actions**:
-- `reset`: When `subject === 'agenda'`, deletes cached agenda and ICS files before repopulating.
-- Event requests: When `subject === 'events'` and `action` is a number, instructs scouts.mjs to queue that many new events via `realm: 'scoutsRequest'`.
-
-**Code Location**: `scouts.mjs` command parsing logic (~1960-2050).
-
-## Message Flow
-
-### From SQS to Processing
-1. Message arrives in `scoutsDecision` queue
-2. SQS triggers `scouts.mjs` Lambda
-3. Lambda extracts message from SQS record
-4. Message is reprocessed as HTTP request (recursive call)
-5. Realm-specific handler processes the request
-
-**SQS Handler Code** (Lines 1828-1858):
-```javascript
-if (event.Records && Array.isArray(event.Records)) {
-  for (const record of event.Records) {
-    const messageBody = JSON.parse(record.body);
-    const sqsEvent = {
-      ...messageBody,
-      headers: {},
-      requestContext: { http: { method: 'POST' } },
-      body: JSON.stringify(messageBody),
-      _triggeredBySqs: true
-    };
-    const result = await lambdaHandler(sqsEvent);
-  }
-}
-```
-
-## Downstream Queue Integration
-
-### scoutsRequests Queue
-Scouts.mjs sends messages to the `scoutsRequests` queue when:
-- A `persisted` notification arrives but the HEX is still incomplete → no requeue is performed from this callback path.
-- A reset command removes cached state → follow-up work items are enqueued so enrichment can restart.
-
-## Summary
-
-| Realm | Purpose | Sends To | Slack Update |
-|-------|---------|----------|--------------|
-| sqs2scouts | Persisted/hidden notifications from sqs2scouts lambda | scoutsRequests (only when enrichment still needed) | Handled upstream in sqs2scouts (scouts.mjs only updates agenda) |
-| scouts | Internal commands for resets and event batches | scoutsRequests | No |
-
-## Notes
-- Only `sqs2scouts` notifications are expected from the decision queue after the persistence refactor; approval/hide realms were removed in favour of the persist pipeline.
-- The `_triggeredBySqs` flag indicates messages came from SQS (affects default behaviour).
-- Messages are reprocessed recursively to maintain consistent handling logic.
+The previous version documented a proposed recursive SQS-to-HTTP handler and
+realm-specific callbacks. Those code snippets and flow descriptions no longer
+match the current source or deployed CloudFormation templates. Consult Git
+history if the original design is needed; do not use it as an operational
+runbook.

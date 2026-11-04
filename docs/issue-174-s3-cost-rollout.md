@@ -803,6 +803,14 @@ or existing Activity records, and created none. The strongly consistent,
 two-item-page scan consumed 1,942 read capacity units, so a migration run has
 a material read cost. Expected missing-object diagnostics are suppressed so
 the utility emits aggregate results without HEX values or AWS error text.
+For a future dry-run that needs row-level owner review, pass
+`--review-manifest <path>` with a destination outside the checkout. The
+manifest destination is checked before AWS calls, then created exclusively
+with owner-only (`0600`) permissions; it contains HEX, source stage/time,
+canonical-event classification, planned state, retryability and
+existing-record status, but omits event titles and raw error details. It is
+unavailable with `--apply`. Do not rerun the production scan solely to
+generate this file: the prior full scan consumed 1,942 RCUs.
 
 Event-backed rows are imported as `manual_review` with their supported stage,
 so existing Activity Centre retry controls can re-read and conditionally reset
@@ -854,6 +862,51 @@ not costs isolated to this bucket. In particular, the lower estimated storage
 line items cannot be attributed to this code change. This readback therefore
 does not establish a charge reduction. Collect posted daily costs and a mature
 aligned seven-day post-change request window before evaluating savings.
+
+## CloudWatch request-metric cost attribution (2026-11-04)
+
+After verifying account `553490163883`, a read-only inventory found exactly
+one S3 request-metrics configuration across the account's three buckets:
+`CodexRequestCostAudit` on `scouts-2ndtolworth-prod-553490163883`, in
+`eu-west-2`, without a prefix filter. October Cost Explorer usage grouped by
+usage type and operation reported `EUW2-CW:MetricMonitorUsage` /
+`MetricStorage:AWS/S3` at **10.6747311566 metric units and $0.2036297891**.
+The same query reported five alarm units at $0 and
+`MetricStorage:AWS/Logs-EMF` at $0; the S3 metric line accounts for the
+reported October CloudWatch total of $0.20363. This attributes that metric-
+storage charge to the existing S3 request-metrics configuration; it is a
+separate cost from S3 request charges and belongs in the optimisation's
+before/after accounting. AWS documents that S3 request metrics are billed at
+the CloudWatch custom-metric rate and delivered on a best-effort basis ([S3
+CloudWatch monitoring](https://docs.aws.amazon.com/AmazonS3/latest/userguide/cloudwatch-monitoring.html),
+[CloudWatch billing identifiers](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch_billing.html)).
+
+The configuration remains enabled to collect the aligned post-change request
+window. Do not disable it before the seven-day comparison is complete; after
+that readback, remove it if the data is no longer needed and record the
+resulting CloudWatch cost change. No CloudWatch or S3 configuration was
+changed during this read-only check.
+
+## Image HEAD cache cost assessment (2026-11-04)
+
+The deployed scheduled refresh cadence is six hours (four runs/day). The
+post-change SDK summaries recorded 35–36 image HEAD calls per scheduled run.
+At most, a perfectly warm Lambda execution environment with stable image keys
+and an eight-hour positive cache would reuse checks on every other run: about
+2,160 fewer SDK calls over a 30-day month. The October eu-west-2 S3 Cost
+Explorer line was $0.20060 for 477,611 Tier-2 requests, an observed effective
+rate of about $0.00042 per 1,000 requests. Applying that rate gives an
+illustrative maximum saving of **about $0.00091/month** if each avoided SDK
+call maps to one billable request. This is not a bill-level attribution: SDK
+counts and best-effort bucket metrics have not reconciled, and cold starts,
+new image keys, or environment replacement would reduce warm-cache hits.
+
+That potential saving is below one tenth of a cent per month and does not
+justify delaying detection of a deleted image by up to eight hours. Keep the
+existing per-invocation deduplication, which has no cross-refresh staleness,
+and do not deploy the additional warm-instance cache proposed in PR #222.
+This is a measured no-change decision for this optimization, not evidence that
+the broader S3 request work has no savings.
 
 ## SQS queue recheck (2026-11-04 08:48 UTC)
 
@@ -923,6 +976,56 @@ changed. The intended notification consumer and alerting remain unverified;
 preserve the queue and its messages
 until that contract is confirmed.
 
+## S3 request attribution recheck (2026-11-04 09:24 UTC)
+
+AWS STS verified account `553490163883` before running the read-only collector.
+The complete CloudWatch query covered 2026-11-03 19:42 through 2026-11-04
+09:20 UTC, returned all six metric statuses in one page, and searched the
+Lambda logs without truncation. The bucket-wide request metrics contained 922
+GET, 408 HEAD, 65 LIST and 331 PUT requests across 50 nonzero minute bins.
+The final nonzero S3 bin was 09:07, about 13 minutes behind the query end.
+Several bursts do not line up with scheduled refreshes, including a PUT/LIST
+burst around 09:02–09:03 during the website deployment; bucket metrics remain
+best-effort and cannot identify callers.
+
+Four SDK summaries were recovered: three scheduled refreshes at 19:44, 00:20
+and 06:20, with respectively 177/38/2/1, 176/38/2/3, and 178/38/2/1
+Get/Head/List/Put SDK calls, all classified to the data bucket. A non-scheduled
+invocation at 22:44 recorded 167/35/2/2 calls. Per-refresh summaries recorded
+98–99 reused HEX reads and 35–36 image HEAD requests with six cache hits. SDK
+calls are not billable wire counts because retries may add requests; the
+non-scheduled canary and website deployment also contaminate this short
+window. It is not a clean before/after comparison and does not establish
+savings. Continue the aligned seven-day collection and compare against posted
+S3 charges before making a cost claim.
+
+## S3 request attribution readback (2026-11-04 09:58 UTC)
+
+AWS STS verified account `553490163883` before the read-only queries. A direct
+CloudWatch statistics query returned seven complete daily bins from Oct 28
+through Nov 3: 93,597 GET, 14,737 HEAD, 750 LIST and 1,476 PUT requests for
+the whole bucket metric filter. The Nov 3 bin alone contained 11,631 GET,
+2,065 HEAD, 159 LIST and 520 PUT requests. These are bucket-wide counts and
+the Nov 3 bin straddles the 19:42 schedule cutover; the PUT burst also overlaps
+deployments and the synthetic canary, so it cannot be assigned to refresh
+code.
+
+For the 19:42–09:58 post-cutover interval, one-minute bucket metrics reported
+925 GET, 413 HEAD, 68 LIST and 332 PUT requests, alongside nine `scouts`
+Lambda invocations and zero errors. The collector returned all six metric
+series in one page. Its hourly-partitioned CloudWatch Logs filter searches were
+complete and not truncated. They found three scheduled refresh summaries at
+19:44, 00:20 and 06:20 with 177/38/2/1, 176/38/2/3 and 178/38/2/1 Get/Head/
+List/Put SDK calls respectively, plus one non-scheduled invocation at 22:44
+with 167/35/2/2 calls. Per-refresh summaries recorded 98–100 reused HEX reads
+and 35–36 image HEAD requests with six cache hits.
+
+The bucket-wide interval grew only slightly from the prior 09:24 readback
+(922/408/65/331), while invocation-level SDK activity still does not reconcile
+with bucket metrics or identify browser/CDN callers. This short interval
+remains insufficient for a seven-day post-change trend or a posted-charge
+comparison; it does not prove bill-level savings.
+
 ## Decision-queue backlog recheck (2026-11-04 10:11 UTC)
 
 AWS STS verified account `553490163883` before this read-only check. The
@@ -952,18 +1055,6 @@ headroom or the delivery contract for the two pending notifications. Keep the
 existing processing mappings until a tested replacement preserves failure
 activity and the free-tier projection or actual charges justify a change.
 
-## Decision-queue age sample (2026-11-04 10:34 UTC)
-
-AWS STS verified account `553490163883`. A read-only attribute request still
-returned two visible `scoutsDecision` messages, zero in-flight and delayed
-messages, and 14-day retention. The latest five-minute
-`ApproximateAgeOfOldestMessage` maximum was 42,553 seconds at 10:30 UTC. The
-intervening five-minute datapoints since 09:55 ranged from 40,514 to 42,553
-seconds, so the metric did not rise monotonically across the full interval.
-This confirms an old outstanding notification, but the approximation alone
-does not identify which message is oldest or whether the consumer contract
-changed. No message body was read and no queue operation changed state.
-
 ## Deferred-refresh production configuration (2026-11-04 10:22 UTC)
 
 AWS STS verified account `553490163883`. The `scouts-lambda` stack was
@@ -978,6 +1069,18 @@ present in the stack, and a direct read-only `DescribeTable` confirmed that
 implementation is therefore not active in production, and there is no live
 backlog or drain-lag sample. No AWS resources were changed during this
 readback.
+
+## Decision-queue age sample (2026-11-04 10:34 UTC)
+
+AWS STS verified account `553490163883`. A read-only attribute request still
+returned two visible `scoutsDecision` messages, zero in-flight and delayed
+messages, and 14-day retention. The latest five-minute
+`ApproximateAgeOfOldestMessage` maximum was 42,553 seconds at 10:30 UTC. The
+intervening five-minute datapoints since 09:55 ranged from 40,514 to 42,553
+seconds, so the metric did not rise monotonically across the full interval.
+This confirms an old outstanding notification, but the approximation alone
+does not identify which message is oldest or whether the consumer contract
+changed. No message body was read and no queue operation changed state.
 
 ## CloudWatch queue-alert coverage (2026-11-04 10:51 UTC)
 
