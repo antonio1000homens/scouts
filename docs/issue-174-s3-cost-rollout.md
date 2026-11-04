@@ -1343,3 +1343,30 @@ The template's explicit rollback cadence remains `rate(30 minutes)`.
 `LegacyRuntimeSnapshotsEnabled=true` and `DeferredRefreshOutboxEnabled=false`
 remain deployed. This is a configuration readback; it does not substitute for
 a mature post-change S3 request comparison.
+
+## Calendar-feed staleness budget under six-hour cadence (2026-11-04)
+
+The deployed six-hour EventBridge cadence is not the calendar-source freshness
+bound. `scouts-service.mjs` reuses an S3 ICS cache while its `LastModified` age
+is at most 24 hours. With nominal six-hour invocations, a source update just
+after a successful feed fetch can therefore remain unseen until the next run
+after that cache crosses 24 hours: roughly 30 hours in the no-error case. This
+is about 5.5 hours longer than the previous nominal 30-minute schedule with
+the same 24-hour cache. It is a timing bound under successful invocations and
+successful source fetches, not a guarantee during feed failures; on a feed
+error, merge logic retains existing agenda entries until a later successful
+fetch.
+
+The Admin “Run refresh now” control sends `refreshAllCalendars` with
+`maxEvents: 0`, so it performs calendar/agenda work without publishing new
+enrichment jobs. The ordinary Admin “Sync calendars & agenda” control sends
+the same calendar action. Neither sets a cache-bypass option: both reuse an
+ICS object still within the 24-hour freshness window and fetch from the source
+only when the cache is stale or missing. This preserves current manual behavior
+but means “run now” is not a force-refresh of an upstream feed.
+
+The owner has confirmed that scheduled refreshes are non-time-critical, but
+has not set a numeric maximum source-to-agenda staleness target. Record the
+roughly 30-hour nominal bound and keep that acceptance distinction explicit;
+do not describe six-hour cadence as six-hour calendar freshness. Feed errors
+can extend staleness and remain visible through per-feed failure diagnostics.
