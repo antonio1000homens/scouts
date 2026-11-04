@@ -863,6 +863,30 @@ line items cannot be attributed to this code change. This readback therefore
 does not establish a charge reduction. Collect posted daily costs and a mature
 aligned seven-day post-change request window before evaluating savings.
 
+## CloudWatch request-metric cost attribution (2026-11-04)
+
+After verifying account `553490163883`, a read-only inventory found exactly
+one S3 request-metrics configuration across the account's three buckets:
+`CodexRequestCostAudit` on `scouts-2ndtolworth-prod-553490163883`, in
+`eu-west-2`, without a prefix filter. October Cost Explorer usage grouped by
+usage type and operation reported `EUW2-CW:MetricMonitorUsage` /
+`MetricStorage:AWS/S3` at **10.6747311566 metric units and $0.2036297891**.
+The same query reported five alarm units at $0 and
+`MetricStorage:AWS/Logs-EMF` at $0; the S3 metric line accounts for the
+reported October CloudWatch total of $0.20363. This attributes that metric-
+storage charge to the existing S3 request-metrics configuration; it is a
+separate cost from S3 request charges and belongs in the optimisation's
+before/after accounting. AWS documents that S3 request metrics are billed at
+the CloudWatch custom-metric rate and delivered on a best-effort basis ([S3
+CloudWatch monitoring](https://docs.aws.amazon.com/AmazonS3/latest/userguide/cloudwatch-monitoring.html),
+[CloudWatch billing identifiers](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch_billing.html)).
+
+The configuration remains enabled to collect the aligned post-change request
+window. Do not disable it before the seven-day comparison is complete; after
+that readback, remove it if the data is no longer needed and record the
+resulting CloudWatch cost change. No CloudWatch or S3 configuration was
+changed during this read-only check.
+
 ## SQS queue recheck (2026-11-04 08:48 UTC)
 
 AWS STS verified account `553490163883`. A read-only inventory found five
