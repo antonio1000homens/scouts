@@ -47,8 +47,9 @@ function helpText() {
     '',
     'The benchmark uses a temporary PROVISIONED table and GSI at 1 RCU/1 WCU each,',
     'creates up to 100 synthetic rows, simulates 10-item dispatches with no SQS sends,',
-    'records consumed capacity and throttles, then deletes its table. It never enables',
-    'the production outbox or reads production event data. Run only after owner approval.',
+    'records consumed capacity and throttles, and deletes only a table with its run tags.',
+    'Apply exits nonzero on throttles or incomplete enqueue/drain. It never enables the',
+    'production outbox or reads production event data. Run only after owner approval.',
   ].join('\n');
 }
 
@@ -222,7 +223,7 @@ async function verifyPayerScope(aws, accountId) {
   }
 }
 
-async function createBenchmarkTable(aws, tableName) {
+async function createBenchmarkTable(aws, tableName, runId) {
   return aws([
     'dynamodb', 'create-table',
     '--table-name', tableName,
@@ -248,8 +249,34 @@ async function createBenchmarkTable(aws, tableName) {
     '--tags', JSON.stringify([
       { Key: 'Purpose', Value: 'issue-174-capacity-benchmark' },
       { Key: 'Owner', Value: 'codex-temporary' },
+      { Key: 'RunId', Value: runId },
     ]),
   ]);
+}
+
+export async function cleanupBenchmarkTable(aws, tableName, runId, { sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
+  let table;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      table = (await aws(['dynamodb', 'describe-table', '--table-name', tableName])).Table;
+      break;
+    } catch (error) {
+      if (getErrorName(error) !== 'ResourceNotFoundException') throw error;
+      if (attempt === 4) return { deleted: false, error: 'BenchmarkTableNotVisibleAfterCreateAttempt' };
+      await sleep(1000);
+    }
+  }
+
+  if (!table?.TableArn) throw new Error('Benchmark table exists without a readable ARN; refusing cleanup');
+  const tagResult = await aws(['dynamodb', 'list-tags-of-resource', '--resource-arn', table.TableArn]);
+  const ownsTable = (tagResult.Tags || []).some((tag) => tag.Key === 'RunId' && tag.Value === runId)
+    && (tagResult.Tags || []).some((tag) => tag.Key === 'Purpose' && tag.Value === 'issue-174-capacity-benchmark');
+  if (!ownsTable) return { deleted: false, error: 'BenchmarkTableOwnershipMismatch' };
+
+  await aws(['dynamodb', 'wait', 'table-exists', '--table-name', tableName], { json: false });
+  await aws(['dynamodb', 'delete-table', '--table-name', tableName]);
+  await aws(['dynamodb', 'wait', 'table-not-exists', '--table-name', tableName], { json: false });
+  return { deleted: true, absent: false };
 }
 
 async function enqueueOne(aws, report, tableName, item, startedAt) {
@@ -540,13 +567,15 @@ async function main() {
     throw new Error('Refusing benchmark: current provisioned table/index capacity plus this benchmark exceeds the 25/25 Always Free allowance.');
   }
 
-  const suffix = `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
+  const runId = crypto.randomUUID();
+  const suffix = `${Date.now().toString(36)}-${runId.replaceAll('-', '').slice(0, 12)}`;
   const tableName = `scouts-174-capacity-benchmark-${suffix}`;
   const report = {
     mode: options.apply ? 'apply' : 'dry-run',
     account: identity.Account,
     region: REGION,
     profile: options.profile,
+    runId,
     tableName,
     benchmark: {
       syntheticItems: ITEM_COUNT,
@@ -583,12 +612,12 @@ async function main() {
     return;
   }
 
-  let tableCreated = false;
+  let tableCreateAttempted = false;
   let failed = false;
   try {
     process.stderr.write(`Creating temporary benchmark table ${tableName}; if interrupted, inspect and remove this table before retrying.\n`);
-    await createBenchmarkTable(aws, tableName);
-    tableCreated = true;
+    tableCreateAttempted = true;
+    await createBenchmarkTable(aws, tableName, runId);
     await aws(['dynamodb', 'wait', 'table-exists', '--table-name', tableName], { json: false });
     report.tableStatus = (await aws(['dynamodb', 'describe-table', '--table-name', tableName])).Table.TableStatus;
     await runBenchmark(aws, report, tableName, new Date());
@@ -596,18 +625,19 @@ async function main() {
     failed = true;
     report.error = getErrorName(error);
   } finally {
-    if (tableCreated) {
+    if (tableCreateAttempted) {
       report.cleanup.attempted = true;
       try {
-        await aws(['dynamodb', 'delete-table', '--table-name', tableName]);
-        await aws(['dynamodb', 'wait', 'table-not-exists', '--table-name', tableName], { json: false });
-        report.cleanup.deleted = true;
-      } catch (error) {
-        if (getErrorName(error) === 'ResourceNotFoundException') report.cleanup.deleted = true;
-        else {
+        const cleanup = await cleanupBenchmarkTable(aws, tableName, runId);
+        report.cleanup.deleted = cleanup.deleted;
+        if (cleanup.absent) report.cleanup.absent = true;
+        if (cleanup.error) {
           failed = true;
-          report.cleanup.error = getErrorName(error);
+          report.cleanup.error = cleanup.error;
         }
+      } catch (error) {
+        failed = true;
+        report.cleanup.error = getErrorName(error);
       }
     }
   }

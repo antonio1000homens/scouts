@@ -234,8 +234,9 @@ throttles, successful enqueue/dispatch counts, remaining backlog, and simulated
 maximum queue age. It uses no real event content and a no-op publisher: it does
 not send SQS messages, invoke enrichment providers, read S3, enable the
 production outbox, or change a production stack. The script attempts to delete
-its temporary table in `finally`; if the process is forcibly terminated,
-inspect/delete the printed table name before retrying. This benchmark reports
+its temporary table in `finally` and verifies unique run tags before deletion;
+if cleanup fails or the process is forcibly terminated, inspect the printed
+table name and tags before retrying or deleting it. This benchmark reports
 the capacity envelope for its synthetic workload, not production queue age or
 representativeness of the real work mix. Do not treat it as the staged live
 outbox acceptance gate. Apply mode exits nonzero if any operation throttles,
