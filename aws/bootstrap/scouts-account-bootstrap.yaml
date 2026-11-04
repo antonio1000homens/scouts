@@ -307,7 +307,7 @@ Resources:
                 Action:
                   - dynamodb:CreateTable
                 Resource: '*'
-              - Sid: GeminiUsageTableManagement
+              - Sid: ScoutsDynamoDBTableManagement
                 Effect: Allow
                 Action:
                   - dynamodb:DeleteTable
@@ -319,6 +319,7 @@ Resources:
                   - !Sub arn:aws:dynamodb:eu-west-2:${AWS::AccountId}:table/scouts-gemini-usage
                   - !Sub arn:aws:dynamodb:eu-west-2:${AWS::AccountId}:table/scouts-enrichment-state
                   - !Sub arn:aws:dynamodb:eu-west-2:${AWS::AccountId}:table/scouts-request-activity
+                  - !Sub arn:aws:dynamodb:eu-west-2:${AWS::AccountId}:table/scouts-deferred-refresh
               - Sid: GeminiAlarmManagement
                 Effect: Allow
                 Action:
