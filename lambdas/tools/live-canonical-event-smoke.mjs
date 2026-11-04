@@ -212,21 +212,48 @@ function objectExists(key) {
 }
 
 function deleteObjectChecked(key) {
-  aws(['s3api', 'delete-object', '--bucket', BUCKET, '--key', key, '--output', 'json']);
+  let before;
+  try {
+    before = headObject(key);
+  } catch (error) {
+    if (isNotFoundError(error)) return;
+    throw error;
+  }
+  aws(['s3api', 'delete-object', '--bucket', BUCKET, '--key', key, '--if-match', before.ETag, '--output', 'json']);
   if (objectExists(key)) throw new Error(`S3 object still exists after delete: ${key}`);
 }
 
-function listOwnedImageKeys(hex) {
-  const prefix = `website/eventImages/${hex}-`;
-  const response = JSON.parse(aws([
-    's3api', 'list-objects-v2',
-    '--bucket', BUCKET,
-    '--prefix', prefix,
-    '--output', 'json',
-  ]));
-  return (response?.Contents || [])
-    .map((entry) => entry?.Key)
-    .filter((key) => typeof key === 'string' && key.startsWith(prefix));
+function listOwnedKeys(prefix) {
+  const keys = [];
+  let continuationToken;
+  do {
+    const args = [
+      's3api', 'list-objects-v2',
+      '--bucket', BUCKET,
+      '--prefix', prefix,
+      '--output', 'json',
+    ];
+    if (continuationToken) args.push('--continuation-token', continuationToken);
+    const response = JSON.parse(aws(args));
+    keys.push(...(response?.Contents || []).map((entry) => entry?.Key).filter((key) => typeof key === 'string'));
+    continuationToken = response?.NextContinuationToken;
+  } while (continuationToken);
+  return keys;
+}
+
+function listOwnedEventKeys(hex) {
+  return listOwnedKeys(`events/${hex}`).filter((key) => key.endsWith('.json'));
+}
+
+function canaryImagePrefixes(hex, title) {
+  return [hex, ...['tagline', 'imageTheme', 'image'].map((stage) => titleToHex(`${title} ${stage}`))]
+    .map((candidate) => `website/eventImages/${candidate}-`);
+}
+
+function listOwnedImageKeys(hex, title) {
+  const prefixes = canaryImagePrefixes(hex, title);
+  return listOwnedKeys(`website/eventImages/${hex}`)
+    .filter((key) => prefixes.some((prefix) => key.startsWith(prefix)));
 }
 
 function sleep(ms) {
@@ -303,31 +330,35 @@ function formatIcsDate(iso) {
   return new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, '');
 }
 
-function assertOwnedAgendaEvent(event, hex, uids) {
+function assertOwnedAgendaEvent(event, hex, uids, title) {
   const ownedUids = new Set(Array.isArray(uids) ? uids : [uids]);
   if (!event) return;
+  const eventTitle = event?.title || event?.summary || '';
+  const titleIsOwned = eventTitle === title || eventTitle.startsWith(`${title} `);
+  const identityIsOwned = event?.metadata?.hex === hex
+    || (titleIsOwned && event?.metadata?.hex === titleToHex(eventTitle));
   if (
-    event?.metadata?.hex !== hex
-    || !ownedUids.has(event?.uid)
+    !ownedUids.has(event?.uid)
     || (event?.source?.uid !== undefined && !ownedUids.has(event?.source?.uid))
+    || !identityIsOwned
   ) {
     throw new Error(`Refusing to mutate non-canary agenda entry for HEX ${hex}`);
   }
 }
 
-function removeAgendaDummies(agenda, hex, uids) {
-  const matching = eventsFromAgenda(agenda, hex);
-  if (!matching.length) return agenda;
-  for (const event of matching) assertOwnedAgendaEvent(event, hex, uids);
+function removeAgendaDummies(agenda, hex, uids, title) {
   const ownedUids = new Set(uids);
+  const matching = (agenda?.events || []).filter((event) => ownedUids.has(event?.uid));
+  if (!matching.length) return agenda;
+  for (const event of matching) assertOwnedAgendaEvent(event, hex, uids, title);
   return {
     ...agenda,
     generatedAt: new Date().toISOString(),
-    events: (Array.isArray(agenda?.events) ? agenda.events : []).filter((event) => !(event?.metadata?.hex === hex && ownedUids.has(event?.uid))),
+    events: (Array.isArray(agenda?.events) ? agenda.events : []).filter((event) => !ownedUids.has(event?.uid)),
   };
 }
 
-function replaceAgendaMetadata(agenda, hex, uids, metadata, titleOverride = null, sectionOverride = null) {
+function replaceAgendaMetadata(agenda, hex, uids, metadata, titleOverride = null, sectionOverride = null, locationOverride = null) {
   let matched = false;
   const events = (Array.isArray(agenda?.events) ? agenda.events : []).map((event) => {
     if (event?.metadata?.hex !== hex) return event;
@@ -336,6 +367,7 @@ function replaceAgendaMetadata(agenda, hex, uids, metadata, titleOverride = null
     return {
       ...event,
       ...(titleOverride ? { title: titleOverride } : {}),
+      ...(locationOverride ? { location: locationOverride } : {}),
       ...(sectionOverride ? { source: { ...event.source, section: sectionOverride } } : {}),
       metadata: structuredClone(metadata),
     };
@@ -377,7 +409,15 @@ async function writeCanonicalState(hex, mutate, stage = null) {
   }, 'canonical event reset');
   await mutateJsonOptimistically(
     AGENDA_KEY,
-    (agenda) => replaceAgendaMetadata(agenda, hex, agendaUids, next.metadata, next.title, `canary-${stage}`),
+    (agenda) => replaceAgendaMetadata(
+      agenda,
+      hex,
+      agendaUids,
+      next.metadata,
+      null,
+      `canary-${stage}`,
+      `canary generation reset ${stage}`,
+    ),
     'canonical agenda reset',
   );
   await waitForEventAndAgenda(hex, () => true, 'canonical state reset');
@@ -388,11 +428,8 @@ async function requestAndVerify({ action, stage, reset, predicate, label }) {
   if (reset) {
     await writeCanonicalState(hex, (event) => {
       reset(event);
-      // The production reservation logic resets a succeeded stage when its
-      // generation ID changes. The canonical schema has no description field,
-      // so vary the title (while retaining the original HEX namespace) to
-      // keep the canary self-contained without DynamoDB write access.
-      event.title = `${title} ${stage}`;
+      // Change an agenda-only generation input. Changing the title changes
+      // the canonical HEX identity and can strand a second event document.
     }, stage);
     recordPass(`${label} generation reset`, stage);
   }
@@ -611,15 +648,27 @@ try {
   failure = error;
   recordFailure('Live canonical lifecycle', error);
 } finally {
+  const ownedUids = new Set(agendaUids);
+  const imagePrefixes = canaryImagePrefixes(hex, title);
+  const rememberCanaryImage = (event) => {
+    const key = imageKeyFromEvent(event);
+    if (key && imagePrefixes.some((prefix) => key.startsWith(prefix))) generatedImageKeys.add(key);
+  };
+
   if (agendaEntryCreatedByRun) {
     try {
+      const currentAgenda = readJson(AGENDA_KEY);
+      for (const event of (currentAgenda?.events || []).filter((entry) => ownedUids.has(entry?.uid))) {
+        assertOwnedAgendaEvent(event, hex, agendaUids, title);
+        rememberCanaryImage(event);
+      }
       await mutateJsonOptimistically(
         AGENDA_KEY,
-        (agenda) => removeAgendaDummies(agenda, hex, agendaUids),
+        (agenda) => removeAgendaDummies(agenda, hex, agendaUids, title),
         'agenda cleanup',
       );
-      if (eventFromAgenda(readJson(AGENDA_KEY), hex)) {
-        throw new Error(`Canary agenda entry still exists after cleanup for HEX ${hex}`);
+      if ((readJson(AGENDA_KEY).events || []).some((event) => ownedUids.has(event?.uid))) {
+        throw new Error(`Canary agenda entry still exists after cleanup for UID ${uid}`);
       }
       recordPass('Cleanup agenda entry', AGENDA_KEY);
     } catch (error) {
@@ -632,19 +681,27 @@ try {
 
   if (eventCreatedByRun) {
     try {
-      const currentEvent = readJson(eventKey);
-      const ownedTitle = currentEvent?.title === title || currentEvent?.title?.startsWith(`${title} `);
-      if (!ownedTitle || currentEvent?.metadata?.hex !== hex) {
-        throw new Error(`Refusing to delete event object no longer owned by this canary: ${eventKey}`);
+      const ownedKeys = listOwnedEventKeys(hex);
+      for (const key of ownedKeys) {
+        const currentEvent = readJson(key);
+        const eventTitle = currentEvent?.title || currentEvent?.summary || '';
+        const ownedTitle = eventTitle === title || eventTitle.startsWith(`${title} `);
+        const ownedIdentity = currentEvent?.metadata?.hex === hex
+          || currentEvent?.metadata?.hex === titleToHex(eventTitle);
+        if (!key.startsWith(`events/${hex}`) || !ownedTitle || !ownedIdentity) {
+          throw new Error(`Refusing to delete event object no longer owned by this canary: ${key}`);
+        }
+        rememberCanaryImage(currentEvent);
+        deleteObjectChecked(key);
+        recordPass('Cleanup event object', key);
       }
-      deleteObjectChecked(eventKey);
-      recordPass('Cleanup event object', eventKey);
+      const leftovers = listOwnedEventKeys(hex);
+      if (leftovers.length > 0) {
+        throw new Error(`Canary event prefix still contains ${leftovers.length} object(s): ${leftovers.join(', ')}`);
+      }
+      if (ownedKeys.length === 0) recordPass('Cleanup event object', `${eventKey} already absent`);
     } catch (error) {
-      if (isNotFoundError(error)) {
-        recordPass('Cleanup event object', `${eventKey} already absent`);
-      } else {
-        markCleanupFailure('Cleanup event object', error);
-      }
+      markCleanupFailure('Cleanup event objects', error);
     }
   } else if (eventExistedBeforeRun) {
     console.error(`Pre-existing event retained${eventBackupKey ? `; backup at s3://${BUCKET}/${eventBackupKey}` : ''}`);
@@ -654,16 +711,19 @@ try {
 
   if (eventCreatedByRun) {
     try {
-      const ownedKeys = listOwnedImageKeys(hex);
+      const ownedKeys = new Set([...generatedImageKeys, ...listOwnedImageKeys(hex, title)]);
       for (const key of ownedKeys) {
         try {
+          if (!imagePrefixes.some((prefix) => key.startsWith(prefix))) {
+            throw new Error(`Refusing to delete image outside the canary namespace: ${key}`);
+          }
           deleteObjectChecked(key);
           recordPass('Cleanup generated image', key);
         } catch (error) {
           markCleanupFailure('Cleanup generated image', error);
         }
       }
-      const leftovers = listOwnedImageKeys(hex);
+      const leftovers = listOwnedImageKeys(hex, title);
       if (leftovers.length > 0) {
         throw new Error(`Canary image prefix still contains ${leftovers.length} object(s): ${leftovers.join(', ')}`);
       }

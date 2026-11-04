@@ -139,7 +139,11 @@ test('live regression canary covers all deployed mutation routes with durable ev
   assert.match(liveRegressionSource, /Date\.parse\(FUTURE_DATE_ISO\) > Date\.now\(\)/);
   assert.match(liveRegressionSource, /finally \{/);
   assert.match(liveRegressionSource, /removeAgendaDummies/);
-  assert.match(liveRegressionSource, /deleteObjectChecked\(eventKey\)/);
+  assert.match(liveRegressionSource, /listOwnedEventKeys\(hex\)/);
+  assert.match(liveRegressionSource, /deleteObjectChecked\(key\)/);
+  assert.match(liveRegressionSource, /removeAgendaDummies\(agenda, hex, agendaUids, title\)/);
+  assert.match(liveRegressionSource, /canary generation reset \$\{stage\}/);
+  assert.doesNotMatch(liveRegressionSource, /event\.title = `\$\{title\} \$\{stage\}`/);
 });
 
 test('live regression canary uses conditional S3 writes and explicit ownership for production safety', () => {
@@ -162,8 +166,8 @@ test('live regression canary verifies deployment and sweeps its full generated-i
   assert.match(liveRegressionSource, /EXPECTED_AWS_ACCOUNT/);
   assert.match(liveRegressionSource, /verifyDeployedRegressionGuard/);
   assert.match(liveRegressionSource, /DEPLOYED_EVENT_LOADER_KEY/);
-  assert.match(liveRegressionSource, /const prefix = `website\/eventImages\/\$\{hex\}-`/);
-  assert.match(liveRegressionSource, /listOwnedImageKeys\(hex\)/);
+  assert.match(liveRegressionSource, /website\/eventImages\/\$\{candidate\}-/);
+  assert.match(liveRegressionSource, /listOwnedImageKeys\(hex, title\)/);
   assert.match(liveRegressionSource, /Canary image prefix still contains/);
 });
 
