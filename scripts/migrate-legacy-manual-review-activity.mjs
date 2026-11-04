@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { buildReviewManifest, writeReviewManifest } from './legacy-review-manifest.mjs';
+import { buildReviewManifest, validateReviewManifestPath, writeReviewManifest } from './legacy-review-manifest.mjs';
 
 const ACCOUNT_ID = '553490163883';
 const REGION = 'eu-west-2';
@@ -45,6 +45,7 @@ if (manifestIndex >= 0 && (!reviewManifestPath || reviewManifestPath.startsWith(
 if (reviewManifestPath && apply) {
   throw new Error('--review-manifest is dry-run only; remove --apply');
 }
+if (reviewManifestPath) validateReviewManifestPath(reviewManifestPath);
 
 function awsRaw(args, { maxBuffer = 1024 * 1024 } = {}) {
   try {

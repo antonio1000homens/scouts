@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { buildReviewManifest, writeReviewManifest } from '../scripts/legacy-review-manifest.mjs';
+import { buildReviewManifest, validateReviewManifestPath, writeReviewManifest } from '../scripts/legacy-review-manifest.mjs';
 
 const samplePlan = {
   id: 'legacy-manual-review#synthetic-digest',
@@ -54,5 +54,16 @@ test('review manifest writer uses owner-only permissions and refuses overwrite',
 
 test('review manifest writer rejects repository destinations', () => {
   const repositoryPath = resolve(fileURLToPath(new URL('../tests/review-manifest-must-not-exist.json', import.meta.url)));
-  assert.throws(() => writeReviewManifest(repositoryPath, { rows: [] }), /outside the repository/);
+  assert.throws(() => validateReviewManifestPath(repositoryPath), /outside the repository/);
+});
+
+test('review manifest path validation rejects existing destinations before a scan', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'scouts-review-manifest-'));
+  const path = join(directory, 'review.json');
+  try {
+    writeReviewManifest(path, { rows: [] });
+    assert.throws(() => validateReviewManifestPath(path), /destination already exists/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
