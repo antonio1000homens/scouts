@@ -1370,3 +1370,22 @@ has not set a numeric maximum source-to-agenda staleness target. Record the
 roughly 30-hour nominal bound and keep that acceptance distinction explicit;
 do not describe six-hour cadence as six-hour calendar freshness. Feed errors
 can extend staleness and remain visible through per-feed failure diagnostics.
+
+## Duplicate canonical-event listing no-change assessment (2026-11-04 15:12 UTC)
+
+The pre-change scheduled-refresh SDK summaries show two `ListObjectsV2` calls
+per run, corresponding to orphan cleanup and the later full HEX image
+verification scan. At the deployed four runs/day cadence, consolidating these
+would avoid at most about 120 SDK list calls per 30-day month. October's
+observed effective Tier-1 rate was about $0.0000053 per request
+($0.04219 / 7,961); applying that aggregate rate gives an illustrative
+estimate of about **$0.00064/month**. This is not a list-operation-specific
+bill attribution, and retries or other callers can change the actual savings.
+
+The second scan also gives image verification a fresh object listing after
+orphan cleanup has processed the first scan. Sharing the initial listing could
+miss a canonical event written concurrently during cleanup and defer its
+broken-image check until the next scheduled run. Given the sub-cent estimate
+and the requirement to preserve image recovery, retain both scans. No code or
+production state was changed for this candidate; revisit only if object-level
+request evidence changes the cost/risk assessment.
