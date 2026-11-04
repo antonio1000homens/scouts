@@ -216,6 +216,21 @@ test('cost work preserves live SQS mappings and existing DynamoDB billing modes'
   }
 });
 
+test('notification queue remains outside the Lambda event-source mappings', () => {
+  const scoutsStack = source('../lambdas/cloudformation/templates/scouts.yaml');
+  const routerStack = source('../lambdas/cloudformation/templates/scouts2sqs.yaml');
+  const workerStack = source('../lambdas/cloudformation/templates/sqs2scouts.yaml');
+  const queueDocs = source('../lambdas/scouts/docs/SQS-MESSAGE-LIMITS.md');
+  const templates = `${scoutsStack}\n${routerStack}\n${workerStack}`;
+
+  assert.match(scoutsStack, /ScoutsProcessingDlqActivityMapping:[\s\S]*?EventSourceArn: !Ref ScoutsProcessingDlqArn[\s\S]*?Enabled: true/);
+  assert.match(routerStack, /Scouts2SqsEventSourceMapping:[\s\S]*?EventSourceArn: !Ref ScoutsRequestsQueueArn[\s\S]*?Enabled: true/);
+  assert.match(workerStack, /Sqs2ScoutsEventSourceMapping:[\s\S]*?EventSourceArn: !Ref QueueArn[\s\S]*?Enabled: true/);
+  assert.doesNotMatch(templates, /EventSourceArn:[^\n]*scoutsDecision/);
+  assert.match(queueDocs, /`scoutsDecision` is a notification queue/);
+  assert.doesNotMatch(queueDocs, /SQS-Triggered Invocations \(scoutsDecision queue\)/);
+});
+
 test('deferred refresh outbox is durable, conditional, bounded and opt-in', () => {
   const stack = source('../lambdas/cloudformation/templates/scouts.yaml');
   const deploy = source('../lambdas/scouts/deploy.sh');
