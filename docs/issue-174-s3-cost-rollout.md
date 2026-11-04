@@ -951,3 +951,15 @@ charge in the returned period, but do not establish full-month free-tier
 headroom or the delivery contract for the two pending notifications. Keep the
 existing processing mappings until a tested replacement preserves failure
 activity and the free-tier projection or actual charges justify a change.
+
+## Decision-queue age sample (2026-11-04 10:34 UTC)
+
+AWS STS verified account `553490163883`. A read-only attribute request still
+returned two visible `scoutsDecision` messages, zero in-flight and delayed
+messages, and 14-day retention. The latest five-minute
+`ApproximateAgeOfOldestMessage` maximum was 42,553 seconds at 10:30 UTC. The
+intervening five-minute datapoints since 09:55 ranged from 40,514 to 42,553
+seconds, so the metric did not rise monotonically across the full interval.
+This confirms an old outstanding notification, but the approximation alone
+does not identify which message is oldest or whether the consumer contract
+changed. No message body was read and no queue operation changed state.
