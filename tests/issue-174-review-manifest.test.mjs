@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,6 +64,32 @@ test('review manifest path validation rejects existing destinations before a sca
   try {
     writeReviewManifest(path, { rows: [] });
     assert.throws(() => validateReviewManifestPath(path), /destination already exists/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('migration rejects an in-repository manifest path before calling AWS', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'scouts-review-manifest-preflight-'));
+  const marker = join(directory, 'aws-was-called');
+  const fakeAws = join(directory, 'aws');
+  const script = fileURLToPath(new URL('../scripts/migrate-legacy-manual-review-activity.mjs', import.meta.url));
+  const repositoryPath = fileURLToPath(new URL('./must-not-be-created.json', import.meta.url));
+
+  try {
+    writeFileSync(fakeAws, '#!/bin/sh\nprintf called > "$FAKE_AWS_MARKER"\nexit 1\n');
+    chmodSync(fakeAws, 0o700);
+    const result = spawnSync(process.execPath, [
+      script,
+      '--profile', 'scouts',
+      '--review-manifest', repositoryPath,
+    ], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: directory, FAKE_AWS_MARKER: marker },
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Review manifest must be written outside the repository/);
+    assert.equal(existsSync(marker), false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
