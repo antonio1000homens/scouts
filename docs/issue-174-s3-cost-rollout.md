@@ -1484,3 +1484,9 @@ An authenticated production POST for `realm=runtime`, `subject=snapshot`,
 operations. The API key was used inside the local request process and is not
 recorded here. The check confirms the gated endpoint is active; it does not
 delete the three historical S3 snapshot objects or change the queue mappings.
+
+The deployed `website/admin/admin-script.js` object was also read from the
+verified Scouts bucket; it contains the explicit retired-snapshot notice and
+was last modified at 16:35:32 UTC. An unauthenticated GET of the public admin
+route returned HTTP 403, so this check confirms the deployed script contents
+but not the rendered viewer in an authenticated browser session.
