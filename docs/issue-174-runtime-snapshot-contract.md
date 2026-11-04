@@ -10,8 +10,8 @@ authoritative queue or workflow ledger.
 The top level held `source`, `queue`, `updatedAt`, `requests`, `requestIds`,
 `hexes`, `links`, and `recordCount`. Individual `requests` entries could hold
 `requestTime`, `requestId`, `messageId`, `hex`, `title`, `subject`, `realm`,
-`action`, `taskToken`, `orchestrationType`, `orchestrationStep`, and `status`;
-completed entries could also carry failure information. The three objects
+`action`, `taskToken`, `orchestrationType`, `orchestrationStep`, `status`,
+`completedAt`, and optional `failure`; the three objects
 represented queued, processing, and completed snapshots. Writers bounded
 request rows to 200, IDs/HEX values to 50, and links to 100; these were
 last-writer-wins S3 summaries rather than a complete delivery history.
@@ -20,7 +20,7 @@ last-writer-wins S3 summaries rather than a complete delivery history.
 
 | Legacy field | Current lifecycle source | Queue source | Enrichment source | Step Functions source | Limits |
 | --- | --- | --- | --- | --- | --- |
-| `requests` | `scouts-request-activity` stores one item per `requestId`, with state, stage, timeline, and recovery data. | `GetQueueAttributes` returns queue-level visible, in-flight, and delayed counts. | `scouts-enrichment-state` stores one item per HEX and stage. | Active execution listing returns workflow executions. | No source reconstructs the old combined array. Activity rows can be absent or expire; queue counts have no request identities; enrichment rows are not request rows; execution listing is bounded to active workflows. |
+| `requests` | `scouts-request-activity` stores one item per `requestId`, with state, stage, timeline, and recovery data; ordinary rows expire after seven days, while `manual_review` rows have no TTL. | `GetQueueAttributes` returns queue-level visible, in-flight, and delayed counts. | `scouts-enrichment-state` stores one item per HEX and stage. | Active execution listing returns workflow executions. | No source reconstructs the old combined array. Activity rows can be absent or expire; queue counts have no request identities; enrichment rows are not request rows; execution listing is bounded to active workflows. |
 | `requestIds` | Activity partition key `requestId`, plus `rootRequestId` and collapsed `childRequestIds`. | Message IDs are intentionally not enumerated by the read-only status path. Receiving messages would change visibility and is outside this status API. | `lastRequestId` is per HEX/stage and is not a queue inventory. | Execution input can provide request/root IDs when present. | Old arrays contained a capped mix of application request IDs and SQS message IDs; no current read provides that same set. |
 | `hexes` | Activity `hex` supports lifecycle lookup and filtering. | Queue attributes do not expose HEX values. | HEX is the partition key and stage is the sort key. | Execution input may contain `hex` or `requestHex`. | HEX identifies event work, not a unique delivery; the old aggregate set was capped at 50. |
 | `links` | Activity rows retain `requestId`, `rootRequestId`, `hex`, `action`, and reconciliation identity. | Queue status has no request-to-HEX linkage. | Enrichment state links HEX to a stage and last request ID, not to every delivery. | Execution input can correlate a running workflow to its request ID and HEX. | The old `requestId`/`hex`/`sourceMessageId`/`realm`/`action` rows were sampled links, not a durable relation table. |
