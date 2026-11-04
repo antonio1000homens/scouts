@@ -2,6 +2,24 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 const requestContext = new AsyncLocalStorage();
 const DATA_BUCKET = String(process.env.TARGET_BUCKET || 'scouts-2ndtolworth-prod-553490163883').trim();
+const OPERATION_CATEGORIES = new Set([
+  'agenda',
+  'canonical-event',
+  'calendar-cache',
+  'event-image',
+  'runtime',
+  'other',
+]);
+
+export function s3ObjectCategory(key) {
+  const value = typeof key === 'string' ? key : '';
+  if (/(^|\/)agenda\.json$/i.test(value)) return 'agenda';
+  if (value.startsWith('events/')) return 'canonical-event';
+  if (value.startsWith('website/eventImages/')) return 'event-image';
+  if (/\.ics$/i.test(value) || value.startsWith('calendar/')) return 'calendar-cache';
+  if (value.startsWith('runtime/')) return 'runtime';
+  return 'other';
+}
 
 function bucketClass(command) {
   const bucket = String(command?.input?.Bucket || '').trim();
@@ -17,6 +35,7 @@ export async function runWithS3RequestMetrics(source, callback) {
     source: String(source || 'unknown'),
     operationCounts: {},
     bucketOperationCounts: {},
+    categoryOperationCounts: {},
   };
   return requestContext.run(context, async () => {
     try {
@@ -27,13 +46,14 @@ export async function runWithS3RequestMetrics(source, callback) {
           source: context.source,
           operationCounts: context.operationCounts,
           bucketOperationCounts: context.bucketOperationCounts,
+          categoryOperationCounts: context.categoryOperationCounts,
         });
       }
     }
   });
 }
 
-export async function sendS3Command(client, command) {
+export async function sendS3Command(client, command, category = 'other') {
   const context = requestContext.getStore();
   if (context) {
     const operation = command?.constructor?.name?.replace(/Command$/, '') || 'Unknown';
@@ -41,6 +61,10 @@ export async function sendS3Command(client, command) {
     const role = bucketClass(command);
     const roleCounts = context.bucketOperationCounts[role] || (context.bucketOperationCounts[role] = {});
     roleCounts[operation] = (roleCounts[operation] || 0) + 1;
+    const safeCategory = OPERATION_CATEGORIES.has(category) ? category : 'other';
+    const categoryCounts = context.categoryOperationCounts[safeCategory]
+      || (context.categoryOperationCounts[safeCategory] = {});
+    categoryCounts[operation] = (categoryCounts[operation] || 0) + 1;
   }
   return client.send(command);
 }

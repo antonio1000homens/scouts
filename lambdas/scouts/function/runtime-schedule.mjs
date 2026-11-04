@@ -1,5 +1,5 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { sendS3Command } from './s3-request-metrics.mjs';
+import { sendS3Command, s3ObjectCategory } from './s3-request-metrics.mjs';
 
 const REGION = process.env.AWS_REGION || 'eu-west-2';
 const TARGET_BUCKET = process.env.TARGET_BUCKET || 'scouts-2ndtolworth-prod-553490163883';
@@ -51,7 +51,7 @@ function errorDetail(error) {
 export async function getScheduledRefreshSettings() {
   let stored = null;
   try {
-    const response = await sendS3Command(s3, new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: CONFIG_KEY }));
+    const response = await sendS3Command(s3, new GetObjectCommand({ Bucket: TARGET_BUCKET, Key: CONFIG_KEY }), s3ObjectCategory(CONFIG_KEY));
     const raw = await response.Body.transformToString();
     stored = JSON.parse(raw);
   } catch (error) {
@@ -105,7 +105,7 @@ export async function setScheduledRefreshEnabled(enabled, updatedBy = 'admin') {
     Body: JSON.stringify(next, null, 2),
     ContentType: 'application/json',
     CacheControl: 'no-store',
-  }));
+  }), s3ObjectCategory(CONFIG_KEY));
 
   return {
     ...defaultSettings(),
