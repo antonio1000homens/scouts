@@ -386,10 +386,16 @@ export async function getDeferredRefreshStatus({ limit = 50 } = {}) {
         },
         ScanIndexForward: true,
         Limit: boundedLimit,
-        Select: 'COUNT',
       }));
       output.states[state].dueSampledItems = Number(dueResponse?.Count || 0);
       output.states[state].dueHasMore = Boolean(dueResponse?.LastEvaluatedKey);
+      if (state === 'ready') {
+        const dueItems = (dueResponse?.Items || []).map(unmarshal);
+        output.states.ready.oldestDueReadyAt = dueItems
+          .map((item) => item.createdAt)
+          .filter((createdAt) => typeof createdAt === 'string' && createdAt.length)
+          .sort()[0] || null;
+      }
     }
   }
   return output;

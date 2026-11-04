@@ -87,9 +87,10 @@ Coalescing and delivery rules:
 
 The runtime API exposes a bounded read-only status query for ready, due,
 leased, needs-attention, and expired work. Operations displays the sample
-counts, oldest ready item, sampled retry count, expired lease count, and
-failure reasons for a small needs-attention sample. A plus sign indicates
-that the bounded sample has more results. Dispatch does not count as completed
+counts, the oldest `createdAt` among sampled due-ready work, sampled retry
+count, expired lease count, and failure reasons for a small needs-attention
+sample. The due counts and oldest due age share a bounded sample; a plus sign
+indicates that more results exist. Dispatch does not count as completed
 enrichment; completion remains owned by request activity and enrichment state.
 
 ## Capacity and rollout gates

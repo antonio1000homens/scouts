@@ -502,6 +502,17 @@ test('status lookup is bounded and reports oldest sample and continuation state'
   setDeferredRefreshClientForTests({
     async send(command) {
       commands.push(command);
+      if (command.input.ExpressionAttributeValues?.[':due']) {
+        const isReady = command.input.ExpressionAttributeValues[':state'].S === 'ready';
+        return {
+          Count: isReady ? 2 : 1,
+          Items: isReady ? [
+            { createdAt: { S: '2026-11-04T11:00:00.000Z' }, nextAttemptAt: { S: `${NOW.toISOString()}#work-1` } },
+            { createdAt: { S: '2026-11-04T09:00:00.000Z' }, nextAttemptAt: { S: `${NOW.toISOString()}#work-2` } },
+          ] : [],
+          LastEvaluatedKey: { workKey: { S: 'more-due' } },
+        };
+      }
       return { Items: [{ nextAttemptAt: { S: `${NOW.toISOString()}#work-1` }, workKey: { S: 'work-1' } }], LastEvaluatedKey: { workKey: { S: 'more' } } };
     },
   });
@@ -510,9 +521,13 @@ test('status lookup is bounded and reports oldest sample and continuation state'
     assert.equal(status.bounded, true);
     assert.equal(status.states.ready.sampledItems, 1);
     assert.equal(status.states.ready.oldestReadyAt, NOW.toISOString());
+    assert.equal(status.states.ready.dueSampledItems, 2);
+    assert.equal(status.states.ready.oldestDueReadyAt, '2026-11-04T09:00:00.000Z');
+    assert.equal(status.states.ready.dueHasMore, true);
     assert.equal(status.states.ready.hasMore, true);
     assert.equal(commands.length, 6);
     assert.ok(commands.every((command) => command.input.Limit === 20));
+    assert.ok(commands.filter((command) => command.input.ExpressionAttributeValues?.[':due']).every((command) => command.input.Select !== 'COUNT'));
   } finally {
     resetDeferredRefreshClientForTests();
   }

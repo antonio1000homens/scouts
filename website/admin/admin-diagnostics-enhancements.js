@@ -282,7 +282,7 @@
         const states = latestDeferredRefreshStatus.deferredRefresh?.states || {};
         renderDefinition(target, 'Ready items sampled', `${states.ready?.sampledItems ?? 0}${states.ready?.hasMore ? '+' : ''}`);
         renderDefinition(target, 'Due ready items sampled', `${states.ready?.dueSampledItems ?? 0}${states.ready?.dueHasMore ? '+' : ''}`);
-        renderDefinition(target, 'Oldest ready item', formatDateTime(states.ready?.oldestReadyAt));
+        renderDefinition(target, 'Oldest due ready (sample)', formatDateTime(states.ready?.oldestDueReadyAt));
         renderDefinition(target, 'Retries in sample', states.ready?.sampledRetryCount ?? 0);
         renderDefinition(target, 'Leased items sampled', `${states.leased?.sampledItems ?? 0}${states.leased?.hasMore ? '+' : ''}`);
         renderDefinition(target, 'Expired leases sampled', `${states.leased?.dueSampledItems ?? 0}${states.leased?.dueHasMore ? '+' : ''}`);
@@ -299,7 +299,7 @@
             }
             target.appendChild(list);
         }
-        target.appendChild(makeHelp(`Each state is capped at ${latestDeferredRefreshStatus.deferredRefresh?.sampleLimitPerState ?? 'a bounded'} records; a plus sign means more records exist.`));
+        target.appendChild(makeHelp(`Each state is capped at ${latestDeferredRefreshStatus.deferredRefresh?.sampleLimitPerState ?? 'a bounded'} records; due counts and oldest due age use the same bounded sample, and a plus sign means more records exist.`));
     }
 
     async function refreshDeferredRefreshStatus(showStatus = false) {
