@@ -5,6 +5,7 @@ import {
   buildMetricDataQueries,
   collectAttribution,
   parseAttributionOptions,
+  summarizeAttributionTimeline,
 } from '../scripts/scouts-s3-request-attribution.mjs';
 
 const START = '2026-11-03T18:00:00Z';
@@ -50,6 +51,48 @@ test('minute timeline joins bucket requests and Lambda invocations by timestamp'
     s3: { HeadRequests: 3, GetRequests: 7 },
     scoutsLambda: { Invocations: 1 },
   }]);
+});
+
+test('timeline summary totals bucket requests and exposes same-minute correlation limits', () => {
+  const summary = summarizeAttributionTimeline([
+    {
+      timestamp: START,
+      s3: { GetRequests: 10, HeadRequests: 0 },
+      scoutsLambda: { Invocations: 1, Errors: 0 },
+    },
+    {
+      timestamp: '2026-11-03T18:01:00.000Z',
+      s3: { GetRequests: 20, HeadRequests: 2, ListRequests: 1, PutRequests: 3 },
+      scoutsLambda: {},
+    },
+    {
+      timestamp: '2026-11-03T18:02:00.000Z',
+      s3: {},
+      scoutsLambda: { Invocations: 2, Errors: 1 },
+    },
+    {
+      timestamp: '2026-11-03T18:03:00.000Z',
+      s3: { GetRequests: 0, PutRequests: 0 },
+      scoutsLambda: { Invocations: 0, Errors: 0 },
+    },
+  ]);
+
+  assert.deepEqual(summary, {
+    s3RequestTotals: {
+      GetRequests: 30,
+      HeadRequests: 2,
+      ListRequests: 1,
+      PutRequests: 3,
+      TotalRequests: 36,
+    },
+    scoutsLambdaTotals: { Invocations: 3, Errors: 1 },
+    s3MetricDataMinuteBins: 3,
+    s3RequestMinuteBins: 2,
+    s3RequestMinuteBinsWithLambdaInvocations: 1,
+    s3RequestMinuteBinsWithoutLambdaInvocations: 1,
+    latestS3RequestMinute: '2026-11-03T18:01:00.000Z',
+    latestScoutsLambdaInvocationMinute: '2026-11-03T18:02:00.000Z',
+  });
 });
 
 test('audit stops before other AWS reads when the verified account is wrong', () => {
