@@ -1391,3 +1391,18 @@ include browser/admin and other S3 callers, and cannot attribute each request
 to a caller. This partial window is not a full-day or seven-day comparison and
 does not establish a savings or bill reduction; continue the aligned
 seven-day collection before making that claim.
+
+## Six-hour post-cutover S3 attribution check (2026-11-04 15:32 UTC)
+
+After verifying Scouts account `553490163883`, the read-only collector queried
+2026-11-04 09:32–15:32 UTC. All six CloudWatch metric series returned
+`Complete` in one page; neither the SDK-operation search nor the per-refresh
+search was truncated. The bucket-wide metrics contained 726 GET, 376 HEAD, 24
+LIST, and 101 PUT requests across 34 nonzero minute bins. The `scouts` Lambda
+had 7 invocations and zero errors in the same window. The SDK and per-refresh
+searches each returned two aggregate log entries.
+
+This shorter interim window does not identify the callers responsible for the
+bucket-wide requests, and the request metrics may be delayed. It is not a
+full-day or seven-day comparison and does not establish savings or bill
+reduction. Keep the aligned seven-day comparison as the acceptance gate.
