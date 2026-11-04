@@ -88,6 +88,21 @@ and confirms the logged HEX-read reuse and image-HEAD cache hits. It still
 does not identify all bucket callers, establish request-metric delivery
 latency, or replace the aligned seven-day comparison.
 
+## Illustrative monthly value of per-run reuse
+
+Across the four scheduled summaries, the per-refresh counter reported 98, 99,
+99 and 99 reused HEX reads, plus six image HEAD cache hits in each run. If
+four runs/day continue for 30 days, that projects to about 11,850 avoided HEX
+GET calls and 720 avoided image HEAD calls per month. Applying the October
+effective Tier-2 rate recorded in the rollout notes ($0.20060 / 477,611
+requests, about $0.00042 per 1,000 requests) gives an illustrative total of
+about **$0.0053/month** if each avoided SDK call maps to one billable request.
+
+This is a sub-cent projection from four observed scheduled runs, not a
+measured bill reduction. It excludes other S3 request changes and must not be
+used as evidence of a month-over-month saving; compare the complete aligned
+seven-day request window and posted charges before making that claim.
+
 ## Limits
 
 Bucket metrics include browser/admin and other S3 callers. The observations do
