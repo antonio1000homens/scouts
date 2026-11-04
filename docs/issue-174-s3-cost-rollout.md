@@ -1439,18 +1439,17 @@ refresh rule remained enabled at `rate(6 hours)`. No historical snapshot S3
 objects were deleted.
 
 The implementation returns HTTP 410 for `subject=snapshot` before reaching
-the snapshot S3 read when disabled. The authenticated live HTTP response is
-still unverified: current-browser requests to `/admin/` and
-`/admin/index.html` returned HTTP 403, so no authenticated admin API request
-could be made. The stack parameter and Lambda environment are the live
-readback.
+the snapshot S3 read when disabled. At this 13:52 check, the authenticated HTTP
+response was not yet verified: current-browser requests to `/admin/` and
+`/admin/index.html` returned HTTP 403. The stack parameter and Lambda
+environment were the available live readback then; the later authenticated
+API probe is recorded below.
 
-Future deployments now default the flag to false in the workflow, deploy
-script, template, and handler fallback so an unrelated deploy cannot silently
-re-enable the API. Set `LEGACY_RUNTIME_SNAPSHOTS_ENABLED=true` explicitly for
-rollback. This does not prove historical task-token reconstruction or a
-seven-day post-change S3 request/cost comparison; those remain open issue
-criteria.
+The CloudFormation template, deploy script, and handler fallback now default
+the flag to false, so an unrelated deployment cannot silently re-enable the
+API. Set `LEGACY_RUNTIME_SNAPSHOTS_ENABLED=true` explicitly for rollback. This
+does not prove historical task-token reconstruction or a seven-day post-change
+S3 request/cost comparison; those remain open issue criteria.
 
 ## Calendar-feed staleness budget under six-hour cadence (2026-11-04)
 
@@ -1523,3 +1522,25 @@ but not the rendered viewer in an authenticated browser session.
 
 The reconstructed legacy field contract and current source inventory are in
 [`issue-174-runtime-snapshot-contract.md`](issue-174-runtime-snapshot-contract.md).
+
+## Decision notification producer removal deployment verification (2026-11-04 17:55–17:57 UTC)
+
+AWS STS verified account `553490163883` before the readback. PR #242 merged as
+`26de80a`; Deploy Scouts run
+[`41881622108`](https://github.com/antonio1000homens/scouts/actions/runs/41881622108)
+completed successfully. The `sqs2scouts` Lambda is Active with a successful
+update, `LastModified=17:55:56 UTC`, and code SHA-256
+`kG6FNViXbwQfqbCcIGcatqpKrVPMEpPLt32HKQGYOgo=`. I downloaded the deployed
+package in-process and verified that neither `persistence-processor.mjs` nor
+`approval-lifecycle-adapter.mjs` contains a `scoutsDecision` reference or
+decision notification function.
+
+The queue readback showed four visible, zero in-flight and zero delayed
+`scoutsDecision` messages; `scoutsRequests`, `scoutsProcessing`, and
+`scoutsProcessingDLQ` each had zero visible, in-flight and delayed messages.
+All four queues retain 14-day message retention. The owner confirmed there is
+no external consumer. The existing decision messages were not received or
+deleted, and no queue configuration or event-source mapping was changed. SQS
+Free Tier usage remained at 90,811 actual requests and 681,082.5 forecast of
+the account-wide 1,000,000-request allowance at this readback; it is a forecast,
+not a final bill.
