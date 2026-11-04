@@ -221,6 +221,7 @@ test('notification queue remains outside the Lambda event-source mappings', () =
   const routerStack = source('../lambdas/cloudformation/templates/scouts2sqs.yaml');
   const workerStack = source('../lambdas/cloudformation/templates/sqs2scouts.yaml');
   const queueDocs = source('../lambdas/scouts/docs/SQS-MESSAGE-LIMITS.md');
+  const legacyQueueDoc = source('../lambdas/scouts/SCOUTS-DECISION-QUEUE-REALMS.md');
   const templates = `${scoutsStack}\n${routerStack}\n${workerStack}`;
 
   assert.match(scoutsStack, /ScoutsProcessingDlqActivityMapping:[\s\S]*?EventSourceArn: !Ref ScoutsProcessingDlqArn[\s\S]*?Enabled: true/);
@@ -229,6 +230,10 @@ test('notification queue remains outside the Lambda event-source mappings', () =
   assert.doesNotMatch(templates, /EventSourceArn:[^\n]*scoutsDecision/);
   assert.match(queueDocs, /`scoutsDecision` is a notification queue/);
   assert.doesNotMatch(queueDocs, /SQS-Triggered Invocations \(scoutsDecision queue\)/);
+  assert.match(legacyQueueDoc, /previously described an automatic SQS consumer[\s\S]*?That description is obsolete/);
+  assert.match(legacyQueueDoc, /no `scoutsDecision` Lambda event-source mapping/);
+  assert.match(legacyQueueDoc, /does not receive or delete messages/);
+  assert.doesNotMatch(legacyQueueDoc, /SQS triggers `scouts\.mjs` Lambda/);
 });
 
 test('deferred refresh outbox is durable, conditional, bounded and opt-in', () => {
