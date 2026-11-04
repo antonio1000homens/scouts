@@ -28,7 +28,7 @@ const SCOUTS_REQUESTS_QUEUE_URL = process.env.SCOUTS_REQUESTS_QUEUE_URL || '';
 const ENRICHMENT_STATE_TABLE_NAME = String(process.env.GEMINI_ENRICHMENT_STATE_TABLE_NAME || '').trim();
 const REQUEST_ACTIVITY_TABLE_NAME = String(process.env.SCOUTS_REQUEST_ACTIVITY_TABLE_NAME || '').trim();
 const LEGACY_RUNTIME_SNAPSHOTS_ENABLED = !['false', '0', 'no', 'off'].includes(
-  String(process.env.SCOUTS_LEGACY_RUNTIME_SNAPSHOTS ?? 'true').trim().toLowerCase(),
+  String(process.env.SCOUTS_LEGACY_RUNTIME_SNAPSHOTS ?? 'false').trim().toLowerCase(),
 );
 const ENRICHMENT_STAGES = Object.freeze(['tagline', 'imageTheme', 'image']);
 const PRIVATE_RUNTIME_SNAPSHOT_KEYS = Object.freeze({

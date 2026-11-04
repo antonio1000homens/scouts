@@ -125,8 +125,8 @@ Parameters:
     AllowedValues:
       - 'true'
       - 'false'
-    Default: 'true'
-    Description: Keep legacy S3 snapshot reads enabled until production parity is verified; set false to opt into retirement, with true as rollback.
+    Default: 'false'
+    Description: Legacy S3 snapshot API is retired; set true only for an explicit rollback.
   ScheduledRefreshDefaultEnabled:
     Type: String
     AllowedValues:
