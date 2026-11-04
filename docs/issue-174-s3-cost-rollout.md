@@ -1277,3 +1277,18 @@ the expected migration source and failure metadata, and no TTL field. The
 backfill preserves the underlying enrichment rows and canonical event objects;
 it does not validate historical task-token state or establish snapshot/admin
 viewer parity. Those remain separate cutover gates.
+
+## Step Functions and retirement-flag recheck (2026-11-04 13:29 UTC)
+
+AWS STS verified account `553490163883` before the read-only check. The
+`scouts-lambda` stack was `UPDATE_COMPLETE` (last updated 13:20:22 UTC), with
+`LegacyRuntimeSnapshotsEnabled=true` and `DeferredRefreshOutboxEnabled=false`.
+A fresh `ListExecutions` read found zero `RUNNING` executions in each of
+`scouts-full-enrich`, `scouts-full-enrich-managed-poc`, and
+`scouts-image-enrich`.
+
+This shows no currently running execution in those state machines depends on
+a legacy snapshot task token at the time of the read. It does not establish a
+retention or support contract for historical snapshot rows or the legacy admin
+viewer. Keep the compatibility flag enabled pending that owner decision; no
+AWS configuration or S3 object was changed.
