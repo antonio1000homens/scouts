@@ -1198,6 +1198,13 @@ AWS services or account.
 there is no queue-level DLQ configuration; the configured 14-day retention is
 the visible expiry boundary for messages left unconsumed.
 
+The repository contract identifies two `sqs2scouts` producers and no
+in-repository consumer or acknowledgement/retry contract. The
+`approval-lifecycle-adapter` emits `persisted` for both `awaiting_image` and
+`approved` states, so consumers cannot treat that action alone as final
+approval. Both producers treat `SendMessage` as best-effort after persistence.
+See [`SCOUTS-DECISION-QUEUE-REALMS.md`](../lambdas/scouts/SCOUTS-DECISION-QUEUE-REALMS.md).
+
 The age metric is approximate and does not identify the oldest message or its
 consumer. No message bodies were read and no queue state was changed. This
 confirms the queue is not draining in the observed interval; preserve its
