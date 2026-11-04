@@ -703,3 +703,25 @@ known caller and does not establish a post-change comparison. Allow the metric
 window to mature, capture a successful persistence event, then compare daily
 and seven-day operation totals and posted S3 charges. Keep web/admin traffic
 separate from Lambda SDK counts; no S3 objects were modified for this readback.
+
+## Legacy manual-review Activity backfill utility
+
+`scripts/migrate-legacy-manual-review-activity.mjs` prepares a controlled
+one-time import from durable enrichment state into the Activity Centre ledger.
+It defaults to dry-run, verifies AWS account `553490163883`, scans at most two
+items per request with a one-second pause, classifies every canonical event
+before making any writes, and refuses apply mode unless the scan completed and
+`--ack-account 553490163883` was supplied. The current table has 158 items, so
+this migration requires a full-table read; the previous paced inventory used
+950.5 read capacity units. The utility reports actual capacity consumed and
+does not print HEX values or error text.
+
+Event-backed rows are imported as `manual_review` with their supported stage,
+so existing Activity Centre retry controls can re-read and conditionally reset
+the durable enrichment state. Missing or invalid canonical events are
+imported as non-retryable `needs_attention` records. The migration is
+idempotent, uses a transaction that verifies the source state has not changed
+before a conditional activity put, omits TTL for both categories, and never
+reads or copies snapshot task tokens. Do not run it in apply mode until the
+dry-run classification has been owner-reviewed; no migration writes have been
+performed.
