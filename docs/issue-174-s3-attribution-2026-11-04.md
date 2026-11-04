@@ -137,6 +137,16 @@ configuration if the data is no longer needed and verify the resulting bill
 change. The two figures are not a net monthly comparison because one is an
 October posted charge and the other is a four-run projection.
 
+## Follow-up sample (17:46 UTC)
+
+The collector verified account `553490163883` and queried 2026-11-04
+17:24–17:46 UTC. All six metric series returned `Complete` in one page; both
+log searches were untruncated and returned no aggregate entries. The three
+minute bins showed two `scouts` invocations and zero errors, plus two GET and
+two HEAD bucket requests. Those S3 request bins occurred in a different minute
+from the invocation bins, so this short sample does not establish attribution.
+It is also too short for a daily or seven-day comparison.
+
 ## Limits
 
 Bucket metrics include browser/admin and other S3 callers. The observations do
