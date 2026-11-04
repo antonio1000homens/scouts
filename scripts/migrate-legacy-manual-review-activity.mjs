@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { buildReviewManifest, validateReviewManifestPath, writeReviewManifest } from './legacy-review-manifest.mjs';
 
 const ACCOUNT_ID = '553490163883';
 const REGION = 'eu-west-2';
@@ -19,13 +20,15 @@ if (!Number.isInteger(rawMaxScanItems) || rawMaxScanItems < 1) {
 }
 const maxScanItems = Math.min(10000, rawMaxScanItems);
 const apply = process.argv.includes('--apply');
+const manifestIndex = process.argv.indexOf('--review-manifest');
+const reviewManifestPath = manifestIndex >= 0 ? process.argv[manifestIndex + 1] : '';
 const ackIndex = process.argv.indexOf('--ack-account');
 const acknowledgedAccount = ackIndex >= 0 ? process.argv[ackIndex + 1] : '';
 const env = { ...process.env, AWS_PROFILE: profile, AWS_REGION: REGION, AWS_DEFAULT_REGION: REGION };
 
 if (process.argv.includes('--help')) {
   process.stdout.write([
-    'Dry run: node scripts/migrate-legacy-manual-review-activity.mjs [--profile <profile>] [--max-scan-items <count>]',
+    'Dry run: node scripts/migrate-legacy-manual-review-activity.mjs [--profile <profile>] [--max-scan-items <count>] [--review-manifest <path-outside-repo>]',
     `Apply:    node scripts/migrate-legacy-manual-review-activity.mjs --profile <profile> --max-scan-items <count> --apply --ack-account ${ACCOUNT_ID}`,
     'Apply mode requires a complete scan. Rows with missing or invalid canonical events are imported as non-retryable needs_attention records.',
   ].join('\n') + '\n');
@@ -36,6 +39,13 @@ if (!profile) throw new Error('Set AWS_PROFILE or pass --profile for the intende
 if (apply && acknowledgedAccount !== ACCOUNT_ID) {
   throw new Error(`Refusing writes: apply mode also requires --ack-account ${ACCOUNT_ID}`);
 }
+if (manifestIndex >= 0 && (!reviewManifestPath || reviewManifestPath.startsWith('--'))) {
+  throw new Error('--review-manifest requires a path outside the repository');
+}
+if (reviewManifestPath && apply) {
+  throw new Error('--review-manifest is dry-run only; remove --apply');
+}
+if (reviewManifestPath) validateReviewManifestPath(reviewManifestPath);
 
 function awsRaw(args, { maxBuffer = 1024 * 1024 } = {}) {
   try {
@@ -235,6 +245,17 @@ const summary = {
   conditionalConflicts: 0,
 };
 
+let reviewManifestOutput;
+if (reviewManifestPath) {
+  const manifest = buildReviewManifest({
+    account: identity.Account,
+    region: REGION,
+    generatedAt: now,
+    plans,
+  });
+  reviewManifestOutput = writeReviewManifest(reviewManifestPath, manifest);
+}
+
 for (const plan of plans) {
   summary.stages[plan.stage] = (summary.stages[plan.stage] || 0) + 1;
   if (plan.retryable) summary.classifications.retryableEventBacked += 1;
@@ -283,3 +304,4 @@ for (const plan of plans) {
 }
 
 process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+if (reviewManifestOutput) process.stderr.write(`Private review manifest written: ${reviewManifestOutput}\n`);

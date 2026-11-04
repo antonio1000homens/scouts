@@ -152,7 +152,7 @@ jobs:
                 ;;
             esac
             case "${file}" in
-              deploy.sh|lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|tests/issue-34-admin-ui.integration.test.mjs|tests/issue-39-*.test.mjs|tests/issue-39-*.integration.test.mjs|tests/issue-43-*.test.mjs|tests/issue-125-*.test.mjs|tests/admin-notifications.test.mjs|tests/public-repo-safety.test.mjs|tests/helpers/*|scripts/run-hermetic-tests.mjs|eslint.config.mjs|docs/TESTING-STRATEGY.md|website/admin/*|.github/workflows/deploy-to-s3.yml)
+              deploy.sh|lambdas/shared-layer/*|lambdas/scouts/*|lambdas/scouts2sqs/*|lambdas/sqs2scouts/*|lambdas/cloudformation/templates/scouts.yaml|lambdas/cloudformation/templates/scouts2sqs.yaml|lambdas/cloudformation/templates/sqs2scouts.yaml|GEMINI-ENRICHMENT-RETRY.md|tests/issue-16-pipeline.integration.test.mjs|tests/deployment-order.integration.test.mjs|tests/issue-34-admin-ui.integration.test.mjs|tests/issue-39-*.test.mjs|tests/issue-39-*.integration.test.mjs|tests/issue-43-*.test.mjs|tests/issue-125-*.test.mjs|tests/issue-174-*.test.mjs|tests/issue-174-*.integration.test.mjs|tests/admin-notifications.test.mjs|tests/public-repo-safety.test.mjs|tests/helpers/*|scripts/run-hermetic-tests.mjs|scripts/legacy-review-manifest.mjs|scripts/migrate-legacy-manual-review-activity.mjs|eslint.config.mjs|docs/TESTING-STRATEGY.md|website/admin/*|.github/workflows/deploy-to-s3.yml)
                 retry_safety=true
                 ;;
             esac

@@ -803,6 +803,14 @@ or existing Activity records, and created none. The strongly consistent,
 two-item-page scan consumed 1,942 read capacity units, so a migration run has
 a material read cost. Expected missing-object diagnostics are suppressed so
 the utility emits aggregate results without HEX values or AWS error text.
+For a future dry-run that needs row-level owner review, pass
+`--review-manifest <path>` with a destination outside the checkout. The
+manifest destination is checked before AWS calls, then created exclusively
+with owner-only (`0600`) permissions; it contains HEX, source stage/time,
+canonical-event classification, planned state, retryability and
+existing-record status, but omits event titles and raw error details. It is
+unavailable with `--apply`. Do not rerun the production scan solely to
+generate this file: the prior full scan consumed 1,942 RCUs.
 
 Event-backed rows are imported as `manual_review` with their supported stage,
 so existing Activity Centre retry controls can re-read and conditionally reset
