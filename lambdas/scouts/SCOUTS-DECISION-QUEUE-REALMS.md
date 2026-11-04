@@ -10,8 +10,7 @@
 No external consumer was identified, and the repository has no automatic
 consumer or acknowledgement contract. Producers no longer publish terminal
 decision notifications to `scoutsDecision`. The `scouts` Operations view
-continues to read queue attributes and CloudWatch queue metrics; it does not
-receive or delete messages. Existing messages remain subject to the queue's
+continues to read queue attributes and CloudWatch queue metrics; it does not receive or delete messages. Existing messages remain subject to the queue's
 configured retention period, and the queue remains available for read-only
 operational visibility.
 
