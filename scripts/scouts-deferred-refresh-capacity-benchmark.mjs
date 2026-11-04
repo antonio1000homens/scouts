@@ -14,6 +14,7 @@ const DISPATCH_BATCH = 10;
 const DISPATCH_INTERVAL_MS = 15 * 60 * 1000;
 const RETENTION_SECONDS = 14 * 24 * 60 * 60;
 const DIAGNOSTIC_RETENTION_SECONDS = 14 * 24 * 60 * 60;
+const MAX_COUNT_PAGES = 100;
 const THROTTLE_NAMES = [
   'ProvisionedThroughputExceededException',
   'RequestLimitExceeded',
@@ -277,21 +278,31 @@ async function queryState(aws, report, tableName, state, at) {
 }
 
 async function countState(aws, report, tableName, state, at) {
-  const output = await aws([
-    'dynamodb', 'query',
-    '--table-name', tableName,
-    '--index-name', 'state-nextAttemptAt-index',
-    '--key-condition-expression', '#state = :state AND nextAttemptAt <= :due',
-    '--expression-attribute-names', JSON.stringify({ '#state': 'state' }),
-    '--expression-attribute-values', JSON.stringify({
-      ':state': { S: state },
-      ':due': { S: `${at.toISOString()}#~` },
-    }),
-    '--select', 'COUNT',
-    '--return-consumed-capacity', 'INDEXES',
-  ]);
-  addCapacity(report, `count-${state}`, output);
-  return Number(output.Count || 0);
+  let count = 0;
+  let exclusiveStartKey;
+  for (let page = 0; page < MAX_COUNT_PAGES; page += 1) {
+    const args = [
+      'dynamodb', 'query',
+      '--table-name', tableName,
+      '--index-name', 'state-nextAttemptAt-index',
+      '--key-condition-expression', '#state = :state AND nextAttemptAt <= :due',
+      '--expression-attribute-names', JSON.stringify({ '#state': 'state' }),
+      '--expression-attribute-values', JSON.stringify({
+        ':state': { S: state },
+        ':due': { S: `${at.toISOString()}#~` },
+      }),
+      '--select', 'COUNT',
+      '--no-paginate',
+      '--return-consumed-capacity', 'INDEXES',
+    ];
+    if (exclusiveStartKey) args.push('--exclusive-start-key', JSON.stringify(exclusiveStartKey));
+    const output = await aws(args);
+    addCapacity(report, `count-${state}`, output);
+    count += Number(output.Count || 0);
+    exclusiveStartKey = output.LastEvaluatedKey;
+    if (!exclusiveStartKey || Object.keys(exclusiveStartKey).length === 0) return count;
+  }
+  throw new Error(`Backlog count for state ${state} exceeded ${MAX_COUNT_PAGES} pages`);
 }
 
 async function recoverExpiredLease(aws, report, tableName, indexedItem, at) {

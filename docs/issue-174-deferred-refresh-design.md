@@ -240,8 +240,9 @@ the capacity envelope for its synthetic workload, not production queue age or
 representativeness of the real work mix. Do not treat it as the staged live
 outbox acceptance gate.
 
-Final ready/leased backlog fields use unbounded paginated `COUNT` queries so
-they do not inherit the dispatcher's 10-item batch limit.
+Final ready/leased backlog fields sum explicit paginated `COUNT` queries, up to
+100 pages; they do not inherit the dispatcher's 10-item batch limit and fail
+the run if that page bound is reached.
 
 The read-only dry run completed on 2026-11-04 after STS verified account
 `553490163883`. Organizations reported this as the only active account in its
