@@ -1292,3 +1292,27 @@ a legacy snapshot task token at the time of the read. It does not establish a
 retention or support contract for historical snapshot rows or the legacy admin
 viewer. Keep the compatibility flag enabled pending that owner decision; no
 AWS configuration or S3 object was changed.
+
+## Static website cache-policy review (2026-11-04 13:39 UTC)
+
+AWS STS verified account `553490163883` before the read-only CloudFront
+inspection of distribution `E3INLSADL3AN6C`. The live distribution matches the
+repository template: the default behavior uses AWS managed
+`Managed-CachingOptimized` (minimum TTL 1 second, default 24 hours, maximum 365
+days; query strings, cookies, and viewer headers are not cache-key inputs).
+`/agenda.json`, `/runtime/*`, and `/events/*` use `Managed-CachingDisabled`.
+
+The website deploy currently assigns
+`Cache-Control: max-age=0, no-cache, no-store, must-revalidate` to website
+objects and invalidates `/website/*` after deploy. The static assets have a
+mixture of stable filenames and a small number of query-versioned references;
+CloudFront ignores those query strings, and there is no path-level origin
+request attribution for static assets in the available bucket metrics.
+CloudFront's one-second minimum TTL means the default behavior can retain an
+object briefly despite `no-store`; browsers still honor `no-store`. No broad
+cache-header change is justified by the available cost evidence. Revisit a
+targeted long browser TTL after static asset URLs are consistently
+content-versioned and request attribution shows material repeat origin
+traffic. Dynamic agenda, runtime, and canonical-event paths remain uncached.
+No CloudFront configuration, website object metadata, or cache invalidation
+was changed by this review.
