@@ -14,7 +14,7 @@ import { getRequiredSecret } from '/opt/nodejs/ssm-secrets.mjs';
 import { listRequestActivity, recordRequestActivity } from '/opt/nodejs/request-activity.mjs';
 import { createImageHeadMemo } from './image-head-memo.mjs';
 import { buildImageEnrichRuntimeStageIndex, findImageEnrichRuntimeStage } from './runtime-activity-index.mjs';
-import { runWithS3RequestMetrics, sendS3Command } from './s3-request-metrics.mjs';
+import { runWithS3RequestMetrics, sendS3Command, s3ObjectCategory } from './s3-request-metrics.mjs';
 import { enqueueDeferredRefresh } from './runtime-deferred-refresh.mjs';
 import {
   getEnrichmentState,
@@ -990,6 +990,7 @@ async function fetchCalendar(url, label) {
 
 
 async function putJsonToS3(bucket, key, payload, label, suppressLog = false) {
+  const category = s3ObjectCategory(key);
   const isEventKey = typeof key === 'string' && key.startsWith('events/');
   const isAgendaKey = typeof key === 'string' && /(^|\/)agenda\.json$/i.test(key);
   // For event files under the 'events/' prefix, ensure we don't persist a top-level `uid` field.
@@ -1026,7 +1027,7 @@ async function putJsonToS3(bucket, key, payload, label, suppressLog = false) {
     CacheControl: 'no-store',
   });
 
-  await sendS3Command(s3, command);
+  await sendS3Command(s3, command, category);
   if (!suppressLog) {
     console.log(`Stored ${label} data in s3://${bucket}/${key}`);
   }
@@ -1041,7 +1042,7 @@ async function putRawIcsToS3(bucket, key, icsData, label) {
     CacheControl: 'max-age=300',
   });
 
-  await sendS3Command(s3, command);
+  await sendS3Command(s3, command, 'calendar-cache');
   console.log(`Stored raw ${label} ICS data in s3://${bucket}/${key}`);
 }
 
@@ -1104,7 +1105,7 @@ async function downloadImageToS3(imageUrl, bucket, eventTitle) {
       CacheControl: 'public, max-age=31536000', // Cache for 1 year
     });
 
-    await sendS3Command(s3, command);
+    await sendS3Command(s3, command, 'event-image');
     console.log(`[Image Download] Uploaded image to s3://${bucket}/${s3Key}`);
 
     // Return the S3 website URL
@@ -1127,12 +1128,12 @@ async function downloadImageToS3(imageUrl, bucket, eventTitle) {
 async function getFreshIcsFromS3(bucket, key, freshnessMs = 60 * 60 * 1000) {
   try {
     const headCmd = new HeadObjectCommand({ Bucket: bucket, Key: key });
-    const head = await sendS3Command(s3, headCmd);
+    const head = await sendS3Command(s3, headCmd, 'calendar-cache');
     const lastModified = head?.LastModified ? new Date(head.LastModified).getTime() : null;
     if (lastModified && Date.now() - lastModified <= freshnessMs) {
       // Read the object content and return it
       const getCmd = new GetObjectCommand({ Bucket: bucket, Key: key });
-      const resp = await sendS3Command(s3, getCmd);
+      const resp = await sendS3Command(s3, getCmd, 'calendar-cache');
       const body = await resp.Body.transformToString();
       console.log(`Using cached ICS from s3://${bucket}/${key} (LastModified=${head.LastModified})`);
       return body;
@@ -1154,7 +1155,7 @@ async function getJsonFromS3(bucket, key, label) {
       Bucket: bucket,
       Key: key,
     });
-    const response = await sendS3Command(s3, command);
+    const response = await sendS3Command(s3, command, s3ObjectCategory(key));
     const bodyString = await response.Body.transformToString();
     const data = JSON.parse(bodyString);
     return data;
@@ -1171,7 +1172,7 @@ async function deleteObjectFromS3(bucket, key, label) {
     Bucket: bucket,
     Key: key,
   });
-  await sendS3Command(s3, command);
+  await sendS3Command(s3, command, s3ObjectCategory(key));
   console.log(`Deleted ${label} data from s3://${bucket}/${key}`);
 }
 
@@ -1185,7 +1186,7 @@ async function purgeEventFilesFromS3(bucket, prefix = 'events/') {
       Prefix: prefix,
       ContinuationToken: continuationToken,
     });
-    const response = await sendS3Command(s3, listCommand);
+    const response = await sendS3Command(s3, listCommand, s3ObjectCategory(prefix));
     const objects = response?.Contents || [];
 
     if (!objects.length && !response?.IsTruncated) {
@@ -1245,7 +1246,7 @@ async function deleteOrphanedHexFiles(bucket, agendaData, hexReadCache = null) {
       Prefix: 'events/',
       ContinuationToken: continuationToken,
     });
-    const response = await sendS3Command(s3, listCommand);
+    const response = await sendS3Command(s3, listCommand, 'canonical-event');
     const objects = response?.Contents || [];
 
     if (!objects.length && !response?.IsTruncated) {
@@ -2091,7 +2092,7 @@ async function imageExistsInS3(bucket, imageUrl, imageHeadMemo = null) {
 
   const check = async () => {
     try {
-      await sendS3Command(s3, new HeadObjectCommand({ Bucket: bucket, Key: key }));
+      await sendS3Command(s3, new HeadObjectCommand({ Bucket: bucket, Key: key }), 'event-image');
       return true;
     } catch (error) {
       // An absent image is repairable; permission errors, throttling and S3
@@ -4206,7 +4207,7 @@ async function lambdaHandlerCore(event = {}) {
           Prefix: 'events/',
           ContinuationToken: continuationToken,
         });
-        const response = await sendS3Command(s3, listCommand);
+        const response = await sendS3Command(s3, listCommand, 'canonical-event');
         const objects = response?.Contents || [];
 
         if (!objects.length && !response?.IsTruncated) {

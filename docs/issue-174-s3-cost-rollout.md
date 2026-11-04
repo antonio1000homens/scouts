@@ -789,6 +789,31 @@ different boundaries, the counts are not a valid before/after comparison.
 Continue collecting aligned daily totals and a complete seven-day post-change
 window before claiming request or bill savings.
 
+## Legacy manual-review Activity backfill utility
+
+`scripts/migrate-legacy-manual-review-activity.mjs` prepares a controlled
+one-time import from durable enrichment state into the Activity Centre ledger.
+It defaults to dry-run, verifies AWS account `553490163883`, scans at most two
+items per request with a one-second pause, classifies every canonical event
+before making any writes, and refuses apply mode unless the scan completed and
+`--ack-account 553490163883` was supplied. The 2026-11-04 dry-run evaluated
+161 table items and found 27 manual-review records: 14 with canonical events
+and 13 whose canonical event objects are missing. It found no invalid events
+or existing Activity records, and created none. The strongly consistent,
+two-item-page scan consumed 1,942 read capacity units, so a migration run has
+a material read cost. Expected missing-object diagnostics are suppressed so
+the utility emits aggregate results without HEX values or AWS error text.
+
+Event-backed rows are imported as `manual_review` with their supported stage,
+so existing Activity Centre retry controls can re-read and conditionally reset
+the durable enrichment state. Missing or invalid canonical events are
+imported as non-retryable `needs_attention` records. The migration is
+idempotent, uses a transaction that verifies the source state has not changed
+before a conditional activity put, omits TTL for both categories, and never
+reads or copies snapshot task tokens. Do not run it in apply mode until the
+dry-run classification has been owner-reviewed; no migration writes have been
+performed. The dry-run classification still requires owner review before apply.
+
 ## 24-hour S3 request attribution recheck (2026-11-04 08:30 UTC)
 
 The read-only collector verified AWS account `553490163883` and returned

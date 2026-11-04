@@ -211,3 +211,8 @@ baseline evidence, not a workload benchmark: capacity benchmarking,
 deployment, live queue-age and drain-lag proof, and the shared
 provisioned-capacity decision remain before it can satisfy the queue rollout
 portion of issue #174.
+
+PR #206 adds focused concurrency regressions for two same-generation
+discoveries coalescing on one work key and two dispatchers competing for one
+conditional lease. They exercise the DynamoDB command contract through the
+hermetic client; they do not replace a live throughput or backlog benchmark.
