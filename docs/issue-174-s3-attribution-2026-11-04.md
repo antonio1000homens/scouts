@@ -4,7 +4,32 @@ These read-only measurements compare bucket-wide S3 request metrics with
 `scouts` Lambda invocations and low-cardinality SDK logs. They are interim
 observations from 2026-11-04, not the aligned seven-day acceptance window.
 
-## Partial post-cutover sample (14:05 UTC)
+## Exact seven-day pre-cutover baseline
+
+The read-only collector verified account `553490163883` and queried 2026-10-27
+19:42–2026-11-03 19:42 UTC, the exact seven days immediately before the
+production cutover. All six CloudWatch series returned `Complete` in one page;
+the SDK-operation and per-refresh log searches were untruncated. Across 721
+populated minute bins, `CodexRequestCostAudit` recorded 95,288 GET, 14,782
+HEAD, 716 LIST, and 1,250 PUT requests (112,036 total). `scouts` had 336
+invocations and zero errors. The collector found two SDK-operation and three
+per-refresh aggregate log entries.
+
+## Partial post-cutover sample (17:24 UTC)
+
+The collector queried 2026-11-03 19:42–2026-11-04 17:24 UTC. All six metric
+series returned `Complete` in one page, and both log searches were untruncated.
+Across 88 populated minute bins, the bucket-wide metrics recorded 1,675 GET,
+789 HEAD, 106 LIST, and 509 PUT requests (3,079 total). `scouts` had 16
+invocations and zero errors. Each log search returned six aggregate entries.
+The latest populated S3 request bin was 16:36 UTC, so the newest activity may
+not yet be reflected in the metric totals.
+
+This partial interval is shorter than a full day and is not directly comparable
+to the seven-day baseline. It cannot establish savings. Continue collection
+through 2026-11-10 19:42 UTC for the matching seven-day post-cutover interval.
+
+## Earlier partial post-cutover sample (14:05 UTC)
 
 The collector verified account `553490163883` and queried 2026-11-03 19:42 UTC
 through 2026-11-04 14:03 UTC. All six CloudWatch metric series returned
