@@ -1,5 +1,10 @@
 # Issue #174 — staged Scouts S3/SQS cost optimisation
 
+The partial post-change S3 request samples collected on 2026-11-04 are recorded
+in [the S3 attribution recheck note](issue-174-s3-attribution-2026-11-04.md).
+They are interim observations and do not replace the aligned seven-day
+acceptance window.
+
 The staged implementation is in [PR #175](https://github.com/antonio1000homens/scouts/pull/175),
 [PR #176](https://github.com/antonio1000homens/scouts/pull/176), and
 [PR #177](https://github.com/antonio1000homens/scouts/pull/177). This document
